@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-POCKETBASE_URL = os.getenv('POCKETBASE_URL', 'http://192.168.55.140:8090')
+POCKETBASE_URL = os.getenv('POCKETBASE_URL', 'https://crm.tableturnerr.com')
 PB_ADMIN_EMAIL = os.getenv('PB_ADMIN_EMAIL', '')
 PB_ADMIN_PASSWORD = os.getenv('PB_ADMIN_PASSWORD', '')
 

@@ -13,7 +13,7 @@
 5. [Dashboard Setup](#5-dashboard-setup)
 6. [Transcriber Setup](#6-transcriber-setup)
 7. [Testing Checklist](#7-testing-checklist)
-8. [Production Deployment (Ubuntu)](#8-production-deployment-local-ubuntu-server)
+8. [Production Deployment](#8-production-deployment)
 9. [Troubleshooting](#9-troubleshooting)
 
 ---
@@ -37,7 +37,7 @@ python --version  # Should be 3.10+
 ## 2. PocketBase Setup
 
 - Ensure you have admin access to your PocketBase instance
-- Default URL: `https://crm.tableturnerr.com/_/`
+- Default URL: `https://api.yourdomain.com/_/`
 
 ### Create Admin Account
 1. Go to the PocketBase Admin UI
@@ -49,7 +49,7 @@ python --version  # Should be 3.10+
 ## 3. Import Schema
 
 ### Step-by-Step
-1. Open PocketBase Admin UI (`https://crm.tableturnerr.com/_/`)
+1. Open PocketBase Admin UI (`https://api.yourdomain.com/_/`)
 2. Log in with your admin credentials
 3. Go to **Settings** → **Import Collections**
 4. Click **Load from JSON file**
@@ -84,7 +84,7 @@ copy ..\..\.env.example .env
 
 Edit `.env` with your credentials:
 ```env
-POCKETBASE_URL=https://crm.tableturnerr.com
+POCKETBASE_URL=https://api.yourdomain.com
 PB_ADMIN_EMAIL=your_admin_email
 PB_ADMIN_PASSWORD=your_admin_password
 ```
@@ -151,7 +151,7 @@ copy .env.example .env.local
 
 Edit with your PocketBase URL:
 ```env
-NEXT_PUBLIC_POCKETBASE_URL=https://crm.tableturnerr.com
+NEXT_PUBLIC_POCKETBASE_URL=https://api.yourdomain.com
 ```
 
 ### Start Development Server
@@ -179,7 +179,7 @@ copy .env.example .env
 
 Edit `.env`:
 ```env
-POCKETBASE_URL=https://crm.tableturnerr.com
+POCKETBASE_URL=https://api.yourdomain.com
 PB_ADMIN_EMAIL=your_admin_email
 PB_ADMIN_PASSWORD=your_admin_password
 GEMINI_API_KEY=your_gemini_api_key
@@ -320,11 +320,19 @@ python transcribe_calls.py sample.mp3 --phone "+1-555-0000"
 
 ## Quick Reference
 
-### URLs
+### URLs (Development)
 | Service | URL |
 |---------|-----|
-| PocketBase Admin | https://crm.tableturnerr.com/_/ |
+| PocketBase | http://localhost:8090 |
+| PocketBase Admin | http://localhost:8090/_/ |
 | Dashboard | http://localhost:3000 |
+
+### URLs (Production)
+| Service | URL |
+|---------|-----|
+| PocketBase API | https://api.yourdomain.com |
+| PocketBase Admin | https://api.yourdomain.com/_/ |
+| Dashboard | https://app.yourdomain.com |
 
 ### Default Test Credentials
 | Email | Password | Role |
@@ -350,60 +358,77 @@ cd apps/dashboard && pnpm build
 
 ---
 
-## 8. Production Deployment (Local Ubuntu Server)
+## 8. Production Deployment
 
-If you are hosting this on a local Ubuntu server (e.g., a mini PC or VM) and want to access it from the internet, follow these steps.
+This project uses a split architecture:
+- **PocketBase API** → Hosted on your local Ubuntu server, exposed via Cloudflare Tunnel
+- **Dashboard** → Hosted on Vercel (external)
 
-### 8.1 Prerequisites (Ubuntu)
+```
+┌─────────────────┐     ┌───────────────────┐     ┌──────────────────┐
+│  Vercel         │     │  Cloudflare       │     │  Ubuntu Server   │
+│  (Dashboard)    │────▶│  Tunnel           │────▶│  (PocketBase)    │
+│  app.domain.com │     │  api.domain.com   │     │  localhost:8090  │
+└─────────────────┘     └───────────────────┘     └──────────────────┘
+```
+
+### 8.1 Prerequisites (Ubuntu Server)
+
 Update your system and install basic tools:
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y unzip curl git python3-pip
 ```
 
-**Install Node.js (via fnm or nvm recommended):**
-```bash
-curl -fsSL https://fnm.vercel.app/install | bash
-source ~/.bashrc
-fnm use --install-if-missing 20
-node -v # Should be v20+
-```
+### 8.2 PocketBase Setup (Ubuntu)
 
-**Install pnpm:**
-```bash
-npm install -g pnpm
-```
-
-### 8.2 PocketBase Setup (Linux Service)
-1. **Download:**
+1. **Download PocketBase:**
    ```bash
    wget https://github.com/pocketbase/pocketbase/releases/download/v0.23.0/pocketbase_0.23.0_linux_amd64.zip
    unzip pocketbase_*.zip -d pocketbase
+   cd pocketbase
    ```
+
 2. **Run manually first** to create the initial admin account:
    ```bash
-   ./pocketbase/pocketbase serve --http="0.0.0.0:8090"
+   ./pocketbase serve --http="0.0.0.0:8090"
    ```
-3. **Setup as System Service (Optional but Recommended):**
-   Create a systemd service file `/etc/systemd/system/pocketbase.service` to keep it running in the background.
+   Visit `http://<server-ip>:8090/_/` to create your admin account.
 
-### 8.3 Dashboard Setup
-1. **Clone/Copy Project** to your server.
-2. **Install & Build:**
+3. **Create systemd service** for auto-start:
    ```bash
-   cd apps/dashboard
-   pnpm install
-   pnpm build
-   ```
-3. **Run with PM2** (Process Manager):
-   ```bash
-   npm install -g pm2
-   pm2 start npm --name "crm-dashboard" -- start
-   pm2 save
+   sudo nano /etc/systemd/system/pocketbase.service
    ```
 
-### 8.4 Cloudflare Tunnel Setup (Subdomain)
-To access your local server from the internet without port forwarding, use **Cloudflare Tunnel**.
+   Add:
+   ```ini
+   [Unit]
+   Description=PocketBase CRM
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=<your-username>
+   WorkingDirectory=/home/<your-username>/pocketbase
+   ExecStart=/home/<your-username>/pocketbase/pocketbase serve --http=0.0.0.0:8090
+   Restart=on-failure
+   RestartSec=5
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+4. **Enable and start service:**
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable pocketbase
+   sudo systemctl start pocketbase
+   sudo systemctl status pocketbase
+   ```
+
+### 8.3 Cloudflare Tunnel (PocketBase API)
+
+Expose your local PocketBase to the internet without port forwarding.
 
 1. **Install cloudflared:**
    ```bash
@@ -414,38 +439,81 @@ To access your local server from the internet without port forwarding, use **Clo
 2. **Login & Create Tunnel:**
    ```bash
    cloudflared tunnel login
-   cloudflared tunnel create crm-tunnel
+   cloudflared tunnel create crm-api
    ```
 
-3. **Configure Tunnel:**
-   Create a configuration file `~/.cloudflared/config.yml`:
+3. **Configure Tunnel** (`~/.cloudflared/config.yml`):
    ```yaml
    tunnel: <Tunnel-UUID>
    credentials-file: /home/<user>/.cloudflared/<Tunnel-UUID>.json
 
    ingress:
-     # Route traffic for your subdomain to the Next.js Dashboard
-     - hostname: crm.yourdomain.com
-       service: http://localhost:3000
-     
-     # Route traffic for the API/Admin UI
+     # PocketBase API and Admin UI
      - hostname: api.yourdomain.com
        service: http://localhost:8090
-       
      - service: http_status:404
    ```
 
 4. **Route DNS:**
    ```bash
-   cloudflared tunnel route dns crm-tunnel crm.yourdomain.com
-   cloudflared tunnel route dns crm-tunnel api.yourdomain.com
+   cloudflared tunnel route dns crm-api api.yourdomain.com
    ```
 
-5. **Run Tunnel:**
+5. **Install as service:**
    ```bash
-   cloudflared tunnel run crm-tunnel
+   sudo cloudflared service install
+   sudo systemctl start cloudflared
+   sudo systemctl enable cloudflared
    ```
-   *(For persistence, install as a service: `sudo cloudflared service install`)*
+
+6. **Verify:** Visit `https://api.yourdomain.com/_/` to access PocketBase Admin.
+
+### 8.4 Dashboard Deployment (Vercel)
+
+The dashboard is a Next.js app deployed to Vercel.
+
+1. **Push code to GitHub** (if not already).
+
+2. **Import to Vercel:**
+   - Go to [vercel.com](https://vercel.com) and sign in
+   - Click "Add New Project"
+   - Import your GitHub repository
+   - Set **Root Directory** to `apps/dashboard`
+
+3. **Configure Environment Variables** in Vercel:
+   ```
+   NEXT_PUBLIC_POCKETBASE_URL=https://api.yourdomain.com
+   ```
+
+4. **Configure Custom Domain:**
+   - In Vercel project → Settings → Domains
+   - Add `app.yourdomain.com` (or your preferred subdomain)
+
+5. **Update Cloudflare DNS:**
+   In Cloudflare DNS, add a CNAME record:
+   ```
+   Type: CNAME
+   Name: app
+   Target: cname.vercel-dns.com
+   Proxy: DNS only (gray cloud recommended for Vercel)
+   ```
+
+6. **Deploy:** Vercel auto-deploys on every push to `main`.
+
+### 8.5 Domain Summary
+
+| Service | Subdomain | Hosted On |
+|---------|-----------|-----------|
+| PocketBase API | `api.yourdomain.com` | Ubuntu (via Cloudflare Tunnel) |
+| PocketBase Admin | `api.yourdomain.com/_/` | Ubuntu (via Cloudflare Tunnel) |
+| Dashboard | `app.yourdomain.com` | Vercel |
+
+### 8.6 CORS Notes
+
+PocketBase v0.20+ handles CORS automatically for all origins. If you need to restrict origins, you can configure it in PocketBase settings or via command line:
+```bash
+./pocketbase serve --origins="https://app.yourdomain.com,https://localhost:3000"
+```
 
 ---
 

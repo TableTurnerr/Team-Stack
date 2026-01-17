@@ -344,7 +344,7 @@ function CompanyCallsDrawer({
           pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(companyId),
           pb.collection(COLLECTIONS.COLD_CALLS).getList<ColdCall>(1, 50, {
             filter: `company = "${companyId}"`,
-            sort: '-id',  // Use 'id' since 'created' field is missing from PocketBase schema
+            sort: '-created',
           }),
         ]);
         setCompany(companyData);
@@ -457,7 +457,7 @@ export default function CompaniesPage() {
       setError(null);
 
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
-        sort: '-id',  // Use 'id' since 'created' field is missing from PocketBase schema
+        sort: '-created',
         ...(searchTerm && { filter: `company_name ~ "${searchTerm}" || phone_numbers ~ "${searchTerm}" || owner_name ~ "${searchTerm}"` }),
       });
 

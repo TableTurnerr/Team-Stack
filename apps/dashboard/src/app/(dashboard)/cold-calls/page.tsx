@@ -17,6 +17,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCall, type Company, type User } from '@/lib/types';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
 
 // Outcome badge colors
 const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
@@ -130,8 +131,10 @@ export default function ColdCallsPage() {
       setCalls(result.items);
       setTotalPages(result.totalPages);
     } catch (err: any) {
-      console.error('Failed to fetch cold calls:', err);
-      setError(`Failed to load cold calls: ${err.message} ${err.data ? JSON.stringify(err.data) : ''}`);
+      if (err.status !== 0) {
+        console.error('Failed to fetch cold calls:', err);
+        setError(`Failed to load cold calls: ${err.message} ${err.data ? JSON.stringify(err.data) : ''}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -187,6 +190,10 @@ export default function ColdCallsPage() {
   };
 
   const hasActiveFilters = searchTerm || outcomeFilter.length > 0 || minInterest > 0;
+
+  if (loading || authLoading) {
+    return <ColdCallsTableSkeleton />;
+  }
 
   return (
     <div className="space-y-6">
@@ -314,12 +321,7 @@ export default function ColdCallsPage() {
 
       {/* Table */}
       <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
-        {(loading || authLoading) && calls.length === 0 ? (
-          <div className="p-12 text-center">
-            <RefreshCw size={32} className="mx-auto mb-4 text-[var(--muted)] animate-spin" />
-            <p className="text-[var(--muted)]">Loading cold calls...</p>
-          </div>
-        ) : calls.length === 0 ? (
+        {calls.length === 0 ? (
           <div className="p-16 text-center">
             <div className="w-12 h-12 rounded-full bg-[var(--info-subtle)] flex items-center justify-center mx-auto mb-4">
               <Phone size={24} className="text-[var(--info)]" />

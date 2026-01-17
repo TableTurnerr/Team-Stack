@@ -16,8 +16,9 @@ import {
   X,
   Zap,
   LogOut,
+  Loader2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 
@@ -39,7 +40,12 @@ const bottomNavItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const { user, logout } = useAuth();
+
+  useEffect(() => {
+    setLoadingPath(null);
+  }, [pathname]);
 
   return (
     <>
@@ -89,7 +95,8 @@ export function Sidebar() {
           <ul className="space-y-0.5">
             {navItems.map((item) => {
               const isActive = pathname === item.href;
-              const Icon = item.icon;
+              const isLoading = loadingPath === item.href;
+              const Icon = isLoading ? Loader2 : item.icon;
 
               return (
                 <li key={item.href}>
@@ -107,7 +114,10 @@ export function Sidebar() {
                   ) : (
                     <Link
                       href={item.href}
-                      onClick={() => setMobileOpen(false)}
+                      onClick={() => {
+                        if (pathname !== item.href) setLoadingPath(item.href);
+                        setMobileOpen(false);
+                      }}
                       className={cn(
                         'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150',
                         isActive
@@ -115,7 +125,7 @@ export function Sidebar() {
                           : 'text-[var(--muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--foreground)]'
                       )}
                     >
-                      <Icon size={18} strokeWidth={isActive ? 2 : 1.5} />
+                      <Icon size={18} strokeWidth={isActive ? 2 : 1.5} className={cn(isLoading && "animate-spin")} />
                       <span className="text-sm font-medium">{item.label}</span>
                     </Link>
                   )}
@@ -130,13 +140,17 @@ export function Sidebar() {
           <ul className="space-y-0.5">
             {bottomNavItems.map((item) => {
               const isActive = pathname === item.href;
-              const Icon = item.icon;
+              const isLoading = loadingPath === item.href;
+              const Icon = isLoading ? Loader2 : item.icon;
 
               return (
                 <li key={item.href}>
                   <Link
                     href={item.href}
-                    onClick={() => setMobileOpen(false)}
+                    onClick={() => {
+                      if (pathname !== item.href) setLoadingPath(item.href);
+                      setMobileOpen(false);
+                    }}
                     className={cn(
                       'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150',
                       isActive
@@ -144,7 +158,7 @@ export function Sidebar() {
                         : 'text-[var(--muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--foreground)]'
                     )}
                   >
-                    <Icon size={18} strokeWidth={isActive ? 2 : 1.5} />
+                    <Icon size={18} strokeWidth={isActive ? 2 : 1.5} className={cn(isLoading && "animate-spin")} />
                     <span className="text-sm font-medium">{item.label}</span>
                   </Link>
                 </li>

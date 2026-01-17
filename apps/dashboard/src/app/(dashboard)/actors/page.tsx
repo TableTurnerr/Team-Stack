@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { Instagram, Activity, User as UserIcon, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { TableSkeleton } from '@/components/dashboard-skeletons';
 
 interface ActorStats {
   dmsSent: number;
@@ -72,6 +73,10 @@ export default function ActorsPage() {
     return STATUS_STYLES[status] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' };
   };
 
+  if (loading) {
+    return <TableSkeleton />;
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -92,12 +97,7 @@ export default function ActorsPage() {
 
       {/* Table */}
       <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
-        {loading ? (
-          <div className="p-16 text-center">
-            <RefreshCw size={32} className="mx-auto mb-4 text-[var(--muted)] animate-spin" />
-            <p className="text-sm text-[var(--muted)]">Loading actors...</p>
-          </div>
-        ) : actors.length === 0 ? (
+        {actors.length === 0 ? (
           <div className="p-16 text-center">
             <div className="w-12 h-12 rounded-full bg-[var(--accent-red-subtle)] flex items-center justify-center mx-auto mb-4">
               <Instagram size={24} className="text-[var(--accent-red)]" />

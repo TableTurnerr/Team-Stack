@@ -465,8 +465,10 @@ export default function CompaniesPage() {
       setCompanies(result.items);
       setTotalPages(result.totalPages);
     } catch (err: any) {
-      console.error('Failed to fetch companies:', err);
-      setError(`Failed to load companies: ${err.message} ${err.data ? JSON.stringify(err.data) : ''}`);
+      if (err.status !== 0) {
+        console.error('Failed to fetch companies:', err);
+        setError(`Failed to load companies: ${err.message} ${err.data ? JSON.stringify(err.data) : ''}`);
+      }
     } finally {
       setLoading(false);
     }

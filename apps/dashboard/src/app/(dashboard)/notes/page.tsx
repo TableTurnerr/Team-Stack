@@ -12,6 +12,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import '@uiw/react-md-editor/markdown-editor.css';
 import '@uiw/react-markdown-preview/markdown.css';
+import { CardGridSkeleton } from '@/components/dashboard-skeletons';
 
 // Dynamic import to avoid SSR issues with the markdown editor
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
@@ -41,8 +42,8 @@ export default function NotesPage() {
         expand: 'created_by'
       });
       setNotes(result.items);
-    } catch (error) {
-      console.error("Error fetching notes:", error);
+    } catch (error: any) {
+      if (error.status !== 0) console.error("Error fetching notes:", error);
     } finally {
       setLoading(false);
     }
@@ -98,6 +99,10 @@ export default function NotesPage() {
     } catch (e) {
       console.error(e);
     }
+  }
+
+  if (loading) {
+    return <CardGridSkeleton />;
   }
 
   if (isEditing) {
@@ -247,122 +252,119 @@ export default function NotesPage() {
       </div>
 
       {/* Notes Grid */}
-      {loading ? (
-        <div className="p-16 text-center">
-          <div className="w-8 h-8 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-sm text-[var(--muted)]">Loading notes...</p>
-        </div>
-      ) : filteredNotes.length === 0 ? (
-        <div className="p-16 text-center">
-          <div className="w-12 h-12 rounded-full bg-[var(--warning-subtle)] flex items-center justify-center mx-auto mb-4">
-            <StickyNote size={24} className="text-[var(--warning)]" />
-          </div>
-          <p className="text-sm font-medium">No notes found</p>
-          <p className="text-xs text-[var(--muted)] mt-1">
-            {search ? 'Try a different search term' : `No ${tab} notes yet`}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredNotes.map((note) => (
-            <div
-              key={note.id}
-              className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl flex flex-col h-64 card-interactive"
-            >
-              <div className="p-4 flex-1 overflow-hidden">
-                <div className="flex justify-between items-start gap-2 mb-3">
-                  <h3 className="font-semibold text-sm truncate">{note.title}</h3>
-                  <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider shrink-0">
-                    {note.updated ? format(new Date(note.updated), 'MMM d') : '-'}
-                  </span>
-                </div>
-                <p className="text-sm text-[var(--muted)] whitespace-pre-wrap line-clamp-6">
-                  {note.note_text}
-                </p>
-              </div>
-
-              <div className="px-4 py-3 border-t border-[var(--card-border)] flex justify-between items-center">
-                <span className="text-xs text-[var(--muted)]">
-                  {(note.expand?.created_by as User)?.name || 'Unknown'}
-                </span>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => setViewingNote(note)}
-                    className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                    title="View"
-                  >
-                    <Expand size={14} />
-                  </button>
-                  <button
-                    onClick={() => { setCurrentNote(note); setIsEditing(true); }}
-                    className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                    title="Edit"
-                  >
-                    <FileText size={14} />
-                  </button>
-
-                  {tab === 'active' && (
-                    <>
-                      <button
-                        onClick={() => handleStatusChange(note.id, { is_archived: true })}
-                        className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                        title="Archive"
-                      >
-                        <Archive size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleStatusChange(note.id, { is_deleted: true })}
-                        className="p-1.5 rounded-md hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors"
-                        title="Move to Trash"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </>
-                  )}
-
-                  {tab === 'archived' && (
-                    <>
-                      <button
-                        onClick={() => handleStatusChange(note.id, { is_archived: false })}
-                        className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                        title="Unarchive"
-                      >
-                        <RotateCcw size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleStatusChange(note.id, { is_deleted: true })}
-                        className="p-1.5 rounded-md hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors"
-                        title="Move to Trash"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </>
-                  )}
-
-                  {tab === 'deleted' && (
-                    <>
-                      <button
-                        onClick={() => handleStatusChange(note.id, { is_deleted: false })}
-                        className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                        title="Restore"
-                      >
-                        <RotateCcw size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDeletePermanent(note.id)}
-                        className="p-1.5 rounded-md hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors"
-                        title="Delete Permanently"
-                      >
-                        <X size={14} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
+      <div className={cn(filteredNotes.length === 0 && "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden")}>
+        {filteredNotes.length === 0 ? (
+          <div className="p-16 text-center">
+            <div className="w-12 h-12 rounded-full bg-[var(--warning-subtle)] flex items-center justify-center mx-auto mb-4">
+              <StickyNote size={24} className="text-[var(--warning)]" />
             </div>
-          ))}
-        </div>
-      )}
+            <p className="text-sm font-medium">No notes found</p>
+            <p className="text-xs text-[var(--muted)] mt-1">
+              {search ? 'Try a different search term' : `No ${tab} notes yet`}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredNotes.map((note) => (
+              <div
+                key={note.id}
+                className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl flex flex-col h-64 card-interactive"
+              >
+                <div className="p-4 flex-1 overflow-hidden">
+                  <div className="flex justify-between items-start gap-2 mb-3">
+                    <h3 className="font-semibold text-sm truncate">{note.title}</h3>
+                    <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider shrink-0">
+                      {note.updated ? format(new Date(note.updated), 'MMM d') : '-'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-[var(--muted)] whitespace-pre-wrap line-clamp-6">
+                    {note.note_text}
+                  </p>
+                </div>
+
+                <div className="px-4 py-3 border-t border-[var(--card-border)] flex justify-between items-center">
+                  <span className="text-xs text-[var(--muted)]">
+                    {(note.expand?.created_by as User)?.name || 'Unknown'}
+                  </span>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setViewingNote(note)}
+                      className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                      title="View"
+                    >
+                      <Expand size={14} />
+                    </button>
+                    <button
+                      onClick={() => { setCurrentNote(note); setIsEditing(true); }}
+                      className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                      title="Edit"
+                    >
+                      <FileText size={14} />
+                    </button>
+
+                    {tab === 'active' && (
+                      <>
+                        <button
+                          onClick={() => handleStatusChange(note.id, { is_archived: true })}
+                          className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                          title="Archive"
+                        >
+                          <Archive size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(note.id, { is_deleted: true })}
+                          className="p-1.5 rounded-md hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors"
+                          title="Move to Trash"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
+
+                    {tab === 'archived' && (
+                      <>
+                        <button
+                          onClick={() => handleStatusChange(note.id, { is_archived: false })}
+                          className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                          title="Unarchive"
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleStatusChange(note.id, { is_deleted: true })}
+                          className="p-1.5 rounded-md hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors"
+                          title="Move to Trash"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
+
+                    {tab === 'deleted' && (
+                      <>
+                        <button
+                          onClick={() => handleStatusChange(note.id, { is_deleted: false })}
+                          className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                          title="Restore"
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDeletePermanent(note.id)}
+                          className="p-1.5 rounded-md hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors"
+                          title="Delete Permanently"
+                        >
+                          <X size={14} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

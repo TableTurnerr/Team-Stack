@@ -70,7 +70,7 @@ export default function LeadsPage() {
             <input
               type="text"
               placeholder="Search leads..."
-              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] w-64"
+              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] w-full sm:w-64"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
@@ -190,7 +190,7 @@ export default function LeadsPage() {
 
             {/* Modal Body */}
             <div className="px-6 py-5 overflow-y-auto max-h-[60vh]">
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
                   <p className="text-xs text-[var(--muted)] uppercase tracking-wider mb-1">Status</p>
                   <p className="text-sm font-medium">{selectedLead.status || '-'}</p>

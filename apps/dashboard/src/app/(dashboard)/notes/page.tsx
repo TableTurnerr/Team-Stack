@@ -103,7 +103,7 @@ export default function NotesPage() {
   if (isEditing) {
     return (
       <div className="h-full flex flex-col space-y-4" data-color-mode="dark">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <input
             type="text"
             placeholder="Note Title"
@@ -111,7 +111,7 @@ export default function NotesPage() {
             value={currentNote.title || ''}
             onChange={e => setCurrentNote({ ...currentNote, title: e.target.value })}
           />
-          <div className="flex gap-2 shrink-0">
+          <div className="flex gap-2 shrink-0 self-end sm:self-auto">
             <button
               onClick={() => setIsEditing(false)}
               className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-[var(--card-hover)] transition-colors"
@@ -234,7 +234,7 @@ export default function NotesPage() {
           ))}
         </div>
 
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative flex-1 w-full sm:max-w-sm">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
           <input
             type="text"

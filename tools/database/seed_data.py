@@ -41,10 +41,11 @@ class PocketBaseSeeder:
         self.id_maps: Dict[str, Dict[str, str]] = {}
         
     def authenticate(self, email: str, password: str):
-        """Authenticate as admin."""
+        """Authenticate as admin (superuser)."""
         print(f"🔑 Authenticating with PocketBase at {self.url}...")
+        # PocketBase 0.8+ uses _superusers collection for admin auth
         response = self.client.post(
-            f"{self.url}/api/admins/auth-with-password",
+            f"{self.url}/api/collections/_superusers/auth-with-password",
             json={'identity': email, 'password': password}
         )
         response.raise_for_status()

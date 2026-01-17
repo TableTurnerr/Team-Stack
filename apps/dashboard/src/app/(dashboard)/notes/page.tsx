@@ -4,9 +4,17 @@ import { useState, useEffect } from 'react';
 import { pb } from '@/lib/pocketbase';
 import { Note, COLLECTIONS, User } from '@/lib/types';
 import { format } from 'date-fns';
-import { Plus, Archive, Trash2, RotateCcw, FileText, Search, X, StickyNote } from 'lucide-react';
+import { Plus, Archive, Trash2, RotateCcw, FileText, Search, X, StickyNote, Expand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import dynamic from 'next/dynamic';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import '@uiw/react-md-editor/markdown-editor.css';
+import '@uiw/react-markdown-preview/markdown.css';
+
+// Dynamic import to avoid SSR issues with the markdown editor
+const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 
 type Tab = 'active' | 'archived' | 'deleted';
 
@@ -19,6 +27,7 @@ export default function NotesPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [currentNote, setCurrentNote] = useState<Partial<Note>>({});
+  const [viewingNote, setViewingNote] = useState<Note | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) fetchNotes();
@@ -93,7 +102,7 @@ export default function NotesPage() {
 
   if (isEditing) {
     return (
-      <div className="h-full flex flex-col space-y-4">
+      <div className="h-full flex flex-col space-y-4" data-color-mode="dark">
         <div className="flex items-center justify-between">
           <input
             type="text"
@@ -117,18 +126,77 @@ export default function NotesPage() {
             </button>
           </div>
         </div>
-        <textarea
-          className="flex-1 w-full p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none font-mono text-sm placeholder:text-[var(--muted)]"
-          placeholder="Write your note here (Markdown supported)..."
-          value={currentNote.note_text || ''}
-          onChange={e => setCurrentNote({ ...currentNote, note_text: e.target.value })}
-        />
+        <div className="flex-1 min-h-[500px]">
+          <MDEditor
+            value={currentNote.note_text || ''}
+            onChange={(value) => setCurrentNote({ ...currentNote, note_text: value || '' })}
+            height="100%"
+            preview="live"
+            visibleDragbar={false}
+            style={{
+              borderRadius: '0.75rem',
+              overflow: 'hidden',
+              minHeight: '500px'
+            }}
+          />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* View Note Modal */}
+      {viewingNote && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setViewingNote(null)}>
+          <div
+            className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-[var(--card-border)]">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-xl font-bold truncate">{viewingNote.title}</h2>
+                <div className="flex items-center gap-3 mt-1 text-xs text-[var(--muted)]">
+                  <span>By {(viewingNote.expand?.created_by as User)?.name || 'Unknown'}</span>
+                  <span>•</span>
+                  <span>{viewingNote.updated ? format(new Date(viewingNote.updated), 'MMM d, yyyy h:mm a') : '-'}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingNote(null)}
+                className="p-2 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors ml-4"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="prose prose-invert max-w-none prose-headings:text-[var(--foreground)] prose-p:text-[var(--foreground)] prose-strong:text-[var(--foreground)] prose-code:text-[var(--primary)] prose-code:bg-[var(--card-hover)] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-pre:bg-[var(--card-hover)] prose-a:text-[var(--primary)] prose-li:text-[var(--foreground)] prose-blockquote:border-l-[var(--primary)] prose-blockquote:text-[var(--muted)]">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {viewingNote.note_text}
+                </ReactMarkdown>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-2 p-4 border-t border-[var(--card-border)]">
+              <button
+                onClick={() => {
+                  setCurrentNote(viewingNote);
+                  setIsEditing(true);
+                  setViewingNote(null);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-[var(--background)] border border-[var(--card-border)] hover:bg-gray-100 transition-colors text-sm font-medium"
+              >
+                <FileText size={14} />
+                Edit Note
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -205,7 +273,7 @@ export default function NotesPage() {
                 <div className="flex justify-between items-start gap-2 mb-3">
                   <h3 className="font-semibold text-sm truncate">{note.title}</h3>
                   <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider shrink-0">
-                    {format(new Date(note.updated), 'MMM d')}
+                    {note.updated ? format(new Date(note.updated), 'MMM d') : '-'}
                   </span>
                 </div>
                 <p className="text-sm text-[var(--muted)] whitespace-pre-wrap line-clamp-6">
@@ -218,6 +286,13 @@ export default function NotesPage() {
                   {(note.expand?.created_by as User)?.name || 'Unknown'}
                 </span>
                 <div className="flex gap-1">
+                  <button
+                    onClick={() => setViewingNote(note)}
+                    className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                    title="View"
+                  >
+                    <Expand size={14} />
+                  </button>
                   <button
                     onClick={() => { setCurrentNote(note); setIsEditing(true); }}
                     className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"

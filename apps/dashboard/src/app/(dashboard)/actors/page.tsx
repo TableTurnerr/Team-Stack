@@ -61,8 +61,8 @@ export default function ActorsPage() {
       }));
 
       setActors(actorsData);
-    } catch (error) {
-      console.error("Error fetching actors:", error);
+    } catch (error: any) {
+      if (error.status !== 0) console.error("Error fetching actors:", error);
     } finally {
       setLoading(false);
     }

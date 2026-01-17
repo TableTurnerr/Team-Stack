@@ -6,7 +6,8 @@ Populates PocketBase with sample data for testing and development.
 Run this after importing the schema via PocketBase Admin UI.
 
 Usage:
-    python seed_data.py
+    python seed_data.py          # Create sample data
+    python seed_data.py --clean  # Remove previously created sample data
 
 Prerequisites:
     1. PocketBase running at configured URL
@@ -16,8 +17,10 @@ Prerequisites:
 
 import os
 import sys
+import json
+import argparse
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import httpx
 from dotenv import load_dotenv
@@ -30,6 +33,10 @@ POCKETBASE_URL = os.getenv('POCKETBASE_URL', 'https://crmdb.tableturnerr.com')
 PB_ADMIN_EMAIL = os.getenv('PB_ADMIN_EMAIL', '')
 PB_ADMIN_PASSWORD = os.getenv('PB_ADMIN_PASSWORD', '')
 
+# Path for the seed log file
+CurrentDir = os.path.dirname(os.path.abspath(__file__))
+SEED_LOG_FILE = os.path.join(CurrentDir, 'seed_log.json')
+
 
 class PocketBaseSeeder:
     """Seed PocketBase with sample data."""
@@ -39,6 +46,8 @@ class PocketBaseSeeder:
         self.client = httpx.Client(timeout=30.0)
         self.token = None
         self.id_maps: Dict[str, Dict[str, str]] = {}
+        # Track created records by collection
+        self.seeded_records: Dict[str, List[str]] = {}
         
     def authenticate(self, email: str, password: str):
         """Authenticate as admin (superuser)."""
@@ -66,34 +75,138 @@ class PocketBaseSeeder:
             json=data
         )
         response.raise_for_status()
-        return response.json()
+        rec = response.json()
+        
+        # Track ID
+        if collection not in self.seeded_records:
+            self.seeded_records[collection] = []
+        self.seeded_records[collection].append(rec['id'])
+        
+        return rec
     
+    def delete_record(self, collection: str, record_id: str):
+        """Delete a record from PocketBase."""
+        try:
+            response = self.client.delete(
+                f"{self.url}/api/collections/{collection}/records/{record_id}",
+                headers=self._headers()
+            )
+            # 204 No Content is success, 404 means already gone
+            if response.status_code == 404:
+                return  # Already deleted
+            response.raise_for_status()
+            print(f"   ✓ Deleted {collection}/{record_id}")
+        except Exception as e:
+            print(f"   ✗ Failed to delete {collection}/{record_id}: {e}")
+
+    def save_seed_log(self):
+        """Save seeded record IDs to log file."""
+        existing_data = {}
+        if os.path.exists(SEED_LOG_FILE):
+            try:
+                with open(SEED_LOG_FILE, 'r') as f:
+                    existing_data = json.load(f)
+            except Exception:
+                pass  # Ignore read errors
+        
+        # Merge new records into existing data
+        for col, ids in self.seeded_records.items():
+            if col not in existing_data:
+                existing_data[col] = []
+            # Add only unique new IDs
+            existing_set = set(existing_data[col])
+            for new_id in ids:
+                if new_id not in existing_set:
+                    existing_data[col].append(new_id)
+
+        try:
+            with open(SEED_LOG_FILE, 'w') as f:
+                json.dump(existing_data, f, indent=2)
+            print(f"\n📄 Saved record IDs to {SEED_LOG_FILE}")
+        except Exception as e:
+            print(f"\n⚠️ Failed to save seed log: {e}")
+
+    def cleanup_seeded_data(self):
+        """Remove previously seeded data using the log file."""
+        if not os.path.exists(SEED_LOG_FILE):
+            print(f"\nℹ️ No seed log found at {SEED_LOG_FILE}. Nothing to clean.")
+            return
+
+        print("\n🧹 Cleaning up seeded data...")
+        try:
+            with open(SEED_LOG_FILE, 'r') as f:
+                data = json.load(f)
+            
+            # Common dependent collections first
+            priority_order = [
+                'event_logs', 'outreach_logs', 'call_transcripts', 'cold_calls', 
+                'notes', 'leads', 'insta_actors', 'goals', 'rules', 'alerts',
+                'companies', 'users' 
+            ]
+            
+            # Sort collections by priority
+            collections = sorted(data.keys(), key=lambda x: priority_order.index(x) if x in priority_order else 999)
+
+            for col in collections:
+                ids = data[col]
+                if not ids:
+                    continue
+                print(f"   Cleaning {col} ({len(ids)} records)...")
+                for record_id in ids:
+                    self.delete_record(col, record_id)
+            
+            # Clear the log file content
+            with open(SEED_LOG_FILE, 'w') as f:
+                json.dump({}, f)
+                
+            print("\n✅ Cleanup complete!")
+            
+        except Exception as e:
+            print(f"\n❌ Error during cleanup: {e}")
+
     def seed_users(self):
         """Create sample team members."""
         print("\n👥 Creating users...")
         
         users = [
             {'email': 'admin@tableturnerr.com', 'name': 'Admin User', 'role': 'admin'},
-            {'email': 'sarah@tableturnerr.com', 'name': 'Sarah Johnson', 'role': 'operator'},
-            {'email': 'mike@tableturnerr.com', 'name': 'Mike Chen', 'role': 'operator'},
+            {'email': 'sarah@tableturnerr.com', 'name': 'Sarah Johnson', 'role': 'member'},
+            {'email': 'mike@tableturnerr.com', 'name': 'Mike Chen', 'role': 'member'},
             {'email': 'emma@tableturnerr.com', 'name': 'Emma Davis', 'role': 'member'},
         ]
         
         self.id_maps['users'] = {}
+
         for user in users:
             try:
-                rec = self.create_record('users', {
-                    **user,
+                # Prepare data matching schema
+                user_data = {
+                    'email': user['email'],
+                    'name': user['name'],
                     'password': 'Password123!',
                     'passwordConfirm': 'Password123!',
+                    'role': user['role'],
                     'status': 'online' if user['role'] == 'admin' else 'offline',
                     'last_activity': datetime.utcnow().isoformat() + 'Z'
-                })
+                }
+                
+                rec = self.create_record('users', user_data)
                 self.id_maps['users'][user['email']] = rec['id']
                 print(f"   ✓ Created user: {user['name']}")
             except Exception as e:
+                # If user exists, we try to fetch it to populate id_map
                 if 'already exists' in str(e).lower():
                     print(f"   ⚠ User already exists: {user['email']}")
+                    try:
+                        # Try fetch
+                        res = self.client.get(f"{self.url}/api/collections/users/records", 
+                                            params={'filter': f'email="{user["email"]}"'},
+                                            headers=self._headers())
+                        items = res.json().get('items', [])
+                        if items:
+                            self.id_maps['users'][user['email']] = items[0]['id']
+                    except:
+                        pass
                 else:
                     print(f"   ✗ Failed to create user {user['email']}: {e}")
     
@@ -147,8 +260,21 @@ class PocketBaseSeeder:
                 self.id_maps['companies'][company['company_name']] = rec['id']
                 print(f"   ✓ Created company: {company['company_name']}")
             except Exception as e:
+                # If exists, find it
+                if 'already exists' in str(e).lower(): 
+                   pass # Ideally we fetch ID like users, but for brevity skipping unless needed for relations
                 print(f"   ✗ Failed to create company: {e}")
-    
+                
+                # Try simple fetch if failure was due to duplicate to populate map
+                try: 
+                     res = self.client.get(f"{self.url}/api/collections/companies/records", 
+                                            params={'filter': f'company_name="{company["company_name"]}"'}, 
+                                            headers=self._headers())
+                     items = res.json().get('items', [])
+                     if items:
+                         self.id_maps['companies'][company['company_name']] = items[0]['id']
+                except: pass
+
     def seed_cold_calls(self):
         """Create sample cold calls with transcripts."""
         print("\n📞 Creating cold calls and transcripts...")
@@ -303,8 +429,11 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
         
         if not sarah_id and not mike_id:
             print("   ⚠ No users found - skipping actors")
-            return
+            # Try to persist anyway if we have some ids
         
+        # Safe defaults if users failed
+        owner_id = sarah_id or mike_id 
+
         actors = [
             {'username': 'tableturnerr_official', 'owner': sarah_id, 'status': 'Active'},
             {'username': 'tableturnerr_sales', 'owner': sarah_id, 'status': 'Active'},
@@ -315,7 +444,10 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
         self.id_maps['actors'] = {}
         for actor in actors:
             if not actor['owner']:
-                continue
+                 # Fallback if specific owner not found but we have at least one
+                 if owner_id: actor['owner'] = owner_id
+                 else: continue
+
             try:
                 rec = self.create_record('insta_actors', {
                     **actor,
@@ -325,6 +457,15 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
                 print(f"   ✓ Created actor: @{actor['username']} ({actor['status']})")
             except Exception as e:
                 print(f"   ✗ Failed to create actor: {e}")
+                if 'already exists' in str(e).lower():
+                   try:
+                       res = self.client.get(f"{self.url}/api/collections/insta_actors/records", 
+                                             params={'filter': f'username="{actor["username"]}"'},
+                                             headers=self._headers())
+                       items = res.json().get('items', [])
+                       if items:
+                           self.id_maps['actors'][actor['username']] = items[0]['id']
+                   except: pass
     
     def seed_notes(self):
         """Create sample notes."""
@@ -335,7 +476,6 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
         
         if not admin_id:
             print("   ⚠ No admin user found - skipping notes")
-            return
         
         notes = [
             {
@@ -362,6 +502,7 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
         ]
         
         for note in notes:
+            if not note.get('created_by'): continue
             try:
                 self.create_record('notes', note)
                 print(f"   ✓ Created note: {note['title']}")
@@ -402,6 +543,10 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Seed PocketBase with sample data.')
+    parser.add_argument('--clean', action='store_true', help='Remove previously created sample data')
+    args = parser.parse_args()
+
     print("=" * 60)
     print("CRM-Tableturnerr: Seed Sample Data")
     print("=" * 60)
@@ -416,25 +561,27 @@ def main():
     try:
         seeder.authenticate(PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD)
         
-        # Seed in dependency order
-        seeder.seed_users()
-        seeder.seed_companies()
-        seeder.seed_cold_calls()
-        seeder.seed_leads()
-        seeder.seed_insta_actors()
-        seeder.seed_notes()
-        seeder.seed_event_logs()
-        
-        print("\n" + "=" * 60)
-        print("✅ Seeding Complete!")
-        print("=" * 60)
-        print("\nSample data created:")
-        print(f"  • {len(seeder.id_maps.get('users', {}))} users")
-        print(f"  • {len(seeder.id_maps.get('companies', {}))} companies")
-        print(f"  • {len(seeder.id_maps.get('cold_calls', {}))} cold calls with transcripts")
-        print(f"  • {len(seeder.id_maps.get('actors', {}))} Instagram actors")
-        print("\nYou can now test the dashboard at:")
-        print(f"  http://localhost:3000")
+        if args.clean:
+            seeder.cleanup_seeded_data()
+        else:
+            # Seed in dependency order
+            seeder.seed_users()
+            seeder.seed_companies()
+            seeder.seed_cold_calls()
+            seeder.seed_leads()
+            seeder.seed_insta_actors()
+            seeder.seed_notes()
+            seeder.seed_event_logs()
+            
+            # Save the log of created IDs
+            seeder.save_seed_log()
+            
+            print("\n" + "=" * 60)
+            print("✅ Seeding Complete!")
+            print("=" * 60)
+            print("\nSample data created and logged to seed_log.json")
+            print("\nYou can now test the dashboard at:")
+            print(f"  http://localhost:3000")
         
     except Exception as e:
         print(f"\n❌ Error: {e}")

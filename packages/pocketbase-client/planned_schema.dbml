@@ -1,0 +1,150 @@
+// Use DBML to define your database structure
+// Docs: https://dbml.dbdiagram.io/docs
+
+Table users {
+  id text [pk]
+  name text
+  email text
+  avatar file
+  role text [note: 'admin | member (optional)'] // Made optional to support OAuth creation
+  status text [note: 'online | offline | suspended (optional)'] // Made optional in schema
+  last_activity date // Missing in current DB
+  created date
+  updated date
+}
+
+Table companies {
+  id text [pk]
+  company_name text
+  owner_name text
+  company_location text
+  google_maps_link url
+  phone_numbers text
+  source text
+  created date
+  updated date
+}
+
+Table leads {
+  id text [pk]
+  username text
+  status text [note: 'Cold No Reply | Replied | Warm | Booked | Paid | Client | Excluded']
+  first_contacted date
+  last_updated date
+  notes text
+  email email
+  phone text
+  contact_source text
+  source text
+  created date
+  updated date
+}
+
+Table insta_actors {
+  id text [pk]
+  username text
+  owner relation [ref: > users.id]
+  status text [note: 'Active | Suspended By Team | Suspended By Insta | Discarded']
+  last_activity date
+}
+
+Table cold_calls {
+  id text [pk]
+  company relation [ref: > companies.id]
+  caller_name text
+  recipients text
+  call_outcome text [note: 'Interested | Not Interested | Callback | No Answer | Wrong Number | Other']
+  interest_level number
+  objections json
+  pain_points json
+  follow_up_actions json
+  call_summary text
+  call_duration_estimate text
+  model_used text
+  phone_number text
+  owner_name text
+  claimed_by relation [ref: > users.id]
+  created date
+  updated date
+}
+
+Table call_transcripts {
+  id text [pk]
+  call relation [ref: - cold_calls.id] // One-to-one
+  transcript text
+}
+
+Table event_logs {
+  id text [pk]
+  event_type text [note: 'Outreach | Change in Tar Info | Tar Exception Toggle | User | System | Cold Call']
+  actor relation [ref: > insta_actors.id]
+  user relation [ref: > users.id]
+  target relation [ref: > leads.id]
+  cold_call relation [ref: > cold_calls.id]
+  details text
+  source text
+  created date
+  updated date
+}
+
+Table outreach_logs {
+  id text [pk]
+  event relation [ref: - event_logs.id] // One-to-one
+  message_text text
+  sent_at date
+}
+
+Table goals {
+  id text [pk]
+  metric text [note: 'Total Messages Sent | Unique Profiles Contacted | ...']
+  target_value number
+  frequency text [note: 'Daily | Weekly | Monthly']
+  assigned_to_user relation [ref: > users.id]
+  assigned_to_actor relation [ref: > insta_actors.id]
+  status text [note: 'Active | Pending Suggestion | Rejected | Archived']
+  suggested_by relation [ref: > users.id]
+  start_date date
+  end_date date
+  created date
+  updated date
+}
+
+Table rules {
+  id text [pk]
+  type text [note: 'Frequency Cap | Interval Spacing']
+  metric text
+  limit_value number
+  time_window_sec number
+  severity text
+  assigned_to_user relation [ref: > users.id]
+  assigned_to_actor relation [ref: > insta_actors.id]
+  status text
+  suggested_by relation [ref: > users.id]
+  created date
+  updated date
+}
+
+Table alerts {
+  id text [pk]
+  created_by relation [ref: > users.id]
+  target_user relation [ref: > users.id]
+  entity_type text [note: 'cold_call | lead | goal']
+  entity_id text
+  entity_label text
+  alert_time date
+  message text
+  is_dismissed bool
+}
+
+Table notes {
+  id text [pk]
+  title text
+  note_text text
+  created_by relation [ref: > users.id]
+  last_edited_by relation [ref: > users.id]
+  is_archived bool
+  is_deleted bool
+  deleted_at date
+  created date
+  updated date
+}

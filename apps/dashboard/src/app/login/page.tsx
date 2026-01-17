@@ -42,6 +42,7 @@ export default function LoginPage() {
             await loginWithGoogle();
             router.push('/');
         } catch (err: unknown) {
+            console.error('Google Sign In Error Page Log:', err);
             if (err instanceof Error) {
                 setError(err.message || 'Failed to sign in with Google');
             } else {

@@ -78,14 +78,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const loginWithGoogle = async () => {
-        const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
-        const model = authData.record;
-        setUser({
-            id: model.id,
-            email: model.email || '',
-            name: model.name || model.email?.split('@')[0] || 'User',
-            avatar: model.avatar,
-        });
+        console.log('Login with Google initiated');
+        console.log('PB URL:', pb.baseUrl);
+        try {
+            const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
+            console.log('Google auth data:', authData);
+            const model = authData.record;
+            setUser({
+                id: model.id,
+                email: model.email || '',
+                name: model.name || model.email?.split('@')[0] || 'User',
+                avatar: model.avatar,
+            });
+        } catch (error) {
+            console.error('Google login failed:', error);
+            throw error;
+        }
     };
 
     const logout = () => {

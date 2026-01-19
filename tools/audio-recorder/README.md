@@ -74,6 +74,25 @@ The default hotkey is `Ctrl+Shift+R`. You can change this via the "Change" butto
 
 The application stores its configuration (hotkey, save mode, save directory) in `config.json` located in the `AudioRecorder` directory. You can edit this file manually, but it's generally recommended to use the in-app settings.
 
-## Troubleshooting Desktop Audio
-
 For recording desktop audio, Windows typically requires enabling a "Stereo Mix" or equivalent loopback device in your sound settings. The in-app "Desktop audio not working? Click here" button provides detailed instructions and quick links to relevant Windows settings. If "Stereo Mix" is not available, your sound card might not support it, or you may need updated audio drivers. Some users might find "What U Hear" or "Wave Out Mix" as alternatives.
+
+## Troubleshooting
+
+If the application fails to run on a new computer (especially for teammates):
+
+1.  **Run the troubleshooter:**
+    We have included a script to check for common issues.
+    ```bash
+    python troubleshoot.py
+    ```
+
+2.  **Missing DLL Error / Sounddevice fails to load:**
+    If you see errors about "DLL load failed" or generic ImportError with `sounddevice`:
+    *   You likely need the **Visual C++ Redistributable**.
+    *   Download and install it from Microsoft: https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+3.  **Dependencies:**
+    Ensure you have installed all requirements:
+    ```bash
+    pip install -r requirements.txt
+    ```

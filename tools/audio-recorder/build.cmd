@@ -42,4 +42,47 @@ echo Executable created at:
 echo %~dp0dist\AudioRecorder.exe
 echo.
 
+REM Check if NSIS is installed
+where makensis >nul 2>&1
+if errorlevel 1 (
+    echo =========================================
+    echo NSIS NOT FOUND - Skipping installer build
+    echo =========================================
+    echo.
+    echo To create the installer, please install NSIS from:
+    echo https://nsis.sourceforge.io/Download
+    echo.
+    echo Then add NSIS to your PATH and run this script again.
+    echo.
+    pause
+    exit /b 0
+)
+
+echo.
+echo =========================================
+echo Building Installer with NSIS...
+echo =========================================
+echo.
+
+makensis installer.nsi
+
+if errorlevel 1 (
+    echo.
+    echo =========================================
+    echo INSTALLER BUILD FAILED!
+    echo =========================================
+    pause
+    exit /b 1
+)
+
+echo.
+echo =========================================
+echo INSTALLER BUILD SUCCESSFUL!
+echo =========================================
+echo.
+echo Installer created at:
+echo %~dp0dist\AudioRecorder_Setup.exe
+echo.
+
 pause
+

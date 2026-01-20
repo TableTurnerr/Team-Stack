@@ -96,3 +96,29 @@ If the application fails to run on a new computer (especially for teammates):
     ```bash
     pip install -r requirements.txt
     ```
+
+## Building the Installer
+
+To create a distributable Windows installer:
+
+### Prerequisites
+1. **Python** with all dependencies installed (`pip install -r requirements.txt`)
+2. **PyInstaller** (`pip install pyinstaller`)
+3. **NSIS** (Nullsoft Scriptable Install System) - Download from https://nsis.sourceforge.io/Download
+
+### Build Steps
+1. Run the build script:
+   ```bash
+   build.cmd
+   ```
+2. The script will:
+   - Build the standalone executable with PyInstaller
+   - Create the installer with NSIS (if installed)
+3. Find the installer at: `dist\AudioRecorder_Setup.exe`
+
+### Installer Features
+- **Automatic VC++ Redistributable**: Downloads and installs Visual C++ Redistributable during installation
+- **Classic Windows UI**: Standard Windows installer experience
+- **Start Menu & Desktop shortcuts**: Created automatically
+- **Clean uninstaller**: Available in Add/Remove Programs
+- **Recordings preservation**: Uninstaller asks before deleting recordings (moves to Recycle Bin if chosen)

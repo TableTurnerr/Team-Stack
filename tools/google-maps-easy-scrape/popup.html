@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Google Maps Easy Scrape</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      min-width: 570px;
+      padding: 20px;
+      font-family: 'Poppins', sans-serif;
+    }
+
+    #message {
+      font-size: 16px;
+      padding-top: 20px;
+      padding-bottom: 20px;
+      text-decoration: none;
+    }
+
+    .button {
+
+      padding: 10px 20px;
+      border: none;
+      color: white;
+      background-color: #007BFF;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+      border-radius: 20px;
+      font-family: 'Poppins', sans-serif;
+    }
+
+    .button:hover {
+      background-color: #0056b3;
+    }
+
+    /* disabled state - prevent hover changes when disabled */
+    .button:disabled,
+    .button[disabled] {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    /* Variant buttons (user-updated class names) */
+    .button.red-btn {
+      background-color: #dc3545; /* bootstrap danger */
+    }
+    .button.red-btn:hover {
+      background-color: #c82333;
+    }
+
+    .button.darkred-btn {
+      background-color: #b02a37; /* darker red */
+    }
+    .button.darkred-btn:hover {
+      background-color: #8a1f2a;
+    }
+
+    .button.black-btn {
+      background-color: #343a40; /* dark/black */
+    }
+    .button.black-btn:hover {
+      background-color: #1f2326;
+    }
+
+    .input {
+      padding: 8px 15px;
+      margin-right: 10px;
+      border: 1px solid #c2c2c2;
+      border-radius: 20px;
+      font-family: 'Poppins', sans-serif;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    th,
+    td {
+      border: 1px solid #ddd;
+      padding: 8px;
+    }
+
+    th {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      text-align: left;
+      background-color: #dddddd;
+    }
+
+    h1 {
+      font-weight: 600;
+      font-size: 24px;
+      margin: 0;
+    }
+
+    h4 {
+      margin: 0;
+      padding-top: 10px;
+    }
+
+    h4 a {
+      color: #1d1d1d;
+      text-decoration: none;
+    }
+
+    h4 a:hover {
+      color: #000000;
+      text-decoration: none;
+    }
+    /* small inline spinner for Remove Chains button */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.6);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* Mode Toggle CSS */
+    .mode-toggle-container {
+      display: flex;
+      gap: 8px;
+      margin: 16px 0;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: #666;
+      transition: all 0.2s;
+    }
+    .mode-btn.active {
+      background: #4285f4;
+      color: white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .mode-btn:hover:not(.active) {
+      background: #e0e0e0;
+    }
+    .manual-mode-info {
+      padding: 16px;
+      background: #e8f5e9;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      border: 1px solid #c8e6c9;
+    }
+    .manual-mode-info h3 {
+      margin: 0 0 8px 0;
+      color: #2e7d32;
+      font-size: 18px;
+    }
+    .manual-mode-info p {
+      margin: 8px 0;
+      color: #333;
+      font-size: 14px;
+    }
+    .manual-mode-info ul {
+      margin: 8px 0;
+      padding-left: 20px;
+      font-size: 14px;
+    }
+    .manual-mode-info li {
+      margin: 4px 0;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>&#x1F5FA;&#xFE0F; Google Maps Easy Scrape</h1>
+  <div style="flex: auto;">
+    <h4>
+      <a href="https://www.youtube.com/@itsmikepowers" target="_blank">By Mike</a>
+      <a href="https://github.com/Hashaam101/" target="_blank"> - Improved By Hashaam101</a>
+    </h4>
+    <span style="font-weight: bolder; color: #313131;"> Open popup:<span style="color: #505050;"> Ctrl+Shift+Y
+      </span></span>
+      <br>
+    <div id="scraping-shortcuts">
+    <span style="font-weight: bolder; color: #313131;"> Scrape active Maps tab:<span style="color: #505050;"> Ctrl+Shift+S
+      </span></span>
+    </div>
+
+  </div>
+
+  <div class="mode-toggle-container">
+    <button id="scrapingModeBtn" class="mode-btn active">Scraping Mode</button>
+    <button id="manualModeBtn" class="mode-btn">Manual Mode</button>
+  </div>
+
+  <!-- Scraping Mode Section -->
+  <div id="scrapingModeSection">
+    <div id="message">Checking URL...</div>
+    <button id="actionButton" class="button" disabled>Scrape Google Maps</button>
+  </div>
+
+  <!-- Manual Mode Section -->
+  <div id="manualModeSection" style="display: none;">
+    <div class="manual-mode-info">
+      <h3>Manual Mode Active</h3>
+      <p>Visit any Google Maps place or business website to see the info overlay.</p>
+      <ul>
+        <li><strong>Google Maps:</strong> View place details and add with one click</li>
+        <li><strong>Websites:</strong> Auto-scan for contact info, emails, and addresses</li>
+      </ul>
+      <p><small style="color: #666;">Use Ctrl+Shift+M to toggle the overlay visibility on any page.</small></p>
+    </div>
+    <button id="manualAddBtn" class="button">Show Quick Add</button>
+  </div>
+
+  <!-- Shared Controls -->
+  <div style="margin-top: 15px;">
+    <button id="clearListButton" class="button red-btn" style="margin-left: 0;" disabled>Clear List</button>
+    <button id="removeChainsButton" class="button darkred-btn" style="margin-left: 10px;">Remove Chains <span class="spinner" style="display:none" aria-hidden="true"></span></button>
+    <div style="height: 10px;"></div>
+    <button id="downloadCsvButton" class="button black-btn" style="margin-left: 0;" disabled>Download as CSV</button>
+    <input type="text" id="filenameInput" class="input" placeholder="Enter file name" style="margin-left: 10px;" />
+  </div>
+
+  <table id="resultsTable">
+    <thead>
+      <tr>
+      </tr>
+    </thead>
+    <tbody>
+    </tbody>
+  </table>
+  <script src="popup.js"></script>
+</body>
+
+</html>

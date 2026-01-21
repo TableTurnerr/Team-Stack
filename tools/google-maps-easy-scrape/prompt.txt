@@ -1,0 +1,1179 @@
+# Implementation Task: Add Manual Mode to Google Maps Easy Scrape Chrome Extension
+
+## Overview
+
+You are tasked with enhancing the Google Maps Easy Scrape Chrome extension by adding a new "Manual Mode" alongside the existing functionality (which will be renamed to "Scraping Mode"). This document provides comprehensive instructions for implementation.
+
+---
+
+## Current Codebase Architecture
+
+### File Structure
+```
+google-maps-easy-scrape/
+├── manifest.json              # Chrome MV3 extension configuration
+├── popup.html                 # UI popup interface
+├── popup.js                   # Main popup logic (739 lines)
+├── background.js              # Service worker (498 lines)
+├── injected_scraper.js        # Content script for continuous scraping
+├── version.json               # Version info for updates
+└── map.png                    # Icon asset
+```
+
+### Key Components
+1. **popup.js** - Handles UI, scraping orchestration, data storage, export
+2. **background.js** - Service worker for background tasks, message handling, version checking
+3. **injected_scraper.js** - Content script injected into Google Maps for continuous scraping
+4. **manifest.json** - MV3 configuration with permissions: activeTab, scripting, storage, notifications, alarms
+
+### Data Storage Keys (chrome.storage.local)
+- `gmes_results` - Array of scraped item objects
+- `gmes_ignore_names` - Array of chain names to ignore
+- `gmes_ignore_industries` - Array of industries to ignore
+- `gmes_background_scraping` - Boolean for scraping state
+
+### Item Object Structure
+```javascript
+{
+  title: string,           // Place name
+  closedStatus: string,    // "Temporarily Closed" or ""
+  rating: string,          // "4.5" or "0"
+  reviewCount: string,     // "(200)" or "0"
+  phone: string,           // "(123) 456-7890" or ""
+  industry: string,        // "Restaurant" (letters only)
+  expensiveness: string,   // "$" or "$$"
+  city: string,            // Extracted city name
+  address: string,         // Full address
+  companyUrl: string,      // Website URL
+  instaSearch: string,     // Instagram search URL
+  href: string             // Google Maps place URL (unique identifier)
+}
+```
+
+---
+
+## Task Requirements
+
+### 1. Add Mode Toggle System
+
+**Location:** popup.html and popup.js
+
+Create a mode toggle at the top of the popup allowing users to switch between:
+- **Scraping Mode** (current functionality, renamed)
+- **Manual Mode** (new functionality)
+
+**UI Design:**
+- Add a toggle switch or segmented button control at the top of the popup
+- Persist the selected mode in `chrome.storage.local` with key `gmes_mode` (values: "scraping" | "manual")
+- When mode changes, show/hide relevant UI sections
+- Default to "scraping" mode for backward compatibility
+
+**Implementation:**
+```html
+<!-- Add after the header section in popup.html -->
+<div class="mode-toggle-container">
+  <button id="scrapingModeBtn" class="mode-btn active">Scraping Mode</button>
+  <button id="manualModeBtn" class="mode-btn">Manual Mode</button>
+</div>
+```
+
+### 2. Scraping Mode (Existing Functionality)
+
+Keep all existing functionality intact:
+- "Scrape Google Maps" button
+- Continuous injected scraping
+- Results table display
+- Export to .xls
+- Remove Chains functionality
+- Clear List functionality
+
+**Minor Changes:**
+- Wrap all existing UI elements in a container with id `scrapingModeSection`
+- Show this section only when Scraping Mode is selected
+- All existing keyboard shortcuts remain functional
+
+### 3. Manual Mode - New Functionality
+
+#### 3.1 Google Maps Profile Overlay
+
+**Trigger:** When user visits a Google Maps place detail page (URL contains `/maps/place/`)
+
+**Overlay Position:** Fixed position, top-right corner of the page
+
+**Overlay Content:**
+```
+┌─────────────────────────────────────────┐
+│  📍 Quick Add                      [x]  │
+├─────────────────────────────────────────┤
+│  Name: Pizzeria Mario                   │
+│  Rating: 4.8 ★ (156 reviews)            │
+│  Industry: Italian Restaurant $$        │
+│  Phone: (555) 123-4567                  │
+│  Address: 456 Broadway, NYC             │
+│  Website: pizzeriamario.com             │
+├─────────────────────────────────────────┤
+│  [Add to List]                          │
+└─────────────────────────────────────────┘
+```
+
+**Implementation Details:**
+- Create a new content script: `manual_mode_maps.js`
+- Inject when URL matches `*://www.google.com/maps/place/*`
+- Scrape the place detail panel for:
+  - Title (business name)
+  - Rating and review count
+  - Industry/category
+  - Expensiveness ($, $$, etc.)
+  - Phone number
+  - Address
+  - Website URL
+- Show overlay with scraped data
+- "Add to List" button saves item to `gmes_results` via `chrome.runtime.sendMessage()`
+- Close button [x] to dismiss overlay
+- Overlay should be draggable (optional enhancement)
+- Remember if user dismissed overlay for this session
+
+**DOM Selectors for Google Maps Place Detail:**
+```javascript
+// Title
+document.querySelector('h1.DUwDvf') ||
+document.querySelector('[data-item-id="title"]')
+
+// Rating
+document.querySelector('span.ceNzKf') ||
+document.querySelector('[role="img"][aria-label*="stars"]')
+
+// Review count
+document.querySelector('span.F7nice span[aria-label]')
+
+// Address
+document.querySelector('[data-item-id="address"]') ||
+document.querySelector('button[data-item-id="address"]')
+
+// Phone
+document.querySelector('[data-item-id="phone"]') ||
+document.querySelector('button[data-tooltip="Copy phone number"]')
+
+// Website
+document.querySelector('[data-item-id="authority"]') ||
+document.querySelector('a[data-item-id="authority"]')
+
+// Industry/Category
+document.querySelector('button.DkEaL') ||
+document.querySelector('[jsaction*="category"]')
+```
+
+**Note:** These selectors may need adjustment. Test thoroughly and implement fallback selectors.
+
+#### 3.2 Website Visitor Overlay
+
+**Trigger:** When Manual Mode is active and user visits ANY website (not Google Maps)
+
+**Overlay Position:** Fixed position, top-right corner
+
+**Overlay Content:**
+```
+┌─────────────────────────────────────────┐
+│  📍 Contact Info Scanner           [x]  │
+├─────────────────────────────────────────┤
+│  Phone: (555) 123-4567                  │
+│         (555) 987-6543                  │
+│  Email: contact@example.com             │
+│         sales@example.com               │
+│  Address: 123 Main St, City, ST 12345   │
+│  Google Maps: [Search on Maps]          │
+├─────────────────────────────────────────┤
+│  Business Name: [____________]          │
+│  [Add to List]                          │
+└─────────────────────────────────────────┘
+```
+
+**Implementation Details:**
+- Create a new content script: `manual_mode_website.js`
+- Inject on all URLs when Manual Mode is active (except Google Maps)
+- Scan the page DOM for:
+  - Phone numbers (regex pattern matching)
+  - Email addresses (regex pattern matching)
+  - Physical addresses (heuristic detection)
+  - Links to Google Maps (href containing "google.com/maps")
+- Display found information in overlay
+- Allow user to input business name manually
+- "Add to List" saves to `gmes_results`
+- Generate Google Maps search link if not found: `https://www.google.com/maps/search/[business name]+[address]`
+
+**Extraction Patterns:**
+
+```javascript
+// Phone number patterns (US/International)
+const phoneRegex = /(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}/g;
+
+// Email pattern
+const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+
+// Address patterns (US)
+const addressRegex = /\d+\s+[\w\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl)\.?(?:,?\s+(?:Suite|Ste|Apt|Unit|#)\s*[\w\d-]+)?(?:,?\s+[\w\s]+)?(?:,?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?)?/gi;
+
+// Google Maps links
+const mapsLinkRegex = /https?:\/\/(?:www\.)?google\.com\/maps[^\s"']*/gi;
+```
+
+**Scanning Strategy:**
+1. Scan common locations first: header, footer, contact page indicators
+2. Look for structured data (schema.org JSON-LD)
+3. Check meta tags
+4. Scan visible text content
+5. Check anchor hrefs for tel: and mailto: links
+6. Limit scan to prevent performance issues (e.g., first 100KB of text)
+
+```javascript
+// Check for tel: and mailto: links
+const telLinks = document.querySelectorAll('a[href^="tel:"]');
+const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]');
+
+// Check structured data
+const ldJsonScripts = document.querySelectorAll('script[type="application/ld+json"]');
+ldJsonScripts.forEach(script => {
+  try {
+    const data = JSON.parse(script.textContent);
+    // Extract telephone, email, address from structured data
+  } catch (e) {}
+});
+```
+
+### 4. Manifest.json Updates
+
+```json
+{
+  "manifest_version": 3,
+  "name": "Google Maps Easy Scrape",
+  "version": "1.2",
+  "permissions": ["activeTab", "scripting", "storage", "notifications", "alarms"],
+  "host_permissions": [
+    "https://www.google.com/maps/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "map.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.google.com/maps/place/*"],
+      "js": ["manual_mode_maps.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Ctrl+Shift+Y" },
+      "description": "Open popup"
+    },
+    "scrape": {
+      "suggested_key": { "default": "Ctrl+Shift+S" },
+      "description": "Scrape active Maps tab"
+    },
+    "toggle_manual_overlay": {
+      "suggested_key": { "default": "Ctrl+Shift+M" },
+      "description": "Toggle manual mode overlay"
+    }
+  }
+}
+```
+
+**Important:** The website scanner content script should NOT be declared in manifest.json as a static content script. Instead, inject it dynamically via `chrome.scripting.executeScript()` only when:
+1. Manual Mode is active
+2. User is on a non-Google-Maps website
+3. User hasn't dismissed the overlay
+
+### 5. Background.js Updates
+
+Add message handlers for Manual Mode:
+
+```javascript
+// Add to existing message listener
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Existing handlers...
+
+  if (msg.type === 'MANUAL_ADD_ITEM') {
+    // Add item from manual mode overlay
+    handleManualAddItem(msg.item);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (msg.type === 'GET_MODE') {
+    chrome.storage.local.get(['gmes_mode'], (result) => {
+      sendResponse({ mode: result.gmes_mode || 'scraping' });
+    });
+    return true;
+  }
+
+  if (msg.type === 'CHECK_SHOULD_SHOW_OVERLAY') {
+    chrome.storage.local.get(['gmes_mode', 'gmes_overlay_dismissed'], (result) => {
+      const shouldShow = result.gmes_mode === 'manual' && !result.gmes_overlay_dismissed;
+      sendResponse({ shouldShow });
+    });
+    return true;
+  }
+});
+
+async function handleManualAddItem(item) {
+  const result = await chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries']);
+  const existingItems = result.gmes_results || [];
+  const ignoreNames = result.gmes_ignore_names || [];
+  const ignoreIndustries = result.gmes_ignore_industries || [];
+
+  // Check ignore lists
+  const titleLower = (item.title || '').toLowerCase();
+  const industryLower = (item.industry || '').toLowerCase();
+
+  for (const name of ignoreNames) {
+    if (titleLower.includes(name.toLowerCase())) {
+      console.log('Item ignored by name filter:', item.title);
+      return;
+    }
+  }
+
+  for (const ind of ignoreIndustries) {
+    if (industryLower.includes(ind.toLowerCase())) {
+      console.log('Item ignored by industry filter:', item.industry);
+      return;
+    }
+  }
+
+  // Deduplication
+  const key = item.href || (item.title + '|' + item.address);
+  const existingKeys = new Set(existingItems.map(i => i.href || (i.title + '|' + i.address)));
+
+  if (existingKeys.has(key)) {
+    console.log('Duplicate item, skipping:', item.title);
+    return;
+  }
+
+  // Add item
+  existingItems.push(item);
+  await chrome.storage.local.set({ gmes_results: existingItems });
+  console.log('Item added via manual mode:', item.title);
+}
+```
+
+### 6. New File: manual_mode_maps.js
+
+This content script handles the Google Maps place detail overlay.
+
+```javascript
+// manual_mode_maps.js
+(function() {
+  'use strict';
+
+  // Check if we should show overlay
+  chrome.runtime.sendMessage({ type: 'CHECK_SHOULD_SHOW_OVERLAY' }, (response) => {
+    if (response && response.shouldShow) {
+      initMapsOverlay();
+    }
+  });
+
+  function initMapsOverlay() {
+    // Wait for page to load place details
+    const observer = new MutationObserver((mutations, obs) => {
+      const title = document.querySelector('h1.DUwDvf');
+      if (title) {
+        obs.disconnect();
+        setTimeout(createOverlay, 500); // Wait for all data to load
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Also try immediately in case page is already loaded
+    if (document.querySelector('h1.DUwDvf')) {
+      setTimeout(createOverlay, 500);
+    }
+  }
+
+  function scrapeCurrentPlace() {
+    // Implement scraping logic using selectors mentioned above
+    // Return item object
+    const item = {
+      title: '',
+      rating: '0',
+      reviewCount: '0',
+      phone: '',
+      industry: '',
+      expensiveness: '',
+      city: '',
+      address: '',
+      companyUrl: '',
+      instaSearch: '',
+      href: window.location.href,
+      closedStatus: ''
+    };
+
+    // Title
+    const titleEl = document.querySelector('h1.DUwDvf');
+    if (titleEl) item.title = titleEl.textContent.trim();
+
+    // Rating
+    const ratingEl = document.querySelector('span.ceNzKf');
+    if (ratingEl) item.rating = ratingEl.textContent.trim();
+
+    // Review count
+    const reviewEl = document.querySelector('span.F7nice span[aria-label]');
+    if (reviewEl) {
+      const match = reviewEl.getAttribute('aria-label').match(/(\d[\d,]*)/);
+      if (match) item.reviewCount = '(' + match[1] + ')';
+    }
+
+    // Phone - look for tel: link or data attribute
+    const phoneBtn = document.querySelector('[data-item-id="phone"]');
+    if (phoneBtn) {
+      const phoneText = phoneBtn.textContent || phoneBtn.getAttribute('aria-label') || '';
+      const phoneMatch = phoneText.match(/[\d\s\-\(\)\+]+/);
+      if (phoneMatch) item.phone = phoneMatch[0].trim();
+    }
+
+    // Address
+    const addressBtn = document.querySelector('[data-item-id="address"]');
+    if (addressBtn) item.address = addressBtn.textContent.trim();
+
+    // Website
+    const websiteLink = document.querySelector('a[data-item-id="authority"]');
+    if (websiteLink) item.companyUrl = websiteLink.href;
+
+    // Industry/Category
+    const categoryBtn = document.querySelector('button.DkEaL');
+    if (categoryBtn) {
+      const raw = categoryBtn.textContent.trim();
+      // Separate letters from currency symbols
+      item.industry = raw.replace(/[^a-zA-Z\s]/g, '').trim();
+      item.expensiveness = raw.replace(/[a-zA-Z\s]/g, '').trim();
+    }
+
+    // City - extract from address or page title
+    const pageTitle = document.title;
+    const cityMatch = pageTitle.match(/,\s*([^,]+)\s*-\s*Google Maps/);
+    if (cityMatch) item.city = cityMatch[1].trim();
+
+    // Instagram search URL
+    if (item.title && item.city) {
+      item.instaSearch = 'https://www.google.com/search?q=' +
+        encodeURIComponent(item.title + ' ' + item.city + ' Instagram');
+    }
+
+    return item;
+  }
+
+  function createOverlay() {
+    // Remove existing overlay if any
+    const existing = document.getElementById('gmes-manual-overlay');
+    if (existing) existing.remove();
+
+    const item = scrapeCurrentPlace();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'gmes-manual-overlay';
+    overlay.innerHTML = `
+      <style>
+        #gmes-manual-overlay {
+          position: fixed;
+          top: 80px;
+          right: 20px;
+          width: 320px;
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+          z-index: 10000;
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          font-size: 14px;
+        }
+        #gmes-manual-overlay .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          background: #4285f4;
+          color: white;
+          border-radius: 12px 12px 0 0;
+          font-weight: 600;
+        }
+        #gmes-manual-overlay .close-btn {
+          background: none;
+          border: none;
+          color: white;
+          font-size: 20px;
+          cursor: pointer;
+          padding: 0;
+          line-height: 1;
+        }
+        #gmes-manual-overlay .content {
+          padding: 16px;
+        }
+        #gmes-manual-overlay .field {
+          margin-bottom: 10px;
+        }
+        #gmes-manual-overlay .field-label {
+          font-weight: 600;
+          color: #666;
+          font-size: 12px;
+          text-transform: uppercase;
+          margin-bottom: 2px;
+        }
+        #gmes-manual-overlay .field-value {
+          color: #333;
+          word-break: break-word;
+        }
+        #gmes-manual-overlay .field-value a {
+          color: #4285f4;
+          text-decoration: none;
+        }
+        #gmes-manual-overlay .add-btn {
+          width: 100%;
+          padding: 12px;
+          background: #34a853;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          margin-top: 8px;
+        }
+        #gmes-manual-overlay .add-btn:hover {
+          background: #2d9249;
+        }
+        #gmes-manual-overlay .add-btn:disabled {
+          background: #ccc;
+          cursor: not-allowed;
+        }
+        #gmes-manual-overlay .success-msg {
+          color: #34a853;
+          text-align: center;
+          padding: 8px;
+          font-weight: 600;
+        }
+      </style>
+      <div class="header">
+        <span>📍 Quick Add</span>
+        <button class="close-btn" id="gmes-close-btn">&times;</button>
+      </div>
+      <div class="content">
+        <div class="field">
+          <div class="field-label">Name</div>
+          <div class="field-value">${item.title || 'N/A'}</div>
+        </div>
+        <div class="field">
+          <div class="field-label">Rating</div>
+          <div class="field-value">${item.rating} ★ ${item.reviewCount || ''}</div>
+        </div>
+        <div class="field">
+          <div class="field-label">Category</div>
+          <div class="field-value">${item.industry || 'N/A'} ${item.expensiveness || ''}</div>
+        </div>
+        <div class="field">
+          <div class="field-label">Phone</div>
+          <div class="field-value">${item.phone || 'N/A'}</div>
+        </div>
+        <div class="field">
+          <div class="field-label">Address</div>
+          <div class="field-value">${item.address || 'N/A'}</div>
+        </div>
+        <div class="field">
+          <div class="field-label">Website</div>
+          <div class="field-value">${item.companyUrl ? `<a href="${item.companyUrl}" target="_blank">${new URL(item.companyUrl).hostname}</a>` : 'N/A'}</div>
+        </div>
+        <button class="add-btn" id="gmes-add-btn">Add to List</button>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Close button handler
+    document.getElementById('gmes-close-btn').addEventListener('click', () => {
+      overlay.remove();
+      chrome.storage.local.set({ gmes_overlay_dismissed: true });
+    });
+
+    // Add button handler
+    document.getElementById('gmes-add-btn').addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: item }, (response) => {
+        if (response && response.success) {
+          const btn = document.getElementById('gmes-add-btn');
+          btn.textContent = '✓ Added!';
+          btn.disabled = true;
+          setTimeout(() => {
+            btn.textContent = 'Add to List';
+            btn.disabled = false;
+          }, 2000);
+        }
+      });
+    });
+  }
+})();
+```
+
+### 7. New File: manual_mode_website.js
+
+This content script handles website contact info scanning.
+
+```javascript
+// manual_mode_website.js
+(function() {
+  'use strict';
+
+  // Prevent duplicate injection
+  if (window.__GMES_WEBSITE_SCANNER__) return;
+  window.__GMES_WEBSITE_SCANNER__ = true;
+
+  // Patterns
+  const phoneRegex = /(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}/g;
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  const mapsLinkRegex = /https?:\/\/(?:www\.)?google\.com\/maps[^\s"'<>]*/gi;
+
+  function scanPage() {
+    const results = {
+      phones: new Set(),
+      emails: new Set(),
+      addresses: [],
+      mapsLinks: new Set(),
+      businessName: document.title.split('|')[0].split('-')[0].trim()
+    };
+
+    // Scan tel: links
+    document.querySelectorAll('a[href^="tel:"]').forEach(el => {
+      const phone = el.href.replace('tel:', '').replace(/\D/g, '');
+      if (phone.length >= 10) results.phones.add(formatPhone(phone));
+    });
+
+    // Scan mailto: links
+    document.querySelectorAll('a[href^="mailto:"]').forEach(el => {
+      const email = el.href.replace('mailto:', '').split('?')[0];
+      if (email.includes('@')) results.emails.add(email.toLowerCase());
+    });
+
+    // Scan Google Maps links
+    document.querySelectorAll('a[href*="google.com/maps"]').forEach(el => {
+      results.mapsLinks.add(el.href);
+    });
+
+    // Scan page text (limit to body text, skip scripts/styles)
+    const textContent = document.body.innerText.substring(0, 100000);
+
+    // Find phones in text
+    const textPhones = textContent.match(phoneRegex) || [];
+    textPhones.forEach(p => {
+      const cleaned = p.replace(/\D/g, '');
+      if (cleaned.length >= 10 && cleaned.length <= 11) {
+        results.phones.add(formatPhone(cleaned));
+      }
+    });
+
+    // Find emails in text
+    const textEmails = textContent.match(emailRegex) || [];
+    textEmails.forEach(e => {
+      if (!e.includes('.png') && !e.includes('.jpg') && !e.includes('.gif')) {
+        results.emails.add(e.toLowerCase());
+      }
+    });
+
+    // Find maps links in text/html
+    const html = document.body.innerHTML;
+    const mapsMatches = html.match(mapsLinkRegex) || [];
+    mapsMatches.forEach(link => results.mapsLinks.add(link));
+
+    // Check structured data
+    document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
+      try {
+        const data = JSON.parse(script.textContent);
+        extractFromStructuredData(data, results);
+      } catch (e) {}
+    });
+
+    return {
+      phones: Array.from(results.phones).slice(0, 5),
+      emails: Array.from(results.emails).slice(0, 5),
+      addresses: results.addresses.slice(0, 3),
+      mapsLinks: Array.from(results.mapsLinks).slice(0, 3),
+      businessName: results.businessName
+    };
+  }
+
+  function formatPhone(digits) {
+    if (digits.length === 11 && digits[0] === '1') digits = digits.slice(1);
+    if (digits.length === 10) {
+      return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+    }
+    return digits;
+  }
+
+  function extractFromStructuredData(data, results) {
+    if (Array.isArray(data)) {
+      data.forEach(item => extractFromStructuredData(item, results));
+      return;
+    }
+
+    if (typeof data !== 'object' || !data) return;
+
+    if (data.telephone) results.phones.add(data.telephone);
+    if (data.email) results.emails.add(data.email.toLowerCase());
+    if (data.name && !results.businessName) results.businessName = data.name;
+
+    if (data.address) {
+      if (typeof data.address === 'string') {
+        results.addresses.push(data.address);
+      } else if (data.address.streetAddress) {
+        const addr = [
+          data.address.streetAddress,
+          data.address.addressLocality,
+          data.address.addressRegion,
+          data.address.postalCode
+        ].filter(Boolean).join(', ');
+        results.addresses.push(addr);
+      }
+    }
+
+    // Recursively check nested objects
+    Object.values(data).forEach(val => {
+      if (typeof val === 'object') extractFromStructuredData(val, results);
+    });
+  }
+
+  function createOverlay(data) {
+    const overlay = document.createElement('div');
+    overlay.id = 'gmes-website-overlay';
+
+    const phonesHtml = data.phones.length
+      ? data.phones.map(p => `<div class="info-item">${p}</div>`).join('')
+      : '<div class="info-item empty">No phone numbers found</div>';
+
+    const emailsHtml = data.emails.length
+      ? data.emails.map(e => `<div class="info-item"><a href="mailto:${e}">${e}</a></div>`).join('')
+      : '<div class="info-item empty">No emails found</div>';
+
+    const addressHtml = data.addresses.length
+      ? data.addresses.map(a => `<div class="info-item">${a}</div>`).join('')
+      : '<div class="info-item empty">No address found</div>';
+
+    const mapsHtml = data.mapsLinks.length
+      ? data.mapsLinks.map(link => `<div class="info-item"><a href="${link}" target="_blank">View on Maps</a></div>`).join('')
+      : `<div class="info-item"><a href="https://www.google.com/maps/search/${encodeURIComponent(data.businessName)}" target="_blank">Search on Maps</a></div>`;
+
+    overlay.innerHTML = `
+      <style>
+        #gmes-website-overlay {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          width: 340px;
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+          z-index: 2147483647;
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          font-size: 14px;
+        }
+        #gmes-website-overlay .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          background: #4285f4;
+          color: white;
+          border-radius: 12px 12px 0 0;
+          font-weight: 600;
+        }
+        #gmes-website-overlay .close-btn {
+          background: none;
+          border: none;
+          color: white;
+          font-size: 20px;
+          cursor: pointer;
+          padding: 0;
+          line-height: 1;
+        }
+        #gmes-website-overlay .content {
+          padding: 16px;
+          max-height: 400px;
+          overflow-y: auto;
+        }
+        #gmes-website-overlay .section {
+          margin-bottom: 16px;
+        }
+        #gmes-website-overlay .section-label {
+          font-weight: 600;
+          color: #666;
+          font-size: 12px;
+          text-transform: uppercase;
+          margin-bottom: 6px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        #gmes-website-overlay .info-item {
+          color: #333;
+          padding: 4px 0;
+          word-break: break-word;
+        }
+        #gmes-website-overlay .info-item.empty {
+          color: #999;
+          font-style: italic;
+        }
+        #gmes-website-overlay .info-item a {
+          color: #4285f4;
+          text-decoration: none;
+        }
+        #gmes-website-overlay .name-input {
+          width: 100%;
+          padding: 10px;
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          font-size: 14px;
+          margin-bottom: 12px;
+          box-sizing: border-box;
+        }
+        #gmes-website-overlay .add-btn {
+          width: 100%;
+          padding: 12px;
+          background: #34a853;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        #gmes-website-overlay .add-btn:hover {
+          background: #2d9249;
+        }
+        #gmes-website-overlay .add-btn:disabled {
+          background: #ccc;
+          cursor: not-allowed;
+        }
+      </style>
+      <div class="header">
+        <span>📍 Contact Info Scanner</span>
+        <button class="close-btn" id="gmes-close-btn">&times;</button>
+      </div>
+      <div class="content">
+        <div class="section">
+          <div class="section-label">📞 Phone Numbers</div>
+          ${phonesHtml}
+        </div>
+        <div class="section">
+          <div class="section-label">📧 Email Addresses</div>
+          ${emailsHtml}
+        </div>
+        <div class="section">
+          <div class="section-label">📍 Address</div>
+          ${addressHtml}
+        </div>
+        <div class="section">
+          <div class="section-label">🗺️ Google Maps</div>
+          ${mapsHtml}
+        </div>
+        <div class="section">
+          <div class="section-label">Business Name</div>
+          <input type="text" class="name-input" id="gmes-name-input" value="${escapeHtml(data.businessName)}" placeholder="Enter business name">
+        </div>
+        <button class="add-btn" id="gmes-add-btn">Add to List</button>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Close handler
+    document.getElementById('gmes-close-btn').addEventListener('click', () => {
+      overlay.remove();
+    });
+
+    // Add handler
+    document.getElementById('gmes-add-btn').addEventListener('click', () => {
+      const businessName = document.getElementById('gmes-name-input').value.trim();
+
+      const item = {
+        title: businessName || 'Unknown Business',
+        closedStatus: '',
+        rating: '0',
+        reviewCount: '0',
+        phone: data.phones[0] || '',
+        industry: '',
+        expensiveness: '',
+        city: '',
+        address: data.addresses[0] || '',
+        companyUrl: window.location.href,
+        instaSearch: businessName ?
+          `https://www.google.com/search?q=${encodeURIComponent(businessName + ' Instagram')}` : '',
+        href: data.mapsLinks[0] || `https://www.google.com/maps/search/${encodeURIComponent(businessName + ' ' + (data.addresses[0] || ''))}`
+      };
+
+      chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: item }, (response) => {
+        if (response && response.success) {
+          const btn = document.getElementById('gmes-add-btn');
+          btn.textContent = '✓ Added!';
+          btn.disabled = true;
+          setTimeout(() => {
+            btn.textContent = 'Add to List';
+            btn.disabled = false;
+          }, 2000);
+        }
+      });
+    });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // Initialize
+  const data = scanPage();
+  createOverlay(data);
+})();
+```
+
+### 8. Popup.js Updates
+
+Add mode toggle functionality and Manual Mode UI section:
+
+```javascript
+// Add at the top of DOMContentLoaded handler
+chrome.storage.local.get(['gmes_mode'], (result) => {
+  const mode = result.gmes_mode || 'scraping';
+  setMode(mode);
+});
+
+function setMode(mode) {
+  // Update storage
+  chrome.storage.local.set({ gmes_mode: mode, gmes_overlay_dismissed: false });
+
+  // Update UI
+  const scrapingBtn = document.getElementById('scrapingModeBtn');
+  const manualBtn = document.getElementById('manualModeBtn');
+  const scrapingSection = document.getElementById('scrapingModeSection');
+  const manualSection = document.getElementById('manualModeSection');
+
+  if (mode === 'scraping') {
+    scrapingBtn.classList.add('active');
+    manualBtn.classList.remove('active');
+    scrapingSection.style.display = 'block';
+    manualSection.style.display = 'none';
+  } else {
+    scrapingBtn.classList.remove('active');
+    manualBtn.classList.add('active');
+    scrapingSection.style.display = 'none';
+    manualSection.style.display = 'block';
+
+    // Inject website scanner if on non-Maps page
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const url = tabs[0]?.url || '';
+      if (!url.includes('google.com/maps')) {
+        chrome.scripting.executeScript({
+          target: { tabId: tabs[0].id },
+          files: ['manual_mode_website.js']
+        });
+      }
+    });
+  }
+}
+
+// Add event listeners for mode buttons
+document.getElementById('scrapingModeBtn').addEventListener('click', () => setMode('scraping'));
+document.getElementById('manualModeBtn').addEventListener('click', () => setMode('manual'));
+```
+
+### 9. Popup.html Updates
+
+```html
+<!-- Add after the header, before existing content -->
+<div class="mode-toggle-container">
+  <button id="scrapingModeBtn" class="mode-btn active">Scraping Mode</button>
+  <button id="manualModeBtn" class="mode-btn">Manual Mode</button>
+</div>
+
+<!-- Wrap existing content -->
+<div id="scrapingModeSection">
+  <!-- All existing buttons, table, etc. go here -->
+</div>
+
+<!-- Add Manual Mode section -->
+<div id="manualModeSection" style="display: none;">
+  <div class="manual-mode-info">
+    <h3>Manual Mode Active</h3>
+    <p>Visit any Google Maps place or business website to see the info overlay.</p>
+    <ul>
+      <li><strong>Google Maps:</strong> View place details and add with one click</li>
+      <li><strong>Websites:</strong> Auto-scan for contact info, emails, and addresses</li>
+    </ul>
+    <p><small>Use Ctrl+Shift+M to toggle the overlay visibility on any page.</small></p>
+  </div>
+
+  <!-- Show the same results table for both modes -->
+  <h4>Collected Items</h4>
+  <!-- Clone or share the results table display -->
+</div>
+
+<!-- Add CSS for mode toggle -->
+<style>
+  .mode-toggle-container {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding: 8px;
+    background: #f5f5f5;
+    border-radius: 8px;
+  }
+  .mode-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: #666;
+    transition: all 0.2s;
+  }
+  .mode-btn.active {
+    background: #4285f4;
+    color: white;
+  }
+  .mode-btn:hover:not(.active) {
+    background: #e0e0e0;
+  }
+  .manual-mode-info {
+    padding: 16px;
+    background: #e8f5e9;
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+  .manual-mode-info h3 {
+    margin: 0 0 8px 0;
+    color: #2e7d32;
+  }
+  .manual-mode-info p {
+    margin: 8px 0;
+    color: #333;
+  }
+  .manual-mode-info ul {
+    margin: 8px 0;
+    padding-left: 20px;
+  }
+  .manual-mode-info li {
+    margin: 4px 0;
+  }
+</style>
+```
+
+---
+
+## Testing Checklist
+
+### Scraping Mode (Regression Testing)
+- [ ] Existing scraping functionality works unchanged
+- [ ] Keyboard shortcuts still work (Ctrl+Shift+Y, Ctrl+Shift+S)
+- [ ] Injected scraper runs continuously
+- [ ] Results table displays correctly
+- [ ] Export to .xls works
+- [ ] Remove Chains functionality works
+- [ ] Clear List works
+- [ ] Data persists across sessions
+
+### Manual Mode - Google Maps Overlay
+- [ ] Overlay appears on Google Maps place pages
+- [ ] All fields are extracted correctly (title, rating, phone, etc.)
+- [ ] "Add to List" button works and shows confirmation
+- [ ] Close button dismisses overlay
+- [ ] Overlay doesn't appear when in Scraping Mode
+- [ ] Added items appear in results table
+- [ ] Deduplication works (can't add same place twice)
+- [ ] Ignore lists are applied
+
+### Manual Mode - Website Scanner
+- [ ] Overlay appears on non-Maps websites
+- [ ] Phone numbers are detected (tel: links and text)
+- [ ] Email addresses are detected (mailto: links and text)
+- [ ] Google Maps links are found if present
+- [ ] Structured data (JSON-LD) is parsed
+- [ ] Business name field is editable
+- [ ] "Add to List" saves item correctly
+- [ ] Generated Maps search link works
+
+### Mode Toggle
+- [ ] Mode persists when popup closes
+- [ ] Switching modes shows/hides correct sections
+- [ ] Overlay dismissed state resets when switching to Manual Mode
+- [ ] Keyboard shortcut (Ctrl+Shift+M) toggles overlay
+
+### Edge Cases
+- [ ] Works on different Google Maps URL formats
+- [ ] Handles missing data gracefully (shows N/A)
+- [ ] Works on websites with minimal contact info
+- [ ] Doesn't break on SPA navigation
+- [ ] Performance is acceptable (no lag)
+
+---
+
+## File Checklist
+
+Files to create:
+- [ ] `manual_mode_maps.js` - Google Maps overlay content script
+- [ ] `manual_mode_website.js` - Website scanner content script
+
+Files to modify:
+- [ ] `manifest.json` - Add new content script, permissions, command
+- [ ] `popup.html` - Add mode toggle UI, manual mode section
+- [ ] `popup.js` - Add mode switching logic, manual mode handlers
+- [ ] `background.js` - Add message handlers for manual mode
+- [ ] `version.json` - Update version to 1.2
+
+---
+
+## Implementation Order
+
+1. Update `manifest.json` with new permissions and content script declaration
+2. Create `manual_mode_maps.js` and test on Google Maps place pages
+3. Create `manual_mode_website.js` and test on various websites
+4. Update `popup.html` with mode toggle UI
+5. Update `popup.js` with mode switching logic
+6. Update `background.js` with message handlers
+7. Test all functionality thoroughly
+8. Update `version.json` to 1.2
+
+---
+
+## Notes for Implementation
+
+1. **DOM Selector Stability:** Google frequently updates their Maps interface. The provided selectors are examples and may need adjustment. Implement robust fallback selectors.
+
+2. **Performance:** The website scanner should be efficient. Don't scan the entire DOM repeatedly. Cache results and limit text scanning.
+
+3. **User Experience:**
+   - Show loading states when scanning
+   - Provide clear feedback when items are added
+   - Make overlays non-intrusive but noticeable
+
+4. **Error Handling:**
+   - Handle cases where content scripts can't be injected (restricted pages)
+   - Gracefully handle missing permissions
+   - Log errors for debugging
+
+5. **Code Style:** Follow the existing code style in the project (var declarations, similar naming conventions, etc.)
+
+6. **Testing:** Test on various websites and Google Maps pages to ensure robust extraction.
+
+---
+
+## Questions to Consider
+
+1. Should the website scanner run automatically or require a trigger?
+2. Should there be a way to edit extracted data before adding to list?
+3. Should the overlay be draggable/resizable?
+4. Should there be visual indicators in the popup showing recent manual additions?
+
+---
+
+End of Implementation Prompt

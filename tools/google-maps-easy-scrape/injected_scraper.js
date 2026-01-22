@@ -76,15 +76,23 @@
       links.forEach(function(link) {
         try {
           var container = link.closest('[jsaction*="mouseover:pane"]');
-          var titleText = container ? (container.querySelector('.fontHeadlineSmall') ? container.querySelector('.fontHeadlineSmall').textContent : '') : '';
+          var titleEl = container ? container.querySelector('.fontHeadlineSmall') : null;
+          var titleText = titleEl ? titleEl.textContent : '';
           var containerText = container ? (container.textContent || '') : '';
-          if (/permanently closed/i.test(containerText)) return; // skip
+          if (/permanently closed/i.test(containerText)) return;
 
           var rating = '';
           var reviewCount = '';
           var industry = '';
+          var expensiveness = ''; // Declare at proper scope
           var address = '';
           var companyUrl = '';
+          var phone = '';
+          var closedStatus = '';
+
+          if (/temporarily closed/i.test(containerText)) {
+            closedStatus = 'Temporarily Closed';
+          }
 
           if (container) {
             var roleImgContainer = container.querySelector('[role="img"]');
@@ -108,35 +116,39 @@
               if (ratingIndex !== -1) {
                 var rawIndustryText = textBeforeAddress.substring(ratingIndex + (rating + reviewCount).length).trim().split(/\r?\n/)[0] || '';
                 var cleanedRawIndustry = rawIndustryText.replace(/[·.,#!?]/g, '').trim();
-                            var industryAlpha = cleanedRawIndustry.replace(/[^A-Za-z\s]/g, '').trim();
-                            industry = industryAlpha;
-                            // derive expensiveness from the cleaned raw industry text (symbols, $, digits)
-                            var expensivenessMatch = cleanedRawIndustry.replace(/[A-Za-z\s]/g, '').trim();
-                            expensiveness = expensivenessMatch;
+                industry = cleanedRawIndustry.replace(/[^A-Za-z\s]/g, '').trim();
+                expensiveness = cleanedRawIndustry.replace(/[^0-9$\-\u2013+]/g, '').trim();
               }
+              // Clean address
+              var filterRegex = /\b(Closed|Open 24 hours|24 hours)|Open\b/g;
+              address = address.replace(filterRegex, '').trim();
+              address = address.replace(/(\d+)(Open)/g, '$1').trim();
+              address = address.replace(/(\w)(Open)/g, '$1').trim();
+              address = address.replace(/(\w)(Closed)/g, '$1').trim();
             }
 
             var allLinks = Array.from(container.querySelectorAll('a[href]'));
             var filteredLinks = allLinks.filter(a => !a.href.startsWith('https://www.google.com/maps/place/'));
             if (filteredLinks.length > 0) companyUrl = filteredLinks[0].href;
 
-            var phoneRegex = /(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/;
+            // Better phone regex
+            var phoneRegex = /(?:\+1\s?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[-.\s]?[2-9]\d{2}[-.\s]?\d{4}/;
             var phoneMatch = containerText.match(phoneRegex);
-            var phone = phoneMatch ? phoneMatch[0] : '';
+            phone = phoneMatch ? phoneMatch[0] : '';
           }
 
-          // build object
           var instaSearch = '';
           try { instaSearch = 'https://www.google.com/search?q=' + encodeURIComponent((titleText || '') + (city ? ' ' + city : '') + ' Instagram'); } catch (e) { instaSearch = ''; }
 
           var item = {
             title: titleText || '',
             note: '',
+            closedStatus: closedStatus,
             rating: rating || '',
             reviewCount: reviewCount || '',
-            phone: (typeof phone !== 'undefined') ? phone : '',
+            phone: phone,
             industry: industry || '',
-            expensiveness: expensiveness || '',
+            expensiveness: expensiveness,
             city: city || '',
             address: address || '',
             companyUrl: companyUrl || '',
@@ -160,11 +172,9 @@
         try { chrome.runtime.sendMessage({ type: 'INJECTED_SCRAPE_ITEMS', items: newItems }); } catch (e) {}
       }
 
-      // update popdown with total extracted
       var el = ensurePopdown();
       el.textContent = 'Scraping active.. Total extracted (' + (window.__GMES_SCRAPER__.totalExtracted) + ')';
 
-      // check stop flag
       if (window.__GMES_SCRAPER__.stop) {
         clearInterval(window.__GMES_SCRAPER__.intervalId);
         window.__GMES_SCRAPER__.running = false;

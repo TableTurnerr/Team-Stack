@@ -23,12 +23,6 @@
     }
   ],
   "commands": {
-    "_execute_action": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+Y"
-      },
-      "description": "Open extension popup"
-    },
     "scrape": {
       "suggested_key": {
         "default": "Ctrl+Shift+S"
@@ -46,6 +40,12 @@
         "default": "Ctrl+Shift+L"
       },
       "description": "Add current item to list (Manual Mode)"
+    },
+    "open_website": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+W"
+      },
+      "description": "Open business website (Manual Mode)"
     }
   },
   "icons": {

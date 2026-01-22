@@ -299,148 +299,81 @@ checkForUpdates();
 // ============================================================================
 
 chrome.commands.onCommand.addListener(function (command) {
-    if (command !== 'scrape') return;
-
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        var tab = tabs && tabs[0];
-        if (!tab) return;
-
-        chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            function: scrapeData
-        }, function (results) {
-            if (!results || !results[0] || !results[0].result) return;
-            var newItems = results[0].result;
-
-            // Also respect ignore lists stored under 'gmes_ignore_names' and 'gmes_ignore_industries' (arrays of strings).
-            chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries'], function (data) {
-                var existing = Array.isArray(data.gmes_results) ? data.gmes_results : [];
-                var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
-                var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
-                var ignoreNamesSet = new Set(ignoreNamesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
-                var ignoreIndustriesSet = new Set(ignoreIndustriesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
-
-                var seen = new Set(existing.map(function (it) { return it.href || (it.title + '|' + it.address); }));
-                var added = false;
-
-                newItems.forEach(function (item) {
-                    var key = item.href || (item.title + '|' + item.address);
-                    if (!key) return;
-                    // skip if already seen
-                    if (seen.has(key)) return;
-                    // skip if title or industry matches an ignore token (case-insensitive substring match)
-                    try {
-                        var ignoreMatch = false;
-
-                        // Check title/name
-                        if (item && item.title) {
-                            var title = String(item.title).toLowerCase();
-                            for (var ig of ignoreNamesSet) {
-                                if (!ig) continue;
-                                if (title === ig || title.indexOf(ig) !== -1) {
-                                    ignoreMatch = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Check industry if title didn't match
-                        if (!ignoreMatch && item && item.industry) {
-                            var industry = String(item.industry).toLowerCase();
-                            for (var ig of ignoreIndustriesSet) {
-                                if (!ig) continue;
-                                if (industry === ig || industry.indexOf(ig) !== -1) {
-                                    ignoreMatch = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (ignoreMatch) return;
-                    } catch (e) {
-                        // if matching fails, proceed with adding
-                    }
-
-                    seen.add(key);
-                    existing.push(item);
-                    added = true;
-                });
-
-                if (added) {
-                    chrome.storage.local.set({ gmes_results: existing });
-                }
-            });
-        });
-    });
-});
-
-
-// Manual Mode Message Handlers
-chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-    if (!msg || !msg.type) return;
-
-    if (msg.type === 'MANUAL_ADD_ITEM') {
-        handleManualAddItem(msg.item).then(() => {
-            sendResponse({ success: true });
-        });
-        return true; // async response
-    }
-
-    if (msg.type === 'GET_MODE') {
-        chrome.storage.local.get(['gmes_mode'], function (result) {
-            sendResponse({ mode: result.gmes_mode || 'scraping' });
-        });
-        return true;
-    }
-
-    if (msg.type === 'CHECK_SHOULD_SHOW_OVERLAY') {
-        chrome.storage.local.get(['gmes_mode', 'gmes_overlay_dismissed'], function (result) {
-            var shouldShow = result.gmes_mode === 'manual' && !result.gmes_overlay_dismissed;
-            sendResponse({ shouldShow: shouldShow });
-        });
-        return true;
-    }
-});
-
-// Toggle overlay command
-chrome.commands.onCommand.addListener(function (command) {
-    if (command === 'toggle_manual_overlay') {
+    if (command === 'scrape') {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            if (!tabs[0]) return;
+            var tab = tabs && tabs[0];
+            if (!tab) return;
 
-            // Toggle the dismissed state
-            chrome.storage.local.get(['gmes_overlay_dismissed', 'gmes_mode'], function (result) {
-                var newDismissed = !result.gmes_overlay_dismissed;
+            chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                function: scrapeData
+            }, function (results) {
+                if (!results || !results[0] || !results[0].result) return;
+                var newItems = results[0].result;
 
-                chrome.storage.local.set({ gmes_overlay_dismissed: newDismissed }, function () {
-                    // Refresh overlay state in active tab
-                    if (result.gmes_mode === 'manual') {
-                        // We can just re-inject or let the user refresh, but let's try to reload the page or inject
-                        if (tabs[0].url.includes('google.com/maps')) {
-                            chrome.scripting.executeScript({
-                                target: { tabId: tabs[0].id },
-                                files: ['manual_mode_maps.js']
-                            });
-                        } else {
-                            chrome.scripting.executeScript({
-                                target: { tabId: tabs[0].id },
-                                files: ['manual_mode_website.js']
-                            });
-                        }
+                chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries'], function (data) {
+                    var existing = Array.isArray(data.gmes_results) ? data.gmes_results : [];
+                    var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
+                    var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
+                    var ignoreNamesSet = new Set(ignoreNamesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
+                    var ignoreIndustriesSet = new Set(ignoreIndustriesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
+
+                    var seen = new Set(existing.map(function (it) { return it.href || (it.title + '|' + it.address); }));
+                    var added = false;
+
+                    newItems.forEach(function (item) {
+                        var key = item.href || (item.title + '|' + item.address);
+                        if (!key) return;
+                        if (seen.has(key)) return;
+                        try {
+                            var ignoreMatch = false;
+                            if (item && item.title) {
+                                var title = String(item.title).toLowerCase();
+                                for (var ig of ignoreNamesSet) {
+                                    if (!ig) continue;
+                                    if (title === ig || title.indexOf(ig) !== -1) { ignoreMatch = true; break; }
+                                }
+                            }
+                            if (!ignoreMatch && item && item.industry) {
+                                var industry = String(item.industry).toLowerCase();
+                                for (var ig of ignoreIndustriesSet) {
+                                    if (!ig) continue;
+                                    if (industry === ig || industry.indexOf(ig) !== -1) { ignoreMatch = true; break; }
+                                }
+                            }
+                            if (ignoreMatch) return;
+                        } catch (e) {}
+
+                        seen.add(key);
+                        existing.push(item);
+                        added = true;
+                    });
+
+                    if (added) {
+                        chrome.storage.local.set({ gmes_results: existing });
                     }
                 });
             });
         });
-    }
-});
-
-chrome.commands.onCommand.addListener(function (command) {
-    if (command === 'manual_add_to_list') {
+    } else if (command === 'manual_add_to_list') {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             if (tabs[0]) {
                 chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_MANUAL_ADD' });
             }
         });
+    } else if (command === 'open_website') {
+        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+            if (tabs[0]) {
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_OPEN_WEBSITE' });
+            }
+        });
+    }
+});
+
+// Handle opening shortcuts settings
+chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (msg.type === 'OPEN_SHORTCUTS_SETTINGS') {
+        chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
     }
 });
 
@@ -451,7 +384,6 @@ function handleManualAddItem(item) {
             var ignoreNames = Array.isArray(result.gmes_ignore_names) ? result.gmes_ignore_names : [];
             var ignoreIndustries = Array.isArray(result.gmes_ignore_industries) ? result.gmes_ignore_industries : [];
 
-            // dedupe logic
             var key = item.href || (item.title + '|' + item.address);
             var seen = new Set(existingItems.map(function (i) { return i.href || (i.title + '|' + i.address); }));
 
@@ -461,7 +393,6 @@ function handleManualAddItem(item) {
                 return;
             }
 
-            // ignore logic
             var titleLower = (item.title || '').toLowerCase();
             var industryLower = (item.industry || '').toLowerCase();
 
@@ -487,13 +418,20 @@ function handleManualAddItem(item) {
     });
 }
 
-// The scrapeData function is serialized and injected into the page by executeScript.
-// It must not reference extension APIs; it only inspects the DOM and returns data.
 function scrapeData() {
     var links = Array.from(document.querySelectorAll('a[href^="https://www.google.com/maps/place"]'));
     return links.map(link => {
         var container = link.closest('[jsaction*="mouseover:pane"]');
         var titleText = container ? container.querySelector('.fontHeadlineSmall').textContent : '';
+        var containerText = container ? (container.textContent || '') : '';
+        
+        var closedStatus = '';
+        if (/permanently closed/i.test(containerText)) {
+            return null;
+        } else if (/temporaril(?:y)? closed/i.test(containerText) || /temporarily closed/i.test(containerText)) {
+            closedStatus = 'Temporarily Closed';
+        }
+        
         var rating = '';
         var reviewCount = '';
         var phone = '';
@@ -501,13 +439,10 @@ function scrapeData() {
         var address = '';
         var companyUrl = '';
 
-        // Rating and Reviews
         if (container) {
             var roleImgContainer = container.querySelector('[role="img"]');
-
             if (roleImgContainer) {
                 var ariaLabel = roleImgContainer.getAttribute('aria-label');
-
                 if (ariaLabel && ariaLabel.includes("stars")) {
                     var parts = ariaLabel.split(' ');
                     var rating = parts[0];
@@ -519,7 +454,6 @@ function scrapeData() {
             }
         }
 
-        // Address and Industry
         if (container) {
             var containerText = container.textContent || '';
             var addressRegex = /\d+ [\w\s]+(?:#\s*\d+|Suite\s*\d+|Apt\s*\d+)?/;
@@ -527,16 +461,12 @@ function scrapeData() {
 
             if (addressMatch) {
                 address = addressMatch[0];
-
-                // Extract industry text based on the position before the address
                 var textBeforeAddress = containerText.substring(0, containerText.indexOf(address)).trim();
                 var ratingIndex = textBeforeAddress.lastIndexOf(rating + reviewCount);
                 if (ratingIndex !== -1) {
-                    // Assuming industry is the first significant text after rating and review count
                     var rawIndustryText = textBeforeAddress.substring(ratingIndex + (rating + reviewCount).length).trim().split(/[\r\n]+/)[0];
                     var cleanedRawIndustry = rawIndustryText.replace(/[·.,#!?]/g, '').trim();
                     var industryAlpha = cleanedRawIndustry.replace(/[^A-Za-z\s]/g, '').trim();
-                    // keep only digits, $, hyphen, en-dash and plus
                     var expensivenessVal = cleanedRawIndustry.replace(/[^0-9$\-\u2013+]/g, '').trim();
                     industry = industryAlpha;
                     var expensiveness = expensivenessVal;
@@ -551,7 +481,6 @@ function scrapeData() {
             }
         }
 
-        // Company URL
         if (container) {
             var allLinks = Array.from(container.querySelectorAll('a[href]'));
             var filteredLinks = allLinks.filter(a => !a.href.startsWith("https://www.google.com/maps/place/"));
@@ -560,7 +489,6 @@ function scrapeData() {
             }
         }
 
-        // Phone Numbers
         if (container) {
             var containerText = container.textContent || '';
             var phoneRegex = /(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/;
@@ -585,7 +513,6 @@ function scrapeData() {
                     return query.substring(inIndex + 4);
                 }
             }
-
             return '';
         }
 
@@ -595,6 +522,8 @@ function scrapeData() {
 
         return {
             title: titleText,
+            note: '',
+            closedStatus: closedStatus,
             rating: rating,
             reviewCount: reviewCount,
             phone: phone,
@@ -608,27 +537,3 @@ function scrapeData() {
         };
     });
 }
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.url && tab.url.includes('google.com/maps/place')) {
-        chrome.storage.local.get(['gmes_mode'], (result) => {
-            if (result.gmes_mode === 'manual') {
-                setTimeout(() => {
-                    chrome.tabs.sendMessage(tabId, { type: 'URL_CHANGED' });
-                }, 1000);
-            }
-        });
-    }
-});
-
-chrome.tabs.onActivated.addListener((activeInfo) => {
-    chrome.tabs.get(activeInfo.tabId, (tab) => {
-        if (tab.url && tab.url.includes('google.com/maps/place')) {
-            chrome.storage.local.get(['gmes_mode'], (result) => {
-                if (result.gmes_mode === 'manual') {
-                    chrome.tabs.sendMessage(activeInfo.tabId, { type: 'SHOW_OVERLAY' });
-                }
-            });
-        }
-    });
-});

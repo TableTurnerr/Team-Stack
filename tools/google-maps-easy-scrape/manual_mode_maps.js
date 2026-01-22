@@ -37,15 +37,16 @@
                     btn.click();
                 }
             }
-        } else if (request.type === 'TRIGGER_OPEN_WEBSITE') {
-            // Handle keyboard shortcut to open website
+        } else if (request.type === 'GET_CURRENT_WEBSITE') {
             const item = scrapeCurrentPlace();
+            let url = '';
             if (item.companyUrl) {
-                window.open(item.companyUrl, '_blank');
+                url = item.companyUrl;
             } else {
                 const query = `${item.title} ${item.city} website`;
-                window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
             }
+            sendResponse({ url: url });
         } else if (request.type === 'TOGGLE_OVERLAY') {
             // Toggle overlay visibility
             const overlay = document.getElementById('gmes-manual-overlay');
@@ -184,7 +185,18 @@
 
         // Website
         const websiteLink = document.querySelector('a[data-item-id="authority"]');
-        if (websiteLink) item.companyUrl = websiteLink.href;
+        if (websiteLink) {
+            item.companyUrl = websiteLink.href;
+        } else {
+            // Fallback: Try finding a link with "Website" in aria-label or text
+            const allLinks = Array.from(document.querySelectorAll('a[href]'));
+            const websiteBtn = allLinks.find(a => 
+                (a.ariaLabel && a.ariaLabel.includes("Website")) || 
+                (a.textContent && a.textContent.includes("Website")) ||
+                (a.dataset.tooltip && a.dataset.tooltip.includes("Open website"))
+            );
+            if (websiteBtn) item.companyUrl = websiteBtn.href;
+        }
 
         // Industry/Category
         const categoryBtn = document.querySelector('button.DkEaL');

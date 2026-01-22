@@ -495,14 +495,18 @@ chrome.commands.onCommand.addListener(function (command) {
     } else if (command === 'open_website') {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_OPEN_WEBSITE' });
-            }
-        });
-    } else if (command === 'toggle_manual_overlay') {
-        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            if (tabs[0]) {
-                // Send message to toggle overlay visibility
-                chrome.tabs.sendMessage(tabs[0].id, { type: 'TOGGLE_OVERLAY' });
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_CURRENT_WEBSITE' }, function(response) {
+                    if (chrome.runtime.lastError) {
+                        console.error('Error getting website URL:', chrome.runtime.lastError);
+                        return;
+                    }
+                    if (response && response.url) {
+                        console.log('Opening website:', response.url);
+                        chrome.tabs.create({ url: response.url });
+                    } else {
+                        console.warn('No URL returned from content script');
+                    }
+                });
             }
         });
     }

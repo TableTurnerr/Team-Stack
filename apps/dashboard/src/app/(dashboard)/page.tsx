@@ -12,28 +12,28 @@ import { useAuth } from '@/contexts/auth-context';
 interface Stats {
   totalCompanies: number;
   totalColdCalls: number;
-  totalLeads: number;
+
   activeMembers: number;
 }
 
 function getEventDescription(event: EventLog): string {
   const user = event.expand?.user?.name || 'Unknown';
   const actor = event.expand?.actor?.username || '';
-  const target = event.expand?.target?.username || '';
+  const targetName = event.expand?.company?.company_name || 'Unknown';
 
   switch (event.event_type) {
     case 'Outreach':
-      return `${actor || user} sent outreach to ${target}`;
+      return `${actor || user} sent outreach to ${targetName}`;
     case 'Cold Call':
-      return `${user} made a cold call`;
+      return `${user} made a cold call to ${targetName}`;
     case 'User':
       return event.details || `${user} performed an action`;
     case 'System':
       return event.details || 'System event';
     case 'Change in Tar Info':
-      return `${user} updated target info for ${target}`;
+      return `${user} updated info for ${targetName}`;
     case 'Tar Exception Toggle':
-      return `${user} toggled exception for ${target}`;
+      return `${user} toggled exception for ${targetName}`;
     default:
       return event.details || 'Activity logged';
   }
@@ -59,7 +59,7 @@ export default function OverviewPage() {
   const [stats, setStats] = useState<Stats>({
     totalCompanies: 0,
     totalColdCalls: 0,
-    totalLeads: 0,
+
     activeMembers: 0,
   });
   const [recentActivity, setRecentActivity] = useState<EventLog[]>([]);
@@ -83,21 +83,21 @@ export default function OverviewPage() {
           }
         };
 
-        const [totalCompanies, totalColdCalls, totalLeads, activeMembers, activityResult] = await Promise.all([
+        const [totalCompanies, totalColdCalls, activeMembers, activityResult] = await Promise.all([
           getCount(COLLECTIONS.COMPANIES),
           getCount(COLLECTIONS.COLD_CALLS),
-          getCount(COLLECTIONS.LEADS),
+
           getCount(COLLECTIONS.USERS),
           pb.collection(COLLECTIONS.EVENT_LOGS).getList<EventLog>(1, 10, {
             sort: '-created',
-            expand: 'user,actor,target,cold_call',
+            expand: 'user,actor,cold_call,company',
           }).catch(() => ({ items: [] })),
         ]);
 
         setStats({
           totalCompanies,
           totalColdCalls,
-          totalLeads,
+
           activeMembers,
         });
         setRecentActivity(activityResult.items);
@@ -143,13 +143,7 @@ export default function OverviewPage() {
           description="Calls recorded"
           variant="accent"
         />
-        <StatsCard
-          title="Leads"
-          value={stats.totalLeads}
-          icon={Users}
-          description="Prospects tracked"
-          variant="primary"
-        />
+
         <StatsCard
           title="Team Members"
           value={stats.activeMembers}

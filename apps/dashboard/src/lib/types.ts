@@ -19,18 +19,18 @@ export interface Company extends RecordModel {
   google_maps_link?: string;
   phone_numbers?: string;
   source?: string;
+
+  // NEW fields merged from leads
+  instagram_handle?: string;
+  email?: string;
+  status?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
+  first_contacted?: string;
+  last_contacted?: string;
+  notes?: string;
+  contact_source?: string;
 }
 
-export interface Lead extends RecordModel {
-  username: string;
-  status: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
-  first_contacted?: string;
-  notes?: string;
-  email?: string;
-  phone?: string;
-  contact_source?: string;
-  source?: string;
-}
+
 
 export interface InstaActor extends RecordModel {
   username: string;
@@ -75,14 +75,16 @@ export interface EventLog extends RecordModel {
   event_type: 'Outreach' | 'Change in Tar Info' | 'Tar Exception Toggle' | 'User' | 'System' | 'Cold Call';
   actor?: string;
   user?: string;
-  target?: string;
+  company?: string;           // NEW: Direct company link
+
   cold_call?: string;
   details?: string;
   source?: string;
   expand?: {
     actor?: InstaActor;
     user?: User;
-    target?: Lead;
+    company?: Company;        // NEW
+
     cold_call?: ColdCall;
   };
 }
@@ -133,7 +135,7 @@ export interface Rule extends RecordModel {
 export interface Alert extends RecordModel {
   created_by: string;
   target_user: string;
-  entity_type: 'cold_call' | 'lead' | 'goal';
+  entity_type: 'cold_call' | 'company' | 'goal';
   entity_id?: string;
   entity_label?: string;
   alert_time?: string;
@@ -166,7 +168,7 @@ export interface Note extends RecordModel {
 export const COLLECTIONS = {
   USERS: 'users',
   COMPANIES: 'companies',
-  LEADS: 'leads',
+
   INSTA_ACTORS: 'insta_actors',
   COLD_CALLS: 'cold_calls',
   CALL_TRANSCRIPTS: 'call_transcripts',

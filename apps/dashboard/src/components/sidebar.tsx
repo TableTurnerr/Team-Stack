@@ -25,7 +25,7 @@ import { useAuth } from '@/contexts/auth-context';
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
-  { href: '/leads', label: 'Leads', icon: Users },
+
   { href: '/companies', label: 'Companies', icon: Building2 },
   { href: '/actors', label: 'Actors', icon: Instagram },
   { href: '/notes', label: 'Notes', icon: StickyNote },

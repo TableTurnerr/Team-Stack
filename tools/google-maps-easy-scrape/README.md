@@ -7,8 +7,9 @@ A small Chrome extension that extracts listings from Google Maps Search results 
 ## Features
 
 - **Scraping Mode**: Automatically scrape Google Maps Search results (title, rating, reviews, phone, industry, expensiveness, city, address, website, Instagram search link, Google Maps link).
-- **Manual Mode**: 
-  - **Google Maps Overlay**: When viewing a specific place on Maps, a "Quick Add" overlay appears allowing you to add the business to your list with one click.
+- **Restaurant/Food Business Filter**: Automatically filters results to only include restaurants and food-related businesses, excluding grocery stores, gas stations, and other non-food businesses. This is enabled by default.
+- **Manual Mode**:
+  - **Google Maps Overlay**: When viewing a specific place on Maps, a "Quick Add" overlay appears allowing you to add the business to your list with one click. Requires a mandatory note field.
   - **Website Scanner**: Visit any business website and the extension will automatically scan for contact info (phones, emails, addresses) and provide an overlay to add them to your list.
 - **Deduplication**: Automatically prevents duplicate entries by Maps URL (fallback: Title + Address).
 - **Persistence**: Results are saved across popup opens and browser restarts via `chrome.storage.local`.
@@ -17,6 +18,8 @@ A small Chrome extension that extracts listings from Google Maps Search results 
   - Open popup: _extension action_ (default: `Ctrl+Shift+Y`).
   - Scrape active Maps tab: `Ctrl+Shift+S`.
   - Toggle Manual Mode Overlay: `Ctrl+Shift+M`.
+  - Add to List (Manual Mode): `Alt+Shift+S`.
+  - Open Website (Manual Mode): `Ctrl+Shift+G`.
 - **Excel Export**: Export your collected leads to an Excel-compatible `.xls` file that preserves clickable links.
 - **Update Notifications**: Automatic checking for new releases on GitHub.
 
@@ -63,8 +66,8 @@ A small Chrome extension that extracts listings from Google Maps Search results 
 
 - **Scrape active tab**: `Ctrl+Shift+S`
 - **Toggle Manual Overlay**: `Ctrl+Shift+M`
-- **Add to List (Manual Mode)**: `Ctrl+Shift+L`
-- **Open Website (Manual Mode)**: `Ctrl+Shift+W`
+- **Add to List (Manual Mode)**: `Alt+Shift+S`
+- **Open Website (Manual Mode)**: `Ctrl+Shift+G`
 - **Open Popup**: Configurable in Chrome Extensions Shortcuts (typically `Ctrl+Shift+Y` or click the icon).
 
 **Note:** You can customize all these shortcuts at `chrome://extensions/shortcuts`.
@@ -74,6 +77,20 @@ A small Chrome extension that extracts listings from Google Maps Search results 
 - **Manifest**: MV3 with a background service worker (`background.js`).
 - **Persistence**: Uses `chrome.storage.local` to share data between scripts.
 - **Manual Mode Injection**: The website scanner is injected dynamically when Manual Mode is active on non-Maps pages.
+
+## Restaurant/Food Business Filter
+
+The extension automatically filters scraped results to only include restaurants and food-related businesses. This is designed for use cases like restaurant lead generation where you want to exclude:
+
+- Grocery stores, supermarkets, convenience stores
+- Gas stations, liquor stores
+- Pharmacies, retail stores
+- Hotels, gyms, banks
+- And other non-food businesses
+
+The filter includes a comprehensive list of food-related industries (restaurants, cafes, bakeries, pizzerias, etc.) and will include businesses that match any of these categories while excluding businesses that match non-food categories.
+
+This filter is enabled by default to ensure you get only relevant restaurant leads.
 
 ## Remove Chains (Ignore list)
 

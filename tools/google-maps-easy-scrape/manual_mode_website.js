@@ -119,6 +119,21 @@
         });
     }
 
+        function checkIfAlreadyAdded(callback) {
+            chrome.storage.local.get(['gmes_results'], (storageData) => {
+                const results = Array.isArray(storageData.gmes_results) ? storageData.gmes_results : [];
+                const currentUrl = window.location.href;
+
+                const exists = results.some(existingItem => {
+                    // Check by companyUrl (website URL) or by href containing the current domain
+                    return existingItem.companyUrl === currentUrl ||
+                           (existingItem.companyUrl && existingItem.companyUrl.includes(window.location.hostname));
+                });
+
+                callback(exists);
+            });
+        }
+
         function createOverlay(data) {
             const overlay = document.createElement('div');
             overlay.id = 'gmes-website-overlay';
@@ -230,6 +245,10 @@
               background: #ccc;
               cursor: not-allowed;
             }
+            #gmes-website-overlay .add-btn.already-added {
+              background: #6c757d;
+              cursor: default;
+            }
             #gmes-website-overlay .shortcut {
                 font-size: 11px;
                 opacity: 0.8;
@@ -283,7 +302,7 @@
               <div class="section-label">Note <span style="color: red;">*</span></div>
               <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)"></textarea>
             </div>
-            <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Ctrl+Shift+L)</span></button>
+            <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Alt+Shift+S)</span></button>
             <div class="shortcuts-info">
                  <span id="gmes-settings-btn" class="settings-icon" title="Change shortcuts">⚙️ Configure Shortcuts</span>
             </div>
@@ -330,18 +349,20 @@
             });
     
             // Add handler
-            document.getElementById('gmes-add-btn').addEventListener('click', () => {
+            const addBtn = document.getElementById('gmes-add-btn');
+
+            addBtn.addEventListener('click', () => {
                 const businessName = document.getElementById('gmes-name-input').value.trim();
                 const noteInput = document.getElementById('gmes-note-input');
                 const noteValue = noteInput.value.trim();
-    
+
                 if (!noteValue) {
                     noteInput.classList.add('error');
                     noteInput.focus();
                     return;
                 }
                 noteInput.classList.remove('error');
-    
+
                 const item = {
                     title: businessName || 'Unknown Business',
                     closedStatus: '',
@@ -358,18 +379,43 @@
                     href: data.mapsLinks[0] || `https://www.google.com/maps/search/${encodeURIComponent(businessName + ' ' + (data.addresses[0] || ''))}`,
                     note: noteValue
                 };
-    
+
                 chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: item }, (response) => {
                     if (response && response.success) {
-                        const btn = document.getElementById('gmes-add-btn');
-                        btn.textContent = '✓ Added!';
-                        btn.disabled = true;
-                        setTimeout(() => {
-                            btn.innerHTML = 'Add to List <span class="shortcut">(Ctrl+Shift+L)</span>';
-                            btn.disabled = false;
-                        }, 2000);
+                        addBtn.textContent = '✓ Already in List';
+                        addBtn.disabled = true;
+                        addBtn.classList.add('already-added');
                     }
                 });
+            });
+
+            // Check if already added and update button state
+            checkIfAlreadyAdded((alreadyExists) => {
+                if (alreadyExists) {
+                    addBtn.textContent = '✓ Already in List';
+                    addBtn.disabled = true;
+                    addBtn.classList.add('already-added');
+                }
+            });
+
+            // Listen for storage changes to update button state
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && changes.gmes_results) {
+                    checkIfAlreadyAdded((alreadyExists) => {
+                        const btn = document.getElementById('gmes-add-btn');
+                        if (!btn) return;
+
+                        if (alreadyExists) {
+                            btn.textContent = '✓ Already in List';
+                            btn.disabled = true;
+                            btn.classList.add('already-added');
+                        } else {
+                            btn.innerHTML = 'Add to List <span class="shortcut">(Alt+Shift+S)</span>';
+                            btn.disabled = false;
+                            btn.classList.remove('already-added');
+                        }
+                    });
+                }
             });
         }
     
@@ -387,7 +433,7 @@
             if (request.type === 'TRIGGER_MANUAL_ADD') {
                 const btn = document.getElementById('gmes-add-btn');
                 const noteInput = document.getElementById('gmes-note-input');
-    
+
                 if (btn && !btn.disabled && noteInput) {
                     const noteValue = noteInput.value.trim();
                     if (!noteValue) {
@@ -396,6 +442,11 @@
                     } else {
                         btn.click();
                     }
+                }
+            } else if (request.type === 'TOGGLE_OVERLAY') {
+                const overlay = document.getElementById('gmes-website-overlay');
+                if (overlay) {
+                    overlay.style.display = overlay.style.display === 'none' ? 'block' : 'none';
                 }
             }
         });

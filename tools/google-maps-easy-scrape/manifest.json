@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Google Maps Easy Scrape",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Google Maps Easy Scrape by Mike Powers - Improved by Hashaam101",
   "permissions": ["activeTab", "scripting", "storage", "notifications", "alarms"],
   "host_permissions": [
@@ -37,13 +37,13 @@
     },
     "manual_add_to_list": {
       "suggested_key": {
-        "default": "Ctrl+Shift+L"
+        "default": "Alt+Shift+S"
       },
       "description": "Add current item to list (Manual Mode)"
     },
     "open_website": {
       "suggested_key": {
-        "default": "Ctrl+Shift+W"
+        "default": "Ctrl+Shift+G"
       },
       "description": "Open business website (Manual Mode)"
     }

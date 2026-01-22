@@ -97,13 +97,45 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // Export functionality
+    // Export functionality - HTML-based .xls for link preservation
     exportBtn.addEventListener('click', () => {
-        const rows = Array.from(table.querySelectorAll('tr'));
-        let csvContent = '';
-        
-        rows.forEach(row => {
-            const cols = Array.from(row.querySelectorAll('th, td'));
-            const rowData = cols.map(col => {
-                let text = col.innerText;
-                return `"${text.replace(/
+        try {
+            const headers = Array.from(table.querySelectorAll('thead th'));
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+
+            let html = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
+            html += '<table border="1" style="border-collapse:collapse;">';
+
+            // Headers
+            html += '<thead><tr>';
+            headers.forEach(h => { html += '<th>' + (h.innerText || '') + '</th>'; });
+            html += '</tr></thead>';
+
+            // Body
+            html += '<tbody>';
+            rows.forEach(tr => {
+                html += '<tr>';
+                const cols = Array.from(tr.querySelectorAll('td'));
+                cols.forEach(td => {
+                    // Use innerHTML so anchor tags are preserved
+                    const cellHtml = td.innerHTML || '';
+                    html += '<td>' + cellHtml + '</td>';
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table></body></html>';
+
+            const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'google-maps-data.xls';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+        } catch (e) {
+            console.error('Failed to export XLS', e);
+            alert('Export failed: ' + (e && e.message ? e.message : e));
+        }
+    });
+});

@@ -2,6 +2,16 @@
 (function () {
     'use strict';
 
+    // Prevent duplicate initialization
+    if (window.__GMES_MAPS_OVERLAY_INIT__) return;
+    window.__GMES_MAPS_OVERLAY_INIT__ = true;
+
+    // Track last URL and title for change detection
+    let lastUrl = window.location.href;
+    let lastTitle = '';
+    let urlCheckInterval = null;
+    let isOverlayActive = false;
+
     // Check if we should show overlay
     chrome.runtime.sendMessage({ type: 'CHECK_SHOULD_SHOW_OVERLAY' }, (response) => {
         if (response && response.shouldShow) {
@@ -14,29 +24,116 @@
             createOverlay();
         } else if (request.type === 'SHOW_OVERLAY') {
             initMapsOverlay();
+        } else if (request.type === 'TRIGGER_MANUAL_ADD') {
+            // Handle keyboard shortcut to add item
+            const btn = document.getElementById('gmes-add-btn');
+            const noteInput = document.getElementById('gmes-note-input');
+            if (btn && !btn.disabled && noteInput) {
+                const noteValue = noteInput.value.trim();
+                if (!noteValue) {
+                    noteInput.classList.add('error');
+                    noteInput.focus();
+                } else {
+                    btn.click();
+                }
+            }
+        } else if (request.type === 'TRIGGER_OPEN_WEBSITE') {
+            // Handle keyboard shortcut to open website
+            const websiteEl = document.getElementById('gmes-website-link');
+            if (websiteEl) {
+                if (websiteEl.href) {
+                    // Direct link exists
+                    window.open(websiteEl.href, '_blank');
+                } else if (websiteEl.dataset.search === 'true') {
+                    // No website found, open a Google search
+                    const item = scrapeCurrentPlace();
+                    const query = `${item.title} ${item.city} website`;
+                    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                }
+            }
+        } else if (request.type === 'TOGGLE_OVERLAY') {
+            // Toggle overlay visibility
+            const overlay = document.getElementById('gmes-manual-overlay');
+            if (overlay) {
+                overlay.style.display = overlay.style.display === 'none' ? 'block' : 'none';
+            } else {
+                // If overlay doesn't exist, create it
+                createOverlay();
+            }
         }
     });
 
     function initMapsOverlay() {
-        const runOverlay = () => {
-            const title = document.querySelector('h1.DUwDvf');
-            if (title) {
-                createOverlay();
+        if (isOverlayActive) return;
+        isOverlayActive = true;
+
+        // Initial run with delay to let page load
+        setTimeout(tryCreateOverlay, 500);
+
+        // Method 1: URL polling (most reliable for Google Maps SPA)
+        if (urlCheckInterval) clearInterval(urlCheckInterval);
+        urlCheckInterval = setInterval(() => {
+            const currentUrl = window.location.href;
+            const currentTitle = document.querySelector('h1.DUwDvf')?.textContent || '';
+
+            // Check if URL changed OR if the business title changed
+            if (currentUrl !== lastUrl || (currentTitle && currentTitle !== lastTitle)) {
+                lastUrl = currentUrl;
+                lastTitle = currentTitle;
+
+                // Only update if we're on a place page
+                if (currentUrl.includes('/maps/place/')) {
+                    // Wait for DOM to settle
+                    setTimeout(tryCreateOverlay, 800);
+                }
+            }
+        }, 500);
+
+        // Method 2: Listen for popstate (back/forward navigation)
+        window.addEventListener('popstate', () => {
+            setTimeout(tryCreateOverlay, 800);
+        });
+
+        // Method 3: Watch for DOM changes in the main content area
+        const mainObserver = new MutationObserver((mutations) => {
+            // Check if h1.DUwDvf changed (business title)
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList') {
+                    const titleEl = document.querySelector('h1.DUwDvf');
+                    if (titleEl) {
+                        const currentTitle = titleEl.textContent || '';
+                        if (currentTitle && currentTitle !== lastTitle) {
+                            lastTitle = currentTitle;
+                            setTimeout(tryCreateOverlay, 300);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Observe the main content container
+        const observeMainContent = () => {
+            const mainContent = document.querySelector('[role="main"]') || document.body;
+            if (mainContent) {
+                mainObserver.observe(mainContent, {
+                    childList: true,
+                    subtree: true
+                });
             }
         };
 
-        // Initial run
-        runOverlay();
+        // Start observing after a short delay
+        setTimeout(observeMainContent, 1000);
+    }
 
-        // Watch for title changes (navigation in SPA)
-        const titleObserver = new MutationObserver(() => {
-            // Short debounce to allow DOM to settle
-            setTimeout(runOverlay, 1000);
-        });
-        
-        const titleEl = document.querySelector('title');
-        if (titleEl) {
-            titleObserver.observe(titleEl, { childList: true });
+    function tryCreateOverlay() {
+        // Only create overlay if we're on a place page
+        if (!window.location.href.includes('/maps/place/')) return;
+
+        const titleEl = document.querySelector('h1.DUwDvf');
+        if (titleEl && titleEl.textContent) {
+            createOverlay();
         }
     }
 
@@ -117,6 +214,20 @@
         return item;
     }
 
+    function checkIfAlreadyAdded(item, callback) {
+        chrome.storage.local.get(['gmes_results'], (data) => {
+            const results = Array.isArray(data.gmes_results) ? data.gmes_results : [];
+            const currentKey = item.href || (item.title + '|' + item.address);
+
+            const exists = results.some(existingItem => {
+                const existingKey = existingItem.href || (existingItem.title + '|' + existingItem.address);
+                return existingKey === currentKey;
+            });
+
+            callback(exists);
+        });
+    }
+
     function createOverlay() {
         // Remove existing overlay if any
         const existing = document.getElementById('gmes-manual-overlay');
@@ -159,6 +270,19 @@
           padding: 0;
           line-height: 1;
         }
+        #gmes-manual-overlay .refresh-btn {
+          background: none;
+          border: none;
+          color: white;
+          font-size: 14px;
+          cursor: pointer;
+          padding: 2px 4px;
+          line-height: 1;
+          transition: transform 0.3s;
+        }
+        #gmes-manual-overlay .refresh-btn:hover {
+          transform: rotate(180deg);
+        }
         #gmes-manual-overlay .content {
           padding: 16px;
         }
@@ -199,6 +323,10 @@
           background: #ccc;
           cursor: not-allowed;
         }
+        #gmes-manual-overlay .add-btn.already-added {
+          background: #6c757d;
+          cursor: default;
+        }
         #gmes-manual-overlay .success-msg {
           color: #34a853;
           text-align: center;
@@ -208,7 +336,10 @@
       </style>
       <div class="header">
         <span>📍 Quick Add</span>
-        <button class="close-btn" id="gmes-close-btn">&times;</button>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button class="refresh-btn" id="gmes-refresh-btn" title="Refresh data">🔄</button>
+          <button class="close-btn" id="gmes-close-btn">&times;</button>
+        </div>
       </div>
       <div class="content">
         <div class="field">
@@ -233,15 +364,15 @@
         </div>
         <div class="field">
           <div class="field-label">Website</div>
-          <div class="field-value">${item.companyUrl ? `<a href="${item.companyUrl}" target="_blank">${new URL(item.companyUrl).hostname}</a>` : 'N/A'}</div>
+          <div class="field-value">${item.companyUrl ? `<a id="gmes-website-link" href="${item.companyUrl}" target="_blank">${new URL(item.companyUrl).hostname}</a>` : '<span id="gmes-website-link" data-search="true">N/A</span>'}</div>
         </div>
         <div class="field">
           <div class="field-label">Note <span style="color: red;">*</span></div>
           <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)"></textarea>
         </div>
-        <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Ctrl+Shift+L)</span></button>
+        <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Alt+Shift+S)</span></button>
         <div class="shortcuts-info">
-             <span>Open Website: Ctrl+Shift+W</span>
+             <span>Open Website: Ctrl+Shift+G</span>
              <span id="gmes-settings-btn" class="settings-icon" title="Change shortcuts">⚙️</span>
         </div>
       </div>
@@ -299,6 +430,11 @@
         `;
         document.head.appendChild(style);
 
+        // Refresh button handler
+        document.getElementById('gmes-refresh-btn').addEventListener('click', () => {
+            createOverlay();
+        });
+
         // Close button handler
         document.getElementById('gmes-close-btn').addEventListener('click', () => {
             overlay.remove();
@@ -312,7 +448,9 @@
         });
 
         // Add button handler
-        document.getElementById('gmes-add-btn').addEventListener('click', () => {
+        const addBtn = document.getElementById('gmes-add-btn');
+
+        addBtn.addEventListener('click', () => {
             const noteInput = document.getElementById('gmes-note-input');
             const noteValue = noteInput.value.trim();
 
@@ -321,21 +459,50 @@
                 noteInput.focus();
                 return;
             }
-            
-            noteInput.classList.remove('error');
-            item.note = noteValue;
 
-            chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: item }, (response) => {
+            noteInput.classList.remove('error');
+
+            // Get fresh data at the moment of adding (ensures current URL)
+            const freshItem = scrapeCurrentPlace();
+            freshItem.note = noteValue;
+
+            chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: freshItem }, (response) => {
                 if (response && response.success) {
-                    const btn = document.getElementById('gmes-add-btn');
-                    btn.textContent = '✓ Added!';
-                    btn.disabled = true;
-                    setTimeout(() => {
-                        btn.innerHTML = 'Add to List <span class="shortcut">(Ctrl+Shift+L)</span>';
-                        btn.disabled = false;
-                    }, 2000);
+                    addBtn.textContent = '✓ Already in List';
+                    addBtn.disabled = true;
+                    addBtn.classList.add('already-added');
                 }
             });
+        });
+
+        // Check if already added and update button state
+        checkIfAlreadyAdded(item, (alreadyExists) => {
+            if (alreadyExists) {
+                addBtn.textContent = '✓ Already in List';
+                addBtn.disabled = true;
+                addBtn.classList.add('already-added');
+            }
+        });
+
+        // Listen for storage changes to update button state
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'local' && changes.gmes_results) {
+                const currentItem = scrapeCurrentPlace();
+                checkIfAlreadyAdded(currentItem, (alreadyExists) => {
+                    const btn = document.getElementById('gmes-add-btn');
+                    if (!btn) return;
+
+                    if (alreadyExists) {
+                        btn.textContent = '✓ Already in List';
+                        btn.disabled = true;
+                        btn.classList.add('already-added');
+                    } else {
+                        btn.innerHTML = 'Add to List <span class="shortcut">(Alt+Shift+S)</span>';
+                        btn.disabled = false;
+                        btn.classList.remove('already-added');
+                    }
+                });
+            }
         });
     }
 

@@ -13,13 +13,33 @@ import {
   X,
   Check,
   RefreshCw,
-  ChevronRight
+  ChevronRight,
+  Instagram,
+  Mail,
+  MessageSquare,
+  Calendar
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type ColdCall } from '@/lib/types';
+import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
+import { ColumnSelector } from '@/components/column-selector';
+import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+
+// Column definitions for companies table
+const COMPANY_COLUMNS: ColumnDefinition[] = [
+  { key: 'company_name', label: 'Company Name', defaultVisible: true },
+  { key: 'owner_name', label: 'Owner', defaultVisible: true },
+  { key: 'instagram_handle', label: 'Instagram', defaultVisible: true },      // NEW
+  { key: 'status', label: 'Status', defaultVisible: true },                   // NEW
+  { key: 'phone_numbers', label: 'Phone', defaultVisible: true },
+  { key: 'email', label: 'Email', defaultVisible: false },                    // NEW
+  { key: 'company_location', label: 'Location', defaultVisible: false },
+  { key: 'source', label: 'Source', defaultVisible: true },
+  { key: 'last_contacted', label: 'Last Contact', defaultVisible: true },     // NEW
+  { key: 'actions', label: 'Actions', alwaysVisible: true },
+];
 
 // Source badge colors
 const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
@@ -29,15 +49,37 @@ const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
   'Instagram': { bg: 'bg-[var(--accent-red-subtle)]', text: 'text-[var(--accent-red)]' },
 };
 
+const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
+  'Warm': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
+  'Booked': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
+  'Replied': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
+  'Cold No Reply': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' },
+  'Client': { bg: 'bg-[var(--primary-subtle)]', text: 'text-[var(--primary)]' },
+  'Paid': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
+  'Excluded': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]' },
+};
+
+const STATUS_OPTIONS = [
+  'Cold No Reply',
+  'Replied',
+  'Warm',
+  'Booked',
+  'Paid',
+  'Client',
+  'Excluded'
+] as const;
+
 // Company row with inline edit
 function CompanyRow({
   company,
   onEdit,
-  onView
+  onView,
+  isColumnVisible
 }: {
   company: Company;
   onEdit: (id: string, data: Partial<Company>) => void;
   onView: (id: string) => void;
+  isColumnVisible: (key: string) => boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
@@ -45,6 +87,9 @@ function CompanyRow({
     owner_name: company.owner_name || '',
     phone_numbers: company.phone_numbers || '',
     company_location: company.company_location || '',
+    instagram_handle: company.instagram_handle || '',
+    status: company.status || 'Cold No Reply',
+    email: company.email || '',
   });
 
   const handleSave = () => {
@@ -58,6 +103,9 @@ function CompanyRow({
       owner_name: company.owner_name || '',
       phone_numbers: company.phone_numbers || '',
       company_location: company.company_location || '',
+      instagram_handle: company.instagram_handle || '',
+      status: company.status || 'Cold No Reply',
+      email: company.email || '',
     });
     setIsEditing(false);
   };
@@ -65,50 +113,102 @@ function CompanyRow({
   if (isEditing) {
     return (
       <tr className="border-b border-[var(--card-border)] bg-[var(--sidebar-bg)]">
-        <td className="py-3 px-4">
-          <input
-            type="text"
-            value={editData.company_name}
-            onChange={(e) => setEditData(p => ({ ...p, company_name: e.target.value }))}
-            className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-          />
-        </td>
-        <td className="py-3 px-4">
-          <input
-            type="text"
-            value={editData.owner_name}
-            onChange={(e) => setEditData(p => ({ ...p, owner_name: e.target.value }))}
-            className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-            placeholder="Owner name"
-          />
-        </td>
-        <td className="py-3 px-4">
-          <input
-            type="text"
-            value={editData.phone_numbers}
-            onChange={(e) => setEditData(p => ({ ...p, phone_numbers: e.target.value }))}
-            className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)] font-mono text-sm"
-            placeholder="Phone numbers"
-          />
-        </td>
-        <td className="py-3 px-4">
-          <input
-            type="text"
-            value={editData.company_location}
-            onChange={(e) => setEditData(p => ({ ...p, company_location: e.target.value }))}
-            className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-            placeholder="Location"
-          />
-        </td>
-        <td className="py-3 px-4">
-          <span className={cn(
-            "px-2 py-1 rounded text-xs",
-            SOURCE_COLORS[company.source || 'Manual']?.bg || 'bg-gray-500/20',
-            SOURCE_COLORS[company.source || 'Manual']?.text || 'text-gray-400'
-          )}>
-            {company.source || 'Manual'}
-          </span>
-        </td>
+        {isColumnVisible('company_name') && (
+          <td className="py-3 px-4">
+            <input
+              type="text"
+              value={editData.company_name}
+              onChange={(e) => setEditData(p => ({ ...p, company_name: e.target.value }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+            />
+          </td>
+        )}
+        {isColumnVisible('owner_name') && (
+          <td className="py-3 px-4">
+            <input
+              type="text"
+              value={editData.owner_name}
+              onChange={(e) => setEditData(p => ({ ...p, owner_name: e.target.value }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              placeholder="Owner name"
+            />
+          </td>
+        )}
+        {isColumnVisible('instagram_handle') && (
+          <td className="py-3 px-4">
+            <input
+              type="text"
+              value={editData.instagram_handle}
+              onChange={(e) => setEditData(p => ({ ...p, instagram_handle: e.target.value }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              placeholder="@username"
+            />
+          </td>
+        )}
+        {isColumnVisible('status') && (
+          <td className="py-3 px-4">
+            <select
+              value={editData.status}
+              onChange={(e) => setEditData(p => ({ ...p, status: e.target.value as any }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--card-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm"
+            >
+              {STATUS_OPTIONS.map(status => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+          </td>
+        )}
+        {isColumnVisible('phone_numbers') && (
+          <td className="py-3 px-4">
+            <input
+              type="text"
+              value={editData.phone_numbers}
+              onChange={(e) => setEditData(p => ({ ...p, phone_numbers: e.target.value }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)] font-mono text-sm"
+              placeholder="Phone numbers"
+            />
+          </td>
+        )}
+        {isColumnVisible('email') && (
+          <td className="py-3 px-4">
+            <input
+              type="email"
+              value={editData.email}
+              onChange={(e) => setEditData(p => ({ ...p, email: e.target.value }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              placeholder="Email"
+            />
+          </td>
+        )}
+        {isColumnVisible('company_location') && (
+          <td className="py-3 px-4">
+            <input
+              type="text"
+              value={editData.company_location}
+              onChange={(e) => setEditData(p => ({ ...p, company_location: e.target.value }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              placeholder="Location"
+            />
+          </td>
+        )}
+        {isColumnVisible('source') && (
+          <td className="py-3 px-4">
+            <span className={cn(
+              "px-2 py-1 rounded text-xs",
+              SOURCE_COLORS[company.source || 'Manual']?.bg || 'bg-gray-500/20',
+              SOURCE_COLORS[company.source || 'Manual']?.text || 'text-gray-400'
+            )}>
+              {company.source || 'Manual'}
+            </span>
+          </td>
+        )}
+        {isColumnVisible('last_contacted') && (
+          <td className="py-3 px-4">
+            <span className="text-sm text-[var(--muted)]">
+              {company.last_contacted ? formatDate(company.last_contacted) : '-'}
+            </span>
+          </td>
+        )}
         <td className="py-3 px-4">
           <div className="flex items-center gap-1">
             <button
@@ -131,41 +231,100 @@ function CompanyRow({
 
   return (
     <tr className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors">
-      <td className="py-3 px-4">
-        <span className="font-medium">{company.company_name}</span>
-      </td>
-      <td className="py-3 px-4 text-sm">
-        {company.owner_name || <span className="text-[var(--muted)]">-</span>}
-      </td>
-      <td className="py-3 px-4">
-        <span className="text-sm font-mono">
-          {company.phone_numbers || <span className="text-[var(--muted)]">-</span>}
-        </span>
-      </td>
-      <td className="py-3 px-4 text-sm">
-        <div className="flex items-center gap-1">
-          {company.company_location || <span className="text-[var(--muted)]">-</span>}
-          {company.google_maps_link && (
-            <a
-              href={company.google_maps_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[var(--primary)] hover:underline"
-            >
-              <ExternalLink size={12} />
-            </a>
-          )}
-        </div>
-      </td>
-      <td className="py-3 px-4">
-        <span className={cn(
-          "px-2 py-1 rounded text-xs",
-          SOURCE_COLORS[company.source || 'Manual']?.bg || 'bg-gray-500/20',
-          SOURCE_COLORS[company.source || 'Manual']?.text || 'text-gray-400'
-        )}>
-          {company.source || 'Manual'}
-        </span>
-      </td>
+      {isColumnVisible('company_name') && (
+        <td className="py-3 px-4">
+          <span className="font-medium">{company.company_name}</span>
+        </td>
+      )}
+      {isColumnVisible('owner_name') && (
+        <td className="py-3 px-4 text-sm">
+          {company.owner_name || <span className="text-[var(--muted)]">-</span>}
+        </td>
+      )}
+      {isColumnVisible('instagram_handle') && (
+        <td className="py-3 px-4">
+          <span className="text-sm">
+            {company.instagram_handle ? (
+              <a
+                href={`https://instagram.com/${company.instagram_handle.replace('@', '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] hover:underline flex items-center gap-1"
+              >
+                <Instagram size={12} />
+                @{company.instagram_handle.replace('@', '')}
+              </a>
+            ) : <span className="text-[var(--muted)]">-</span>}
+          </span>
+        </td>
+      )}
+      {isColumnVisible('status') && (
+        <td className="py-3 px-4">
+          {company.status ? (
+            <span className={cn(
+              "inline-flex px-2 py-0.5 text-xs font-medium rounded-full",
+              STATUS_STYLES[company.status]?.bg || 'bg-gray-500/20',
+              STATUS_STYLES[company.status]?.text || 'text-gray-400'
+            )}>
+              {company.status}
+            </span>
+          ) : <span className="text-[var(--muted)]">-</span>}
+        </td>
+      )}
+      {isColumnVisible('phone_numbers') && (
+        <td className="py-3 px-4">
+          <span className="text-sm font-mono">
+            {company.phone_numbers || <span className="text-[var(--muted)]">-</span>}
+          </span>
+        </td>
+      )}
+      {isColumnVisible('email') && (
+        <td className="py-3 px-4">
+          <span className="text-sm">
+            {company.email ? (
+              <a href={`mailto:${company.email}`} className="text-[var(--primary)] hover:underline flex items-center gap-1">
+                <Mail size={12} />
+                {company.email}
+              </a>
+            ) : <span className="text-[var(--muted)]">-</span>}
+          </span>
+        </td>
+      )}
+      {isColumnVisible('company_location') && (
+        <td className="py-3 px-4 text-sm">
+          <div className="flex items-center gap-1">
+            {company.company_location || <span className="text-[var(--muted)]">-</span>}
+            {company.google_maps_link && (
+              <a
+                href={company.google_maps_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] hover:underline"
+              >
+                <ExternalLink size={12} />
+              </a>
+            )}
+          </div>
+        </td>
+      )}
+      {isColumnVisible('source') && (
+        <td className="py-3 px-4">
+          <span className={cn(
+            "px-2 py-1 rounded text-xs",
+            SOURCE_COLORS[company.source || 'Manual']?.bg || 'bg-gray-500/20',
+            SOURCE_COLORS[company.source || 'Manual']?.text || 'text-gray-400'
+          )}>
+            {company.source || 'Manual'}
+          </span>
+        </td>
+      )}
+      {isColumnVisible('last_contacted') && (
+        <td className="py-3 px-4">
+          <span className="text-sm text-[var(--muted)]">
+            {company.last_contacted ? formatDate(company.last_contacted) : '-'}
+          </span>
+        </td>
+      )}
       <td className="py-3 px-4">
         <div className="flex items-center gap-1">
           <button
@@ -178,7 +337,7 @@ function CompanyRow({
           <button
             onClick={() => onView(company.id)}
             className="p-1.5 rounded bg-white text-[var(--background)] border border-[var(--card-border)] hover:bg-gray-100 transition-colors"
-            title="View calls"
+            title="View interactions"
           >
             <ChevronRight size={14} />
           </button>
@@ -205,12 +364,16 @@ function AddCompanyModal({
     company_location: '',
     google_maps_link: '',
     source: 'Manual',
+    instagram_handle: '',
+    status: 'Cold No Reply',
+    email: '',
+    notes: '',
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.company_name.trim()) return;
-    onAdd(formData);
+    onAdd(formData as any);
     setFormData({
       company_name: '',
       owner_name: '',
@@ -218,6 +381,10 @@ function AddCompanyModal({
       company_location: '',
       google_maps_link: '',
       source: 'Manual',
+      instagram_handle: '',
+      status: 'Cold No Reply',
+      email: '',
+      notes: '',
     });
     onClose();
   };
@@ -226,7 +393,7 @@ function AddCompanyModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl w-full max-w-md mx-4 p-6">
+      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Add New Company</h2>
           <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--foreground)]">
@@ -235,71 +402,119 @@ function AddCompanyModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="text-sm text-[var(--muted)] block mb-1">Company Name *</label>
-            <input
-              type="text"
-              value={formData.company_name}
-              onChange={(e) => setFormData(p => ({ ...p, company_name: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-              required
-            />
-          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="col-span-1 sm:col-span-2">
+              <label className="text-sm text-[var(--muted)] block mb-1">Company Name *</label>
+              <input
+                type="text"
+                value={formData.company_name}
+                onChange={(e) => setFormData(p => ({ ...p, company_name: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                required
+              />
+            </div>
 
-          <div>
-            <label className="text-sm text-[var(--muted)] block mb-1">Owner Name</label>
-            <input
-              type="text"
-              value={formData.owner_name}
-              onChange={(e) => setFormData(p => ({ ...p, owner_name: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-            />
-          </div>
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Owner Name</label>
+              <input
+                type="text"
+                value={formData.owner_name}
+                onChange={(e) => setFormData(p => ({ ...p, owner_name: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              />
+            </div>
 
-          <div>
-            <label className="text-sm text-[var(--muted)] block mb-1">Phone Numbers (comma-separated)</label>
-            <input
-              type="text"
-              value={formData.phone_numbers}
-              onChange={(e) => setFormData(p => ({ ...p, phone_numbers: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-              placeholder="+1-555-1234, +1-555-5678"
-            />
-          </div>
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Status</label>
+              <select
+                value={formData.status}
+                onChange={(e) => setFormData(p => ({ ...p, status: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              >
+                {STATUS_OPTIONS.map(status => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </div>
 
-          <div>
-            <label className="text-sm text-[var(--muted)] block mb-1">Location</label>
-            <input
-              type="text"
-              value={formData.company_location}
-              onChange={(e) => setFormData(p => ({ ...p, company_location: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-            />
-          </div>
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Instagram Handle</label>
+              <input
+                type="text"
+                value={formData.instagram_handle}
+                onChange={(e) => setFormData(p => ({ ...p, instagram_handle: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                placeholder="@username"
+              />
+            </div>
 
-          <div>
-            <label className="text-sm text-[var(--muted)] block mb-1">Google Maps Link</label>
-            <input
-              type="url"
-              value={formData.google_maps_link}
-              onChange={(e) => setFormData(p => ({ ...p, google_maps_link: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-              placeholder="https://maps.google.com/..."
-            />
-          </div>
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Email</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData(p => ({ ...p, email: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                placeholder="email@example.com"
+              />
+            </div>
 
-          <div>
-            <label className="text-sm text-[var(--muted)] block mb-1">Source</label>
-            <select
-              value={formData.source}
-              onChange={(e) => setFormData(p => ({ ...p, source: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-            >
-              <option value="Manual">Manual</option>
-              <option value="Cold Call">Cold Call</option>
-              <option value="Google Maps">Google Maps</option>
-              <option value="Instagram">Instagram</option>
-            </select>
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Phone Numbers</label>
+              <input
+                type="text"
+                value={formData.phone_numbers}
+                onChange={(e) => setFormData(p => ({ ...p, phone_numbers: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                placeholder="+1-555-1234..."
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Location</label>
+              <input
+                type="text"
+                value={formData.company_location}
+                onChange={(e) => setFormData(p => ({ ...p, company_location: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              />
+            </div>
+
+            <div className="col-span-1 sm:col-span-2">
+              <label className="text-sm text-[var(--muted)] block mb-1">Google Maps Link</label>
+              <input
+                type="url"
+                value={formData.google_maps_link}
+                onChange={(e) => setFormData(p => ({ ...p, google_maps_link: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                placeholder="https://maps.google.com/..."
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Source</label>
+              <select
+                value={formData.source}
+                onChange={(e) => setFormData(p => ({ ...p, source: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              >
+                <option value="Manual">Manual</option>
+                <option value="Cold Call">Cold Call</option>
+                <option value="Google Maps">Google Maps</option>
+                <option value="Instagram">Instagram</option>
+              </select>
+            </div>
+
+            <div className="col-span-1 sm:col-span-2">
+              <label className="text-sm text-[var(--muted)] block mb-1">Notes</label>
+              <textarea
+                value={formData.notes}
+                onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
+                rows={3}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                placeholder="Initial notes..."
+              />
+            </div>
           </div>
 
           <div className="flex gap-2 pt-4">
@@ -323,8 +538,8 @@ function AddCompanyModal({
   );
 }
 
-// Company Calls Drawer
-function CompanyCallsDrawer({
+// Company Interactions Drawer
+function CompanyInteractionsDrawer({
   companyId,
   onClose
 }: {
@@ -332,7 +547,7 @@ function CompanyCallsDrawer({
   onClose: () => void;
 }) {
   const [company, setCompany] = useState<Company | null>(null);
-  const [calls, setCalls] = useState<ColdCall[]>([]);
+  const [events, setEvents] = useState<EventLog[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -341,15 +556,16 @@ function CompanyCallsDrawer({
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [companyData, callsData] = await Promise.all([
+        const [companyData, eventsData] = await Promise.all([
           pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(companyId),
-          pb.collection(COLLECTIONS.COLD_CALLS).getList<ColdCall>(1, 50, {
+          pb.collection(COLLECTIONS.EVENT_LOGS).getList<EventLog>(1, 50, {
             filter: `company = "${companyId}"`,
             sort: '-created',
+            expand: 'actor,user,cold_call'
           }),
         ]);
         setCompany(companyData);
-        setCalls(callsData.items);
+        setEvents(eventsData.items);
       } catch (err) {
         console.error('Failed to fetch company data:', err);
       } finally {
@@ -362,6 +578,15 @@ function CompanyCallsDrawer({
 
   if (!companyId) return null;
 
+  const getEventIcon = (event: EventLog) => {
+    switch (event.event_type) {
+      case 'Cold Call': return <Phone size={16} />;
+      case 'Outreach': return <Instagram size={16} />;
+      case 'User': return <Calendar size={16} />; // Or user icon
+      default: return <MessageSquare size={16} />;
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
       <div
@@ -369,7 +594,7 @@ function CompanyCallsDrawer({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-[var(--card-bg)] border-b border-[var(--card-border)] p-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Company Calls</h2>
+          <h2 className="text-lg font-semibold">Interaction History</h2>
           <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--foreground)]">
             <X size={20} />
           </button>
@@ -382,50 +607,97 @@ function CompanyCallsDrawer({
         ) : (
           <div className="p-4 space-y-4">
             {company && (
-              <div className="p-4 bg-[var(--sidebar-bg)] rounded-lg">
-                <h3 className="font-semibold">{company.company_name}</h3>
-                {company.owner_name && (
-                  <p className="text-sm text-[var(--muted)]">{company.owner_name}</p>
+              <div className="p-4 bg-[var(--sidebar-bg)] rounded-lg space-y-2">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-semibold text-lg">{company.company_name}</h3>
+                    {company.owner_name && (
+                      <p className="text-sm text-[var(--muted)]">{company.owner_name}</p>
+                    )}
+                  </div>
+                  {company.status && (
+                    <span className={cn(
+                      "inline-flex px-2 py-0.5 text-xs font-medium rounded-full",
+                      STATUS_STYLES[company.status]?.bg || 'bg-gray-500/20',
+                      STATUS_STYLES[company.status]?.text || 'text-gray-400'
+                    )}>
+                      {company.status}
+                    </span>
+                  )}
+                </div>
+
+                {company.instagram_handle && (
+                  <a href={`https://instagram.com/${company.instagram_handle.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--primary)]">
+                    <Instagram size={14} />
+                    @{company.instagram_handle.replace('@', '')}
+                  </a>
+                )}
+                {company.email && (
+                  <a href={`mailto:${company.email}`} className="flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--primary)]">
+                    <Mail size={14} />
+                    {company.email}
+                  </a>
                 )}
                 {company.phone_numbers && (
-                  <p className="text-sm font-mono mt-1">{company.phone_numbers}</p>
+                  <p className="text-sm font-mono flex items-center gap-2 text-[var(--muted)]">
+                    <Phone size={14} />
+                    {company.phone_numbers}
+                  </p>
                 )}
               </div>
             )}
 
             <h3 className="font-medium text-sm text-[var(--muted)]">
-              {calls.length} Call{calls.length !== 1 ? 's' : ''}
+              {events.length} Interaction{events.length !== 1 ? 's' : ''}
             </h3>
 
-            {calls.length === 0 ? (
-              <p className="text-[var(--muted)] text-sm">No calls recorded for this company.</p>
+            {events.length === 0 ? (
+              <p className="text-[var(--muted)] text-sm">No interactions recorded.</p>
             ) : (
-              <div className="space-y-2">
-                {calls.map((call) => (
-                  <Link
-                    key={call.id}
-                    href={`/cold-calls/${call.id}`}
-                    className="block p-3 rounded-lg border border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{formatDate(call.created)}</span>
-                      {call.call_outcome && (
-                        <span className={cn(
-                          "px-2 py-0.5 rounded text-xs",
-                          call.call_outcome === 'Interested' ? 'bg-[var(--success-subtle)] text-[var(--success)]' :
-                            call.call_outcome === 'Not Interested' ? 'bg-[var(--error-subtle)] text-[var(--error)]' :
-                              'bg-[var(--card-hover)] text-[var(--muted)]'
-                        )}>
-                          {call.call_outcome}
-                        </span>
+              <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:ml-[2.5rem] before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-[var(--border)] before:to-transparent">
+                {events.map((event) => (
+                  <div key={event.id} className="relative flex gap-6 md:gap-8 pb-8 last:pb-0 group">
+                    <div className="absolute left-0 inset-0 flex justify-center w-10 md:w-20">
+                      <div className="h-full w-0.5 bg-[var(--border)] group-last:bg-[linear-gradient(to_bottom,var(--border)_50%,transparent_50%)] pointer-events-none"></div>
+                    </div>
+                    <div className="relative z-10 flex-none w-10 h-10 md:w-16 md:h-16 flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] flex items-center justify-center text-[var(--muted)]">
+                        {getEventIcon(event)}
+                      </div>
+                    </div>
+
+                    <div className="flex-auto pt-1.5 min-w-0">
+                      <div className="flex justify-between gap-x-4">
+                        <div className="text-sm font-medium text-[var(--foreground)]">
+                          {event.event_type}
+                        </div>
+                        <time dateTime={event.created} className="flex-none text-xs text-[var(--muted)]">
+                          {formatDate(event.created)}
+                        </time>
+                      </div>
+                      <p className="text-sm text-[var(--muted)] mt-1">
+                        {event.details}
+                      </p>
+                      {event.expand?.cold_call && (
+                        <div className="mt-2 p-3 rounded bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-sm">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="font-medium">Call Summary</span>
+                            {event.expand.cold_call.call_outcome && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--card-bg)] border border-[var(--card-border)]">
+                                {event.expand.cold_call.call_outcome}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[var(--muted)] line-clamp-3">
+                            {event.expand.cold_call.call_summary || 'No summary available.'}
+                          </p>
+                          <Link href={`/cold-calls/${event.expand.cold_call.id}`} className="text-xs text-[var(--primary)] hover:underline mt-2 inline-block">
+                            View Call Details
+                          </Link>
+                        </div>
                       )}
                     </div>
-                    {call.call_summary && (
-                      <p className="text-sm text-[var(--muted)] mt-1 line-clamp-2">
-                        {call.call_summary}
-                      </p>
-                    )}
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}
@@ -449,6 +721,9 @@ export default function CompaniesPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const perPage = 25;
+
+  // Column visibility
+  const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('companies', COMPANY_COLUMNS);
 
   const fetchCompanies = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -531,6 +806,12 @@ export default function CompaniesPage() {
             Add Company
           </button>
 
+          <ColumnSelector
+            columns={columns}
+            visibleColumns={visibleColumns}
+            onToggle={toggleColumn}
+          />
+
           <button
             onClick={fetchCompanies}
             className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] transition-colors"
@@ -566,11 +847,15 @@ export default function CompaniesPage() {
               <table className="w-full">
                 <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                   <tr>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Company Name</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Owner</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Location</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Source</th>
+                    {isColumnVisible('company_name') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Company Name</th>}
+                    {isColumnVisible('owner_name') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Owner</th>}
+                    {isColumnVisible('instagram_handle') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Instagram</th>}
+                    {isColumnVisible('status') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Status</th>}
+                    {isColumnVisible('phone_numbers') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
+                    {isColumnVisible('email') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Email</th>}
+                    {isColumnVisible('company_location') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Location</th>}
+                    {isColumnVisible('source') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Source</th>}
+                    {isColumnVisible('last_contacted') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Last Contact</th>}
                     <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
                   </tr>
                 </thead>
@@ -581,6 +866,7 @@ export default function CompaniesPage() {
                       company={company}
                       onEdit={handleEdit}
                       onView={setSelectedCompanyId}
+                      isColumnVisible={isColumnVisible}
                     />
                   ))}
                 </tbody>
@@ -622,8 +908,8 @@ export default function CompaniesPage() {
         onAdd={handleAdd}
       />
 
-      {/* Company Calls Drawer */}
-      <CompanyCallsDrawer
+      {/* Company Interactions Drawer */}
+      <CompanyInteractionsDrawer
         companyId={selectedCompanyId}
         onClose={() => setSelectedCompanyId(null)}
       />

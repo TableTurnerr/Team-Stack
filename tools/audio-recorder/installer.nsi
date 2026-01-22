@@ -34,6 +34,9 @@ ShowInstDetails show
 ShowUnInstDetails show
 RequestExecutionLevel admin
 
+; Target x64 Windows
+!include "x64.nsh"
+
 ;--------------------------------
 ; MUI Settings
 
@@ -76,6 +79,25 @@ UninstPage custom un.DeleteRecordingsPage un.DeleteRecordingsPageLeave
 
 Var DeleteRecordingsCheckbox
 Var DeleteRecordings
+
+;--------------------------------
+; Initialization - Check for 64-bit Windows
+
+Function .onInit
+    ; Check if running on 64-bit Windows
+    ${IfNot} ${RunningX64}
+        MessageBox MB_OK|MB_ICONSTOP "This application requires 64-bit Windows.$\r$\n$\r$\nYour system appears to be 32-bit.$\r$\nPlease use a 64-bit version of Windows."
+        Abort
+    ${EndIf}
+    
+    ; Enable 64-bit registry and file system access
+    SetRegView 64
+FunctionEnd
+
+Function un.onInit
+    ; Enable 64-bit registry access for uninstaller
+    SetRegView 64
+FunctionEnd
 
 ;--------------------------------
 ; Installer Sections
@@ -136,6 +158,26 @@ Section "Visual C++ Redistributable" SEC02
             MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to download Visual C++ Redistributable.$\r$\n$\r$\nPlease install it manually from:$\r$\nhttps://aka.ms/vs/17/release/vc_redist.x64.exe$\r$\n$\r$\nThe application may not work without it."
         ${EndIf}
     ${EndIf}
+SectionEnd
+
+Section "Windows Defender Exclusion" SEC03
+    ; Add Windows Defender exclusion for the install directory
+    ; This helps prevent false positives blocking the application
+    DetailPrint "Adding Windows Defender exclusion..."
+    
+    ; Use PowerShell to add exclusion (requires admin rights which we already have)
+    nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "Add-MpPreference -ExclusionPath \"$INSTDIR\" -ErrorAction SilentlyContinue"'
+    Pop $0
+    
+    ${If} $0 == 0
+        DetailPrint "Windows Defender exclusion added successfully."
+    ${Else}
+        DetailPrint "Could not add Windows Defender exclusion (may require manual setup)."
+    ${EndIf}
+    
+    ; Also add exclusion for the executable specifically
+    nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "Add-MpPreference -ExclusionProcess \"$INSTDIR\AudioRecorder.exe\" -ErrorAction SilentlyContinue"'
+    Pop $0
 SectionEnd
 
 Section -Post
@@ -241,4 +283,5 @@ SectionEnd
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
     !insertmacro MUI_DESCRIPTION_TEXT ${SEC01} "Install the main Audio Recorder application."
     !insertmacro MUI_DESCRIPTION_TEXT ${SEC02} "Download and install Visual C++ Redistributable (required)."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SEC03} "Add Windows Defender exclusion to prevent false positives."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END

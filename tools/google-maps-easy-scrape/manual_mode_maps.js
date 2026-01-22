@@ -39,17 +39,12 @@
             }
         } else if (request.type === 'TRIGGER_OPEN_WEBSITE') {
             // Handle keyboard shortcut to open website
-            const websiteEl = document.getElementById('gmes-website-link');
-            if (websiteEl) {
-                if (websiteEl.href) {
-                    // Direct link exists
-                    window.open(websiteEl.href, '_blank');
-                } else if (websiteEl.dataset.search === 'true') {
-                    // No website found, open a Google search
-                    const item = scrapeCurrentPlace();
-                    const query = `${item.title} ${item.city} website`;
-                    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
-                }
+            const item = scrapeCurrentPlace();
+            if (item.companyUrl) {
+                window.open(item.companyUrl, '_blank');
+            } else {
+                const query = `${item.title} ${item.city} website`;
+                window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
             }
         } else if (request.type === 'TOGGLE_OVERLAY') {
             // Toggle overlay visibility
@@ -372,7 +367,7 @@
         </div>
         <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Alt+Shift+S)</span></button>
         <div class="shortcuts-info">
-             <span>Open Website: Ctrl+Shift+G</span>
+             <span>Open Website: Alt+Shift+W</span>
              <span id="gmes-settings-btn" class="settings-icon" title="Change shortcuts">⚙️</span>
         </div>
       </div>

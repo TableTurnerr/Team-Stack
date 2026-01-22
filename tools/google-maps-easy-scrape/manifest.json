@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Google Maps Easy Scrape",
+  "version": "1.2",
+  "description": "Google Maps Easy Scrape by Mike Powers - Improved by Hashaam101",
+  "permissions": ["activeTab", "scripting", "storage", "notifications", "alarms"],
+  "host_permissions": [
+    "https://www.google.com/maps/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "map.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.google.com/maps/place/*"],
+      "js": ["manual_mode_maps.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "Open extension popup"
+    },
+    "scrape": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S"
+      },
+      "description": "Scrape Google Maps from active tab"
+    },
+    "toggle_manual_overlay": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+M"
+      },
+      "description": "Toggle manual mode overlay"
+    }
+  },
+  "icons": {
+    "16": "map.png",
+    "48": "map.png",
+    "128": "map.png"
+  }
+}

@@ -67,7 +67,7 @@ A small Chrome extension that extracts listings from Google Maps Search results 
 - **Scrape active tab**: `Ctrl+Shift+S`
 - **Toggle Manual Overlay**: `Ctrl+Shift+M`
 - **Add to List (Manual Mode)**: `Alt+Shift+S`
-- **Open Website (Manual Mode)**: `Ctrl+Shift+G`
+- **Open Website (Manual Mode)**: `Alt+Shift+W`
 - **Open Popup**: Configurable in Chrome Extensions Shortcuts (typically `Ctrl+Shift+Y` or click the icon).
 
 **Note:** You can customize all these shortcuts at `chrome://extensions/shortcuts`.

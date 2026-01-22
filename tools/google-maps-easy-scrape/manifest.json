@@ -43,7 +43,7 @@
     },
     "open_website": {
       "suggested_key": {
-        "default": "Ctrl+Shift+G"
+        "default": "Alt+Shift+W"
       },
       "description": "Open business website (Manual Mode)"
     }

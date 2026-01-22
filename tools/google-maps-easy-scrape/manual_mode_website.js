@@ -310,4 +310,11 @@
     // Initialize
     const data = scanPage();
     createOverlay(data);
+
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.type === 'TRIGGER_MANUAL_ADD') {
+            const btn = document.getElementById('gmes-add-btn');
+            if (btn && !btn.disabled) btn.click();
+        }
+    });
 })();

@@ -434,6 +434,16 @@ chrome.commands.onCommand.addListener(function (command) {
     }
 });
 
+chrome.commands.onCommand.addListener(function (command) {
+    if (command === 'manual_add_to_list') {
+        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+            if (tabs[0]) {
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_MANUAL_ADD' });
+            }
+        });
+    }
+});
+
 function handleManualAddItem(item) {
     return new Promise((resolve) => {
         chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries'], function (result) {

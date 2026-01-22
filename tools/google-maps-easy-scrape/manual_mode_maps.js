@@ -14,6 +14,9 @@
             createOverlay();
         } else if (request.type === 'SHOW_OVERLAY') {
             initMapsOverlay();
+        } else if (request.type === 'TRIGGER_MANUAL_ADD') {
+            const btn = document.getElementById('gmes-add-btn');
+            if (btn && !btn.disabled) btn.click();
         }
     });
 

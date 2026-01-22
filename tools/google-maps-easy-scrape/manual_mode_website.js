@@ -256,20 +256,60 @@
           <div class="section-label">Business Name</div>
           <input type="text" class="name-input" id="gmes-name-input" value="${escapeHtml(data.businessName)}" placeholder="Enter business name">
         </div>
+        <div class="section">
+          <div class="section-label">Note <span style="color: red;">*</span></div>
+          <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)"></textarea>
+        </div>
         <button class="add-btn" id="gmes-add-btn">Add to List</button>
       </div>
     `;
 
         document.body.appendChild(overlay);
 
+        const style = document.createElement('style');
+        style.textContent = `
+            #gmes-website-overlay .note-input {
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                font-family: inherit;
+                font-size: 14px;
+                resize: vertical;
+                min-height: 60px;
+                box-sizing: border-box;
+                margin-bottom: 12px;
+            }
+            #gmes-website-overlay .note-input.error {
+                border-color: #dc3545;
+                background-color: #fff8f8;
+                outline: none;
+            }
+            #gmes-website-overlay .note-input:focus {
+                border-color: #4285f4;
+                outline: none;
+            }
+        `;
+        document.head.appendChild(style);
+
         // Close handler
         document.getElementById('gmes-close-btn').addEventListener('click', () => {
             overlay.remove();
+            style.remove();
         });
 
         // Add handler
         document.getElementById('gmes-add-btn').addEventListener('click', () => {
             const businessName = document.getElementById('gmes-name-input').value.trim();
+            const noteInput = document.getElementById('gmes-note-input');
+            const noteValue = noteInput.value.trim();
+
+            if (!noteValue) {
+                noteInput.classList.add('error');
+                noteInput.focus();
+                return;
+            }
+            noteInput.classList.remove('error');
 
             const item = {
                 title: businessName || 'Unknown Business',
@@ -284,7 +324,8 @@
                 companyUrl: window.location.href,
                 instaSearch: businessName ?
                     `https://www.google.com/search?q=${encodeURIComponent(businessName + ' Instagram')}` : '',
-                href: data.mapsLinks[0] || `https://www.google.com/maps/search/${encodeURIComponent(businessName + ' ' + (data.addresses[0] || ''))}`
+                href: data.mapsLinks[0] || `https://www.google.com/maps/search/${encodeURIComponent(businessName + ' ' + (data.addresses[0] || ''))}`,
+                note: noteValue
             };
 
             chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: item }, (response) => {
@@ -314,7 +355,17 @@
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.type === 'TRIGGER_MANUAL_ADD') {
             const btn = document.getElementById('gmes-add-btn');
-            if (btn && !btn.disabled) btn.click();
+            const noteInput = document.getElementById('gmes-note-input');
+
+            if (btn && !btn.disabled && noteInput) {
+                const noteValue = noteInput.value.trim();
+                if (!noteValue) {
+                    noteInput.classList.add('error');
+                    noteInput.focus();
+                } else {
+                    btn.click();
+                }
+            }
         }
     });
 })();

@@ -131,6 +131,7 @@
 
           var item = {
             title: titleText || '',
+            note: '',
             rating: rating || '',
             reviewCount: reviewCount || '',
             phone: (typeof phone !== 'undefined') ? phone : '',

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Google Maps Easy Scrape - Live Results</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      padding: 20px;
+      font-family: 'Poppins', sans-serif;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+    }
+    th {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      text-align: left;
+      background-color: #dddddd;
+      position: sticky;
+      top: 0;
+    }
+    h1 {
+      font-weight: 600;
+      font-size: 24px;
+      margin: 0 0 20px 0;
+    }
+    .controls {
+        margin-bottom: 20px;
+    }
+    .button {
+      padding: 10px 20px;
+      border: none;
+      color: white;
+      background-color: #007BFF;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+      border-radius: 20px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 14px;
+    }
+    .button:hover {
+      background-color: #0056b3;
+    }
+    .stats {
+        margin-left: 20px;
+        color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>&#x1F5FA;&#xFE0F; Live Scrape Results</h1>
+  
+  <div class="controls">
+      <button id="exportBtn" class="button">Download CSV</button>
+      <span id="stats" class="stats">Loading...</span>
+  </div>
+
+  <table id="resultsTable">
+    <thead>
+      <tr>
+          <th>Title</th>
+          <th>Note</th>
+          <th>Closed Status</th>
+          <th>Rating</th>
+          <th>Reviews</th>
+          <th>Phone</th>
+          <th>Industry</th>
+          <th>Expensiveness</th>
+          <th>City</th>
+          <th>Address</th>
+          <th>Website</th>
+          <th>Insta Search</th>
+          <th>Google Maps Link</th>
+      </tr>
+    </thead>
+    <tbody>
+    </tbody>
+  </table>
+  <script src="results_tab.js"></script>
+</body>
+</html>

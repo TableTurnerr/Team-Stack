@@ -74,6 +74,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var filenameInput = document.getElementById('filenameInput');
         var removeChainsButton = document.getElementById('removeChainsButton');
+        var openTabButton = document.getElementById('openTabButton');
+
+        if (openTabButton) {
+            openTabButton.addEventListener('click', function() {
+                chrome.tabs.create({ url: 'results_tab.html' });
+            });
+        }
+
         // Hard-coded ignore list URL (kept out of the UI)
         var HARDCODED_IGNORE_URL = 'https://script.google.com/macros/s/AKfycbzCEBk2vosvbmnV9KyO84CRtX9F5PaOyThSmTKJF5HDxsM8JYrsw2I5d8OFfIyxIsMq/exec';
         var resultsTheadRow = resultsTable.querySelector('thead tr');

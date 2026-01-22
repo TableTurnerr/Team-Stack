@@ -23,7 +23,7 @@ except ImportError:
 
 try:
     import soundcard as sc
-except ImportError:
+except (ImportError, OSError):
     sc = None
 
 try:

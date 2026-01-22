@@ -8,6 +8,17 @@ import { Instagram, Activity, User as UserIcon, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
+import { ColumnSelector } from '@/components/column-selector';
+import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+
+// Column definitions for actors table
+const ACTORS_COLUMNS: ColumnDefinition[] = [
+  { key: 'username', label: 'Account', defaultVisible: true },
+  { key: 'status', label: 'Status', defaultVisible: true },
+  { key: 'owner', label: 'Owner', defaultVisible: true },
+  { key: 'activity', label: 'Activity', defaultVisible: true },
+  { key: 'last_activity', label: 'Last Active', defaultVisible: true },
+];
 
 interface ActorStats {
   dmsSent: number;
@@ -29,6 +40,9 @@ export default function ActorsPage() {
   const [actors, setActors] = useState<ActorWithStats[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Column visibility
+  const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('actors', ACTORS_COLUMNS);
+
   useEffect(() => {
     if (isAuthenticated) fetchActors();
   }, [isAuthenticated]);
@@ -45,7 +59,7 @@ export default function ActorsPage() {
         let dmsSent = 0;
         try {
           const dmsResult = await pb.collection(COLLECTIONS.EVENT_LOGS).getList(1, 1, {
-            filter: `actor = "${actor.id}" && event_type = "Outreach"`,
+            filter: `actor = "${actor.id}" && event_type = "Outreach" && company != ""`,
             fields: 'id'
           });
           dmsSent = dmsResult.totalItems;
@@ -86,13 +100,21 @@ export default function ActorsPage() {
           <p className="text-sm text-[var(--muted)] mt-1">Manage your Instagram outreach accounts</p>
         </div>
 
-        <button
-          onClick={fetchActors}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors"
-        >
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <ColumnSelector
+            columns={columns}
+            visibleColumns={visibleColumns}
+            onToggle={toggleColumn}
+          />
+
+          <button
+            onClick={fetchActors}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors"
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -110,11 +132,11 @@ export default function ActorsPage() {
             <table className="w-full">
               <thead className="bg-[var(--table-header)] border-b border-[var(--table-border)]">
                 <tr>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Account</th>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Status</th>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Owner</th>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Activity</th>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Last Active</th>
+                  {isColumnVisible('username') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Account</th>}
+                  {isColumnVisible('status') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Status</th>}
+                  {isColumnVisible('owner') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Owner</th>}
+                  {isColumnVisible('activity') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Activity</th>}
+                  {isColumnVisible('last_activity') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Last Active</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--table-border)]">
@@ -122,41 +144,51 @@ export default function ActorsPage() {
                   const statusStyle = getStatusStyle(actor.status || 'Active');
                   return (
                     <tr key={actor.id} className="hover:bg-[var(--table-row-hover)] transition-colors">
-                      <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-[var(--accent-red-subtle)] flex items-center justify-center">
-                            <Instagram size={18} className="text-[var(--accent-red)]" />
+                      {isColumnVisible('username') && (
+                        <td className="py-3.5 px-5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-[var(--accent-red-subtle)] flex items-center justify-center">
+                              <Instagram size={18} className="text-[var(--accent-red)]" />
+                            </div>
+                            <span className="text-sm font-medium">@{actor.username}</span>
                           </div>
-                          <span className="text-sm font-medium">@{actor.username}</span>
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-5">
-                        <span className={cn(
-                          'px-2 py-1 rounded text-xs font-medium',
-                          statusStyle.bg,
-                          statusStyle.text
-                        )}>
-                          {actor.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
-                          <UserIcon size={14} />
-                          {actor.ownerName}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-1.5 text-sm">
-                          <Activity size={14} className="text-[var(--primary)]" />
-                          <span className="font-medium">{actor.stats.dmsSent}</span>
-                          <span className="text-[var(--muted)]">DMs sent</span>
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-5">
-                        <span className="text-sm text-[var(--muted)]">
-                          {actor.last_activity ? format(new Date(actor.last_activity), 'MMM d, HH:mm') : '-'}
-                        </span>
-                      </td>
+                        </td>
+                      )}
+                      {isColumnVisible('status') && (
+                        <td className="py-3.5 px-5">
+                          <span className={cn(
+                            'px-2 py-1 rounded text-xs font-medium',
+                            statusStyle.bg,
+                            statusStyle.text
+                          )}>
+                            {actor.status}
+                          </span>
+                        </td>
+                      )}
+                      {isColumnVisible('owner') && (
+                        <td className="py-3.5 px-5">
+                          <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
+                            <UserIcon size={14} />
+                            {actor.ownerName}
+                          </div>
+                        </td>
+                      )}
+                      {isColumnVisible('activity') && (
+                        <td className="py-3.5 px-5">
+                          <div className="flex items-center gap-1.5 text-sm">
+                            <Activity size={14} className="text-[var(--primary)]" />
+                            <span className="font-medium">{actor.stats.dmsSent}</span>
+                            <span className="text-[var(--muted)]">DMs sent</span>
+                          </div>
+                        </td>
+                      )}
+                      {isColumnVisible('last_activity') && (
+                        <td className="py-3.5 px-5">
+                          <span className="text-sm text-[var(--muted)]">
+                            {actor.last_activity ? format(new Date(actor.last_activity), 'MMM d, HH:mm') : '-'}
+                          </span>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

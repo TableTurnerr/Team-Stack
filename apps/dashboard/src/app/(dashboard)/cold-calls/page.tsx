@@ -18,6 +18,20 @@ import { COLLECTIONS, type ColdCall, type Company, type User } from '@/lib/types
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
+import { ColumnSelector } from '@/components/column-selector';
+import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+
+// Column definitions for cold calls table
+const COLD_CALL_COLUMNS: ColumnDefinition[] = [
+  { key: 'created', label: 'Date', defaultVisible: true },
+  { key: 'company', label: 'Company', defaultVisible: true },
+  { key: 'phone_number', label: 'Phone', defaultVisible: true },
+  { key: 'recipients', label: 'Recipient', defaultVisible: true },
+  { key: 'call_outcome', label: 'Outcome', defaultVisible: true },
+  { key: 'interest_level', label: 'Interest', defaultVisible: true },
+  { key: 'claimed_by', label: 'Claimed By', defaultVisible: true },
+  { key: 'actions', label: 'Actions', alwaysVisible: true },
+];
 
 // Outcome badge colors
 const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
@@ -98,6 +112,9 @@ export default function ColdCallsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const perPage = 20;
+
+  // Column visibility
+  const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('cold-calls', COLD_CALL_COLUMNS);
 
   const fetchCalls = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -232,6 +249,12 @@ export default function ColdCallsPage() {
             Export CSV
           </button>
 
+          <ColumnSelector
+            columns={columns}
+            visibleColumns={visibleColumns}
+            onToggle={toggleColumn}
+          />
+
           <button
             onClick={fetchCalls}
             className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] transition-colors"
@@ -339,13 +362,13 @@ export default function ColdCallsPage() {
               <table className="w-full">
                 <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                   <tr>
-                    <SortHeader label="Date" field="created" currentSort={sort} onSort={handleSort} />
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Company</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recipient</th>
-                    <SortHeader label="Outcome" field="call_outcome" currentSort={sort} onSort={handleSort} />
-                    <SortHeader label="Interest" field="interest_level" currentSort={sort} onSort={handleSort} />
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Claimed By</th>
+                    {isColumnVisible('created') && <SortHeader label="Date" field="created" currentSort={sort} onSort={handleSort} />}
+                    {isColumnVisible('company') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Company</th>}
+                    {isColumnVisible('phone_number') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
+                    {isColumnVisible('recipients') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recipient</th>}
+                    {isColumnVisible('call_outcome') && <SortHeader label="Outcome" field="call_outcome" currentSort={sort} onSort={handleSort} />}
+                    {isColumnVisible('interest_level') && <SortHeader label="Interest" field="interest_level" currentSort={sort} onSort={handleSort} />}
+                    {isColumnVisible('claimed_by') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Claimed By</th>}
                     <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
                   </tr>
                 </thead>
@@ -355,45 +378,59 @@ export default function ColdCallsPage() {
                       key={call.id}
                       className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors"
                     >
-                      <td className="py-3 px-4">
-                        <span className="text-sm">{call.created ? formatDate(call.created) : '-'}</span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="font-medium">
-                          {call.expand?.company?.company_name || 'Unknown'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="text-sm font-mono">
-                          {call.phone_number || '-'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="text-sm">
-                          {call.recipients || '-'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        {call.call_outcome && (
-                          <span className={cn(
-                            "px-2 py-1 rounded-md text-xs font-medium",
-                            OUTCOME_COLORS[call.call_outcome]?.bg || 'bg-gray-500/20',
-                            OUTCOME_COLORS[call.call_outcome]?.text || 'text-gray-400'
-                          )}>
-                            {call.call_outcome}
+                      {isColumnVisible('created') && (
+                        <td className="py-3 px-4">
+                          <span className="text-sm">{call.created ? formatDate(call.created) : '-'}</span>
+                        </td>
+                      )}
+                      {isColumnVisible('company') && (
+                        <td className="py-3 px-4">
+                          <span className="font-medium">
+                            {call.expand?.company?.company_name || 'Unknown'}
                           </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        {call.interest_level !== undefined && (
-                          <InterestBar level={call.interest_level} />
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="text-sm">
-                          {call.expand?.claimed_by?.name || '-'}
-                        </span>
-                      </td>
+                        </td>
+                      )}
+                      {isColumnVisible('phone_number') && (
+                        <td className="py-3 px-4">
+                          <span className="text-sm font-mono">
+                            {call.phone_number || '-'}
+                          </span>
+                        </td>
+                      )}
+                      {isColumnVisible('recipients') && (
+                        <td className="py-3 px-4">
+                          <span className="text-sm">
+                            {call.recipients || '-'}
+                          </span>
+                        </td>
+                      )}
+                      {isColumnVisible('call_outcome') && (
+                        <td className="py-3 px-4">
+                          {call.call_outcome && (
+                            <span className={cn(
+                              "px-2 py-1 rounded-md text-xs font-medium",
+                              OUTCOME_COLORS[call.call_outcome]?.bg || 'bg-gray-500/20',
+                              OUTCOME_COLORS[call.call_outcome]?.text || 'text-gray-400'
+                            )}>
+                              {call.call_outcome}
+                            </span>
+                          )}
+                        </td>
+                      )}
+                      {isColumnVisible('interest_level') && (
+                        <td className="py-3 px-4">
+                          {call.interest_level !== undefined && (
+                            <InterestBar level={call.interest_level} />
+                          )}
+                        </td>
+                      )}
+                      {isColumnVisible('claimed_by') && (
+                        <td className="py-3 px-4">
+                          <span className="text-sm">
+                            {call.expand?.claimed_by?.name || '-'}
+                          </span>
+                        </td>
+                      )}
                       <td className="py-3 px-4">
                         <Link
                           href={`/cold-calls/${call.id}`}

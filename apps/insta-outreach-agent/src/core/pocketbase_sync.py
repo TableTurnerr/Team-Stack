@@ -21,6 +21,23 @@ class PocketBaseSync:
         else:
             self.logger.warning("No admin credentials found in environment")
 
+    def find_or_create_company_by_instagram(self, username: str) -> Dict[str, Any]:
+        """Find company by instagram_handle or create new one"""
+        # Search for existing company using filter
+        companies = self.pb.get_companies(filter_str=f'instagram_handle = "{username}"')
+
+        if companies:
+            return companies[0]
+
+        # Create new company with Instagram as source
+        return self.pb.create_company({
+            'instagram_handle': username,
+            'source': 'instagram',
+            'status': 'Cold No Reply',
+            'first_contacted': datetime.utcnow().isoformat() + 'Z',
+            'last_contacted': datetime.utcnow().isoformat() + 'Z'
+        })
+
     def log_outreach_event(self, 
                            actor_username: str, 
                            target_username: str, 
@@ -29,7 +46,7 @@ class PocketBaseSync:
                            message_text: Optional[str] = None):
         """
         Log an outreach event to PocketBase.
-        1. Find/Create Lead (target)
+        1. Find/Create Company (was Lead)
         2. Find Actor (source)
         3. Create Event Log
         4. Create Outreach Log (if message)
@@ -38,19 +55,12 @@ class PocketBaseSync:
             self.connect()
 
         try:
-            # 1. Handle Lead
-            lead = self.pb.find_lead_by_username(target_username)
-            if not lead:
-                lead = self.pb.create_lead({
-                    'username': target_username,
-                    'status': 'Cold No Reply',
-                    'source': 'instagram',
-                    'first_contacted': datetime.utcnow().isoformat() + 'Z',
-                    'last_updated': datetime.utcnow().isoformat() + 'Z'
-                })
-            else:
-                self.pb.update_lead(lead['id'], {
-                     'last_updated': datetime.utcnow().isoformat() + 'Z'
+            # 1. Handle Company (Unification of Leads)
+            company = self.find_or_create_company_by_instagram(target_username)
+            if company:
+                # Update last_contacted
+                self.pb.update_company(company['id'], {
+                     'last_contacted': datetime.utcnow().isoformat() + 'Z'
                 })
 
             # 2. Handle Actor
@@ -74,10 +84,9 @@ class PocketBaseSync:
                 'event_type': event_type,
                 'details': details,
                 'source': 'instagram',
-                'target': lead['id']
+                'company': company['id'] if company else None, # Changed from target
+                'actor': actor_id
             }
-            if actor_id:
-                event_data['actor'] = actor_id
             
             event = self.pb.create_event_log(event_data)
 

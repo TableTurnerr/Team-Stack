@@ -20,25 +20,11 @@ Table companies {
   company_location text
   google_maps_link url
   phone_numbers text
-  source text
-  created date
-  updated date
+  source text [note: 'Cold Call | Google Maps | Manual | Instagram']
 }
 
-Table leads {
-  id text [pk]
-  username text
-  status text [note: 'Cold No Reply | Replied | Warm | Booked | Paid | Client | Excluded']
-  first_contacted date
-  last_updated date
-  notes text
-  email email
-  phone text
-  contact_source text
-  source text
-  created date
-  updated date
-}
+
+
 
 Table insta_actors {
   id text [pk]
@@ -46,6 +32,8 @@ Table insta_actors {
   owner relation [ref: > users.id]
   status text [note: 'Active | Suspended By Team | Suspended By Insta | Discarded']
   last_activity date
+  created date
+  updated date
 }
 
 Table cold_calls {
@@ -79,7 +67,8 @@ Table event_logs {
   event_type text [note: 'Outreach | Change in Tar Info | Tar Exception Toggle | User | System | Cold Call']
   actor relation [ref: > insta_actors.id]
   user relation [ref: > users.id]
-  target relation [ref: > leads.id]
+  company relation [ref: > companies.id]   // NEW: Direct company link
+
   cold_call relation [ref: > cold_calls.id]
   details text
   source text
@@ -128,7 +117,7 @@ Table alerts {
   id text [pk]
   created_by relation [ref: > users.id]
   target_user relation [ref: > users.id]
-  entity_type text [note: 'cold_call | lead | goal']
+  entity_type text [note: 'cold_call | company | goal']
   entity_id text
   entity_label text
   alert_time date

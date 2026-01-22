@@ -860,7 +860,7 @@
                 "type": "select",
                 "values": [
                     "cold_call",
-                    "lead",
+                    "company",
                     "goal"
                 ]
             },
@@ -1325,6 +1325,100 @@
                 "type": "text"
             },
             {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text1318742084",
+                "max": 0,
+                "min": 0,
+                "name": "instagram_handle",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "exceptDomains": null,
+                "hidden": false,
+                "id": "email4158784112",
+                "name": "email",
+                "onlyDomains": null,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "email"
+            },
+            {
+                "hidden": false,
+                "id": "select2063623452",
+                "maxSelect": 1,
+                "name": "status",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "Cold No Reply",
+                    "Replied",
+                    "Warm",
+                    "Booked",
+                    "Paid",
+                    "Client",
+                    "Excluded"
+                ]
+            },
+            {
+                "hidden": false,
+                "id": "date2125746760",
+                "max": "",
+                "min": "",
+                "name": "first_contacted",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date8519509426",
+                "max": "",
+                "min": "",
+                "name": "last_contacted",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text5455134183",
+                "max": 0,
+                "min": 0,
+                "name": "notes",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text4726581237",
+                "max": 0,
+                "min": 0,
+                "name": "contact_source",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
                 "autogeneratePattern": "[a-z0-9]{15}",
                 "hidden": false,
                 "id": "text3208210256",
@@ -1418,12 +1512,12 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "pbc_8365621268",
+                "collectionId": "pbc_6239365334",
                 "hidden": false,
-                "id": "relation2835317683",
+                "id": "relation3149591241",
                 "maxSelect": 1,
                 "minSelect": 0,
-                "name": "target",
+                "name": "company",
                 "presentable": false,
                 "required": false,
                 "system": false,
@@ -1760,178 +1854,6 @@
             }
         ],
         "indexes": [],
-        "system": false
-    },
-    {
-        "id": "pbc_8365621268",
-        "listRule": "@request.auth.id != ''",
-        "viewRule": "@request.auth.id != ''",
-        "createRule": "@request.auth.id != ''",
-        "updateRule": "@request.auth.id != ''",
-        "deleteRule": "@request.auth.role = 'admin'",
-        "name": "leads",
-        "type": "base",
-        "fields": [
-            {
-                "autogeneratePattern": "",
-                "hidden": false,
-                "id": "text5769275969",
-                "max": 100,
-                "min": 1,
-                "name": "username",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": true,
-                "system": false,
-                "type": "text"
-            },
-            {
-                "hidden": false,
-                "id": "select1403520892",
-                "maxSelect": 1,
-                "name": "status",
-                "presentable": false,
-                "required": true,
-                "system": false,
-                "type": "select",
-                "values": [
-                    "Cold No Reply",
-                    "Replied",
-                    "Warm",
-                    "Booked",
-                    "Paid",
-                    "Client",
-                    "Excluded"
-                ]
-            },
-            {
-                "hidden": false,
-                "id": "date2456809295",
-                "max": "",
-                "min": "",
-                "name": "first_contacted",
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "date"
-            },
-            {
-                "hidden": false,
-                "id": "date8382713964",
-                "max": "",
-                "min": "",
-                "name": "last_updated",
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "date"
-            },
-            {
-                "autogeneratePattern": "",
-                "hidden": false,
-                "id": "text6959681022",
-                "max": 5000,
-                "min": 0,
-                "name": "notes",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": false,
-                "system": false,
-                "type": "text"
-            },
-            {
-                "exceptDomains": null,
-                "hidden": false,
-                "id": "email4784122348",
-                "name": "email",
-                "onlyDomains": null,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "email"
-            },
-            {
-                "autogeneratePattern": "",
-                "hidden": false,
-                "id": "text2373612296",
-                "max": 100,
-                "min": 0,
-                "name": "phone",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": false,
-                "system": false,
-                "type": "text"
-            },
-            {
-                "autogeneratePattern": "",
-                "hidden": false,
-                "id": "text6944763732",
-                "max": 200,
-                "min": 0,
-                "name": "contact_source",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": false,
-                "system": false,
-                "type": "text"
-            },
-            {
-                "autogeneratePattern": "",
-                "hidden": false,
-                "id": "text9848935877",
-                "max": 100,
-                "min": 0,
-                "name": "source",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": false,
-                "system": false,
-                "type": "text"
-            },
-            {
-                "autogeneratePattern": "[a-z0-9]{15}",
-                "hidden": false,
-                "id": "text3208210256",
-                "max": 15,
-                "min": 15,
-                "name": "id",
-                "pattern": "^[a-z0-9]+$",
-                "presentable": false,
-                "primaryKey": true,
-                "required": true,
-                "system": true,
-                "type": "text"
-            },
-            {
-                "hidden": false,
-                "id": "autodate2990389176",
-                "name": "created",
-                "onCreate": true,
-                "onUpdate": false,
-                "presentable": false,
-                "system": false,
-                "type": "autodate"
-            },
-            {
-                "hidden": false,
-                "id": "autodate3332085495",
-                "name": "updated",
-                "onCreate": false,
-                "onUpdate": true,
-                "presentable": false,
-                "system": false,
-                "type": "autodate"
-            }
-        ],
-        "indexes": [
-            "CREATE UNIQUE INDEX idx_leads_username ON leads (username)"
-        ],
         "system": false
     },
     {

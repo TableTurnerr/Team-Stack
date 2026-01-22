@@ -24,9 +24,19 @@ export interface Company extends RecordModel {
     company_location?: string;
     google_maps_link?: string;
     phone_numbers?: string;
-    source: 'cold_call' | 'manual';
+    source: 'cold_call' | 'manual' | 'instagram'; // Updated source types
+
+    // NEW fields merged from leads
+    instagram_handle?: string;
+    email?: string;
+    status?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
+    first_contacted?: string;
+    last_contacted?: string;
+    notes?: string;
+    contact_source?: string;
 }
 
+/** @deprecated Use Company instead. */
 export interface Lead extends RecordModel {
     username: string;
     status: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
@@ -82,14 +92,16 @@ export interface EventLog extends RecordModel {
     event_type: 'Outreach' | 'Change in Tar Info' | 'Tar Exception Toggle' | 'User' | 'System' | 'Cold Call';
     actor?: string; // Relation to insta_actors
     user?: string; // Relation to users
-    target?: string; // Relation to leads
+    company?: string; // NEW: Relation to companies
+    target?: string; // DEPRECATED: Relation to leads
     cold_call?: string; // Relation to cold_calls
     details?: string;
     source: 'instagram' | 'cold_call';
     expand?: {
         actor?: InstaActor;
         user?: User;
-        target?: Lead;
+        company?: Company; // NEW
+        target?: Lead; // DEPRECATED
         cold_call?: ColdCall;
     };
 }
@@ -275,6 +287,15 @@ export class CRMPocketBase {
 
     async updateCompany(id: string, data: Partial<Company>): Promise<Company> {
         return await this.pb.collection(COLLECTIONS.COMPANIES).update<Company>(id, data);
+    }
+
+    async getCompanyInteractionHistory(companyId: string): Promise<EventLog[]> {
+        const result = await this.pb.collection(COLLECTIONS.EVENT_LOGS).getList<EventLog>(1, 100, {
+            filter: `company = "${companyId}"`,
+            sort: '-created',
+            expand: 'actor,user,cold_call'
+        });
+        return result.items;
     }
 
     // ---------------------------------------------------------------------------

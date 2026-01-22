@@ -227,20 +227,64 @@
           <div class="field-label">Website</div>
           <div class="field-value">${item.companyUrl ? `<a href="${item.companyUrl}" target="_blank">${new URL(item.companyUrl).hostname}</a>` : 'N/A'}</div>
         </div>
+        <div class="field">
+          <div class="field-label">Note <span style="color: red;">*</span></div>
+          <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)"></textarea>
+        </div>
         <button class="add-btn" id="gmes-add-btn">Add to List</button>
       </div>
     `;
 
         document.body.appendChild(overlay);
 
+        // Add CSS for note input
+        const style = document.createElement('style');
+        style.textContent = `
+            #gmes-manual-overlay .note-input {
+                width: 100%;
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                font-family: inherit;
+                font-size: 14px;
+                resize: vertical;
+                min-height: 60px;
+                box-sizing: border-box;
+                margin-top: 5px;
+            }
+            #gmes-manual-overlay .note-input.error {
+                border-color: #dc3545;
+                background-color: #fff8f8;
+                outline: none;
+            }
+            #gmes-manual-overlay .note-input:focus {
+                border-color: #4285f4;
+                outline: none;
+            }
+        `;
+        document.head.appendChild(style);
+
         // Close button handler
         document.getElementById('gmes-close-btn').addEventListener('click', () => {
             overlay.remove();
+            style.remove();
             chrome.storage.local.set({ gmes_overlay_dismissed: true });
         });
 
         // Add button handler
         document.getElementById('gmes-add-btn').addEventListener('click', () => {
+            const noteInput = document.getElementById('gmes-note-input');
+            const noteValue = noteInput.value.trim();
+
+            if (!noteValue) {
+                noteInput.classList.add('error');
+                noteInput.focus();
+                return;
+            }
+            
+            noteInput.classList.remove('error');
+            item.note = noteValue;
+
             chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: item }, (response) => {
                 if (response && response.success) {
                     const btn = document.getElementById('gmes-add-btn');
@@ -255,3 +299,21 @@
         });
     }
 })();
+
+// Helper to check and focus/submit via shortcut
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'TRIGGER_MANUAL_ADD') {
+        const btn = document.getElementById('gmes-add-btn');
+        const noteInput = document.getElementById('gmes-note-input');
+        
+        if (btn && !btn.disabled && noteInput) {
+             const noteValue = noteInput.value.trim();
+             if (!noteValue) {
+                 noteInput.classList.add('error');
+                 noteInput.focus();
+             } else {
+                 btn.click();
+             }
+        }
+    }
+});

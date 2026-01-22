@@ -130,8 +130,8 @@ document.addEventListener('DOMContentLoaded', function () {
         // Helper: create a table row element from an item object
         function createRowFromItem(item) {
             var row = document.createElement('tr');
-            // column order: title, closedStatus, rating, reviewCount, phone, industry, expensiveness, city, address, website, instaSearch, maps link
-            ['title', 'closedStatus', 'rating', 'reviewCount', 'phone', 'industry', 'expensiveness', 'city', 'address', 'companyUrl', 'instaSearch', 'href'].forEach(function (colKey) {
+            // column order: title, note, closedStatus, rating, reviewCount, phone, industry, expensiveness, city, address, website, instaSearch, maps link
+            ['title', 'note', 'closedStatus', 'rating', 'reviewCount', 'phone', 'industry', 'expensiveness', 'city', 'address', 'companyUrl', 'instaSearch', 'href'].forEach(function (colKey) {
                 var cell = document.createElement('td');
 
                 // Special rendering for links
@@ -318,7 +318,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Render table header once (so it isn't re-rendered/cleared on each scrape)
         (function renderHeader() {
-            const headers = ['Title', 'Closed Status', 'Rating', 'Reviews', 'Phone', 'Industry', 'Expensiveness', 'City', 'Address', 'Website', 'Insta Search', 'Google Maps Link'];
+            const headers = ['Title', 'Note', 'Closed Status', 'Rating', 'Reviews', 'Phone', 'Industry', 'Expensiveness', 'City', 'Address', 'Website', 'Insta Search', 'Google Maps Link'];
             // clear existing header row contents
             resultsTheadRow.innerHTML = '';
             headers.forEach(function (headerText) {
@@ -743,6 +743,7 @@ function scrapeData() {
         // Return the data as an object (include closedStatus)
         return {
             title: titleText,
+            note: '',
             closedStatus: closedStatus,
             rating: rating,
             reviewCount: reviewCount,

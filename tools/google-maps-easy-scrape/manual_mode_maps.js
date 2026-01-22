@@ -14,9 +14,6 @@
             createOverlay();
         } else if (request.type === 'SHOW_OVERLAY') {
             initMapsOverlay();
-        } else if (request.type === 'TRIGGER_MANUAL_ADD') {
-            const btn = document.getElementById('gmes-add-btn');
-            if (btn && !btn.disabled) btn.click();
         }
     });
 
@@ -30,6 +27,17 @@
 
         // Initial run
         runOverlay();
+
+        // Watch for title changes (navigation in SPA)
+        const titleObserver = new MutationObserver(() => {
+            // Short debounce to allow DOM to settle
+            setTimeout(runOverlay, 1000);
+        });
+        
+        const titleEl = document.querySelector('title');
+        if (titleEl) {
+            titleObserver.observe(titleEl, { childList: true });
+        }
     }
 
     function scrapeCurrentPlace() {
@@ -231,7 +239,11 @@
           <div class="field-label">Note <span style="color: red;">*</span></div>
           <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)"></textarea>
         </div>
-        <button class="add-btn" id="gmes-add-btn">Add to List</button>
+        <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Ctrl+Shift+L)</span></button>
+        <div class="shortcuts-info">
+             <span>Open Website: Ctrl+Shift+W</span>
+             <span id="gmes-settings-btn" class="settings-icon" title="Change shortcuts">⚙️</span>
+        </div>
       </div>
     `;
 
@@ -261,6 +273,29 @@
                 border-color: #4285f4;
                 outline: none;
             }
+            #gmes-manual-overlay .shortcut {
+                font-size: 11px;
+                opacity: 0.8;
+                margin-left: 4px;
+                font-weight: normal;
+            }
+            #gmes-manual-overlay .shortcuts-info {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: 8px;
+                font-size: 11px;
+                color: #666;
+            }
+            #gmes-manual-overlay .settings-icon {
+                cursor: pointer;
+                font-size: 14px;
+                transition: transform 0.2s;
+            }
+            #gmes-manual-overlay .settings-icon:hover {
+                transform: rotate(45deg);
+                color: #333;
+            }
         `;
         document.head.appendChild(style);
 
@@ -269,6 +304,11 @@
             overlay.remove();
             style.remove();
             chrome.storage.local.set({ gmes_overlay_dismissed: true });
+        });
+
+        // Settings button handler
+        document.getElementById('gmes-settings-btn').addEventListener('click', () => {
+            chrome.runtime.sendMessage({ type: 'OPEN_SHORTCUTS_SETTINGS' });
         });
 
         // Add button handler
@@ -291,29 +331,12 @@
                     btn.textContent = '✓ Added!';
                     btn.disabled = true;
                     setTimeout(() => {
-                        btn.textContent = 'Add to List';
+                        btn.innerHTML = 'Add to List <span class="shortcut">(Ctrl+Shift+L)</span>';
                         btn.disabled = false;
                     }, 2000);
                 }
             });
         });
     }
-})();
 
-// Helper to check and focus/submit via shortcut
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'TRIGGER_MANUAL_ADD') {
-        const btn = document.getElementById('gmes-add-btn');
-        const noteInput = document.getElementById('gmes-note-input');
-        
-        if (btn && !btn.disabled && noteInput) {
-             const noteValue = noteInput.value.trim();
-             if (!noteValue) {
-                 noteInput.classList.add('error');
-                 noteInput.focus();
-             } else {
-                 btn.click();
-             }
-        }
-    }
-});
+})();

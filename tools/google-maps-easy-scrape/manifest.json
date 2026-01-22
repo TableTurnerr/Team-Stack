@@ -40,6 +40,12 @@
         "default": "Ctrl+Shift+M"
       },
       "description": "Toggle manual mode overlay"
+    },
+    "manual_add_to_list": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L"
+      },
+      "description": "Add current item to list (Manual Mode)"
     }
   },
   "icons": {

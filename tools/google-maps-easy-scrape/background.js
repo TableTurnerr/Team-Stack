@@ -167,20 +167,29 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
                     var newItems = results[0].result;
 
                     // Respect ignore lists and merge into storage
-                    chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries'], function (data) {
+                    chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled'], function (data) {
                         var existing = Array.isArray(data.gmes_results) ? data.gmes_results : [];
                         var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
                         var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
                         var ignoreNamesSet = new Set(ignoreNamesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
                         var ignoreIndustriesSet = new Set(ignoreIndustriesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
+                        // Food filter is enabled by default
+                        var foodFilterEnabled = data.gmes_food_filter_enabled !== false;
 
                         var seen = new Set(existing.map(function (it) { return it.href || (it.title + '|' + it.address); }));
                         var added = false;
 
                         newItems.forEach(function (item) {
+                            if (!item) return;
                             var key = item.href || (item.title + '|' + item.address);
                             if (!key) return;
                             if (seen.has(key)) return;
+
+                            // Apply food industry filter
+                            if (foodFilterEnabled && !isFoodRelatedIndustry(item.industry)) {
+                                return;
+                            }
+
                             try {
                                 var ignoreMatch = false;
                                 if (item && item.title) {
@@ -242,12 +251,14 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || msg.type !== 'INJECTED_SCRAPE_ITEMS' || !Array.isArray(msg.items)) return;
 
     var newItems = msg.items;
-    chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries'], function (data) {
+    chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled'], function (data) {
         var existing = Array.isArray(data.gmes_results) ? data.gmes_results : [];
         var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
         var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
         var ignoreNamesSet = new Set(ignoreNamesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
         var ignoreIndustriesSet = new Set(ignoreIndustriesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
+        // Food filter is enabled by default
+        var foodFilterEnabled = data.gmes_food_filter_enabled !== false;
 
         var seen = new Set(existing.map(function (it) { return it.href || (it.title + '|' + it.address); }));
         var added = false;
@@ -256,6 +267,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
             var key = item.href || (item.title + '|' + item.address);
             if (!key) return;
             if (seen.has(key)) return;
+
+            // Apply food industry filter
+            if (foodFilterEnabled && !isFoodRelatedIndustry(item.industry)) {
+                return;
+            }
+
             try {
                 var ignoreMatch = false;
                 if (item && item.title) {
@@ -298,6 +315,111 @@ checkForUpdates();
 // End of Update Checker
 // ============================================================================
 
+// ============================================================================
+// Food/Restaurant Business Filter
+// ============================================================================
+
+// Industries to INCLUDE (food-related businesses)
+var FOOD_INDUSTRIES = [
+    'restaurant', 'restaurants', 'cafe', 'cafes', 'coffee', 'coffee shop', 'coffee house',
+    'bakery', 'bakeries', 'pizza', 'pizzeria', 'burger', 'burgers', 'sushi', 'thai',
+    'chinese', 'mexican', 'italian', 'indian', 'japanese', 'korean', 'vietnamese',
+    'mediterranean', 'greek', 'french', 'american', 'seafood', 'steakhouse', 'steak house',
+    'bbq', 'barbecue', 'grill', 'diner', 'bistro', 'brasserie', 'trattoria', 'osteria',
+    'taqueria', 'cantina', 'pub', 'gastropub', 'tavern', 'bar', 'wine bar', 'sports bar',
+    'brewery', 'brewpub', 'taproom', 'food truck', 'food stand', 'food court',
+    'fast food', 'fast casual', 'quick service', 'takeout', 'take out', 'takeaway',
+    'delivery', 'catering', 'caterer', 'deli', 'delicatessen', 'sandwich', 'sandwiches',
+    'sub', 'subs', 'wrap', 'wraps', 'salad', 'salads', 'soup', 'noodle', 'noodles',
+    'ramen', 'pho', 'dim sum', 'dumpling', 'dumplings', 'wonton', 'hotpot', 'hot pot',
+    'shabu', 'yakiniku', 'tempura', 'teriyaki', 'hibachi', 'teppanyaki',
+    'ice cream', 'gelato', 'frozen yogurt', 'froyo', 'dessert', 'desserts', 'pastry',
+    'donut', 'donuts', 'doughnut', 'doughnuts', 'cupcake', 'cupcakes', 'cake', 'cakes',
+    'tea', 'tea house', 'bubble tea', 'boba', 'juice', 'juice bar', 'smoothie', 'smoothies',
+    'brunch', 'breakfast', 'lunch', 'dinner', 'supper', 'buffet', 'all you can eat',
+    'fine dining', 'casual dining', 'family dining', 'family restaurant',
+    'ethnic', 'fusion', 'contemporary', 'modern', 'traditional', 'authentic',
+    'vegetarian', 'vegan', 'plant based', 'organic', 'farm to table', 'health food',
+    'wings', 'chicken', 'fried chicken', 'rotisserie', 'wing', 'fish', 'fish and chips',
+    'lobster', 'crab', 'oyster', 'clam', 'shrimp', 'crawfish', 'cajun', 'creole',
+    'soul food', 'southern', 'comfort food', 'home cooking', 'homestyle',
+    'tapas', 'small plates', 'appetizers', 'snacks', 'street food', 'hawker',
+    'food hall', 'eatery', 'eating', 'dining', 'kitchen', 'cookhouse', 'chophouse',
+    'pancake', 'waffle', 'crepe', 'crepes', 'bagel', 'bagels', 'toast', 'acai',
+    'poke', 'bowl', 'bowls', 'grain bowl', 'rice bowl', 'burrito', 'burritos', 'taco', 'tacos',
+    'quesadilla', 'nachos', 'enchilada', 'fajita', 'chimichanga', 'tamale', 'tamales',
+    'curry', 'tandoori', 'biryani', 'kebab', 'kebabs', 'shawarma', 'falafel', 'hummus',
+    'gyro', 'gyros', 'souvlaki', 'moussaka', 'spanakopita',
+    'pad thai', 'spring roll', 'egg roll', 'fried rice', 'chow mein', 'lo mein',
+    'general tso', 'kung pao', 'sweet and sour', 'orange chicken', 'mongolian',
+    'vietnamese', 'banh mi', 'bun', 'vermicelli', 'congee', 'jook',
+    'fondue', 'raclette', 'schnitzel', 'bratwurst', 'sausage', 'pretzel',
+    'croissant', 'baguette', 'patisserie', 'confectionery', 'chocolatier',
+    'food', 'meal', 'meals', 'cuisine', 'culinary', 'chef', 'cook', 'cooking'
+];
+
+// Industries to EXCLUDE (non-food businesses that might appear in food searches)
+var NON_FOOD_INDUSTRIES = [
+    'grocery', 'groceries', 'supermarket', 'supermarkets', 'market', 'mart',
+    'convenience store', 'corner store', 'bodega', 'mini mart', 'minimart',
+    'gas station', 'gas', 'fuel', 'petrol', 'filling station', 'service station',
+    'liquor store', 'liquor', 'wine shop', 'beer store', 'bottle shop', 'off license',
+    'pharmacy', 'drug store', 'drugstore', 'chemist',
+    'dollar store', 'dollar', 'discount store', 'variety store',
+    'department store', 'retail', 'retailer', 'shop', 'store', 'outlet',
+    'warehouse', 'wholesale', 'distributor', 'supplier',
+    'hotel', 'motel', 'inn', 'lodge', 'resort', 'hostel', 'bed and breakfast',
+    'laundry', 'laundromat', 'dry cleaner', 'dry cleaning',
+    'bank', 'atm', 'credit union', 'financial',
+    'gym', 'fitness', 'health club', 'spa', 'salon', 'barber', 'hair',
+    'auto', 'car', 'automotive', 'mechanic', 'repair', 'tire', 'oil change',
+    'hardware', 'home improvement', 'lumber', 'building',
+    'office', 'corporate', 'business center',
+    'school', 'college', 'university', 'education', 'learning',
+    'hospital', 'clinic', 'medical', 'doctor', 'dentist', 'dental',
+    'church', 'mosque', 'temple', 'synagogue', 'religious',
+    'parking', 'storage', 'moving', 'shipping',
+    'real estate', 'property', 'apartment', 'rental',
+    'clothing', 'apparel', 'fashion', 'shoes', 'jewelry',
+    'electronics', 'computer', 'phone', 'mobile', 'tech',
+    'pet store', 'pet shop', 'veterinary', 'vet', 'animal',
+    'florist', 'flower', 'plant', 'nursery', 'garden',
+    'furniture', 'mattress', 'home decor', 'interior',
+    'travel', 'tourism', 'tour', 'agency',
+    'insurance', 'lawyer', 'attorney', 'legal', 'law firm',
+    'accounting', 'tax', 'consultant', 'consulting'
+];
+
+// Check if an industry is food-related
+function isFoodRelatedIndustry(industry) {
+    if (!industry) return true; // If no industry, include it (might be a restaurant without category)
+    var industryLower = String(industry).toLowerCase().trim();
+    if (!industryLower) return true;
+
+    // Check if it matches any excluded industry
+    for (var i = 0; i < NON_FOOD_INDUSTRIES.length; i++) {
+        var excluded = NON_FOOD_INDUSTRIES[i];
+        if (industryLower === excluded || industryLower.indexOf(excluded) !== -1) {
+            return false;
+        }
+    }
+
+    // Check if it matches any included food industry
+    for (var i = 0; i < FOOD_INDUSTRIES.length; i++) {
+        var foodInd = FOOD_INDUSTRIES[i];
+        if (industryLower === foodInd || industryLower.indexOf(foodInd) !== -1) {
+            return true;
+        }
+    }
+
+    // If not in either list, include it (benefit of the doubt)
+    return true;
+}
+
+// ============================================================================
+// End of Food/Restaurant Filter
+// ============================================================================
+
 chrome.commands.onCommand.addListener(function (command) {
     if (command === 'scrape') {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
@@ -311,20 +433,29 @@ chrome.commands.onCommand.addListener(function (command) {
                 if (!results || !results[0] || !results[0].result) return;
                 var newItems = results[0].result;
 
-                chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries'], function (data) {
+                chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled'], function (data) {
                     var existing = Array.isArray(data.gmes_results) ? data.gmes_results : [];
                     var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
                     var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
                     var ignoreNamesSet = new Set(ignoreNamesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
                     var ignoreIndustriesSet = new Set(ignoreIndustriesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
+                    // Food filter is enabled by default
+                    var foodFilterEnabled = data.gmes_food_filter_enabled !== false;
 
                     var seen = new Set(existing.map(function (it) { return it.href || (it.title + '|' + it.address); }));
                     var added = false;
 
                     newItems.forEach(function (item) {
+                        if (!item) return;
                         var key = item.href || (item.title + '|' + item.address);
                         if (!key) return;
                         if (seen.has(key)) return;
+
+                        // Apply food industry filter
+                        if (foodFilterEnabled && !isFoodRelatedIndustry(item.industry)) {
+                            return;
+                        }
+
                         try {
                             var ignoreMatch = false;
                             if (item && item.title) {
@@ -367,6 +498,13 @@ chrome.commands.onCommand.addListener(function (command) {
                 chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_OPEN_WEBSITE' });
             }
         });
+    } else if (command === 'toggle_manual_overlay') {
+        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+            if (tabs[0]) {
+                // Send message to toggle overlay visibility
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'TOGGLE_OVERLAY' });
+            }
+        });
     }
 });
 
@@ -375,6 +513,35 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (msg.type === 'OPEN_SHORTCUTS_SETTINGS') {
         chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
     }
+});
+
+// Handle MANUAL_ADD_ITEM messages from content scripts
+chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (!msg || msg.type !== 'MANUAL_ADD_ITEM' || !msg.item) return;
+
+    handleManualAddItem(msg.item).then(function () {
+        sendResponse({ success: true });
+    }).catch(function (err) {
+        console.error('Error adding manual item:', err);
+        sendResponse({ success: false, error: err.message });
+    });
+
+    // Return true to indicate async response
+    return true;
+});
+
+// Handle CHECK_SHOULD_SHOW_OVERLAY messages for manual mode
+chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (!msg || msg.type !== 'CHECK_SHOULD_SHOW_OVERLAY') return;
+
+    chrome.storage.local.get(['gmes_mode', 'gmes_overlay_dismissed'], function (data) {
+        var isManualMode = data.gmes_mode === 'manual';
+        var isDismissed = data.gmes_overlay_dismissed === true;
+        sendResponse({ shouldShow: isManualMode && !isDismissed });
+    });
+
+    // Return true to indicate async response
+    return true;
 });
 
 function handleManualAddItem(item) {
@@ -422,20 +589,22 @@ function scrapeData() {
     var links = Array.from(document.querySelectorAll('a[href^="https://www.google.com/maps/place"]'));
     return links.map(link => {
         var container = link.closest('[jsaction*="mouseover:pane"]');
-        var titleText = container ? container.querySelector('.fontHeadlineSmall').textContent : '';
+        var titleEl = container ? container.querySelector('.fontHeadlineSmall') : null;
+        var titleText = titleEl ? titleEl.textContent : '';
         var containerText = container ? (container.textContent || '') : '';
-        
+
         var closedStatus = '';
         if (/permanently closed/i.test(containerText)) {
             return null;
-        } else if (/temporaril(?:y)? closed/i.test(containerText) || /temporarily closed/i.test(containerText)) {
+        } else if (/temporarily closed/i.test(containerText)) {
             closedStatus = 'Temporarily Closed';
         }
-        
+
         var rating = '';
         var reviewCount = '';
         var phone = '';
         var industry = '';
+        var expensiveness = ''; // Declare at function scope to fix scope bug
         var address = '';
         var companyUrl = '';
 
@@ -445,8 +614,8 @@ function scrapeData() {
                 var ariaLabel = roleImgContainer.getAttribute('aria-label');
                 if (ariaLabel && ariaLabel.includes("stars")) {
                     var parts = ariaLabel.split(' ');
-                    var rating = parts[0];
-                    var reviewCount = '(' + parts[2] + ')';
+                    rating = parts[0] || '';
+                    reviewCount = '(' + (parts[2] || '') + ')';
                 } else {
                     rating = '0';
                     reviewCount = '0';
@@ -455,7 +624,6 @@ function scrapeData() {
         }
 
         if (container) {
-            var containerText = container.textContent || '';
             var addressRegex = /\d+ [\w\s]+(?:#\s*\d+|Suite\s*\d+|Apt\s*\d+)?/;
             var addressMatch = containerText.match(addressRegex);
 
@@ -466,10 +634,8 @@ function scrapeData() {
                 if (ratingIndex !== -1) {
                     var rawIndustryText = textBeforeAddress.substring(ratingIndex + (rating + reviewCount).length).trim().split(/[\r\n]+/)[0];
                     var cleanedRawIndustry = rawIndustryText.replace(/[·.,#!?]/g, '').trim();
-                    var industryAlpha = cleanedRawIndustry.replace(/[^A-Za-z\s]/g, '').trim();
-                    var expensivenessVal = cleanedRawIndustry.replace(/[^0-9$\-\u2013+]/g, '').trim();
-                    industry = industryAlpha;
-                    var expensiveness = expensivenessVal;
+                    industry = cleanedRawIndustry.replace(/[^A-Za-z\s]/g, '').trim();
+                    expensiveness = cleanedRawIndustry.replace(/[^0-9$\-\u2013+]/g, '').trim();
                 }
                 var filterRegex = /\b(Closed|Open 24 hours|24 hours)|Open\b/g;
                 address = address.replace(filterRegex, '').trim();
@@ -490,8 +656,8 @@ function scrapeData() {
         }
 
         if (container) {
-            var containerText = container.textContent || '';
-            var phoneRegex = /(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/;
+            // Better phone regex - requires area code and proper format
+            var phoneRegex = /(?:\+1\s?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[-.\s]?[2-9]\d{2}[-.\s]?\d{4}/;
             var phoneMatch = containerText.match(phoneRegex);
             phone = phoneMatch ? phoneMatch[0] : '';
         }
@@ -528,7 +694,7 @@ function scrapeData() {
             reviewCount: reviewCount,
             phone: phone,
             industry: industry,
-            expensiveness: (typeof expensiveness !== 'undefined') ? expensiveness : '',
+            expensiveness: expensiveness,
             city: city,
             address: address,
             companyUrl: companyUrl,

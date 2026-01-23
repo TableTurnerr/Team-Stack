@@ -2136,6 +2136,17 @@
             },
             {
                 "hidden": false,
+                "id": "date8472910482",
+                "max": "",
+                "min": "",
+                "name": "recording_date",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
                 "onCreate": true,

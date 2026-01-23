@@ -204,6 +204,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (colKey === 'companyUrl') {
                         // If companyUrl is empty OR it's a Google Maps link, create a search link for the website
                         var isMapsLink = url && url.indexOf('https://www.google.com/maps') === 0;
+                        let finalUrl = url;
                         if (!url || isMapsLink) {
                             // build search query: Title + City + Website
                             var qParts = [];
@@ -211,28 +212,21 @@ document.addEventListener('DOMContentLoaded', function () {
                             if (item.city) qParts.push(item.city);
                             qParts.push('Website');
                             var query = qParts.join(' ');
-                            var searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(query);
-                            var a = document.createElement('a');
-                            a.href = searchUrl;
-                            a.textContent = 'Search For Website';
-                            a.target = '_blank';
-                            a.rel = 'noopener noreferrer';
-                            cell.appendChild(a);
-                        } else {
-                            var a = document.createElement('a');
-                            a.href = url;
-                            a.textContent = 'Goto Website';
-                            a.target = '_blank';
-                            a.rel = 'noopener noreferrer';
-                            cell.appendChild(a);
+                            finalUrl = 'https://www.google.com/search?q=' + encodeURIComponent(query);
                         }
+                        var a = document.createElement('a');
+                        a.href = finalUrl;
+                        a.textContent = finalUrl;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        cell.appendChild(a);
                     } else {
                         // href (maps link) column
                         var mapsUrl = url || '';
                         if (mapsUrl) {
                             var a = document.createElement('a');
                             a.href = mapsUrl;
-                            a.textContent = 'Open In Google maps';
+                            a.textContent = mapsUrl;
                             a.target = '_blank';
                             a.rel = 'noopener noreferrer';
                             cell.appendChild(a);
@@ -243,21 +237,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (url) {
                         var a = document.createElement('a');
                         a.href = url;
-                        try {
-                            // try to display the search query (decoded)
-                            var q = '';
-                            var parts = url.split('?');
-                            if (parts.length > 1) {
-                                var params = parts[1].split('&');
-                                for (var pi = 0; pi < params.length; pi++) {
-                                    var kv = params[pi].split('=');
-                                    if (kv[0] === 'q') { q = decodeURIComponent(kv[1].replace(/\+/g, ' ')); break; }
-                                }
-                            }
-                            a.textContent = q || url;
-                        } catch (e) {
-                            a.textContent = url;
-                        }
+                        a.textContent = url;
                         a.target = '_blank';
                         a.rel = 'noopener noreferrer';
                         cell.appendChild(a);
@@ -671,9 +651,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     html += '<tr>';
                     var cols = Array.from(tr.querySelectorAll('td'));
                     cols.forEach(function (td) {
-                        // Use innerHTML so anchor tags are preserved
-                        var cellHtml = td.innerHTML || '';
-                        html += '<td>' + cellHtml + '</td>';
+                        // Use innerText to get the plain text (URLs) and remove anchor tags for the sheet
+                        var cellText = td.innerText || '';
+                        html += '<td>' + cellText + '</td>';
                     });
                     html += '</tr>';
                 });

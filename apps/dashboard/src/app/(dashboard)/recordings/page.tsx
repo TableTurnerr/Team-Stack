@@ -11,12 +11,15 @@ import {
   Pause,
   X,
   FileAudio,
-  Pencil
+  Pencil,
+  Filter
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { formatDate, cn } from '@/lib/utils';
+import { formatDate, formatDateTime, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
+import { ColumnSelector } from '@/components/column-selector';
+import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 
 interface Recording {
   id: string;
@@ -36,12 +39,26 @@ interface Recording {
   }
 }
 
+const RECORDING_COLUMNS: ColumnDefinition[] = [
+  { key: 'recording_date', label: 'Date', defaultVisible: true },
+  { key: 'created', label: 'Uploaded', defaultVisible: true },
+  { key: 'phone_number', label: 'Phone', defaultVisible: true },
+  { key: 'note', label: 'Note', defaultVisible: true },
+  { key: 'file', label: 'Recording', defaultVisible: true },
+  { key: 'uploader', label: 'Uploader', defaultVisible: true },
+  { key: 'actions', label: 'Actions', alwaysVisible: true },
+];
+
 export default function RecordingsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Filters
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
 
   // Upload State
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -63,6 +80,9 @@ export default function RecordingsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const perPage = 20;
 
+  // Column visibility
+  const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('recordings', RECORDING_COLUMNS);
+
   const fetchRecordings = useCallback(async () => {
     if (!isAuthenticated) return;
 
@@ -70,13 +90,54 @@ export default function RecordingsPage() {
       setLoading(true);
       setError(null);
 
-      const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
-        sort: '-recording_date,-created',
-        expand: 'uploader',
-      });
+      const filters: string[] = [];
+      if (searchTerm) {
+        filters.push(`(phone_number ~ "${searchTerm}" || note ~ "${searchTerm}")`);
+      }
 
-      setRecordings(result.items);
-      setTotalPages(result.totalPages);
+      const queryOptions = {
+        expand: 'uploader',
+        filter: filters.length > 0 ? filters.join(' && ') : undefined,
+      };
+
+      try {
+        // Try sorting by recording_date first
+        const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
+          ...queryOptions,
+          sort: '-recording_date,-created',
+        });
+        setRecordings(result.items);
+        setTotalPages(result.totalPages);
+      } catch (sortErr: any) {
+        // Fallback 1: Try sorting by created (if recording_date missing)
+        try {
+          const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
+            ...queryOptions,
+            sort: '-created',
+          });
+          setRecordings(result.items);
+          setTotalPages(result.totalPages);
+        } catch (fallbackErr: any) {
+           console.warn('Fallback 1 failed', fallbackErr);
+           // Fallback 2: Try without filters (if filters causing 400)
+           try {
+             const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
+               expand: 'uploader',
+               sort: '-created',
+             });
+             setRecordings(result.items);
+             setTotalPages(result.totalPages);
+           } catch (finalErr: any) {
+             // Ultimate fallback: raw list without expand/filters
+             console.warn('Ultimate fallback', finalErr);
+             const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
+               sort: '-created',
+             });
+             setRecordings(result.items);
+             setTotalPages(result.totalPages);
+           }
+        }
+      }
     } catch (err: any) {
       if (err.status !== 0) {
         console.error('Failed to fetch recordings:', err);
@@ -85,7 +146,7 @@ export default function RecordingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, isAuthenticated]);
+  }, [page, isAuthenticated, searchTerm]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -108,7 +169,6 @@ export default function RecordingsPage() {
         setUploadPhone(phone);
         
         // Format date/time for PocketBase (YYYY-MM-DD HH:MM:SS)
-        // From 13-01-2026 to 2026-01-13
         const [day, month, year] = date.split('-');
         const formattedTime = time.replace(/-/g, ':');
         const isoDate = `${year}-${month}-${day} ${formattedTime}`;
@@ -118,6 +178,20 @@ export default function RecordingsPage() {
         if (!uploadNote) {
           setUploadNote(`Call on ${date} at ${formattedTime}`);
         }
+      } else {
+        // Fallback to metadata (lastModified)
+        if (file.lastModified) {
+          const d = new Date(file.lastModified);
+          const isoDate = d.toISOString().replace('T', ' ').split('.')[0];
+          setUploadDate(isoDate);
+          
+          if (!uploadNote) {
+            setUploadNote(`Call uploaded from file: ${file.name}`);
+          }
+        } else {
+          setUploadDate('');
+        }
+        setUploadPhone('');
       }
     }
   };
@@ -208,6 +282,12 @@ export default function RecordingsPage() {
     }
   };
 
+  const clearFilters = () => {
+    setSearchTerm('');
+  };
+
+  const hasActiveFilters = !!searchTerm;
+
   if (loading && page === 1 || authLoading) {
     return <TableSkeleton />;
   }
@@ -233,6 +313,30 @@ export default function RecordingsPage() {
           )}
 
           <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
+              showFilters || hasActiveFilters
+                ? "bg-[var(--primary)] text-white border-[var(--primary)]"
+                : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
+            )}
+          >
+            <Filter size={16} />
+            Filters
+            {hasActiveFilters && (
+              <span className="ml-1 w-5 h-5 rounded-full bg-white/20 text-xs flex items-center justify-center">
+                1
+              </span>
+            )}
+          </button>
+
+          <ColumnSelector
+            columns={columns}
+            visibleColumns={visibleColumns}
+            onToggle={toggleColumn}
+          />
+
+          <button
             onClick={fetchRecordings}
             className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors"
             title="Refresh"
@@ -241,6 +345,40 @@ export default function RecordingsPage() {
           </button>
         </div>
       </div>
+
+      {/* Filters Panel */}
+      {showFilters && (
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium">Filters</h3>
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="text-sm text-[var(--primary)] hover:underline"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Search */}
+            <div>
+              <label className="text-sm text-[var(--muted)] block mb-1">Search</label>
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Phone number or notes..."
+                  className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Upload Modal */}
       {isUploadOpen && (
@@ -406,46 +544,62 @@ export default function RecordingsPage() {
             <table className="w-full">
               <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                 <tr>
-                  <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Date</th>
-                  <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>
-                  <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Note</th>
-                  <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recording</th>
-                  <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Uploader</th>
+                  {isColumnVisible('recording_date') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Date</th>}
+                  {isColumnVisible('created') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Uploaded</th>}
+                  {isColumnVisible('phone_number') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
+                  {isColumnVisible('note') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Note</th>}
+                  {isColumnVisible('file') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recording</th>}
+                  {isColumnVisible('uploader') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Uploader</th>}
                   <th className="text-right py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--card-border)]">
                 {recordings.map((recording) => (
                   <tr key={recording.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
-                    <td className="py-3 px-4 whitespace-nowrap text-sm">
-                      {formatDate(recording.recording_date || recording.created)}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
-                      {recording.phone_number || '-'}
-                    </td>
-                    <td className="py-3 px-4 text-sm max-w-xs group relative">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate" title={recording.note}>{recording.note || '-'}</span>
-                        <button 
-                          onClick={() => openEdit(recording)}
-                          className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
-                          title="Edit note"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <audio 
-                        controls 
-                        preload="none"
-                        className="h-8 w-full min-w-[200px] max-w-[300px]"
-                        src={pb.files.getUrl(recording, recording.file)}
-                      />
-                    </td>
-                    <td className="py-3 px-4 text-sm whitespace-nowrap">
-                      {recording.expand?.uploader?.name || recording.expand?.uploader?.email || 'Unknown'}
-                    </td>
+                    {isColumnVisible('recording_date') && (
+                      <td className="py-3 px-4 whitespace-nowrap text-sm">
+                        {recording.recording_date ? formatDateTime(recording.recording_date) : 'N/A'}
+                      </td>
+                    )}
+                    {isColumnVisible('created') && (
+                      <td className="py-3 px-4 whitespace-nowrap text-sm text-[var(--muted)]">
+                        {formatDate(recording.created)}
+                      </td>
+                    )}
+                    {isColumnVisible('phone_number') && (
+                      <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
+                        {recording.phone_number || 'N/A'}
+                      </td>
+                    )}
+                    {isColumnVisible('note') && (
+                      <td className="py-3 px-4 text-sm max-w-xs group relative">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate" title={recording.note}>{recording.note || 'N/A'}</span>
+                          <button 
+                            onClick={() => openEdit(recording)}
+                            className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
+                            title="Edit note"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                    {isColumnVisible('file') && (
+                      <td className="py-3 px-4">
+                        <audio 
+                          controls 
+                          preload="none"
+                          className="h-8 w-full min-w-[200px] max-w-[300px]"
+                          src={pb.files.getUrl(recording, recording.file)}
+                        />
+                      </td>
+                    )}
+                    {isColumnVisible('uploader') && (
+                      <td className="py-3 px-4 text-sm whitespace-nowrap">
+                        {recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A'}
+                      </td>
+                    )}
                     <td className="py-3 px-4 text-right">
                       {isAdmin && (
                         <button

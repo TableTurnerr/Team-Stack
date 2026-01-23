@@ -21,6 +21,7 @@ import { TableSkeleton } from '@/components/dashboard-skeletons';
 interface Recording {
   id: string;
   created: string;
+  recording_date?: string;
   phone_number?: string;
   note?: string;
   file: string;
@@ -47,6 +48,7 @@ export default function RecordingsPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPhone, setUploadPhone] = useState('');
   const [uploadNote, setUploadNote] = useState('');
+  const [uploadDate, setUploadDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -69,7 +71,7 @@ export default function RecordingsPage() {
       setError(null);
 
       const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
-        sort: '-created',
+        sort: '-recording_date,-created',
         expand: 'uploader',
       });
 
@@ -105,8 +107,14 @@ export default function RecordingsPage() {
         const [, date, time, phone] = match;
         setUploadPhone(phone);
         
-        // Format the note with extracted date/time for better context if note is empty
+        // Format date/time for PocketBase (YYYY-MM-DD HH:MM:SS)
+        // From 13-01-2026 to 2026-01-13
+        const [day, month, year] = date.split('-');
         const formattedTime = time.replace(/-/g, ':');
+        const isoDate = `${year}-${month}-${day} ${formattedTime}`;
+        setUploadDate(isoDate);
+
+        // Format the note with extracted date/time for better context if note is empty
         if (!uploadNote) {
           setUploadNote(`Call on ${date} at ${formattedTime}`);
         }
@@ -129,6 +137,7 @@ export default function RecordingsPage() {
       formData.append('file', uploadFile);
       if (uploadPhone) formData.append('phone_number', uploadPhone);
       if (uploadNote) formData.append('note', uploadNote);
+      if (uploadDate) formData.append('recording_date', uploadDate);
       formData.append('uploader', user.id);
 
       await pb.collection('recordings').create(formData);
@@ -137,6 +146,7 @@ export default function RecordingsPage() {
       setUploadFile(null);
       setUploadPhone('');
       setUploadNote('');
+      setUploadDate('');
       setIsUploadOpen(false);
       
       // Refresh list
@@ -408,7 +418,7 @@ export default function RecordingsPage() {
                 {recordings.map((recording) => (
                   <tr key={recording.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
                     <td className="py-3 px-4 whitespace-nowrap text-sm">
-                      {formatDate(recording.created)}
+                      {formatDate(recording.recording_date || recording.created)}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
                       {recording.phone_number || '-'}

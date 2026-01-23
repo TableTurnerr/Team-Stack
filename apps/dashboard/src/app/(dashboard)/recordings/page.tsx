@@ -93,13 +93,35 @@ export default function RecordingsPage() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setUploadFile(e.target.files[0]);
+      const file = e.target.files[0];
+      setUploadFile(file);
+
+      // Extract metadata from filename: recording_DD-MM-YYYY_HH-mm-ss_PHONENUMBER
+      // Example: recording_13-01-2026_23-23-41_18568541222
+      const pattern = /^recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})_(.+)$/;
+      const match = file.name.replace(/\.[^/.]+$/, "").match(pattern);
+
+      if (match) {
+        const [, date, time, phone] = match;
+        setUploadPhone(phone);
+        
+        // Format the note with extracted date/time for better context if note is empty
+        const formattedTime = time.replace(/-/g, ':');
+        if (!uploadNote) {
+          setUploadNote(`Call on ${date} at ${formattedTime}`);
+        }
+      }
     }
   };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadFile || !user) return;
+
+    if (uploadFile.size > 52428800) { // 50MB
+      alert("File is too large. Maximum size is 50MB.");
+      return;
+    }
 
     try {
       setIsUploading(true);
@@ -121,7 +143,20 @@ export default function RecordingsPage() {
       fetchRecordings();
     } catch (err: any) {
       console.error('Upload failed:', err);
-      alert(`Upload failed: ${err.message}`);
+      const dataMessage = err?.data 
+        ? Object.entries(err.data)
+            .map(([key, val]: [string, any]) => `${key}: ${val.message}`)
+            .join('\n')
+        : '';
+      
+      const fullMessage = [
+        `Status: ${err.status}`,
+        err.message,
+        dataMessage,
+        err.response ? JSON.stringify(err.response, null, 2) : ''
+      ].filter(Boolean).join('\n\n');
+
+      alert(`Upload failed:\n${fullMessage}`);
     } finally {
       setIsUploading(false);
     }

@@ -493,21 +493,45 @@ chrome.commands.onCommand.addListener(function (command) {
             }
         });
     } else if (command === 'open_website') {
+        console.log('GMES: Command open_website received');
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_CURRENT_WEBSITE' }, function(response) {
+            var tab = tabs && tabs[0];
+            if (!tab) {
+                 console.warn('GMES: No active tab found');
+                 return;
+            }
+
+            function sendMessageToTab() {
+                chrome.tabs.sendMessage(tab.id, { type: 'GET_CURRENT_WEBSITE' }, function(response) {
                     if (chrome.runtime.lastError) {
                         console.error('Error getting website URL:', chrome.runtime.lastError);
+                        // If we failed, maybe try to inject the script?
+                        if (chrome.runtime.lastError.message && chrome.runtime.lastError.message.includes('receiving end does not exist')) {
+                             console.log('GMES: Content script not found, injecting...');
+                             chrome.scripting.executeScript({
+                                 target: { tabId: tab.id },
+                                 files: ['manual_mode_maps.js']
+                             }, function() {
+                                 if (chrome.runtime.lastError) {
+                                     console.error('GMES: Failed to inject script:', chrome.runtime.lastError);
+                                 } else {
+                                     // Retry sending message after short delay
+                                     setTimeout(sendMessageToTab, 500);
+                                 }
+                             });
+                        }
                         return;
                     }
                     if (response && response.url) {
                         console.log('Opening website:', response.url);
                         chrome.tabs.create({ url: response.url });
                     } else {
-                        console.warn('No URL returned from content script');
+                        console.warn('No URL returned from content script', response);
                     }
                 });
             }
+            
+            sendMessageToTab();
         });
     }
 });

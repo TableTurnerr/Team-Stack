@@ -64,16 +64,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 const val = item[colKey] || '';
                 
                 if (colKey === 'companyUrl') {
-                   if (val && !val.startsWith('https://www.google.com/maps')) {
-                       td.innerHTML = `<a href="${val}" target="_blank">Goto Website</a>`;
-                   } else {
-                       const q = `${item.title || ''} ${item.city || ''} Website`;
-                       td.innerHTML = `<a href="https://www.google.com/search?q=${encodeURIComponent(q)}" target="_blank">Search For Website</a>`;
+                   let finalUrl = val;
+                   if (!val || val.startsWith('https://www.google.com/maps')) {
+                       finalUrl = `https://www.google.com/search?q=${encodeURIComponent((item.title || '') + ' ' + (item.city || '') + ' Website')}`;
                    }
+                   td.innerHTML = `<a href="${finalUrl}" target="_blank">${finalUrl}</a>`;
                 } else if (colKey === 'href') {
-                    if (val) td.innerHTML = `<a href="${val}" target="_blank">Open In Google Maps</a>`;
+                    if (val) td.innerHTML = `<a href="${val}" target="_blank">${val}</a>`;
                 } else if (colKey === 'instaSearch') {
-                    if (val) td.innerHTML = `<a href="${val}" target="_blank">Instagram Search</a>`;
+                    if (val) td.innerHTML = `<a href="${val}" target="_blank">${val}</a>`;
                 } else if (colKey === 'reviewCount') {
                     td.textContent = val.replace(/[()]/g, '');
                 } else {
@@ -117,9 +116,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 html += '<tr>';
                 const cols = Array.from(tr.querySelectorAll('td'));
                 cols.forEach(td => {
-                    // Use innerHTML so anchor tags are preserved
-                    const cellHtml = td.innerHTML || '';
-                    html += '<td>' + cellHtml + '</td>';
+                    // Use innerText to get the plain text (URLs) and remove anchor tags for the sheet
+                    const cellText = td.innerText || '';
+                    html += '<td>' + cellText + '</td>';
                 });
                 html += '</tr>';
             });

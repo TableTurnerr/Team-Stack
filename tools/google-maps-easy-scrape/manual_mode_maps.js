@@ -38,15 +38,22 @@
                 }
             }
         } else if (request.type === 'GET_CURRENT_WEBSITE') {
-            const item = scrapeCurrentPlace();
-            let url = '';
-            if (item.companyUrl) {
-                url = item.companyUrl;
-            } else {
-                const query = `${item.title} ${item.city} website`;
-                url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+            try {
+                const item = scrapeCurrentPlace();
+                let url = '';
+                if (item.companyUrl) {
+                    url = item.companyUrl;
+                } else {
+                    const query = `${item.title || ''} ${item.city || ''} website`.trim();
+                    if (query) {
+                        url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                    }
+                }
+                sendResponse({ url: url });
+            } catch (e) {
+                console.error('Error handling GET_CURRENT_WEBSITE:', e);
+                sendResponse({ url: '', error: e.toString() });
             }
-            sendResponse({ url: url });
         } else if (request.type === 'TOGGLE_OVERLAY') {
             // Toggle overlay visibility
             const overlay = document.getElementById('gmes-manual-overlay');
@@ -151,73 +158,128 @@
             closedStatus: ''
         };
 
-        // Title
-        const titleEl = document.querySelector('h1.DUwDvf');
-        if (titleEl) item.title = titleEl.textContent.trim();
+        // 1. Title Extraction
+        // Try multiple selectors for the main heading
+        const titleSelectors = ['h1.DUwDvf', '.fontHeadlineLarge', 'h1', '[role="main"] [aria-label]'];
+        let titleEl = null;
+        for (const sel of titleSelectors) {
+            // Scope to the main pane if possible to avoid finding hidden h1s
+            const mainPane = document.querySelector('[role="main"]') || document;
+            titleEl = mainPane.querySelector(sel);
+            if (titleEl && titleEl.textContent.trim()) break;
+        }
+        
+        if (titleEl) {
+            item.title = titleEl.textContent.trim();
+        } 
+        
+        // Fallback: document.title usually is "Place Name - Google Maps"
+        if (!item.title) {
+            const docTitle = document.title || '';
+            const split = docTitle.split(' - Google Maps');
+            if (split.length > 0 && split[0].trim()) {
+                item.title = split[0].trim();
+            }
+        }
 
-        // Rating and Review count
-        const ratingReviewEl = document.querySelector('div.F7nice');
+        // 2. Container Context (Main Pane)
+        const container = document.querySelector('[role="main"]') || document.body;
+
+        // 3. Rating and Reviews
+        const ratingReviewEl = container.querySelector('div.F7nice');
         if (ratingReviewEl) {
             const text = ratingReviewEl.textContent.trim();
             const ratingMatch = text.match(/^(\d\.\d)/);
-            if (ratingMatch) {
-                item.rating = ratingMatch[1];
-            }
+            if (ratingMatch) item.rating = ratingMatch[1];
+            
             const reviewMatch = text.match(/\(([\d,]+)\)/);
-            if (reviewMatch) {
-                item.reviewCount = `(${reviewMatch[1]})`;
-            }
+            if (reviewMatch) item.reviewCount = `(${reviewMatch[1]})`;
         }
 
-        // Phone - look for tel: link or data attribute
-        const phoneBtn = document.querySelector('button[aria-label^="Phone:"]');
+        // 4. Phone
+        const phoneBtn = container.querySelector('button[aria-label^="Phone:"]');
         if (phoneBtn) {
             const phoneLabel = phoneBtn.getAttribute('aria-label');
             const phoneMatch = phoneLabel.match(/Phone: (.*)/);
-            if (phoneMatch && phoneMatch[1]) {
-                item.phone = phoneMatch[1].trim();
-            }
+            if (phoneMatch && phoneMatch[1]) item.phone = phoneMatch[1].trim();
         }
 
-        // Address
-        const addressBtn = document.querySelector('[data-item-id="address"]');
+        // 5. Address
+        const addressBtn = container.querySelector('[data-item-id="address"]');
         if (addressBtn) item.address = addressBtn.textContent.trim();
 
-        // Website
-        const websiteLink = document.querySelector('a[data-item-id="authority"]');
-        if (websiteLink) {
+        // 6. Website Extraction (Robust)
+        // Priority 1: The standard "authority" button
+        const websiteLink = container.querySelector('a[data-item-id="authority"]');
+        if (websiteLink && websiteLink.href) {
             item.companyUrl = websiteLink.href;
-        } else {
-            // Fallback: Try finding a link with "Website" in aria-label or text
-            const allLinks = Array.from(document.querySelectorAll('a[href]'));
-            const websiteBtn = allLinks.find(a => 
-                (a.ariaLabel && a.ariaLabel.includes("Website")) || 
-                (a.textContent && a.textContent.includes("Website")) ||
-                (a.dataset.tooltip && a.dataset.tooltip.includes("Open website"))
-            );
+        } 
+        
+        // Priority 2: Look for links explicitly labeled "Website"
+        if (!item.companyUrl) {
+            const allLinks = Array.from(container.querySelectorAll('a[href]'));
+            const websiteBtn = allLinks.find(a => {
+                const ariaLabel = (a.getAttribute('aria-label') || '').toLowerCase();
+                const tooltip = (a.getAttribute('data-tooltip') || '').toLowerCase();
+                const text = (a.textContent || '').toLowerCase();
+                
+                return ariaLabel.includes("website") || 
+                       tooltip.includes("open website") ||
+                       text.includes("website");
+            });
             if (websiteBtn) item.companyUrl = websiteBtn.href;
         }
 
-        // Industry/Category
-        const categoryBtn = document.querySelector('button.DkEaL');
+        // Priority 3: Scavenge for any external link in the main pane
+        // (excluding Google Maps internal links, login, help, etc.)
+        if (!item.companyUrl) {
+            const allLinks = Array.from(container.querySelectorAll('a[href^="http"]'));
+            const externalLink = allLinks.find(a => {
+                const href = a.href;
+                // Exclude common Google patterns
+                if (href.includes('google.com/maps')) return false;
+                if (href.includes('google.com/search')) return false;
+                if (href.includes('accounts.google.com')) return false;
+                if (href.includes('support.google.com')) return false;
+                if (href.includes('policies.google.com')) return false;
+                // It's likely the business website
+                return true;
+            });
+            if (externalLink) item.companyUrl = externalLink.href;
+        }
+
+        // 7. Industry/Category
+        const categoryBtn = container.querySelector('button.DkEaL');
         if (categoryBtn) {
             const raw = categoryBtn.textContent.trim();
-            // Separate letters from currency symbols
             item.industry = raw.replace(/[^a-zA-Z\s]/g, '').trim();
             item.expensiveness = raw.replace(/[a-zA-Z\s]/g, '').trim();
         }
 
-        // City - extract from address or page title
+        // 8. City
         const pageTitle = document.title;
-        const cityMatch = pageTitle.match(/,\s*([^,]+)\s*-\s*Google Maps/);
-        if (cityMatch) item.city = cityMatch[1].trim();
-
-        // Instagram search URL
-        if (item.title && item.city) {
-            item.instaSearch = 'https://www.google.com/search?q=' +
-                encodeURIComponent(item.title + ' ' + item.city + ' Instagram');
+        // Try to find city in title "Business Name, City, State - Google Maps"
+        // This is heuristic and might not always work, but it's a fallback
+        const cityMatch = pageTitle.match(/,\s*([^,]+)(?:,[^,]+)?\s*-\s*Google Maps/);
+        if (cityMatch) {
+            item.city = cityMatch[1].trim();
+        } else if (item.address) {
+            // Try to extract from address: "123 Main St, City, ST 12345"
+            const parts = item.address.split(',');
+            if (parts.length >= 2) {
+                // Heuristic: City is usually the second to last part or part before zip
+                // Simple assumption: "Street, City, State Zip" -> take second part
+                item.city = parts[1].trim(); 
+            }
         }
 
+        // 9. Instagram Search URL
+        if (item.title) {
+            const query = `${item.title} ${item.city || ''} Instagram`.trim();
+            item.instaSearch = 'https://www.google.com/search?q=' + encodeURIComponent(query);
+        }
+        
+        console.log('GMES: Scraped item:', item);
         return item;
     }
 
@@ -295,6 +357,7 @@
         }
         #gmes-manual-overlay .field {
           margin-bottom: 10px;
+          position: relative; /* For suggestions positioning */
         }
         #gmes-manual-overlay .field-label {
           font-weight: 600;
@@ -340,6 +403,35 @@
           padding: 8px;
           font-weight: 600;
         }
+        /* Suggestions Box Styles */
+        #gmes-manual-overlay .suggestions-box {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 150px;
+            overflow-y: auto;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 10001;
+        }
+        #gmes-manual-overlay .suggestion-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            color: #333;
+        }
+        #gmes-manual-overlay .suggestion-item:last-child {
+            border-bottom: none;
+        }
+        #gmes-manual-overlay .suggestion-item:hover {
+            background-color: #f5f5f5;
+            color: #4285f4;
+        }
       </style>
       <div class="header">
         <span>📍 Quick Add</span>
@@ -375,7 +467,8 @@
         </div>
         <div class="field">
           <div class="field-label">Note <span style="color: red;">*</span></div>
-          <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)"></textarea>
+          <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)" autocomplete="off"></textarea>
+          <div id="gmes-suggestions-box" class="suggestions-box"></div>
         </div>
         <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Alt+Shift+S)</span></button>
         <div class="shortcuts-info">
@@ -437,6 +530,69 @@
         `;
         document.head.appendChild(style);
 
+        // Setup Auto-complete for Note Input
+        const noteInput = document.getElementById('gmes-note-input');
+        const suggestionsBox = document.getElementById('gmes-suggestions-box');
+        let recentNotes = [];
+        
+        // Load recent notes
+        chrome.storage.local.get(['gmes_recent_notes'], (data) => {
+            recentNotes = Array.isArray(data.gmes_recent_notes) ? data.gmes_recent_notes : [];
+        });
+
+        function saveNoteToHistory(newNote) {
+            if (!newNote) return;
+            // Remove if exists to move to top
+            recentNotes = recentNotes.filter(n => n !== newNote);
+            recentNotes.unshift(newNote);
+            if (recentNotes.length > 20) recentNotes.pop(); // Keep last 20
+            chrome.storage.local.set({ gmes_recent_notes: recentNotes });
+        }
+
+        function showSuggestions(filterText) {
+            // If empty, show recent 5. If text, filter.
+            let matches = [];
+            if (!filterText) {
+                matches = recentNotes.slice(0, 5);
+            } else {
+                const lower = filterText.toLowerCase();
+                matches = recentNotes.filter(note => note.toLowerCase().includes(lower)).slice(0, 5);
+            }
+
+            if (matches.length === 0) {
+                suggestionsBox.style.display = 'none';
+                return;
+            }
+
+            suggestionsBox.innerHTML = '';
+            matches.forEach(note => {
+                const div = document.createElement('div');
+                div.className = 'suggestion-item';
+                div.textContent = note;
+                div.onmousedown = function(e) { // mousedown happens before blur
+                    e.preventDefault(); // keep focus logic simple
+                    noteInput.value = note;
+                    suggestionsBox.style.display = 'none';
+                    noteInput.focus();
+                };
+                suggestionsBox.appendChild(div);
+            });
+            suggestionsBox.style.display = 'block';
+        }
+
+        noteInput.addEventListener('focus', () => {
+             showSuggestions(noteInput.value.trim());
+        });
+        
+        noteInput.addEventListener('input', () => {
+             showSuggestions(noteInput.value.trim());
+        });
+        
+        noteInput.addEventListener('blur', () => {
+            // Delay hiding to allow click event to process
+            setTimeout(() => { suggestionsBox.style.display = 'none'; }, 200);
+        });
+
         // Refresh button handler
         document.getElementById('gmes-refresh-btn').addEventListener('click', () => {
             createOverlay();
@@ -468,6 +624,9 @@
             }
 
             noteInput.classList.remove('error');
+            
+            // Save note to history
+            saveNoteToHistory(noteValue);
 
             // Get fresh data at the moment of adding (ensures current URL)
             const freshItem = scrapeCurrentPlace();

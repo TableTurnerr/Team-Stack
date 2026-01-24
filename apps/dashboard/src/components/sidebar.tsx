@@ -20,6 +20,7 @@ import {
   Mic,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 

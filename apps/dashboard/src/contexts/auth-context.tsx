@@ -41,9 +41,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Initialize auth state from PocketBase's authStore
     useEffect(() => {
-        const initAuth = () => {
+        const initAuth = async () => {
             if (pb.authStore.isValid && pb.authStore.model) {
-                setUser(mapUser(pb.authStore.model));
+                try {
+                    // Refresh user data from server to get latest role and status
+                    // This ensures admin features persist across new tabs/page refreshes
+                    const freshUser = await pb.collection('users').getOne(pb.authStore.model.id);
+                    setUser(mapUser(freshUser));
+                } catch (error) {
+                    // If refresh fails (e.g., token expired), clear auth state
+                    console.error('Failed to refresh user data:', error);
+                    pb.authStore.clear();
+                    setUser(null);
+                }
             } else {
                 setUser(null);
             }
@@ -53,9 +63,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         initAuth();
 
         // Listen for auth state changes
-        const unsubscribe = pb.authStore.onChange(() => {
+        const unsubscribe = pb.authStore.onChange(async () => {
             if (pb.authStore.isValid && pb.authStore.model) {
-                setUser(mapUser(pb.authStore.model));
+                try {
+                    // Refresh user data on auth changes to ensure role is current
+                    const freshUser = await pb.collection('users').getOne(pb.authStore.model.id);
+                    setUser(mapUser(freshUser));
+                } catch (error) {
+                    console.error('Failed to refresh user on auth change:', error);
+                    setUser(mapUser(pb.authStore.model));
+                }
             } else {
                 setUser(null);
             }

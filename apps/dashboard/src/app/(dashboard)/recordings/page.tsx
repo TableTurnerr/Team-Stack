@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import {
   Mic,
   Upload,
@@ -12,7 +13,8 @@ import {
   X,
   FileAudio,
   Pencil,
-  Filter
+  Filter,
+  History
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { formatDate, formatDateTime, formatDuration, cn } from '@/lib/utils';

@@ -213,7 +213,7 @@ export default function NotesPage() {
 
         <button
           onClick={() => { setCurrentNote({}); setIsEditing(true); }}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-[var(--background)] border border-[var(--card-border)] hover:bg-gray-100 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors"
         >
           <Plus size={16} />
           New Note
@@ -244,7 +244,7 @@ export default function NotesPage() {
           <input
             type="text"
             placeholder="Search notes..."
-            className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+            className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />

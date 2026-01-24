@@ -288,6 +288,39 @@ export default function RecordingsPage() {
 
   const hasActiveFilters = !!searchTerm;
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // ... existing fetchRecordings ...
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === recordings.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(recordings.map(r => r.id)));
+    }
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedIds.size} recordings?`)) return;
+    
+    try {
+      await Promise.all(Array.from(selectedIds).map(id => pb.collection('recordings').delete(id)));
+      setRecordings(prev => prev.filter(r => !selectedIds.has(r.id)));
+      setSelectedIds(new Set());
+    } catch (err: any) {
+      alert(`Bulk delete failed: ${err.message}`);
+    }
+  };
+
   if (loading && page === 1 || authLoading) {
     return <TableSkeleton />;
   }
@@ -302,14 +335,24 @@ export default function RecordingsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isAdmin && (
+          {selectedIds.size > 0 && isAdmin ? (
             <button
-              onClick={() => setIsUploadOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleBulkDelete}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error)] text-white hover:opacity-90 transition-colors"
             >
-              <Upload size={16} />
-              Upload Recording
+              <Trash2 size={16} />
+              Delete ({selectedIds.size})
             </button>
+          ) : (
+            isAdmin && (
+              <button
+                onClick={() => setIsUploadOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Upload size={16} />
+                Upload Recording
+              </button>
+            )
           )}
 
           <button
@@ -317,14 +360,14 @@ export default function RecordingsPage() {
             className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
               showFilters || hasActiveFilters
-                ? "bg-[var(--primary)] text-white border-[var(--primary)]"
+                ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
                 : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
             )}
           >
             <Filter size={16} />
             Filters
             {hasActiveFilters && (
-              <span className="ml-1 w-5 h-5 rounded-full bg-white/20 text-xs flex items-center justify-center">
+              <span className="ml-1 w-5 h-5 rounded-full bg-[var(--background)]/20 text-xs flex items-center justify-center">
                 1
               </span>
             )}
@@ -544,6 +587,16 @@ export default function RecordingsPage() {
             <table className="w-full">
               <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                 <tr>
+                  {isAdmin && (
+                    <th className="py-3 px-4 w-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.size === recordings.length && recordings.length > 0}
+                        onChange={toggleSelectAll}
+                        className="rounded border-[var(--card-border)] text-[var(--foreground)] focus:ring-[var(--foreground)]"
+                      />
+                    </th>
+                  )}
                   {isColumnVisible('recording_date') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Date</th>}
                   {isColumnVisible('created') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Uploaded</th>}
                   {isColumnVisible('phone_number') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
@@ -554,8 +607,29 @@ export default function RecordingsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--card-border)]">
-                {recordings.map((recording) => (
-                  <tr key={recording.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
+                {recordings.map((recording, i) => (
+                  <tr key={recording.id} className="hover:bg-[var(--sidebar-bg)] transition-colors group">
+                    {isAdmin && (
+                      <td className="py-3 px-4">
+                        <div className="relative w-5 h-5 flex items-center justify-center">
+                          <span className={cn(
+                            "text-xs text-[var(--muted)] transition-opacity",
+                            (selectedIds.has(recording.id) || showFilters) ? "opacity-0" : "group-hover:opacity-0"
+                          )}>
+                            {(page - 1) * perPage + i + 1}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(recording.id)}
+                            onChange={() => toggleSelectOne(recording.id)}
+                            className={cn(
+                              "absolute inset-0 opacity-0 transition-opacity",
+                              (selectedIds.has(recording.id) || showFilters) ? "opacity-100" : "group-hover:opacity-100"
+                            )}
+                          />
+                        </div>
+                      </td>
+                    )}
                     {isColumnVisible('recording_date') && (
                       <td className="py-3 px-4 whitespace-nowrap text-sm">
                         {recording.recording_date ? formatDateTime(recording.recording_date) : 'N/A'}

@@ -20,6 +20,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import { BulkUploadModal } from '@/components/bulk-upload-modal';
 
 interface Recording {
   id: string;
@@ -30,14 +31,24 @@ interface Recording {
   file: string;
   duration?: number;
   uploader?: string;
+  call_log?: string;
+  company?: string;
+  phone_number_record?: string;
   collectionId: string;
   collectionName: string;
   expand?: {
     uploader?: {
       name?: string;
       email?: string;
-    }
-  }
+    };
+    company?: {
+      company_name: string;
+    };
+    phone_number_record?: {
+      phone_number: string;
+      label?: string;
+    };
+  };
 }
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
@@ -77,16 +88,131 @@ export default function RecordingsPage() {
   const [showFilters, setShowFilters] = useState(false);
 
   // Upload State
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [uploadPhone, setUploadPhone] = useState('');
-  const [uploadNote, setUploadNote] = useState('');
-  const [uploadDate, setUploadDate] = useState('');
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Edit Note State
+  const handleBulkUpload = async (pendingFiles: any[]) => {
+    if (!user) return;
+    setIsUploading(true);
+
+    try {
+      for (const f of pendingFiles) {
+        const formData = new FormData();
+        formData.append('file', f.file);
+        formData.append('uploader', user.id);
+        
+        // Auto-match logic
+        if (f.matchedPhoneNumber) {
+          try {
+            const phoneRecord = await pb.collection('phone_numbers').getFirstListItem(`phone_number ~ "${f.matchedPhoneNumber}"`);
+            if (phoneRecord) {
+              formData.append('phone_number_record', phoneRecord.id);
+              formData.append('company', phoneRecord.company);
+              formData.append('phone_number', phoneRecord.phone_number);
+            }
+          } catch (e) {
+            // No match found, use raw phone from filename
+            formData.append('phone_number', f.matchedPhoneNumber);
+          }
+        }
+
+        const duration = await getAudioDuration(f.file);
+        if (duration) formData.append('duration', Math.round(duration).toString());
+        
+        // Extract date from filename if possible
+        const meta = extractMetadata(f.file.name);
+        if (meta) {
+          formData.append('recording_date', meta.isoDate);
+          formData.append('note', `Call on ${meta.displayDate}`);
+        }
+
+        await pb.collection('recordings').create(formData);
+      }
+      
+      fetchRecordings();
+    } catch (err) {
+      console.error('Bulk upload failed:', err);
+      alert('Some files failed to upload. Check console for details.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const extractMetadata = (filename: string) => {
+    const pattern = /^recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})_(.+)$/;
+    const match = filename.replace(/\.[^/.]+$/, "").match(pattern);
+    if (match) {
+      const [, date, time, phone] = match;
+      const [day, month, year] = date.split('-');
+      const formattedTime = time.replace(/-/g, ':');
+      const isoDate = `${year}-${month}-${day}T${formattedTime}+05:00`;
+      return { phone, isoDate, displayDate: `${date} at ${formattedTime}` };
+    }
+    return null;
+  };
+
+  const getAudioDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const audio = new Audio();
+      audio.src = URL.createObjectURL(file);
+      audio.onloadedmetadata = () => {
+        URL.revokeObjectURL(audio.src);
+        resolve(audio.duration);
+      };
+      audio.onerror = () => {
+        resolve(0);
+      };
+    });
+  };
+
+  const handleBulkUpload = async (pendingFiles: any[]) => {
+// ... existing handleBulkUpload logic ...
+    if (!user) return;
+    setIsUploading(true);
+
+    try {
+      for (const f of pendingFiles) {
+        const formData = new FormData();
+        formData.append('file', f.file);
+        formData.append('uploader', user.id);
+        
+        // Auto-match logic
+        if (f.matchedPhoneNumber) {
+          try {
+            const phoneRecord = await pb.collection('phone_numbers').getFirstListItem(`phone_number ~ "${f.matchedPhoneNumber}"`);
+            if (phoneRecord) {
+              formData.append('phone_number_record', phoneRecord.id);
+              formData.append('company', phoneRecord.company);
+              formData.append('phone_number', phoneRecord.phone_number);
+            }
+          } catch (e) {
+            // No match found, use raw phone from filename
+            formData.append('phone_number', f.matchedPhoneNumber);
+          }
+        }
+
+        const duration = await getAudioDuration(f.file);
+        if (duration) formData.append('duration', Math.round(duration).toString());
+        
+        // Extract date from filename if possible
+        const meta = extractMetadata(f.file.name);
+        if (meta) {
+          formData.append('recording_date', meta.isoDate);
+          formData.append('note', `Call on ${meta.displayDate}`);
+        }
+
+        await pb.collection('recordings').create(formData);
+      }
+      
+      fetchRecordings();
+    } catch (err) {
+      console.error('Bulk upload failed:', err);
+      alert('Some files failed to upload. Check console for details.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNote, setEditNote] = useState('');
@@ -101,7 +227,6 @@ export default function RecordingsPage() {
   const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('recordings', RECORDING_COLUMNS);
 
   const fetchRecordings = useCallback(async () => {
-    // ... (keep existing fetchRecordings logic)
     if (!isAuthenticated) return;
 
     try {
@@ -114,48 +239,16 @@ export default function RecordingsPage() {
       }
 
       const queryOptions = {
-        expand: 'uploader',
+        expand: 'uploader,company,phone_number_record',
         filter: filters.length > 0 ? filters.join(' && ') : undefined,
       };
 
-      try {
-        // Try sorting by recording_date first
-        const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
-          ...queryOptions,
-          sort: '-recording_date,-created',
-        });
-        setRecordings(result.items);
-        setTotalPages(result.totalPages);
-      } catch (sortErr: any) {
-        // Fallback 1: Try sorting by created (if recording_date missing)
-        try {
-          const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
-            ...queryOptions,
-            sort: '-created',
-          });
-          setRecordings(result.items);
-          setTotalPages(result.totalPages);
-        } catch (fallbackErr: any) {
-           console.warn('Fallback 1 failed', fallbackErr);
-           // Fallback 2: Try without filters (if filters causing 400)
-           try {
-             const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
-               expand: 'uploader',
-               sort: '-created',
-             });
-             setRecordings(result.items);
-             setTotalPages(result.totalPages);
-           } catch (finalErr: any) {
-             // Ultimate fallback: raw list without expand/filters
-             console.warn('Ultimate fallback', finalErr);
-             const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
-               sort: '-created',
-             });
-             setRecordings(result.items);
-             setTotalPages(result.totalPages);
-           }
-        }
-      }
+      const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
+        ...queryOptions,
+        sort: '-recording_date,-created',
+      });
+      setRecordings(result.items);
+      setTotalPages(result.totalPages);
     } catch (err: any) {
       if (err.status !== 0) {
         console.error('Failed to fetch recordings:', err);
@@ -165,189 +258,6 @@ export default function RecordingsPage() {
       setLoading(false);
     }
   }, [page, isAuthenticated, searchTerm]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchRecordings();
-    }
-  }, [isAuthenticated, fetchRecordings]);
-
-  const extractMetadata = (filename: string) => {
-    const pattern = /^recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})_(.+)$/;
-    const match = filename.replace(/\.[^/.]+$/, "").match(pattern);
-    if (match) {
-      const [, date, time, phone] = match;
-      const [day, month, year] = date.split('-');
-      const formattedTime = time.replace(/-/g, ':');
-      const isoDate = `${year}-${month}-${day} ${formattedTime}+05:00`;
-      return { phone, isoDate, displayDate: `${date} at ${formattedTime}` };
-    }
-    return null;
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files);
-      setUploadFiles(files);
-
-      if (files.length === 1) {
-        // If single file, extract and populate inputs as before
-        const meta = extractMetadata(files[0].name);
-        if (meta) {
-          setUploadPhone(meta.phone);
-          setUploadDate(meta.isoDate);
-          if (!uploadNote) {
-            setUploadNote(`Call on ${meta.displayDate}`);
-          }
-        }
-      } else {
-        // If multiple, clear inputs to avoid confusion (they become global overrides)
-        setUploadPhone('');
-        setUploadNote('');
-        setUploadDate('');
-      }
-    }
-  };
-
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (uploadFiles.length === 0 || !user) return;
-
-    // Check sizes
-    for (const file of uploadFiles) {
-        if (file.size > 104857600) { // 100MB
-            alert(`File ${file.name} is too large. Maximum size is 100MB.`);
-            return;
-        }
-    }
-
-    try {
-      setIsUploading(true);
-      setUploadProgress(0);
-      const skipped: string[] = [];
-      const results: any[] = [];
-      let processedCount = 0;
-
-      const processFile = async (file: File) => {
-        const meta = extractMetadata(file.name);
-        const phone = uploadPhone || meta?.phone || '';
-        const date = uploadDate || meta?.isoDate || '';
-
-        // Duplicate Check: Exact match on phone AND timestamp
-        if (phone && date) {
-          try {
-            const existing = await pb.collection('recordings').getFirstListItem(`phone_number="${phone}" && recording_date="${date}"`);
-            if (existing) {
-              skipped.push(`Recording for ${phone} at ${meta?.displayDate || date}`);
-              return null; // Skip this file
-            }
-          } catch (e: any) {
-            if (e.status !== 404) throw e;
-          }
-        }
-
-        const formData = new FormData();
-        const duration = await getAudioDuration(file);
-        
-        formData.append('file', file);
-        formData.append('uploader', user.id);
-        formData.append('phone_number', phone);
-        if (date) formData.append('recording_date', date);
-        if (duration) formData.append('duration', Math.round(duration).toString());
-
-        // Note: Manual override OR generated
-        let noteToSend = uploadNote;
-        if (!noteToSend && meta) {
-            noteToSend = `Call on ${meta.displayDate}`;
-        }
-        formData.append('note', noteToSend);
-
-        return pb.collection('recordings').create(formData);
-      };
-      
-      // Process in batches of 2 to avoid rate limits
-      const BATCH_SIZE = 2;
-      for (let i = 0; i < uploadFiles.length; i += BATCH_SIZE) {
-        const batch = uploadFiles.slice(i, i + BATCH_SIZE);
-        const batchResults = await Promise.all(batch.map(file => processFile(file)));
-        results.push(...batchResults);
-        
-        processedCount += batch.length;
-        setUploadProgress(Math.round((processedCount / uploadFiles.length) * 100));
-      }
-
-      const uploadedCount = results.filter(r => r !== null).length;
-
-      if (skipped.length > 0) {
-        alert(`Upload complete.\n\nUploaded: ${uploadedCount}\nSkipped ${skipped.length} duplicates:\n${skipped.join('\n')}`);
-      }
-      
-      // Reset form
-      setUploadFiles([]);
-      setUploadPhone('');
-      setUploadNote('');
-      setUploadDate('');
-      setIsUploadOpen(false);
-      setUploadProgress(0);
-      
-      // Refresh list
-      fetchRecordings();
-    } catch (err: any) {
-      console.error('Upload failed:', err);
-      const dataMessage = err?.data 
-        ? Object.entries(err.data)
-            .map(([key, val]: [string, any]) => `${key}: ${val.message}`)
-            .join('\n')
-        : '';
-      
-      const fullMessage = [
-        `Status: ${err.status}`,
-        err.message,
-        dataMessage,
-        err.response ? JSON.stringify(err.response, null, 2) : ''
-      ].filter(Boolean).join('\n\n');
-
-      alert(`Upload failed:\n${fullMessage}`);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this recording?')) return;
-    
-    try {
-      await pb.collection('recordings').delete(id);
-      setRecordings(prev => prev.filter(r => r.id !== id));
-    } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
-    }
-  };
-
-  const openEdit = (recording: Recording) => {
-    setEditingId(recording.id);
-    setEditNote(recording.note || '');
-    setIsEditOpen(true);
-  };
-
-  const handleUpdateNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingId) return;
-
-    try {
-      setIsUpdating(true);
-      await pb.collection('recordings').update(editingId, { note: editNote });
-      
-      setRecordings(prev => prev.map(r => r.id === editingId ? { ...r, note: editNote } : r));
-      setIsEditOpen(false);
-      setEditingId(null);
-    } catch (err: any) {
-      console.error('Update failed:', err);
-      alert(`Update failed: ${err.message}`);
-    } finally {
-      setIsUpdating(false);
-    }
-  };
 
   const getRecordingDisplayDate = (recording: Recording) => {
     const pattern = /recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})/;
@@ -442,11 +352,11 @@ export default function RecordingsPage() {
           ) : (
             isAdmin && (
               <button
-                onClick={() => setIsUploadOpen(true)}
+                onClick={() => setIsBulkUploadOpen(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Upload size={16} />
-                Upload Recording
+                Bulk Upload
               </button>
             )
           )}
@@ -467,116 +377,12 @@ export default function RecordingsPage() {
         </div>
       </div>
 
-      {/* Upload Modal */}
-      {isUploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl w-full max-w-md shadow-xl">
-            <div className="flex items-center justify-between p-4 border-b border-[var(--card-border)]">
-              <h2 className="font-semibold text-lg">Upload Recording</h2>
-              <button 
-                onClick={() => setIsUploadOpen(false)}
-                className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            
-            <form onSubmit={handleUpload} className="p-4 space-y-4">
-              {/* File Input */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Audio Files *</label>
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-[var(--card-border)] rounded-lg p-6 text-center cursor-pointer hover:border-[var(--foreground)] hover:bg-[var(--sidebar-bg)] transition-colors"
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="audio/*"
-                    multiple
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                  {uploadFiles.length > 0 ? (
-                    <div className="flex flex-col items-center gap-2 text-[var(--success)]">
-                      <FileAudio size={32} />
-                      <span className="text-sm font-medium">
-                        {uploadFiles.length === 1 ? uploadFiles[0].name : `${uploadFiles.length} files selected`}
-                      </span>
-                      <span className="text-xs text-[var(--muted)]">
-                        {uploadFiles.length === 1 
-                          ? (uploadFiles[0].size / 1024 / 1024).toFixed(2) + ' MB'
-                          : `Total: ${(uploadFiles.reduce((acc, f) => acc + f.size, 0) / 1024 / 1024).toFixed(2)} MB`
-                        }
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 text-[var(--muted)]">
-                      <Upload size={32} />
-                      <span className="text-sm">Click to select audio file(s)</span>
-                      <span className="text-xs">MP3, WAV, M4A supported</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Phone Number */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Phone Number (Optional)</label>
-                <input
-                  type="text"
-                  value={uploadPhone}
-                  onChange={(e) => setUploadPhone(e.target.value)}
-                  placeholder={uploadFiles.length > 1 ? "Applies to all files (leave empty to extract from filename)" : "+1 (555) 000-0000"}
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
-                />
-              </div>
-
-              {/* Note */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Note (Optional)</label>
-                <textarea
-                  value={uploadNote}
-                  onChange={(e) => setUploadNote(e.target.value)}
-                  placeholder={uploadFiles.length > 1 ? "Applies to all files (leave empty to generate)" : "Any details about this call..."}
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
-                />
-              </div>
-
-              {/* Progress Bar */}
-              {isUploading && (
-                <div className="w-full bg-[var(--sidebar-bg)] rounded-full h-2.5 mb-2 border border-[var(--card-border)] overflow-hidden">
-                  <div 
-                    className="bg-[var(--foreground)] h-2.5 rounded-full transition-all duration-300" 
-                    style={{ width: `${uploadProgress}%` }}
-                  ></div>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsUploadOpen(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
-                  disabled={isUploading}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploadFiles.length === 0 || isUploading}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isUploading && <RefreshCw size={14} className="animate-spin" />}
-                  {isUploading ? `Uploading... ${uploadProgress}%` : 'Upload'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Bulk Upload Modal */}
+      <BulkUploadModal
+        isOpen={isBulkUploadOpen}
+        onClose={() => setIsBulkUploadOpen(false)}
+        onUpload={handleBulkUpload}
+      />
 
       {/* Edit Note Modal */}
       {isEditOpen && (
@@ -711,20 +517,52 @@ export default function RecordingsPage() {
                     )}
                     {isColumnVisible('phone_number') && (
                       <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
-                        {recording.phone_number || 'N/A'}
+                        {recording.expand?.phone_number_record ? (
+                          <div className="flex flex-col">
+                            <span className="font-bold text-[var(--foreground)]">{recording.expand.phone_number_record.phone_number}</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {recording.expand.phone_number_record.label && (
+                                <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
+                                  {recording.expand.phone_number_record.label}
+                                </span>
+                              )}
+                              {recording.expand.company && (
+                                <Link 
+                                  href={`/companies/${recording.company}`}
+                                  className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
+                                >
+                                  {recording.expand.company.company_name}
+                                </Link>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-[var(--muted)]">{recording.phone_number || 'N/A'}</span>
+                        )}
                       </td>
                     )}
                     {isColumnVisible('note') && (
                       <td className="py-3 px-4 text-sm max-w-xs group relative">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate" title={recording.note}>{recording.note || 'N/A'}</span>
-                          <button 
-                            onClick={() => openEdit(recording)}
-                            className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
-                            title="Edit note"
-                          >
-                            <Pencil size={14} />
-                          </button>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate" title={recording.note}>{recording.note || 'N/A'}</span>
+                            <button 
+                              onClick={() => openEdit(recording)}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
+                              title="Edit note"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          </div>
+                          {recording.call_log && (
+                            <Link 
+                              href={`/cold-calls/${recording.call_log}`}
+                              className="text-[10px] text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
+                            >
+                              <History size={10} />
+                              View Transcript
+                            </Link>
+                          )}
                         </div>
                       </td>
                     )}

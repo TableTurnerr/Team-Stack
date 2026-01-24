@@ -1,12 +1,10 @@
 # CRM-Tableturnerr
 
-A unified, full-stack CRM and Outreach platform designed to streamline sales operations by integrating cold call monitoring, automated transcription, and Instagram outreach management into a single cohesive system.
+A unified, full-stack CRM and Outreach platform designed to streamline sales operations by integrating cold call monitoring, automated transcription, multi-channel outreach (Instagram, Email, Phone), and smart follow-up management.
 
 This monorepo contains the complete ecosystem including a modern Next.js dashboard, a shared PocketBase backend, and specialized Python tools for data capture and processing.
 
 ## 🏗️ Architecture
-
-The system follows a modular architecture:
 
 ```
 CRM-Tableturnerr/
@@ -18,72 +16,117 @@ CRM-Tableturnerr/
 └── tools/
     ├── audio-recorder/        # 🎙️ Desktop audio recording tool (PyQt) with hotkey support
     ├── transcriber/           # 🧠 AI Transcription service (Gemini API) for cold calls
-    └── database/              # 🗄️ Database seeding and migration scripts
+    ├── google-maps-easy-scrape/ # 🗺️ Chrome extension for scraping restaurant leads
+    └── database/              # 🗄️ Database seeding scripts
 ```
 
 ## 🚀 Key Features
 
-- **Unified Dashboard**: View cold calls, companies, leads, and team performance in one place.
-- **Cold Call Intelligence**: 
-    - Desktop audio recorder captures calls properly.
-    - AI Transcriber (Gemini) converts audio to text, extracting summary, objections, and sentiment.
-- **Instagram Outreach**: 
-    - Automated agent manages DM workflows.
-    - Tracks actor status and outreach performance.
-- **Team Management**: Role-based access and activity tracking for sales reps.
+### Core CRM
+- **Company Management**: Track restaurants/businesses with multiple locations and phone numbers
+- **Phone Number Labels**: Custom labels per number (Main Line, Owner Direct, Branch Name)
+- **Call Logging**: Per-call notes with owner name, receptionist, outcome tracking
+- **Pre-Call Research**: Notes and research organized by company
+
+### Multi-Channel Outreach
+- **Cold Calling**: Record, transcribe, and analyze calls with AI
+- **Instagram DMs**: Automated outreach with status sync
+- **Email**: Track email interactions in unified timeline
+
+### Smart Follow-ups
+- **Timezone-Aware**: Schedule follow-ups in client's timezone, see in your timezone
+- **Auto-Reminders**: Callback outcomes auto-create follow-up tasks
+- **Sidebar Clocks**: Multiple timezone clocks for quick reference
+
+### Data Management
+- **Bulk Upload**: Drag-drop recordings with auto-matching by phone number
+- **Inline Editing**: Edit any field with Ctrl+Z undo and auto-save
+- **Import from Google Sheets**: Bulk CSV import for legacy data
+
+### Integrations
+- **Google Maps Scraper** → Direct PocketBase upload
+- **Audio Recorder** → Auto-sync recordings to dashboard
+- **AI Transcription** → Built into dashboard (no Python needed)
+
+## 📊 Data Model
+
+```mermaid
+erDiagram
+    companies ||--o{ phone_numbers : "has"
+    companies ||--o{ company_notes : "has"
+    companies ||--o{ interactions : "has"
+    phone_numbers ||--o{ call_logs : "called via"
+    call_logs ||--o| recordings : "may have"
+    call_logs ||--o| follow_ups : "schedules"
+```
+
+| Collection | Purpose |
+|------------|---------|
+| `companies` | Restaurant/business entities with status tracking |
+| `phone_numbers` | Per-location phone numbers with labels |
+| `call_logs` | Individual call records with notes and outcomes |
+| `follow_ups` | Scheduled reminders with timezone support |
+| `company_notes` | Pre-call research and general notes |
+| `interactions` | Unified timeline across all channels |
+| `recordings` | Audio files linked to calls |
 
 ## 🛠️ Quick Start
 
-### 1. Prerequisites
+### Prerequisites
 - **Node.js** v18+ (with pnpm)
 - **Python** 3.10+
-- **PocketBase** (v0.22+ recommended)
+- **PocketBase** v0.22+
 
-### 2. Install Dependencies
+### Install & Run
+
 ```bash
-# Install Node.js dependencies
+# Install dependencies
 pnpm install
 
-# Install Python dependencies (in respective tool folders)
-cd tools/database && pip install -r requirements.txt
-```
+# Start PocketBase
+pocketbase serve  # http://localhost:8090
 
-### 3. Backend Setup (PocketBase)
-1. Start PocketBase: `pocketbase serve` (default: http://localhost:8090)
-2. Import schema from `packages/pocketbase-client/pb_schema.json` via the Admin UI.
-3. Seed sample data:
-   ```bash
-   cd tools/database
-   cp .env.example .env # Configure your admin credentials
-   python seed_data.py
-   ```
+# Import schema (Admin UI → Settings → Import Collections)
+# Use: packages/pocketbase-client/pb_schema_exported.json
 
-### 4. Start Dashboard
-```bash
+# Start Dashboard
 cd apps/dashboard
-cp .env.example .env.local # Configure NEXT_PUBLIC_POCKETBASE_URL
-pnpm dev
+cp .env.example .env.local
+pnpm dev  # http://localhost:3000
 ```
-Visit http://localhost:3000 to access the dashboard.
 
 ## 📘 Documentation
 
-- **[Setup Guide](SETUP_GUIDE.md)**: Detailed step-by-step installation, testing, and production deployment guide.
-- **Data Schema**: See `packages/pocketbase-client` for database structure.
+- **[Setup Guide](SETUP_GUIDE.md)**: Detailed installation and deployment
+- **[Upcoming Features](UPCOMING.md)**: Planned enhancements
+- **Data Schema**: `packages/pocketbase-client/pb_schema_exported.json`
 
-## 🧩 Components Detail
+## 🧩 Components
 
 ### Dashboard (`apps/dashboard`)
-A modern, responsive web application built with Next.js App Router. Features include:
-- **Authentication**: Secure login via PocketBase.
-- **Interactive Tables**: filtering, sorting, and inline editing for Leads and Companies.
-- **Visualizations**: Activity charts and performance metrics.
+Next.js 15 web app with:
+- Company detail pages with tabbed interface
+- Inline editing with undo support
+- Bulk recording upload with preview
+- Timezone clocks in sidebar
 
 ### Transcriber (`tools/transcriber`)
-A standalone Python service that watches for new audio files, sends them to Google's Gemini Flash model for analysis, and updates the CRM record with transcripts, summaries, and structured data (objections, outcome).
+Python service using Gemini AI to:
+- Transcribe call recordings
+- Extract owner/receptionist names
+- Identify call outcomes and follow-up needs
 
 ### Audio Recorder (`tools/audio-recorder`)
-A lightweight system tray application that allows sales reps to record calls with a global hotkey, automatically naming and saving files for the Transcriber to pick up.
+PyQt desktop app with:
+- Global hotkey recording (Alt+R)
+- Auto-naming with timestamp and phone number
+- One-click save workflow
+
+### Google Maps Scraper (`tools/google-maps-easy-scrape`)
+Chrome extension for:
+- Scraping restaurant listings from Maps
+- Quick-add overlay on business pages
+- CSV export or direct PocketBase upload
 
 ## 📄 License
 

@@ -6,8 +6,10 @@ This allows the transcriber to use the same client as other Python apps.
 """
 
 import os
+import re
 import sys
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # Add the shared SDK to path
 SDK_PATH = Path(__file__).parent.parent.parent / "packages" / "pocketbase-client" / "src" / "python"
@@ -22,6 +24,10 @@ from pocketbase_client import (
     Company,
     ColdCall,
     CallTranscript,
+    CallLog,
+    PhoneNumber,
+    FollowUp,
+    Interaction,
     EventLog,
 )
 

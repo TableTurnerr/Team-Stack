@@ -23,8 +23,16 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { TimezoneClock } from './timezone-clock';
+
+const DEFAULT_TIMEZONES = [
+  { timezone: 'America/New_York', label: 'EST' },
+  { timezone: 'America/Los_Angeles', label: 'PST' },
+  { timezone: 'UTC', label: 'UTC' },
+];
 
 const navItems = [
+// ... (rest of the imports and navItems)
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
   { href: '/recordings', label: 'Recordings', icon: Mic },
@@ -44,6 +52,24 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const { user, logout } = useAuth();
+  const [timezones, setTimezones] = useState<{ timezone: string; label: string }[]>(DEFAULT_TIMEZONES);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('sidebar_timezones');
+    if (saved) {
+      try {
+        setTimezones(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse saved timezones');
+      }
+    }
+  }, []);
+
+  const removeTimezone = (tz: string) => {
+    const next = timezones.filter(t => t.timezone !== tz);
+    setTimezones(next);
+    localStorage.setItem('sidebar_timezones', JSON.stringify(next));
+  };
 
   useEffect(() => {
     setLoadingPath(null);
@@ -136,6 +162,25 @@ export function Sidebar() {
             })}
           </ul>
         </nav>
+
+        {/* Timezones */}
+        <div className="px-4 py-4 border-t border-[var(--sidebar-border)] space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[10px] font-bold text-[var(--muted)] uppercase tracking-wider">
+              Time Zones
+            </span>
+          </div>
+          <div className="space-y-2">
+            {timezones.map((tz) => (
+              <TimezoneClock
+                key={tz.timezone}
+                timezone={tz.timezone}
+                label={tz.label}
+                onRemove={() => removeTimezone(tz.timezone)}
+              />
+            ))}
+          </div>
+        </div>
 
         {/* Bottom Navigation */}
         <div className="px-3 py-3 border-t border-[var(--sidebar-border)]">

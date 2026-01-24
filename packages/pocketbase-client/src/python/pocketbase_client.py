@@ -128,6 +128,90 @@ class Rule(TypedDict, total=False):
     created: str
 
 
+class PhoneNumber(TypedDict, total=False):
+    id: str
+    company: str  # Relation ID
+    phone_number: str
+    label: Optional[str]
+    location_name: Optional[str]
+    location_address: Optional[str]
+    receptionist_name: Optional[str]
+    last_called: Optional[str]
+    created: str
+    updated: str
+
+
+class CallLog(TypedDict, total=False):
+    id: str
+    company: str  # Relation ID
+    phone_number_record: str  # Relation ID
+    caller: Optional[str]  # Relation ID
+    call_time: str
+    duration: Optional[int]
+    call_outcome: Optional[str]
+    owner_name_found: Optional[str]
+    receptionist_name: Optional[str]
+    post_call_notes: Optional[str]
+    interest_level: Optional[int]
+    status_changed_to: Optional[str]
+    has_recording: bool
+    created: str
+    updated: str
+
+
+class FollowUp(TypedDict, total=False):
+    id: str
+    call_log: Optional[str]  # Relation ID
+    company: str  # Relation ID
+    scheduled_time: str
+    client_timezone: str
+    assigned_to: Optional[str]  # Relation ID
+    notes: Optional[str]
+    status: str  # 'pending' | 'completed' | 'dismissed'
+    completed_at: Optional[str]
+    created: str
+    updated: str
+
+
+class CompanyNote(TypedDict, total=False):
+    id: str
+    company: str  # Relation ID
+    phone_number_record: Optional[str]  # Relation ID
+    note_type: str  # 'pre_call' | 'research' | 'general'
+    content: str
+    created_by: str  # Relation ID
+    created: str
+    updated: str
+
+
+class Interaction(TypedDict, total=False):
+    id: str
+    company: str  # Relation ID
+    channel: str  # 'phone' | 'instagram' | 'email'
+    direction: str  # 'outbound' | 'inbound'
+    timestamp: str
+    user: Optional[str]  # Relation ID
+    summary: Optional[str]
+    call_log: Optional[str]  # Relation ID
+    created: str
+    updated: str
+
+
+class Recording(TypedDict, total=False):
+    id: str
+    phone_number: Optional[str]
+    uploader: Optional[str]  # Relation ID
+    file: Optional[str]
+    note: Optional[str]
+    recording_date: Optional[str]
+    duration: Optional[int]
+    call_log: Optional[str]  # Relation ID
+    company: Optional[str]  # Relation ID
+    phone_number_record: Optional[str]  # Relation ID
+    created: str
+    updated: str
+
+
 # ============================================================================
 # Collection Names
 # ============================================================================
@@ -145,6 +229,13 @@ COLLECTIONS = {
     'RULES': 'rules',
     'ALERTS': 'alerts',
     'NOTES': 'notes',
+    # New CRM collections
+    'PHONE_NUMBERS': 'phone_numbers',
+    'CALL_LOGS': 'call_logs',
+    'FOLLOW_UPS': 'follow_ups',
+    'COMPANY_NOTES': 'company_notes',
+    'INTERACTIONS': 'interactions',
+    'RECORDINGS': 'recordings',
 }
 
 
@@ -439,6 +530,132 @@ class CRMPocketBase:
             'last_activity': datetime.utcnow().isoformat() + 'Z',
             'status': 'online'
         })
+
+    # -------------------------------------------------------------------------
+    # Phone Numbers
+    # -------------------------------------------------------------------------
+
+    def get_phone_numbers(self, filter_str: Optional[str] = None) -> List[PhoneNumber]:
+        """Get phone numbers."""
+        params = {}
+        if filter_str:
+            params['filter'] = filter_str
+        result = self._get(f'/collections/{COLLECTIONS["PHONE_NUMBERS"]}/records', params)
+        return result.get('items', [])
+
+    def find_phone_number(self, phone: str) -> Optional[PhoneNumber]:
+        """Find phone number record by phone number."""
+        result = self._get(f'/collections/{COLLECTIONS["PHONE_NUMBERS"]}/records', {
+            'filter': f'phone_number ~ "{phone}"'
+        })
+        items = result.get('items', [])
+        return items[0] if items else None
+
+    def create_phone_number(self, data: Dict) -> PhoneNumber:
+        """Create new phone number record."""
+        return self._post(f'/collections/{COLLECTIONS["PHONE_NUMBERS"]}/records', data)
+
+    def update_phone_number(self, id: str, data: Dict) -> PhoneNumber:
+        """Update phone number record."""
+        return self._patch(f'/collections/{COLLECTIONS["PHONE_NUMBERS"]}/records/{id}', data)
+
+    # -------------------------------------------------------------------------
+    # Call Logs
+    # -------------------------------------------------------------------------
+
+    def get_call_logs(self, filter_str: Optional[str] = None, sort: str = '-created') -> List[CallLog]:
+        """Get call logs."""
+        params = {'sort': sort}
+        if filter_str:
+            params['filter'] = filter_str
+        result = self._get(f'/collections/{COLLECTIONS["CALL_LOGS"]}/records', params)
+        return result.get('items', [])
+
+    def get_call_log(self, id: str, expand: Optional[str] = None) -> CallLog:
+        """Get call log by ID."""
+        params = {}
+        if expand:
+            params['expand'] = expand
+        return self._get(f'/collections/{COLLECTIONS["CALL_LOGS"]}/records/{id}', params)
+
+    def create_call_log(self, data: Dict) -> CallLog:
+        """Create new call log."""
+        return self._post(f'/collections/{COLLECTIONS["CALL_LOGS"]}/records', data)
+
+    def update_call_log(self, id: str, data: Dict) -> CallLog:
+        """Update call log."""
+        return self._patch(f'/collections/{COLLECTIONS["CALL_LOGS"]}/records/{id}', data)
+
+    # -------------------------------------------------------------------------
+    # Follow Ups
+    # -------------------------------------------------------------------------
+
+    def get_follow_ups(self, filter_str: Optional[str] = None, sort: str = 'scheduled_time') -> List[FollowUp]:
+        """Get follow ups."""
+        params = {'sort': sort}
+        if filter_str:
+            params['filter'] = filter_str
+        result = self._get(f'/collections/{COLLECTIONS["FOLLOW_UPS"]}/records', params)
+        return result.get('items', [])
+
+    def get_pending_follow_ups(self) -> List[FollowUp]:
+        """Get pending follow ups."""
+        return self.get_follow_ups('status = "pending"')
+
+    def create_follow_up(self, data: Dict) -> FollowUp:
+        """Create new follow up."""
+        return self._post(f'/collections/{COLLECTIONS["FOLLOW_UPS"]}/records', data)
+
+    def update_follow_up(self, id: str, data: Dict) -> FollowUp:
+        """Update follow up."""
+        return self._patch(f'/collections/{COLLECTIONS["FOLLOW_UPS"]}/records/{id}', data)
+
+    # -------------------------------------------------------------------------
+    # Company Notes
+    # -------------------------------------------------------------------------
+
+    def get_company_notes(self, company_id: str) -> List[CompanyNote]:
+        """Get notes for a company."""
+        return self._get(f'/collections/{COLLECTIONS["COMPANY_NOTES"]}/records', {
+            'filter': f'company = "{company_id}"',
+            'sort': '-created'
+        }).get('items', [])
+
+    def create_company_note(self, data: Dict) -> CompanyNote:
+        """Create new company note."""
+        return self._post(f'/collections/{COLLECTIONS["COMPANY_NOTES"]}/records', data)
+
+    # -------------------------------------------------------------------------
+    # Interactions
+    # -------------------------------------------------------------------------
+
+    def get_interactions(self, filter_str: Optional[str] = None, sort: str = '-timestamp') -> List[Interaction]:
+        """Get interactions."""
+        params = {'sort': sort}
+        if filter_str:
+            params['filter'] = filter_str
+        result = self._get(f'/collections/{COLLECTIONS["INTERACTIONS"]}/records', params)
+        return result.get('items', [])
+
+    def create_interaction(self, data: Dict) -> Interaction:
+        """Create new interaction."""
+        return self._post(f'/collections/{COLLECTIONS["INTERACTIONS"]}/records', data)
+
+    # -------------------------------------------------------------------------
+    # Recordings
+    # -------------------------------------------------------------------------
+
+    def get_recordings(self, filter_str: Optional[str] = None, sort: str = '-created') -> List[Recording]:
+        """Get recordings."""
+        params = {'sort': sort}
+        if filter_str:
+            params['filter'] = filter_str
+        result = self._get(f'/collections/{COLLECTIONS["RECORDINGS"]}/records', params)
+        return result.get('items', [])
+
+    def update_recording(self, id: str, data: Dict) -> Recording:
+        """Update recording."""
+        return self._patch(f'/collections/{COLLECTIONS["RECORDINGS"]}/records/{id}', data)
 
     # -------------------------------------------------------------------------
     # Cleanup

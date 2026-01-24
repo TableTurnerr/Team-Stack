@@ -2,56 +2,15 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import {
-  Mic,
-  Upload,
-  Search,
-  RefreshCw,
-  Trash2,
-  Play,
-  Pause,
-  X,
-  FileAudio,
-  Pencil,
-  Filter,
-  History
-} from 'lucide-react';
+import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { formatDate, formatDateTime, formatDuration, cn } from '@/lib/utils';
+import { COLLECTIONS, type Recording } from '@/lib/types';
+import { formatDate, formatDateTime, formatDuration, cn, sanitizeFilterValue } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { BulkUploadModal } from '@/components/bulk-upload-modal';
-
-interface Recording {
-  id: string;
-  created: string;
-  recording_date?: string;
-  phone_number?: string;
-  note?: string;
-  file: string;
-  duration?: number;
-  uploader?: string;
-  call_log?: string;
-  company?: string;
-  phone_number_record?: string;
-  collectionId: string;
-  collectionName: string;
-  expand?: {
-    uploader?: {
-      name?: string;
-      email?: string;
-    };
-    company?: {
-      company_name: string;
-    };
-    phone_number_record?: {
-      phone_number: string;
-      label?: string;
-    };
-  };
-}
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -102,7 +61,7 @@ export default function RecordingsPage() {
         const formData = new FormData();
         formData.append('file', f.file);
         formData.append('uploader', user.id);
-        
+
         // Auto-match logic
         if (f.matchedPhoneNumber) {
           try {
@@ -120,7 +79,7 @@ export default function RecordingsPage() {
 
         const duration = await getAudioDuration(f.file);
         if (duration) formData.append('duration', Math.round(duration).toString());
-        
+
         // Extract date from filename if possible
         const meta = extractMetadata(f.file.name);
         if (meta) {
@@ -130,7 +89,7 @@ export default function RecordingsPage() {
 
         await pb.collection('recordings').create(formData);
       }
-      
+
       fetchRecordings();
     } catch (err) {
       console.error('Bulk upload failed:', err);
@@ -226,24 +185,25 @@ export default function RecordingsPage() {
 
       const filters: string[] = [];
       if (searchTerm) {
-        filters.push(`(phone_number ~ "${searchTerm}" || note ~ "${searchTerm}")`);
+        const safeSearch = sanitizeFilterValue(searchTerm);
+        if (safeSearch) {
+          filters.push(`(phone_number ~ "${safeSearch}" || note ~ "${safeSearch}")`);
+        }
       }
 
       const queryOptions = {
         expand: 'uploader,company,phone_number_record',
         filter: filters.length > 0 ? filters.join(' && ') : undefined,
+        sort: '-recording_date,-created',
       };
 
-      const result = await pb.collection('recordings').getList<Recording>(page, perPage, {
-        ...queryOptions,
-        sort: '-recording_date,-created',
-      });
+      const result = await pb.collection(COLLECTIONS.RECORDINGS).getList<Recording>(page, perPage, queryOptions);
       setRecordings(result.items);
       setTotalPages(result.totalPages);
     } catch (err: any) {
       if (err.status !== 0) {
         console.error('Failed to fetch recordings:', err);
-        setError(`Failed to load recordings: ${err.message}`);
+        setError(`Failed to load recordings: ${err.message} (Status: ${err.status})`);
       }
     } finally {
       setLoading(false);
@@ -252,7 +212,7 @@ export default function RecordingsPage() {
 
   const getRecordingDisplayDate = (recording: Recording) => {
     const pattern = /recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})/;
-    const match = recording.file.match(pattern);
+    const match = recording.file?.match(pattern);
     if (match) {
       const [, date, time] = match;
       const [day, month, year] = date.split('-');
@@ -261,7 +221,7 @@ export default function RecordingsPage() {
       const isoDate = `${year}-${month}-${day}T${formattedTime}+05:00`;
       return formatDateTime(isoDate);
     }
-    
+
     if (recording.recording_date) {
       return formatDateTime(recording.recording_date);
     }
@@ -276,7 +236,10 @@ export default function RecordingsPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // ... existing fetchRecordings ...
+  // Fetch recordings when component mounts or dependencies change
+  useEffect(() => {
+    fetchRecordings();
+  }, [fetchRecordings]);
 
   const toggleSelectAll = () => {
     if (selectedIds.size === recordings.length) {
@@ -297,7 +260,7 @@ export default function RecordingsPage() {
 
   const handleBulkDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedIds.size} recordings?`)) return;
-    
+
     try {
       await Promise.all(Array.from(selectedIds).map(id => pb.collection('recordings').delete(id)));
       setRecordings(prev => prev.filter(r => !selectedIds.has(r.id)));
@@ -381,14 +344,14 @@ export default function RecordingsPage() {
           <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl w-full max-w-md shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-[var(--card-border)]">
               <h2 className="font-semibold text-lg">Edit Note</h2>
-              <button 
+              <button
                 onClick={() => setIsEditOpen(false)}
                 className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
-            
+
             <form onSubmit={handleUpdateNote} className="p-4 space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Note</label>
@@ -518,7 +481,7 @@ export default function RecordingsPage() {
                                 </span>
                               )}
                               {recording.expand.company && (
-                                <Link 
+                                <Link
                                   href={`/companies/${recording.company}`}
                                   className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
                                 >
@@ -537,7 +500,7 @@ export default function RecordingsPage() {
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2">
                             <span className="truncate" title={recording.note}>{recording.note || 'N/A'}</span>
-                            <button 
+                            <button
                               onClick={() => openEdit(recording)}
                               className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
                               title="Edit note"
@@ -546,7 +509,7 @@ export default function RecordingsPage() {
                             </button>
                           </div>
                           {recording.call_log && (
-                            <Link 
+                            <Link
                               href={`/cold-calls/${recording.call_log}`}
                               className="text-[10px] text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
                             >
@@ -559,12 +522,16 @@ export default function RecordingsPage() {
                     )}
                     {isColumnVisible('file') && (
                       <td className="py-3 px-4">
-                        <audio 
-                          controls 
-                          preload="none"
-                          className="h-8 w-full min-w-[200px] max-w-[300px]"
-                          src={pb.files.getUrl(recording, recording.file)}
-                        />
+                        {recording.file ? (
+                          <audio 
+                            controls 
+                            preload="none"
+                            className="h-8 w-full min-w-[200px] max-w-[300px]"
+                            src={pb.files.getUrl(recording, recording.file)}
+                          />
+                        ) : (
+                          <span className="text-xs text-[var(--muted)]">No file</span>
+                        )}
                       </td>
                     )}
                     {isColumnVisible('uploader') && (

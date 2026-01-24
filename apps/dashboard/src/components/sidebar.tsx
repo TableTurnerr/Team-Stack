@@ -32,7 +32,7 @@ const DEFAULT_TIMEZONES = [
 ];
 
 const navItems = [
-// ... (rest of the imports and navItems)
+  // ... (rest of the imports and navItems)
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
   { href: '/recordings', label: 'Recordings', icon: Mic },
@@ -223,6 +223,7 @@ export function Sidebar() {
                   src={user.avatar}
                   alt={user.name || 'User'}
                   fill
+                  sizes="32px"
                   className="object-cover"
                 />
               ) : (

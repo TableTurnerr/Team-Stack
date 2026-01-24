@@ -191,10 +191,10 @@ export default function RecordingsPage() {
         }
       }
 
-      // Build query options - only include filter if we have filters
+      // Build query options
       const queryOptions: { sort: string; filter?: string; expand?: string } = {
-        sort: '-created',
-        expand: 'uploader',
+        sort: '-recording_date,-created',
+        expand: 'uploader,company,phone_number_record',
       };
       if (filters.length > 0) {
         queryOptions.filter = filters.join(' && ');

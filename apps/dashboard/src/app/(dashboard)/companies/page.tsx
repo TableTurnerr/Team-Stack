@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
-import { formatDate, cn } from '@/lib/utils';
+import { formatDate, cn, sanitizeFilterValue } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
@@ -563,9 +563,10 @@ export default function CompaniesPage() {
       setLoading(true);
       setError(null);
 
+      const safeSearch = sanitizeFilterValue(searchTerm);
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
         sort: '-created',
-        ...(searchTerm && { filter: `company_name ~ "${searchTerm}" || phone_numbers ~ "${searchTerm}" || owner_name ~ "${searchTerm}"` }),
+        ...(safeSearch && { filter: `company_name ~ "${safeSearch}" || phone_numbers ~ "${safeSearch}" || owner_name ~ "${safeSearch}"` }),
       });
 
       setCompanies(result.items);

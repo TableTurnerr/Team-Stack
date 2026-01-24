@@ -39,3 +39,23 @@ export function formatDuration(seconds: number): string {
   const remainingSeconds = Math.floor(seconds % 60);
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
+
+/**
+ * Sanitize a value for use in PocketBase filter strings.
+ * Prevents filter injection attacks by escaping special characters.
+ *
+ * @param value - The raw user input to sanitize
+ * @returns Sanitized string safe for use in filter expressions
+ */
+export function sanitizeFilterValue(value: string): string {
+  if (!value) return '';
+
+  // Escape double quotes and backslashes which can break filter syntax
+  let sanitized = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  // Remove potentially dangerous filter operators that could be injected
+  // These could allow filter bypass: && || ! ( ) ~ = != > >= < <=
+  sanitized = sanitized.replace(/[&|!()~=<>]/g, '');
+
+  return sanitized;
+}

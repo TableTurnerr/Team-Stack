@@ -6,9 +6,40 @@ Uses httpx for HTTP requests to PocketBase API.
 """
 
 import os
+import re
 import httpx
 from typing import Optional, Dict, List, Any, TypedDict
 from datetime import datetime
+
+
+# ============================================================================
+# Security Utilities
+# ============================================================================
+
+def sanitize_filter_value(value: str) -> str:
+    """
+    Sanitize a value for use in PocketBase filter strings.
+
+    Prevents filter injection attacks by escaping special characters.
+
+    Args:
+        value: The raw user input to sanitize
+
+    Returns:
+        Sanitized string safe for use in filter expressions
+    """
+    if not value:
+        return ''
+
+    # Escape double quotes and backslashes which can break filter syntax
+    sanitized = value.replace('\\', '\\\\').replace('"', '\\"')
+
+    # Remove potentially dangerous filter operators that could be injected
+    # These could allow filter bypass: && || ! ( ) ~ = != > >= < <=
+    # Keep only alphanumeric, spaces, basic punctuation for phone/email/names
+    sanitized = re.sub(r'[&|!()~=<>]', '', sanitized)
+
+    return sanitized
 
 
 # ============================================================================
@@ -350,8 +381,9 @@ class CRMPocketBase:
 
     def find_company_by_phone(self, phone: str) -> Optional[Company]:
         """Find company by phone number."""
+        safe_phone = sanitize_filter_value(phone)
         result = self._get(f'/collections/{COLLECTIONS["COMPANIES"]}/records', {
-            'filter': f'phone_numbers ~ "{phone}"'
+            'filter': f'phone_numbers ~ "{safe_phone}"'
         })
         items = result.get('items', [])
         return items[0] if items else None
@@ -397,8 +429,9 @@ class CRMPocketBase:
 
     def get_transcript_for_call(self, call_id: str) -> Optional[CallTranscript]:
         """Get transcript for a specific call."""
+        safe_call_id = sanitize_filter_value(call_id)
         result = self._get(f'/collections/{COLLECTIONS["CALL_TRANSCRIPTS"]}/records', {
-            'filter': f'call = "{call_id}"'
+            'filter': f'call = "{safe_call_id}"'
         })
         items = result.get('items', [])
         return items[0] if items else None
@@ -421,8 +454,9 @@ class CRMPocketBase:
 
     def find_lead_by_username(self, username: str) -> Optional[Lead]:
         """Find lead by username."""
+        safe_username = sanitize_filter_value(username)
         result = self._get(f'/collections/{COLLECTIONS["LEADS"]}/records', {
-            'filter': f'username = "{username}"'
+            'filter': f'username = "{safe_username}"'
         })
         items = result.get('items', [])
         return items[0] if items else None
@@ -518,8 +552,9 @@ class CRMPocketBase:
 
     def get_user_by_email(self, email: str) -> Optional[User]:
         """Find user by email."""
+        safe_email = sanitize_filter_value(email)
         result = self._get(f'/collections/{COLLECTIONS["USERS"]}/records', {
-            'filter': f'email = "{email}"'
+            'filter': f'email = "{safe_email}"'
         })
         items = result.get('items', [])
         return items[0] if items else None
@@ -545,8 +580,9 @@ class CRMPocketBase:
 
     def find_phone_number(self, phone: str) -> Optional[PhoneNumber]:
         """Find phone number record by phone number."""
+        safe_phone = sanitize_filter_value(phone)
         result = self._get(f'/collections/{COLLECTIONS["PHONE_NUMBERS"]}/records', {
-            'filter': f'phone_number ~ "{phone}"'
+            'filter': f'phone_number ~ "{safe_phone}"'
         })
         items = result.get('items', [])
         return items[0] if items else None
@@ -616,8 +652,9 @@ class CRMPocketBase:
 
     def get_company_notes(self, company_id: str) -> List[CompanyNote]:
         """Get notes for a company."""
+        safe_company_id = sanitize_filter_value(company_id)
         return self._get(f'/collections/{COLLECTIONS["COMPANY_NOTES"]}/records', {
-            'filter': f'company = "{company_id}"',
+            'filter': f'company = "{safe_company_id}"',
             'sort': '-created'
         }).get('items', [])
 

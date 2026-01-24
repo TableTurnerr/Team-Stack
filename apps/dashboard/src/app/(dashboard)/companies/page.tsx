@@ -73,12 +73,10 @@ const STATUS_OPTIONS = [
 function CompanyRow({
   company,
   onEdit,
-  onView,
   isColumnVisible
 }: {
   company: Company;
   onEdit: (id: string, data: Partial<Company>) => void;
-  onView: (id: string) => void;
   isColumnVisible: (key: string) => boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -697,7 +695,6 @@ export default function CompaniesPage() {
                       key={company.id}
                       company={company}
                       onEdit={handleEdit}
-                      onView={setSelectedCompanyId}
                       isColumnVisible={isColumnVisible}
                     />
                   ))}

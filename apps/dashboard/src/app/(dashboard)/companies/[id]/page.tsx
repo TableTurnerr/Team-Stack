@@ -7,7 +7,6 @@ import {
   Phone, 
   History, 
   StickyNote, 
-  Timeline, 
   ChevronLeft, 
   Save, 
   Undo2,

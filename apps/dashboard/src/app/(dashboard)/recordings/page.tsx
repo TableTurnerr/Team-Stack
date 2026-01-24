@@ -83,6 +83,7 @@ export default function RecordingsPage() {
   const [uploadNote, setUploadNote] = useState('');
   const [uploadDate, setUploadDate] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Edit Note State
@@ -214,17 +215,20 @@ export default function RecordingsPage() {
 
     // Check sizes
     for (const file of uploadFiles) {
-        if (file.size > 52428800) { // 50MB
-            alert(`File ${file.name} is too large. Maximum size is 50MB.`);
+        if (file.size > 104857600) { // 100MB
+            alert(`File ${file.name} is too large. Maximum size is 100MB.`);
             return;
         }
     }
 
     try {
       setIsUploading(true);
+      setUploadProgress(0);
       const skipped: string[] = [];
-      
-      const uploadPromises = uploadFiles.map(async (file) => {
+      const results: any[] = [];
+      let processedCount = 0;
+
+      const processFile = async (file: File) => {
         const meta = extractMetadata(file.name);
         const phone = uploadPhone || meta?.phone || '';
         const date = uploadDate || meta?.isoDate || '';
@@ -259,9 +263,19 @@ export default function RecordingsPage() {
         formData.append('note', noteToSend);
 
         return pb.collection('recordings').create(formData);
-      });
+      };
+      
+      // Process in batches of 2 to avoid rate limits
+      const BATCH_SIZE = 2;
+      for (let i = 0; i < uploadFiles.length; i += BATCH_SIZE) {
+        const batch = uploadFiles.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(batch.map(file => processFile(file)));
+        results.push(...batchResults);
+        
+        processedCount += batch.length;
+        setUploadProgress(Math.round((processedCount / uploadFiles.length) * 100));
+      }
 
-      const results = await Promise.all(uploadPromises);
       const uploadedCount = results.filter(r => r !== null).length;
 
       if (skipped.length > 0) {
@@ -274,6 +288,7 @@ export default function RecordingsPage() {
       setUploadNote('');
       setUploadDate('');
       setIsUploadOpen(false);
+      setUploadProgress(0);
       
       // Refresh list
       fetchRecordings();
@@ -529,12 +544,23 @@ export default function RecordingsPage() {
                 />
               </div>
 
+              {/* Progress Bar */}
+              {isUploading && (
+                <div className="w-full bg-[var(--sidebar-bg)] rounded-full h-2.5 mb-2 border border-[var(--card-border)] overflow-hidden">
+                  <div 
+                    className="bg-[var(--foreground)] h-2.5 rounded-full transition-all duration-300" 
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+              )}
+
               {/* Actions */}
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setIsUploadOpen(false)}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                  disabled={isUploading}
                 >
                   Cancel
                 </button>
@@ -544,7 +570,7 @@ export default function RecordingsPage() {
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {isUploading && <RefreshCw size={14} className="animate-spin" />}
-                  {isUploading ? 'Uploading...' : 'Upload'}
+                  {isUploading ? `Uploading... ${uploadProgress}%` : 'Upload'}
                 </button>
               </div>
             </form>

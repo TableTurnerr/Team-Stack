@@ -117,7 +117,7 @@ function CompanyRow({
               type="text"
               value={editData.company_name}
               onChange={(e) => setEditData(p => ({ ...p, company_name: e.target.value }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
             />
           </td>
         )}
@@ -127,7 +127,7 @@ function CompanyRow({
               type="text"
               value={editData.owner_name}
               onChange={(e) => setEditData(p => ({ ...p, owner_name: e.target.value }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               placeholder="Owner name"
             />
           </td>
@@ -138,7 +138,7 @@ function CompanyRow({
               type="text"
               value={editData.instagram_handle}
               onChange={(e) => setEditData(p => ({ ...p, instagram_handle: e.target.value }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               placeholder="@username"
             />
           </td>
@@ -148,7 +148,7 @@ function CompanyRow({
             <select
               value={editData.status}
               onChange={(e) => setEditData(p => ({ ...p, status: e.target.value as any }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--card-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm"
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--card-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm"
             >
               {STATUS_OPTIONS.map(status => (
                 <option key={status} value={status}>{status}</option>
@@ -162,7 +162,7 @@ function CompanyRow({
               type="text"
               value={editData.phone_numbers}
               onChange={(e) => setEditData(p => ({ ...p, phone_numbers: e.target.value }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)] font-mono text-sm"
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] font-mono text-sm"
               placeholder="Phone numbers"
             />
           </td>
@@ -173,7 +173,7 @@ function CompanyRow({
               type="email"
               value={editData.email}
               onChange={(e) => setEditData(p => ({ ...p, email: e.target.value }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               placeholder="Email"
             />
           </td>
@@ -184,7 +184,7 @@ function CompanyRow({
               type="text"
               value={editData.company_location}
               onChange={(e) => setEditData(p => ({ ...p, company_location: e.target.value }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               placeholder="Location"
             />
           </td>
@@ -360,7 +360,6 @@ function AddCompanyModal({
   const [formData, setFormData] = useState({
     company_name: '',
     owner_name: '',
-    phone_numbers: '',
     company_location: '',
     google_maps_link: '',
     source: 'Manual',
@@ -370,14 +369,43 @@ function AddCompanyModal({
     notes: '',
   });
 
+  // Dynamic phone numbers with optional locations
+  const [phoneEntries, setPhoneEntries] = useState<{ phone: string; location: string }[]>([
+    { phone: '', location: '' }
+  ]);
+
+  const addPhoneEntry = () => {
+    setPhoneEntries(prev => [...prev, { phone: '', location: '' }]);
+  };
+
+  const removePhoneEntry = (index: number) => {
+    if (phoneEntries.length > 1) {
+      setPhoneEntries(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const updatePhoneEntry = (index: number, field: 'phone' | 'location', value: string) => {
+    setPhoneEntries(prev => prev.map((entry, i) =>
+      i === index ? { ...entry, [field]: value } : entry
+    ));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.company_name.trim()) return;
-    onAdd(formData as any);
+
+    // Combine phone entries into comma-separated string (include location if provided)
+    const phoneNumbers = phoneEntries
+      .filter(entry => entry.phone.trim())
+      .map(entry => entry.location.trim() ? `${entry.phone} (${entry.location})` : entry.phone)
+      .join(', ');
+
+    onAdd({ ...formData, phone_numbers: phoneNumbers } as any);
+
+    // Reset form
     setFormData({
       company_name: '',
       owner_name: '',
-      phone_numbers: '',
       company_location: '',
       google_maps_link: '',
       source: 'Manual',
@@ -386,6 +414,7 @@ function AddCompanyModal({
       email: '',
       notes: '',
     });
+    setPhoneEntries([{ phone: '', location: '' }]);
     onClose();
   };
 
@@ -409,7 +438,7 @@ function AddCompanyModal({
                 type="text"
                 value={formData.company_name}
                 onChange={(e) => setFormData(p => ({ ...p, company_name: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
                 required
               />
             </div>
@@ -420,7 +449,7 @@ function AddCompanyModal({
                 type="text"
                 value={formData.owner_name}
                 onChange={(e) => setFormData(p => ({ ...p, owner_name: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               />
             </div>
 
@@ -429,7 +458,7 @@ function AddCompanyModal({
               <select
                 value={formData.status}
                 onChange={(e) => setFormData(p => ({ ...p, status: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               >
                 {STATUS_OPTIONS.map(status => (
                   <option key={status} value={status}>{status}</option>
@@ -443,7 +472,7 @@ function AddCompanyModal({
                 type="text"
                 value={formData.instagram_handle}
                 onChange={(e) => setFormData(p => ({ ...p, instagram_handle: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
                 placeholder="@username"
               />
             </div>
@@ -454,29 +483,67 @@ function AddCompanyModal({
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData(p => ({ ...p, email: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
                 placeholder="email@example.com"
               />
             </div>
 
-            <div>
-              <label className="text-sm text-[var(--muted)] block mb-1">Phone Numbers</label>
-              <input
-                type="text"
-                value={formData.phone_numbers}
-                onChange={(e) => setFormData(p => ({ ...p, phone_numbers: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-                placeholder="+1-555-1234..."
-              />
+            {/* Dynamic Phone Numbers Section */}
+            <div className="col-span-1 sm:col-span-2">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm text-[var(--muted)]">Phone Numbers</label>
+                <button
+                  type="button"
+                  onClick={addPhoneEntry}
+                  className="text-xs px-2 py-1 rounded bg-[var(--card-hover)] text-[var(--foreground)] hover:bg-[var(--sidebar-hover)] flex items-center gap-1"
+                >
+                  <Plus size={12} />
+                  Add Phone
+                </button>
+              </div>
+              <div className="space-y-2">
+                {phoneEntries.map((entry, index) => (
+                  <div key={index} className="flex gap-2 items-start">
+                    <div className="flex-1">
+                      <input
+                        type="tel"
+                        value={entry.phone}
+                        onChange={(e) => updatePhoneEntry(index, 'phone', e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                        placeholder="+1-555-1234"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        value={entry.location}
+                        onChange={(e) => updatePhoneEntry(index, 'location', e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                        placeholder="Location (optional)"
+                      />
+                    </div>
+                    {phoneEntries.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removePhoneEntry(index)}
+                        className="p-2 text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] rounded-lg transition-colors"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div>
-              <label className="text-sm text-[var(--muted)] block mb-1">Location</label>
+            <div className="col-span-1 sm:col-span-2">
+              <label className="text-sm text-[var(--muted)] block mb-1">Company Location</label>
               <input
                 type="text"
                 value={formData.company_location}
                 onChange={(e) => setFormData(p => ({ ...p, company_location: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                placeholder="City, State"
               />
             </div>
 
@@ -486,7 +553,7 @@ function AddCompanyModal({
                 type="url"
                 value={formData.google_maps_link}
                 onChange={(e) => setFormData(p => ({ ...p, google_maps_link: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
                 placeholder="https://maps.google.com/..."
               />
             </div>
@@ -496,7 +563,7 @@ function AddCompanyModal({
               <select
                 value={formData.source}
                 onChange={(e) => setFormData(p => ({ ...p, source: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               >
                 <option value="Manual">Manual</option>
                 <option value="Cold Call">Cold Call</option>
@@ -511,7 +578,7 @@ function AddCompanyModal({
                 value={formData.notes}
                 onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
                 rows={3}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
                 placeholder="Initial notes..."
               />
             </div>
@@ -624,7 +691,7 @@ export default function CompaniesPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search companies..."
-              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)] w-full sm:w-64"
+              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-full sm:w-64"
             />
           </div>
 
@@ -730,22 +797,21 @@ export default function CompaniesPage() {
         )}
       </div>
 
-            {/* Add Company Modal */}
+      {/* Add Company Modal */}
 
-            <AddCompanyModal
+      <AddCompanyModal
 
-              isOpen={showAddModal}
+        isOpen={showAddModal}
 
-              onClose={() => setShowAddModal(false)}
+        onClose={() => setShowAddModal(false)}
 
-              onAdd={handleAdd}
+        onAdd={handleAdd}
 
-            />
+      />
 
-          </div>
+    </div>
 
-        );
+  );
 
-      }
+}
 
-      

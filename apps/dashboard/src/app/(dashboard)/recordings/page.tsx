@@ -191,19 +191,28 @@ export default function RecordingsPage() {
         }
       }
 
-      const queryOptions = {
-        expand: 'uploader,company,phone_number_record',
-        filter: filters.length > 0 ? filters.join(' && ') : undefined,
-        sort: '-recording_date,-created',
+      // Build query options - only include filter if we have filters
+      const queryOptions: { sort: string; filter?: string; expand?: string } = {
+        sort: '-created',
+        expand: 'uploader',
       };
+      if (filters.length > 0) {
+        queryOptions.filter = filters.join(' && ');
+      }
+
+      console.log(`Fetching from ${COLLECTIONS.RECORDINGS} with options:`, queryOptions);
 
       const result = await pb.collection(COLLECTIONS.RECORDINGS).getList<Recording>(page, perPage, queryOptions);
       setRecordings(result.items);
       setTotalPages(result.totalPages);
     } catch (err: any) {
+      // Log full error for debugging
+      console.error('Recording Fetch Error (full):', err);
+      console.error('Error type:', typeof err, err?.constructor?.name);
+      console.error('Error keys:', Object.keys(err || {}));
+
       if (err.status !== 0) {
-        console.error('Failed to fetch recordings:', err);
-        setError(`Failed to load recordings: ${err.message} (Status: ${err.status})`);
+        setError(`Failed to load recordings: ${err.message || err.toString() || 'Unknown error'} (Status: ${err.status || 'N/A'})`);
       }
     } finally {
       setLoading(false);
@@ -360,7 +369,7 @@ export default function RecordingsPage() {
                   onChange={(e) => setEditNote(e.target.value)}
                   placeholder="Add details..."
                   rows={5}
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
+                  className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
                 />
               </div>
 
@@ -523,8 +532,8 @@ export default function RecordingsPage() {
                     {isColumnVisible('file') && (
                       <td className="py-3 px-4">
                         {recording.file ? (
-                          <audio 
-                            controls 
+                          <audio
+                            controls
                             preload="none"
                             className="h-8 w-full min-w-[200px] max-w-[300px]"
                             src={pb.files.getUrl(recording, recording.file)}

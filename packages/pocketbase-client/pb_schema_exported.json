@@ -2159,7 +2159,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "call_logs",
+                "collectionId": "pbc_2222222222",
                 "hidden": false,
                 "id": "relation_call_log",
                 "maxSelect": 1,
@@ -2172,7 +2172,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "companies",
+                "collectionId": "pbc_6239365334",
                 "hidden": false,
                 "id": "relation_company",
                 "maxSelect": 1,
@@ -2185,7 +2185,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "phone_numbers",
+                "collectionId": "pbc_1111111111",
                 "hidden": false,
                 "id": "relation_phone_number_record",
                 "maxSelect": 1,
@@ -2371,7 +2371,7 @@
         "system": false
     },
     {
-        "id": "phone_numbers",
+        "id": "pbc_1111111111",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
@@ -2396,7 +2396,7 @@
             },
             {
                 "cascadeDelete": true,
-                "collectionId": "companies",
+                "collectionId": "pbc_6239365334",
                 "hidden": false,
                 "id": "relation_company",
                 "maxSelect": 1,
@@ -2513,7 +2513,7 @@
         "system": false
     },
     {
-        "id": "call_logs",
+        "id": "pbc_2222222222",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
@@ -2538,7 +2538,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "companies",
+                "collectionId": "pbc_6239365334",
                 "hidden": false,
                 "id": "relation_company",
                 "maxSelect": 1,
@@ -2551,7 +2551,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "phone_numbers",
+                "collectionId": "pbc_1111111111",
                 "hidden": false,
                 "id": "relation_phone_number_record",
                 "maxSelect": 1,
@@ -2723,7 +2723,7 @@
         "system": false
     },
     {
-        "id": "follow_ups",
+        "id": "pbc_3333333333",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
@@ -2748,7 +2748,7 @@
             },
             {
                 "cascadeDelete": true,
-                "collectionId": "call_logs",
+                "collectionId": "pbc_2222222222",
                 "hidden": false,
                 "id": "relation_call_log",
                 "maxSelect": 1,
@@ -2761,7 +2761,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "companies",
+                "collectionId": "pbc_6239365334",
                 "hidden": false,
                 "id": "relation_company",
                 "maxSelect": 1,
@@ -2875,7 +2875,7 @@
         "system": false
     },
     {
-        "id": "company_notes",
+        "id": "pbc_4444444444",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
@@ -2900,7 +2900,7 @@
             },
             {
                 "cascadeDelete": true,
-                "collectionId": "companies",
+                "collectionId": "pbc_6239365334",
                 "hidden": false,
                 "id": "relation_company",
                 "maxSelect": 1,
@@ -2913,7 +2913,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "phone_numbers",
+                "collectionId": "pbc_1111111111",
                 "hidden": false,
                 "id": "relation_phone_number_record",
                 "maxSelect": 1,
@@ -2991,7 +2991,7 @@
         "system": false
     },
     {
-        "id": "interactions",
+        "id": "pbc_5555555555",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
@@ -3016,7 +3016,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "companies",
+                "collectionId": "pbc_6239365334",
                 "hidden": false,
                 "id": "relation_company",
                 "maxSelect": 1,
@@ -3096,7 +3096,7 @@
             },
             {
                 "cascadeDelete": false,
-                "collectionId": "call_logs",
+                "collectionId": "pbc_2222222222",
                 "hidden": false,
                 "id": "relation_call_log",
                 "maxSelect": 1,

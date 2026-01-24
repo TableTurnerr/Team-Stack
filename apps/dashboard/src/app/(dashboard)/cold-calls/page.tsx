@@ -222,20 +222,31 @@ export default function ColdCallsPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search..."
+              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)] w-full sm:w-64"
+            />
+          </div>
+
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
-              showFilters || hasActiveFilters
-                ? "bg-[var(--primary)] text-white border-[var(--primary)]"
+              showFilters || outcomeFilter.length > 0 || minInterest > 0
+                ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
                 : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
             )}
           >
             <Filter size={16} />
             Filters
-            {hasActiveFilters && (
-              <span className="ml-1 w-5 h-5 rounded-full bg-white/20 text-xs flex items-center justify-center">
-                {(searchTerm ? 1 : 0) + outcomeFilter.length + (minInterest > 0 ? 1 : 0)}
+            {(outcomeFilter.length > 0 || minInterest > 0) && (
+              <span className="ml-1 w-5 h-5 rounded-full bg-[var(--background)]/20 text-xs flex items-center justify-center">
+                {outcomeFilter.length + (minInterest > 0 ? 1 : 0)}
               </span>
             )}
           </button>
@@ -257,7 +268,7 @@ export default function ColdCallsPage() {
 
           <button
             onClick={fetchCalls}
-            className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] transition-colors"
+            className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors"
             title="Refresh"
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
@@ -270,7 +281,7 @@ export default function ColdCallsPage() {
         <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-medium">Filters</h3>
-            {hasActiveFilters && (
+            {(outcomeFilter.length > 0 || minInterest > 0) && (
               <button
                 onClick={clearFilters}
                 className="text-sm text-[var(--primary)] hover:underline"
@@ -280,22 +291,7 @@ export default function ColdCallsPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Search */}
-            <div>
-              <label className="text-sm text-[var(--muted)] block mb-1">Search</label>
-              <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Company, phone, or name..."
-                  className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-                />
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Outcome Filter */}
             <div>
               <label className="text-sm text-[var(--muted)] block mb-1">Outcome</label>
@@ -328,7 +324,7 @@ export default function ColdCallsPage() {
                 max="10"
                 value={minInterest}
                 onChange={(e) => setMinInterest(parseInt(e.target.value))}
-                className="w-full"
+                className="w-full accent-[var(--foreground)]"
               />
             </div>
           </div>
@@ -434,10 +430,10 @@ export default function ColdCallsPage() {
                       <td className="py-3 px-4">
                         <Link
                           href={`/cold-calls/${call.id}`}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-white text-[var(--background)] border border-[var(--card-border)] text-sm hover:bg-gray-100 transition-colors"
+                          className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors inline-block"
+                          title="View Details"
                         >
-                          <Eye size={14} />
-                          View
+                          <Eye size={16} />
                         </Link>
                       </td>
                     </tr>

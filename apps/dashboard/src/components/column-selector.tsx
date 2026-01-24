@@ -37,7 +37,7 @@ export function ColumnSelector({ columns, visibleColumns, onToggle }: ColumnSele
                 className={cn(
                     "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
                     isOpen
-                        ? "bg-[var(--primary)] text-white border-[var(--primary)]"
+                        ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
                         : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
                 )}
             >
@@ -65,11 +65,11 @@ export function ColumnSelector({ columns, visibleColumns, onToggle }: ColumnSele
                                         className={cn(
                                             "w-4 h-4 rounded border flex items-center justify-center transition-colors",
                                             isVisible
-                                                ? "bg-[var(--primary)] border-[var(--primary)]"
+                                                ? "bg-[var(--foreground)] border-[var(--foreground)]"
                                                 : "border-[var(--card-border)]"
                                         )}
                                     >
-                                        {isVisible && <Check size={12} className="text-white" />}
+                                        {isVisible && <Check size={12} className="text-[var(--background)]" />}
                                     </div>
                                     <span className="text-sm">{column.label}</span>
                                 </button>

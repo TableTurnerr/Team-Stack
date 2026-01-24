@@ -168,10 +168,10 @@ export default function RecordingsPage() {
         const [, date, time, phone] = match;
         setUploadPhone(phone);
         
-        // Format date/time for PocketBase (YYYY-MM-DD HH:MM:SS)
+        // Format date/time for PocketBase (YYYY-MM-DD HH:MM:SS+05:00)
         const [day, month, year] = date.split('-');
         const formattedTime = time.replace(/-/g, ':');
-        const isoDate = `${year}-${month}-${day} ${formattedTime}`;
+        const isoDate = `${year}-${month}-${day} ${formattedTime}+05:00`;
         setUploadDate(isoDate);
 
         // Format the note with extracted date/time for better context if note is empty
@@ -282,6 +282,24 @@ export default function RecordingsPage() {
     }
   };
 
+  const getRecordingDisplayDate = (recording: Recording) => {
+    const pattern = /recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})/;
+    const match = recording.file.match(pattern);
+    if (match) {
+      const [, date, time] = match;
+      const [day, month, year] = date.split('-');
+      const formattedTime = time.replace(/-/g, ':');
+      // Construct an ISO-like string that new Date() can reliably parse, adding +05:00 offset
+      const isoDate = `${year}-${month}-${day}T${formattedTime}+05:00`;
+      return formatDateTime(isoDate);
+    }
+    
+    if (recording.recording_date) {
+      return formatDateTime(recording.recording_date);
+    }
+    return 'N/A';
+  };
+
   const clearFilters = () => {
     setSearchTerm('');
   };
@@ -335,6 +353,17 @@ export default function RecordingsPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search recordings..."
+              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)] w-full sm:w-64"
+            />
+          </div>
+
           {selectedIds.size > 0 && isAdmin ? (
             <button
               onClick={handleBulkDelete}
@@ -355,24 +384,6 @@ export default function RecordingsPage() {
             )
           )}
 
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
-              showFilters || hasActiveFilters
-                ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
-                : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
-            )}
-          >
-            <Filter size={16} />
-            Filters
-            {hasActiveFilters && (
-              <span className="ml-1 w-5 h-5 rounded-full bg-[var(--background)]/20 text-xs flex items-center justify-center">
-                1
-              </span>
-            )}
-          </button>
-
           <ColumnSelector
             columns={columns}
             visibleColumns={visibleColumns}
@@ -389,39 +400,7 @@ export default function RecordingsPage() {
         </div>
       </div>
 
-      {/* Filters Panel */}
-      {showFilters && (
-        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-medium">Filters</h3>
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="text-sm text-[var(--primary)] hover:underline"
-              >
-                Clear all
-              </button>
-            )}
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Search */}
-            <div>
-              <label className="text-sm text-[var(--muted)] block mb-1">Search</label>
-              <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Phone number or notes..."
-                  className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Upload Modal */}
       {isUploadOpen && (
@@ -632,7 +611,7 @@ export default function RecordingsPage() {
                     )}
                     {isColumnVisible('recording_date') && (
                       <td className="py-3 px-4 whitespace-nowrap text-sm">
-                        {recording.recording_date ? formatDateTime(recording.recording_date) : 'N/A'}
+                        {getRecordingDisplayDate(recording)}
                       </td>
                     )}
                     {isColumnVisible('created') && (

@@ -167,58 +167,47 @@ export default function RecordingsPage() {
     });
   };
 
-  const handleBulkUpload = async (pendingFiles: any[]) => {
-// ... existing handleBulkUpload logic ...
-    if (!user) return;
-    setIsUploading(true);
-
-    try {
-      for (const f of pendingFiles) {
-        const formData = new FormData();
-        formData.append('file', f.file);
-        formData.append('uploader', user.id);
-        
-        // Auto-match logic
-        if (f.matchedPhoneNumber) {
-          try {
-            const phoneRecord = await pb.collection('phone_numbers').getFirstListItem(`phone_number ~ "${f.matchedPhoneNumber}"`);
-            if (phoneRecord) {
-              formData.append('phone_number_record', phoneRecord.id);
-              formData.append('company', phoneRecord.company);
-              formData.append('phone_number', phoneRecord.phone_number);
-            }
-          } catch (e) {
-            // No match found, use raw phone from filename
-            formData.append('phone_number', f.matchedPhoneNumber);
-          }
-        }
-
-        const duration = await getAudioDuration(f.file);
-        if (duration) formData.append('duration', Math.round(duration).toString());
-        
-        // Extract date from filename if possible
-        const meta = extractMetadata(f.file.name);
-        if (meta) {
-          formData.append('recording_date', meta.isoDate);
-          formData.append('note', `Call on ${meta.displayDate}`);
-        }
-
-        await pb.collection('recordings').create(formData);
-      }
-      
-      fetchRecordings();
-    } catch (err) {
-      console.error('Bulk upload failed:', err);
-      alert('Some files failed to upload. Check console for details.');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNote, setEditNote] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
+
+  const openEdit = (recording: Recording) => {
+    setEditingId(recording.id);
+    setEditNote(recording.note || '');
+    setIsEditOpen(true);
+  };
+
+  const handleUpdateNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingId) return;
+
+    try {
+      setIsUpdating(true);
+      await pb.collection('recordings').update(editingId, {
+        note: editNote
+      });
+      setIsEditOpen(false);
+      fetchRecordings();
+    } catch (err) {
+      console.error('Failed to update note:', err);
+      alert('Failed to update note');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this recording?')) return;
+
+    try {
+      await pb.collection('recordings').delete(id);
+      fetchRecordings();
+    } catch (err) {
+      console.error('Failed to delete recording:', err);
+      alert('Failed to delete recording');
+    }
+  };
 
   // Pagination
   const [page, setPage] = useState(1);

@@ -33,3 +33,9 @@ export function timeAgo(date: string | Date): string {
   if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
   return formatDate(date);
 }
+
+export function formatDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}

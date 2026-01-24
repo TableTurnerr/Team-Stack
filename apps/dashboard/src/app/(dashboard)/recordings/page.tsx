@@ -15,7 +15,7 @@ import {
   Filter
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { formatDate, formatDateTime, cn } from '@/lib/utils';
+import { formatDate, formatDateTime, formatDuration, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
@@ -28,6 +28,7 @@ interface Recording {
   phone_number?: string;
   note?: string;
   file: string;
+  duration?: number;
   uploader?: string;
   collectionId: string;
   collectionName: string;
@@ -41,6 +42,7 @@ interface Recording {
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
+  { key: 'duration', label: 'Duration', defaultVisible: true },
   { key: 'created', label: 'Uploaded', defaultVisible: true },
   { key: 'phone_number', label: 'Phone', defaultVisible: true },
   { key: 'note', label: 'Note', defaultVisible: true },
@@ -48,6 +50,20 @@ const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'uploader', label: 'Uploader', defaultVisible: true },
   { key: 'actions', label: 'Actions', alwaysVisible: true },
 ];
+
+const getAudioDuration = (file: File): Promise<number> => {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(file);
+    audio.onloadedmetadata = () => {
+      URL.revokeObjectURL(audio.src);
+      resolve(audio.duration);
+    };
+    audio.onerror = () => {
+      resolve(0);
+    };
+  });
+};
 
 export default function RecordingsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -62,7 +78,7 @@ export default function RecordingsPage() {
 
   // Upload State
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadPhone, setUploadPhone] = useState('');
   const [uploadNote, setUploadNote] = useState('');
   const [uploadDate, setUploadDate] = useState('');
@@ -84,6 +100,7 @@ export default function RecordingsPage() {
   const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('recordings', RECORDING_COLUMNS);
 
   const fetchRecordings = useCallback(async () => {
+    // ... (keep existing fetchRecordings logic)
     if (!isAuthenticated) return;
 
     try {
@@ -154,70 +171,105 @@ export default function RecordingsPage() {
     }
   }, [isAuthenticated, fetchRecordings]);
 
+  const extractMetadata = (filename: string) => {
+    const pattern = /^recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})_(.+)$/;
+    const match = filename.replace(/\.[^/.]+$/, "").match(pattern);
+    if (match) {
+      const [, date, time, phone] = match;
+      const [day, month, year] = date.split('-');
+      const formattedTime = time.replace(/-/g, ':');
+      const isoDate = `${year}-${month}-${day} ${formattedTime}+05:00`;
+      return { phone, isoDate, displayDate: `${date} at ${formattedTime}` };
+    }
+    return null;
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setUploadFile(file);
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+      setUploadFiles(files);
 
-      // Extract metadata from filename: recording_DD-MM-YYYY_HH-mm-ss_PHONENUMBER
-      // Example: recording_13-01-2026_23-23-41_18568541222
-      const pattern = /^recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})_(.+)$/;
-      const match = file.name.replace(/\.[^/.]+$/, "").match(pattern);
-
-      if (match) {
-        const [, date, time, phone] = match;
-        setUploadPhone(phone);
-        
-        // Format date/time for PocketBase (YYYY-MM-DD HH:MM:SS+05:00)
-        const [day, month, year] = date.split('-');
-        const formattedTime = time.replace(/-/g, ':');
-        const isoDate = `${year}-${month}-${day} ${formattedTime}+05:00`;
-        setUploadDate(isoDate);
-
-        // Format the note with extracted date/time for better context if note is empty
-        if (!uploadNote) {
-          setUploadNote(`Call on ${date} at ${formattedTime}`);
+      if (files.length === 1) {
+        // If single file, extract and populate inputs as before
+        const meta = extractMetadata(files[0].name);
+        if (meta) {
+          setUploadPhone(meta.phone);
+          setUploadDate(meta.isoDate);
+          if (!uploadNote) {
+            setUploadNote(`Call on ${meta.displayDate}`);
+          }
         }
       } else {
-        // Fallback to metadata (lastModified)
-        if (file.lastModified) {
-          const d = new Date(file.lastModified);
-          const isoDate = d.toISOString().replace('T', ' ').split('.')[0];
-          setUploadDate(isoDate);
-          
-          if (!uploadNote) {
-            setUploadNote(`Call uploaded from file: ${file.name}`);
-          }
-        } else {
-          setUploadDate('');
-        }
+        // If multiple, clear inputs to avoid confusion (they become global overrides)
         setUploadPhone('');
+        setUploadNote('');
+        setUploadDate('');
       }
     }
   };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadFile || !user) return;
+    if (uploadFiles.length === 0 || !user) return;
 
-    if (uploadFile.size > 52428800) { // 50MB
-      alert("File is too large. Maximum size is 50MB.");
-      return;
+    // Check sizes
+    for (const file of uploadFiles) {
+        if (file.size > 52428800) { // 50MB
+            alert(`File ${file.name} is too large. Maximum size is 50MB.`);
+            return;
+        }
     }
 
     try {
       setIsUploading(true);
-      const formData = new FormData();
-      formData.append('file', uploadFile);
-      if (uploadPhone) formData.append('phone_number', uploadPhone);
-      if (uploadNote) formData.append('note', uploadNote);
-      if (uploadDate) formData.append('recording_date', uploadDate);
-      formData.append('uploader', user.id);
+      const skipped: string[] = [];
+      
+      const uploadPromises = uploadFiles.map(async (file) => {
+        const meta = extractMetadata(file.name);
+        const phone = uploadPhone || meta?.phone || '';
+        const date = uploadDate || meta?.isoDate || '';
 
-      await pb.collection('recordings').create(formData);
+        // Duplicate Check: Exact match on phone AND timestamp
+        if (phone && date) {
+          try {
+            const existing = await pb.collection('recordings').getFirstListItem(`phone_number="${phone}" && recording_date="${date}"`);
+            if (existing) {
+              skipped.push(`Recording for ${phone} at ${meta?.displayDate || date}`);
+              return null; // Skip this file
+            }
+          } catch (e: any) {
+            if (e.status !== 404) throw e;
+          }
+        }
+
+        const formData = new FormData();
+        const duration = await getAudioDuration(file);
+        
+        formData.append('file', file);
+        formData.append('uploader', user.id);
+        formData.append('phone_number', phone);
+        if (date) formData.append('recording_date', date);
+        if (duration) formData.append('duration', Math.round(duration).toString());
+
+        // Note: Manual override OR generated
+        let noteToSend = uploadNote;
+        if (!noteToSend && meta) {
+            noteToSend = `Call on ${meta.displayDate}`;
+        }
+        formData.append('note', noteToSend);
+
+        return pb.collection('recordings').create(formData);
+      });
+
+      const results = await Promise.all(uploadPromises);
+      const uploadedCount = results.filter(r => r !== null).length;
+
+      if (skipped.length > 0) {
+        alert(`Upload complete.\n\nUploaded: ${uploadedCount}\nSkipped ${skipped.length} duplicates:\n${skipped.join('\n')}`);
+      }
       
       // Reset form
-      setUploadFile(null);
+      setUploadFiles([]);
       setUploadPhone('');
       setUploadNote('');
       setUploadDate('');
@@ -360,7 +412,7 @@ export default function RecordingsPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search recordings..."
-              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)] w-full sm:w-64"
+              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-full sm:w-64"
             />
           </div>
 
@@ -400,8 +452,6 @@ export default function RecordingsPage() {
         </div>
       </div>
 
-
-
       {/* Upload Modal */}
       {isUploadOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -419,7 +469,7 @@ export default function RecordingsPage() {
             <form onSubmit={handleUpload} className="p-4 space-y-4">
               {/* File Input */}
               <div>
-                <label className="block text-sm font-medium mb-1">Audio File *</label>
+                <label className="block text-sm font-medium mb-1">Audio Files *</label>
                 <div 
                   onClick={() => fileInputRef.current?.click()}
                   className="border-2 border-dashed border-[var(--card-border)] rounded-lg p-6 text-center cursor-pointer hover:border-[var(--foreground)] hover:bg-[var(--sidebar-bg)] transition-colors"
@@ -428,19 +478,27 @@ export default function RecordingsPage() {
                     ref={fileInputRef}
                     type="file"
                     accept="audio/*"
+                    multiple
                     onChange={handleFileChange}
                     className="hidden"
                   />
-                  {uploadFile ? (
+                  {uploadFiles.length > 0 ? (
                     <div className="flex flex-col items-center gap-2 text-[var(--success)]">
                       <FileAudio size={32} />
-                      <span className="text-sm font-medium">{uploadFile.name}</span>
-                      <span className="text-xs text-[var(--muted)]">{(uploadFile.size / 1024 / 1024).toFixed(2)} MB</span>
+                      <span className="text-sm font-medium">
+                        {uploadFiles.length === 1 ? uploadFiles[0].name : `${uploadFiles.length} files selected`}
+                      </span>
+                      <span className="text-xs text-[var(--muted)]">
+                        {uploadFiles.length === 1 
+                          ? (uploadFiles[0].size / 1024 / 1024).toFixed(2) + ' MB'
+                          : `Total: ${(uploadFiles.reduce((acc, f) => acc + f.size, 0) / 1024 / 1024).toFixed(2)} MB`
+                        }
+                      </span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2 text-[var(--muted)]">
                       <Upload size={32} />
-                      <span className="text-sm">Click to select audio file</span>
+                      <span className="text-sm">Click to select audio file(s)</span>
                       <span className="text-xs">MP3, WAV, M4A supported</span>
                     </div>
                   )}
@@ -454,7 +512,7 @@ export default function RecordingsPage() {
                   type="text"
                   value={uploadPhone}
                   onChange={(e) => setUploadPhone(e.target.value)}
-                  placeholder="+1 (555) 000-0000"
+                  placeholder={uploadFiles.length > 1 ? "Applies to all files (leave empty to extract from filename)" : "+1 (555) 000-0000"}
                   className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
                 />
               </div>
@@ -465,7 +523,7 @@ export default function RecordingsPage() {
                 <textarea
                   value={uploadNote}
                   onChange={(e) => setUploadNote(e.target.value)}
-                  placeholder="Any details about this call..."
+                  placeholder={uploadFiles.length > 1 ? "Applies to all files (leave empty to generate)" : "Any details about this call..."}
                   rows={3}
                   className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
                 />
@@ -482,7 +540,7 @@ export default function RecordingsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!uploadFile || isUploading}
+                  disabled={uploadFiles.length === 0 || isUploading}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {isUploading && <RefreshCw size={14} className="animate-spin" />}
@@ -577,6 +635,7 @@ export default function RecordingsPage() {
                     </th>
                   )}
                   {isColumnVisible('recording_date') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Date</th>}
+                  {isColumnVisible('duration') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Duration</th>}
                   {isColumnVisible('created') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Uploaded</th>}
                   {isColumnVisible('phone_number') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
                   {isColumnVisible('note') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Note</th>}
@@ -612,6 +671,11 @@ export default function RecordingsPage() {
                     {isColumnVisible('recording_date') && (
                       <td className="py-3 px-4 whitespace-nowrap text-sm">
                         {getRecordingDisplayDate(recording)}
+                      </td>
+                    )}
+                    {isColumnVisible('duration') && (
+                      <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
+                        {recording.duration ? formatDuration(recording.duration) : 'N/A'}
                       </td>
                     )}
                     {isColumnVisible('created') && (

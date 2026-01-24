@@ -244,7 +244,7 @@ export default function NotesPage() {
           <input
             type="text"
             placeholder="Search notes..."
-            className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--foreground)]"
+            className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />

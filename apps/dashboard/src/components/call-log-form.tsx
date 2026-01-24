@@ -110,7 +110,7 @@ export function CallLogForm({
                       type="text"
                       value={formData.owner_name_found}
                       onChange={(e) => setFormData(p => ({ ...p, owner_name_found: e.target.value }))}
-                      className="w-full pl-9 pr-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--sidebar-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm"
+                      className="w-full pl-9 pr-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--sidebar-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm"
                       placeholder="e.g. John Doe"
                     />
                   </div>
@@ -123,7 +123,7 @@ export function CallLogForm({
                       type="text"
                       value={formData.receptionist_name}
                       onChange={(e) => setFormData(p => ({ ...p, receptionist_name: e.target.value }))}
-                      className="w-full pl-9 pr-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--sidebar-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm"
+                      className="w-full pl-9 pr-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--sidebar-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm"
                       placeholder="e.g. Sarah"
                     />
                   </div>
@@ -158,7 +158,7 @@ export function CallLogForm({
                 value={formData.post_call_notes}
                 onChange={(e) => setFormData(p => ({ ...p, post_call_notes: e.target.value }))}
                 rows={4}
-                className="w-full pl-10 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--sidebar-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm resize-none"
+                className="w-full pl-10 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--sidebar-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm resize-none"
                 placeholder="Summary of the conversation..."
               />
             </div>

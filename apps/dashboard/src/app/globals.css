@@ -151,8 +151,8 @@ input[type="checkbox"]:checked::after {
 }
 
 input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--foreground);
-  outline-offset: 2px;
+  outline: 1px solid var(--muted);
+  outline-offset: 1px;
 }
 
 
@@ -253,7 +253,7 @@ input[type="checkbox"]:focus-visible {
   border-color: var(--card-border);
 }
 
-button, 
+button,
 [role="button"],
 a,
 select,
@@ -263,6 +263,85 @@ input[type="button"],
 label[for],
 .card-interactive {
   cursor: pointer;
+}
+
+/* Native select dropdown styling */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--card-bg);
+  color: var(--foreground);
+  border: 1px solid var(--card-border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+select:hover {
+  border-color: var(--muted);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--muted);
+  box-shadow: 0 0 0 1px var(--muted);
+}
+
+select option {
+  background-color: var(--card-bg);
+  color: var(--foreground);
+  padding: 0.5rem;
+}
+
+/* Input and textarea styling */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+input[type="tel"],
+input[type="url"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+textarea {
+  background-color: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--card-border);
+  transition: border-color 0.15s ease;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="search"]:focus,
+input[type="tel"]:focus,
+input[type="url"]:focus,
+input[type="date"]:focus,
+input[type="datetime-local"]:focus,
+input[type="time"]:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--foreground);
+}
+
+/* Remove default ring styles from Tailwind */
+.focus\\:ring-1:focus,
+.focus\\:ring-2:focus {
+  --tw-ring-color: var(--foreground) !important;
+}
+
+/* Required field asterisk styling */
+label .required,
+label:has(+ input:required)::after,
+.required-asterisk {
+  color: var(--error);
 }
 
 body {
@@ -294,10 +373,10 @@ body {
   }
 }
 
-/* Focus styles */
+/* Focus styles - subtle and thin */
 *:focus-visible {
-  outline: 2px solid var(--foreground);
-  outline-offset: 2px;
+  outline: 1px solid var(--muted);
+  outline-offset: 1px;
 }
 
 /* Button base styles */
@@ -345,18 +424,17 @@ body {
   0% {
     background-position: -200% 0;
   }
+
   100% {
     background-position: 200% 0;
   }
 }
 
 .animate-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--card-hover) 25%,
-    var(--sidebar-border) 50%,
-    var(--card-hover) 75%
-  );
+  background: linear-gradient(90deg,
+      var(--card-hover) 25%,
+      var(--sidebar-border) 50%,
+      var(--card-hover) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }

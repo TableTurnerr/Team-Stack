@@ -161,6 +161,101 @@ export interface Note extends RecordModel {
   };
 }
 
+export interface PhoneNumber extends RecordModel {
+  company: string;
+  phone_number: string;
+  label?: string;
+  location_name?: string;
+  location_address?: string;
+  receptionist_name?: string;
+  last_called?: string;
+  expand?: {
+    company?: Company;
+  };
+}
+
+export interface CallLog extends RecordModel {
+  company: string;
+  phone_number_record: string;
+  caller?: string;
+  call_time: string;
+  duration?: number;
+  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Wrong Number' | 'Other';
+  owner_name_found?: string;
+  receptionist_name?: string;
+  post_call_notes?: string;
+  interest_level?: number;
+  status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
+  has_recording?: boolean;
+  expand?: {
+    company?: Company;
+    phone_number_record?: PhoneNumber;
+    caller?: User;
+  };
+}
+
+export interface FollowUp extends RecordModel {
+  call_log?: string;
+  company: string;
+  scheduled_time: string;
+  client_timezone: string;
+  assigned_to?: string;
+  notes?: string;
+  status: 'pending' | 'completed' | 'dismissed';
+  completed_at?: string;
+  expand?: {
+    call_log?: CallLog;
+    company?: Company;
+    assigned_to?: User;
+  };
+}
+
+export interface CompanyNote extends RecordModel {
+  company: string;
+  phone_number_record?: string;
+  note_type: 'pre_call' | 'research' | 'general';
+  content: string;
+  created_by: string;
+  expand?: {
+    company?: Company;
+    phone_number_record?: PhoneNumber;
+    created_by?: User;
+  };
+}
+
+export interface Interaction extends RecordModel {
+  company: string;
+  channel: 'phone' | 'instagram' | 'email';
+  direction: 'outbound' | 'inbound';
+  timestamp: string;
+  user?: string;
+  summary?: string;
+  call_log?: string;
+  expand?: {
+    company?: Company;
+    user?: User;
+    call_log?: CallLog;
+  };
+}
+
+export interface Recording extends RecordModel {
+  phone_number?: string;
+  uploader?: string;
+  file?: string;
+  note?: string;
+  recording_date?: string;
+  duration?: number;
+  call_log?: string;
+  company?: string;
+  phone_number_record?: string;
+  expand?: {
+    uploader?: User;
+    call_log?: CallLog;
+    company?: Company;
+    phone_number_record?: PhoneNumber;
+  };
+}
+
 // ============================================================================
 // Collection Names Constants
 // ============================================================================
@@ -178,4 +273,12 @@ export const COLLECTIONS = {
   RULES: 'rules',
   ALERTS: 'alerts',
   NOTES: 'notes',
+
+  // New CRM collections
+  PHONE_NUMBERS: 'phone_numbers',
+  CALL_LOGS: 'call_logs',
+  FOLLOW_UPS: 'follow_ups',
+  COMPANY_NOTES: 'company_notes',
+  INTERACTIONS: 'interactions',
+  RECORDINGS: 'recordings',
 } as const;

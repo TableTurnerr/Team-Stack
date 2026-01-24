@@ -233,7 +233,9 @@ function CompanyRow({
     <tr className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors">
       {isColumnVisible('company_name') && (
         <td className="py-3 px-4">
-          <span className="font-medium">{company.company_name}</span>
+          <Link href={`/companies/${company.id}`} className="font-medium hover:text-[var(--primary)] transition-colors">
+            {company.company_name}
+          </Link>
         </td>
       )}
       {isColumnVisible('owner_name') && (
@@ -334,13 +336,13 @@ function CompanyRow({
           >
             <Edit size={14} />
           </button>
-          <button
-            onClick={() => onView(company.id)}
+          <Link
+            href={`/companies/${company.id}`}
             className="p-1.5 rounded bg-white text-[var(--background)] border border-[var(--card-border)] hover:bg-gray-100 transition-colors"
-            title="View interactions"
+            title="View Details"
           >
             <ChevronRight size={14} />
-          </button>
+          </Link>
         </div>
       </td>
     </tr>
@@ -538,176 +540,6 @@ function AddCompanyModal({
   );
 }
 
-// Company Interactions Drawer
-function CompanyInteractionsDrawer({
-  companyId,
-  onClose
-}: {
-  companyId: string | null;
-  onClose: () => void;
-}) {
-  const [company, setCompany] = useState<Company | null>(null);
-  const [events, setEvents] = useState<EventLog[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!companyId) return;
-
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const [companyData, eventsData] = await Promise.all([
-          pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(companyId),
-          pb.collection(COLLECTIONS.EVENT_LOGS).getList<EventLog>(1, 50, {
-            filter: `company = "${companyId}"`,
-            sort: '-created',
-            expand: 'actor,user,cold_call'
-          }),
-        ]);
-        setCompany(companyData);
-        setEvents(eventsData.items);
-      } catch (err) {
-        console.error('Failed to fetch company data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [companyId]);
-
-  if (!companyId) return null;
-
-  const getEventIcon = (event: EventLog) => {
-    switch (event.event_type) {
-      case 'Cold Call': return <Phone size={16} />;
-      case 'Outreach': return <Instagram size={16} />;
-      case 'User': return <Calendar size={16} />; // Or user icon
-      default: return <MessageSquare size={16} />;
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
-      <div
-        className="bg-[var(--card-bg)] border-l border-[var(--card-border)] w-full max-w-md h-full overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 bg-[var(--card-bg)] border-b border-[var(--card-border)] p-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Interaction History</h2>
-          <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--foreground)]">
-            <X size={20} />
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="p-8 text-center">
-            <RefreshCw size={24} className="mx-auto animate-spin text-[var(--muted)]" />
-          </div>
-        ) : (
-          <div className="p-4 space-y-4">
-            {company && (
-              <div className="p-4 bg-[var(--sidebar-bg)] rounded-lg space-y-2">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-semibold text-lg">{company.company_name}</h3>
-                    {company.owner_name && (
-                      <p className="text-sm text-[var(--muted)]">{company.owner_name}</p>
-                    )}
-                  </div>
-                  {company.status && (
-                    <span className={cn(
-                      "inline-flex px-2 py-0.5 text-xs font-medium rounded-full",
-                      STATUS_STYLES[company.status]?.bg || 'bg-gray-500/20',
-                      STATUS_STYLES[company.status]?.text || 'text-gray-400'
-                    )}>
-                      {company.status}
-                    </span>
-                  )}
-                </div>
-
-                {company.instagram_handle && (
-                  <a href={`https://instagram.com/${company.instagram_handle.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--primary)]">
-                    <Instagram size={14} />
-                    @{company.instagram_handle.replace('@', '')}
-                  </a>
-                )}
-                {company.email && (
-                  <a href={`mailto:${company.email}`} className="flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--primary)]">
-                    <Mail size={14} />
-                    {company.email}
-                  </a>
-                )}
-                {company.phone_numbers && (
-                  <p className="text-sm font-mono flex items-center gap-2 text-[var(--muted)]">
-                    <Phone size={14} />
-                    {company.phone_numbers}
-                  </p>
-                )}
-              </div>
-            )}
-
-            <h3 className="font-medium text-sm text-[var(--muted)]">
-              {events.length} Interaction{events.length !== 1 ? 's' : ''}
-            </h3>
-
-            {events.length === 0 ? (
-              <p className="text-[var(--muted)] text-sm">No interactions recorded.</p>
-            ) : (
-              <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:ml-[2.5rem] before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-[var(--border)] before:to-transparent">
-                {events.map((event) => (
-                  <div key={event.id} className="relative flex gap-6 md:gap-8 pb-8 last:pb-0 group">
-                    <div className="absolute left-0 inset-0 flex justify-center w-10 md:w-20">
-                      <div className="h-full w-0.5 bg-[var(--border)] group-last:bg-[linear-gradient(to_bottom,var(--border)_50%,transparent_50%)] pointer-events-none"></div>
-                    </div>
-                    <div className="relative z-10 flex-none w-10 h-10 md:w-16 md:h-16 flex items-center justify-center">
-                      <div className="w-8 h-8 rounded-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] flex items-center justify-center text-[var(--muted)]">
-                        {getEventIcon(event)}
-                      </div>
-                    </div>
-
-                    <div className="flex-auto pt-1.5 min-w-0">
-                      <div className="flex justify-between gap-x-4">
-                        <div className="text-sm font-medium text-[var(--foreground)]">
-                          {event.event_type}
-                        </div>
-                        <time dateTime={event.created} className="flex-none text-xs text-[var(--muted)]">
-                          {formatDate(event.created)}
-                        </time>
-                      </div>
-                      <p className="text-sm text-[var(--muted)] mt-1">
-                        {event.details}
-                      </p>
-                      {event.expand?.cold_call && (
-                        <div className="mt-2 p-3 rounded bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-sm">
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="font-medium">Call Summary</span>
-                            {event.expand.cold_call.call_outcome && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--card-bg)] border border-[var(--card-border)]">
-                                {event.expand.cold_call.call_outcome}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[var(--muted)] line-clamp-3">
-                            {event.expand.cold_call.call_summary || 'No summary available.'}
-                          </p>
-                          <Link href={`/cold-calls/${event.expand.cold_call.id}`} className="text-xs text-[var(--primary)] hover:underline mt-2 inline-block">
-                            View Call Details
-                          </Link>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function CompaniesPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -715,7 +547,6 @@ export default function CompaniesPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -901,18 +732,22 @@ export default function CompaniesPage() {
         )}
       </div>
 
-      {/* Add Company Modal */}
-      <AddCompanyModal
-        isOpen={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        onAdd={handleAdd}
-      />
+            {/* Add Company Modal */}
 
-      {/* Company Interactions Drawer */}
-      <CompanyInteractionsDrawer
-        companyId={selectedCompanyId}
-        onClose={() => setSelectedCompanyId(null)}
-      />
-    </div>
-  );
-}
+            <AddCompanyModal
+
+              isOpen={showAddModal}
+
+              onClose={() => setShowAddModal(false)}
+
+              onAdd={handleAdd}
+
+            />
+
+          </div>
+
+        );
+
+      }
+
+      

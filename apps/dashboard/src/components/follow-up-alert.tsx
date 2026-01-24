@@ -63,7 +63,7 @@ export function FollowUpAlert({
 
           {followUp.notes && (
             <p className="mt-3 text-xs text-[var(--muted)] bg-[var(--sidebar-bg)] p-2 rounded border border-[var(--card-border)] line-clamp-2">
-              "{followUp.notes}"
+              &quot;{followUp.notes}&quot;
             </p>
           )}
         </div>

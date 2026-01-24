@@ -141,7 +141,7 @@ export function BulkUploadModal({
               </div>
               <h3 className="text-lg font-bold mb-2">Drag & drop recordings here</h3>
               <p className="text-sm text-[var(--muted)] mb-8 max-w-xs mx-auto">
-                Select multiple MP3 or WAV files. We'll automatically try to match them by phone number in the filename.
+                Select multiple MP3 or WAV files. We&apos;ll automatically try to match them by phone number in the filename.
               </p>
               <label className="px-6 py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-bold cursor-pointer hover:opacity-90 transition-all">
                 Browse Files

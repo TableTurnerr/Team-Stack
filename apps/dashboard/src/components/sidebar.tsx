@@ -219,10 +219,11 @@ export function Sidebar() {
           <div className="flex items-center gap-3 px-2 py-2 rounded-lg">
             <div className="w-8 h-8 rounded-full bg-[var(--primary)] flex items-center justify-center overflow-hidden relative">
               {user?.avatar ? (
-                <img
+                <Image
                   src={user.avatar}
                   alt={user.name || 'User'}
-                  className="w-full h-full object-cover"
+                  fill
+                  className="object-cover"
                 />
               ) : (
                 <span className="text-white text-xs font-semibold">

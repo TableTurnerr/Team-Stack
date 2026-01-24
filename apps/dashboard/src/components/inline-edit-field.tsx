@@ -155,7 +155,7 @@ export function InlineEditField({
               value={currentValue}
               onChange={(e) => handleChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm min-h-[80px]"
+              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm min-h-[80px]"
               autoFocus
             />
           ) : type === 'select' ? (
@@ -164,7 +164,7 @@ export function InlineEditField({
               value={currentValue}
               onChange={(e) => handleChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm"
+              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm"
               autoFocus
             >
               {options?.map((opt) => (
@@ -180,7 +180,7 @@ export function InlineEditField({
               value={currentValue}
               onChange={(e) => handleChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--primary)] text-sm"
+              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm"
               autoFocus
             />
           )}

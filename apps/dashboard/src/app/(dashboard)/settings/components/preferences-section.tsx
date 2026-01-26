@@ -139,10 +139,11 @@ export function PreferencesSection({ preferences, updatePreferences, isSaving }:
                 <div className="space-y-4 pl-6">
                     <ToggleSwitch
                         checked={settings.auto_start_recording ?? false}
-                        onChange={(v) => updateSetting('auto_start_recording', v)}
+                        onChange={() => { }}
                         label="Auto-start recording"
                         description="Automatically start recording when you begin a call"
-                        disabled={isSaving}
+                        disabled={true}
+                        badge="Coming Soon"
                     />
 
                     <ToggleSwitch

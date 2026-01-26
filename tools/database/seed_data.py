@@ -52,14 +52,18 @@ class PocketBaseSeeder:
     def authenticate(self, email: str, password: str):
         """Authenticate as admin (superuser)."""
         print(f"🔑 Authenticating with PocketBase at {self.url}...")
-        # PocketBase 0.8+ uses _superusers collection for admin auth
-        response = self.client.post(
-            f"{self.url}/api/collections/_superusers/auth-with-password",
-            json={'identity': email, 'password': password}
-        )
-        response.raise_for_status()
-        self.token = response.json()['token']
-        print("   ✓ Authenticated successfully")
+        try:
+            # PocketBase 0.8+ uses _superusers collection for admin auth
+            response = self.client.post(
+                f"{self.url}/api/collections/_superusers/auth-with-password",
+                json={'identity': email, 'password': password}
+            )
+            response.raise_for_status()
+            self.token = response.json()['token']
+            print("   ✓ Authenticated successfully")
+        except Exception as e:
+            print(f"   ✗ Authentication failed: {e}")
+            raise
     
     def _headers(self) -> Dict[str, str]:
         return {
@@ -74,7 +78,12 @@ class PocketBaseSeeder:
             headers=self._headers(),
             json=data
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            print(f"Error creating record in {collection}: {e.response.text}")
+            raise
+
         rec = response.json()
         
         # Track ID
@@ -137,14 +146,15 @@ class PocketBaseSeeder:
             with open(SEED_LOG_FILE, 'r') as f:
                 data = json.load(f)
             
-            # Common dependent collections first
+            # Delete in reverse order of dependency
             priority_order = [
-                'alerts', 'rules', 'goals', 'outreach_logs', 'event_logs', 
-                'call_transcripts', 'cold_calls', 'notes', 'leads', 
-                'insta_actors', 'companies', 'users' 
+                'outreach_logs', 'alerts', 'rules', 'goals', 'event_logs',
+                'call_transcripts', 'cold_calls', 'call_logs', 'recordings',
+                'interactions', 'company_notes', 'notes',
+                'insta_actors', 'phone_numbers', 'companies', 'users'
             ]
             
-            # Sort collections by priority
+            # Sort collections by priority (if not in list, put at end)
             collections = sorted(data.keys(), key=lambda x: priority_order.index(x) if x in priority_order else 999)
 
             for col in collections:
@@ -171,8 +181,6 @@ class PocketBaseSeeder:
         users = [
             {'email': 'admin@tableturnerr.com', 'name': 'Admin User', 'role': 'admin'},
             {'email': 'sarah@tableturnerr.com', 'name': 'Sarah Johnson', 'role': 'member'},
-            {'email': 'mike@tableturnerr.com', 'name': 'Mike Chen', 'role': 'member'},
-            {'email': 'emma@tableturnerr.com', 'name': 'Emma Davis', 'role': 'member'},
         ]
         
         self.id_maps['users'] = {}
@@ -194,13 +202,12 @@ class PocketBaseSeeder:
                 self.id_maps['users'][user['email']] = rec['id']
                 print(f"   ✓ Created user: {user['name']}")
             except Exception as e:
-                # If user exists, we try to fetch it to populate id_map
-                if 'already exists' in str(e).lower():
-                    print(f"   ⚠ User already exists: {user['email']}")
+                # If user exists, try to fetch to populate id_map
+                if 'already exists' in str(e).lower() or '400' in str(e):
+                    print(f"   ⚠ User likely exists: {user['email']}")
                     try:
-                        # Try fetch
                         res = self.client.get(f"{self.url}/api/collections/users/records", 
-                                            params={'filter': f'email="{user["email"]}"'},
+                                            params={'filter': f'email="{user["email"]}"'}, 
                                             headers=self._headers())
                         items = res.json().get('items', [])
                         if items:
@@ -210,70 +217,90 @@ class PocketBaseSeeder:
                 else:
                     print(f"   ✗ Failed to create user {user['email']}: {e}")
     
-    def seed_companies(self):
-        """Create sample companies."""
-        print("\n🏢 Creating companies...")
+    def seed_companies_and_phones(self):
+        """Create sample companies and their phone numbers."""
+        print("\n🏢 Creating companies and phone numbers...")
         
+        # Leads are now companies with specific statuses
         companies = [
             {
                 'company_name': 'Sunrise Restaurant',
                 'owner_name': 'John Martinez',
                 'company_location': 'Los Angeles, CA',
-                'phone_numbers': '+1-310-555-0101',
-                'source': 'Cold Call'
+                'phone_numbers_text': '+1-310-555-0101', # Legacy text field
+                'source': 'Cold Call',
+                'status': 'Warm',
+                'contact_source': 'Research',
+                'phones': [
+                    {'phone_number': '+1-310-555-0101', 'label': 'Main', 'location_name': 'LA Branch'}
+                ]
             },
             {
                 'company_name': 'Golden Gate Bistro',
                 'owner_name': 'Lisa Wong',
                 'company_location': 'San Francisco, CA',
-                'phone_numbers': '+1-415-555-0202',
+                'phone_numbers_text': '+1-415-555-0202',
                 'source': 'Google Maps',
-                'google_maps_link': 'https://maps.google.com/?q=Golden+Gate+Bistro'
+                'google_maps_link': 'https://maps.google.com/?q=Golden+Gate+Bistro',
+                'status': 'Cold No Reply',
+                'phones': [
+                    {'phone_number': '+1-415-555-0202', 'label': 'Manager', 'receptionist_name': 'Mark'}
+                ]
             },
             {
-                'company_name': 'Downtown Diner',
-                'owner_name': 'Robert Smith',
-                'company_location': 'New York, NY',
-                'phone_numbers': '+1-212-555-0303, +1-212-555-0304',
-                'source': 'Cold Call'
-            },
-            {
-                'company_name': 'Coastal Kitchen',
-                'owner_name': 'Maria Garcia',
-                'company_location': 'Miami, FL',
-                'phone_numbers': '+1-305-555-0404',
-                'source': 'Instagram'
-            },
-            {
-                'company_name': 'Mountain View Cafe',
-                'owner_name': 'David Lee',
-                'company_location': 'Denver, CO',
-                'phone_numbers': '+1-720-555-0505',
-                'source': 'Manual'
-            },
+                'company_name': 'Tech Diner',
+                'owner_name': 'Alice Chen',
+                'company_location': 'Seattle, WA',
+                'phone_numbers_text': '+1-206-555-0909',
+                'source': 'Instagram',
+                'status': 'Client',
+                'email': 'alice@techdiner.com',
+                'phones': [
+                    {'phone_number': '+1-206-555-0909', 'label': 'Owner Cell', 'location_name': 'HQ'}
+                ]
+            }
         ]
         
         self.id_maps['companies'] = {}
-        for i, company in enumerate(companies):
+        self.id_maps['phone_numbers'] = {} # map phone number string to record ID
+
+        for company in companies:
+            phones = company.pop('phones', [])
+            # Map 'phone_numbers_text' to schema field 'phone_numbers'
+            if 'phone_numbers_text' in company:
+                company['phone_numbers'] = company.pop('phone_numbers_text')
+                
             try:
                 rec = self.create_record('companies', company)
                 self.id_maps['companies'][company['company_name']] = rec['id']
-                print(f"   ✓ Created company: {company['company_name']}")
-            except Exception as e:
-                # If exists, find it
-                if 'already exists' in str(e).lower(): 
-                   pass # Ideally we fetch ID like users, but for brevity skipping unless needed for relations
-                print(f"   ✗ Failed to create company: {e}")
+                print(f"   ✓ Created company: {company['company_name']} ({company['status']})")
                 
-                # Try simple fetch if failure was due to duplicate to populate map
-                try: 
-                     res = self.client.get(f"{self.url}/api/collections/companies/records", 
+                # Create associated phone number records
+                for phone in phones:
+                    phone_data = {
+                        'company': rec['id'],
+                        'phone_number': phone['phone_number'],
+                        'label': phone.get('label', ''),
+                        'location_name': phone.get('location_name', ''),
+                        'receptionist_name': phone.get('receptionist_name', ''),
+                        'last_called': datetime.now(timezone.utc).isoformat() + 'Z'
+                    }
+                    phone_rec = self.create_record('phone_numbers', phone_data)
+                    self.id_maps['phone_numbers'][phone['phone_number']] = phone_rec['id']
+                    print(f"      → Added phone: {phone['phone_number']}")
+                    
+            except Exception as e:
+                print(f"   ✗ Failed to create company {company['company_name']}: {e}")
+                # Try to fetch if exists to keep map populated
+                if 'already exists' in str(e).lower():
+                    try:
+                        res = self.client.get(f"{self.url}/api/collections/companies/records", 
                                             params={'filter': f'company_name="{company["company_name"]}"'}, 
                                             headers=self._headers())
-                     items = res.json().get('items', [])
-                     if items:
-                         self.id_maps['companies'][company['company_name']] = items[0]['id']
-                except: pass
+                        items = res.json().get('items', [])
+                        if items:
+                            self.id_maps['companies'][company['company_name']] = items[0]['id']
+                    except: pass
 
     def seed_cold_calls(self):
         """Create sample cold calls with transcripts."""
@@ -281,103 +308,62 @@ class PocketBaseSeeder:
         
         cold_calls = [
             {
-                'company': 'Sunrise Restaurant',
+                'company_name': 'Sunrise Restaurant',
                 'recipients': 'Owner (John)',
                 'call_outcome': 'Interested',
                 'interest_level': 8,
                 'phone_number': '+1-310-555-0101',
                 'owner_name': 'John Martinez',
-                'call_summary': 'John was very interested in our tablet menu system. He mentioned they recently renovated and are looking to modernize their operations.',
-                'objections': ['Price concerns', 'Training time for staff'],
-                'pain_points': ['Paper menus get dirty quickly', 'Menu updates are expensive to print'],
-                'follow_up_actions': ['Send pricing details', 'Schedule demo for next week'],
-                'call_duration_estimate': '4 minutes 30 seconds',
+                'call_summary': 'John was interested in modernizing menu operations. Requested pricing.',
+                'objections': ['Price concerns'],
+                'pain_points': ['Paper menus get dirty', 'Reprinting costs'],
+                'follow_up_actions': ['Send pricing', 'Schedule demo'],
+                'call_duration_estimate': '4m 30s',
                 'model_used': 'gemini-2.5-flash',
-                'transcript': """Caller: Hi, is this Sunrise Restaurant? I'm calling from TableTurnerr.
-Recipient: Yes, this is John, the owner. What can I do for you?
-Caller: Great to speak with you, John. We offer digital tablet menus for restaurants. I noticed you recently renovated - are you looking to modernize your menu experience?
-Recipient: Actually, yes! We just finished our renovation and I've been thinking about going digital. What do you offer?
-Caller: We have tablet-based menus that update instantly, show beautiful images, and even integrate with your POS system.
-Recipient: That sounds interesting. Our paper menus get dirty so fast, and every time we update prices, we have to reprint everything.
-Caller: Exactly the problems we solve. Can I send you our pricing and maybe schedule a demo?
-Recipient: Yes, send me the information. I'm definitely interested in seeing a demo."""
+                'transcript': """Caller: Hi, is this Sunrise Restaurant?
+Recipient: Yes, this is John.
+Caller: Hi John, calling from TableTurnerr. We offer digital menus.
+Recipient: Interesting, our paper ones are a hassle.
+Caller: We can help with that. Can I send info?
+Recipient: Yes please."""
             },
             {
-                'company': 'Golden Gate Bistro',
+                'company_name': 'Golden Gate Bistro',
                 'recipients': 'Manager',
                 'call_outcome': 'Callback',
                 'interest_level': 6,
                 'phone_number': '+1-415-555-0202',
                 'owner_name': 'Lisa Wong',
-                'call_summary': 'Spoke with the manager. Owner Lisa is not available until next week. Manager seemed interested and will pass along the information.',
+                'call_summary': 'Spoke with manager. Owner out of town. Call back next week.',
                 'objections': ['Owner not available'],
-                'pain_points': ['Long wait times for ordering'],
-                'follow_up_actions': ['Call back next Tuesday'],
-                'call_duration_estimate': '2 minutes',
+                'pain_points': ['Wait times'],
+                'follow_up_actions': ['Call back Tuesday'],
+                'call_duration_estimate': '2m',
                 'model_used': 'gemini-2.5-flash',
-                'transcript': """Caller: Hi, I'm calling from TableTurnerr. Could I speak with the owner about our digital menu solutions?
-Recipient: I'm the manager. Lisa, the owner, is out of town until next week.
-Caller: I understand. We help restaurants modernize with tablet menus. Would you be able to pass along some information?
-Recipient: Sure, what do you offer?
-Caller: Interactive tablet menus that speed up ordering and improve the guest experience. I can send details.
-Recipient: Sounds interesting. We do get complaints about wait times. I'll let Lisa know.
-Caller: Perfect. I'll call back next Tuesday when she's available. Thank you!"""
-            },
-            {
-                'company': 'Downtown Diner',
-                'recipients': 'Receptionist',
-                'call_outcome': 'Not Interested',
-                'interest_level': 2,
-                'phone_number': '+1-212-555-0303',
-                'owner_name': 'Robert Smith',
-                'call_summary': 'Owner declined immediately. Said they prefer traditional menus and are not interested in technology solutions.',
-                'objections': ['Not interested in technology', 'Happy with current setup'],
-                'pain_points': [],
-                'follow_up_actions': [],
-                'call_duration_estimate': '45 seconds',
-                'model_used': 'gemini-2.5-flash',
-                'transcript': """Caller: Hi, could I speak with the owner about our digital menu system?
-Recipient: Hold on... This is Robert.
-Caller: Hi Robert, I'm calling from TableTurnerr about our tablet menu solutions—
-Recipient: Not interested. We've been doing paper menus for 30 years and that's not changing.
-Caller: I understand. If you ever reconsider—
-Recipient: I won't. Thanks anyway. Goodbye."""
-            },
-            {
-                'company': 'Coastal Kitchen',
-                'recipients': 'Owner (Maria)',
-                'call_outcome': 'Interested',
-                'interest_level': 9,
-                'phone_number': '+1-305-555-0404',
-                'owner_name': 'Maria Garcia',
-                'call_summary': 'Maria is very tech-forward and already follows us on Instagram. She wants to be an early adopter and requested an in-person demo this week.',
-                'objections': [],
-                'pain_points': ['Wants better customer experience', 'Looking for competitive advantage'],
-                'follow_up_actions': ['Schedule in-person demo', 'Prepare custom proposal'],
-                'call_duration_estimate': '6 minutes',
-                'model_used': 'gemini-2.5-flash',
-                'transcript': """Caller: Hi Maria, this is a follow-up from TableTurnerr. I saw you've been engaging with our Instagram posts.
-Recipient: Yes! I love what you're doing. I've been waiting for someone to call me.
-Caller: That's great to hear! Our tablet menus could really enhance your coastal dining experience.
-Recipient: I want to be ahead of my competitors. When can you come show me how it works?
-Caller: I can do an in-person demo this week. Thursday work for you?
-Recipient: Perfect. Come at 2pm before the dinner rush. I'm excited to see it in action.
-Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursday!"""
-            },
+                'transcript': """Caller: May I speak to the owner?
+Recipient: She is not in. I am the manager.
+Caller: I see. We provide digital menus.
+Recipient: Call back next week when Lisa is here."""
+            }
         ]
         
         self.id_maps['cold_calls'] = {}
+        
         for call in cold_calls:
             try:
-                company_id = self.id_maps['companies'].get(call['company'])
+                company_name = call.pop('company_name')
+                company_id = self.id_maps['companies'].get(company_name)
+                
+                if not company_id:
+                    print(f"   ⚠ Skipping call for {company_name}: Company not found")
+                    continue
+                    
                 transcript = call.pop('transcript')
                 
                 call_data = {
                     **call,
                     'company': company_id,
                 }
-                del call_data['company']  # Remove string key
-                call_data['company'] = company_id  # Add ID
                 
                 rec = self.create_record('cold_calls', call_data)
                 self.id_maps['cold_calls'][call['phone_number']] = rec['id']
@@ -392,314 +378,215 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
                 
             except Exception as e:
                 print(f"   ✗ Failed to create cold call: {e}")
-    
-    def seed_leads(self):
-        """Create sample leads."""
-        print("\n🎯 Creating leads...")
+
+    def seed_company_notes(self):
+        """Create company specific notes."""
+        print("\n📝 Creating company notes...")
         
-        leads = [
-            {'username': 'miami_foodie_blog', 'status': 'Warm', 'source': 'Instagram', 'email': 'contact@miamifoodie.com'},
-            {'username': 'restaurant_tech_daily', 'status': 'Replied', 'source': 'Instagram', 'notes': 'Industry influencer, interested in partnership'},
-            {'username': 'chefs_choice_nyc', 'status': 'Cold No Reply', 'source': 'Instagram'},
-            {'username': 'la_dining_guide', 'status': 'Booked', 'source': 'Instagram', 'email': 'partnerships@ladining.com'},
-            {'username': 'sf_restaurant_week', 'status': 'Paid', 'source': 'Instagram', 'notes': 'Signed up for annual plan'},
+        admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
+        if not admin_id: return
+
+        notes = [
+            {
+                'company_name': 'Sunrise Restaurant',
+                'phone': '+1-310-555-0101',
+                'note_type': 'research',
+                'content': 'They have a 4.5 star rating on Yelp. Renovated last month.',
+                'created_by': admin_id
+            }
         ]
-        
-        for lead in leads:
+
+        for note in notes:
+            company_id = self.id_maps['companies'].get(note['company_name'])
+            phone_record_id = self.id_maps['phone_numbers'].get(note['phone'])
+            
+            if not company_id: continue
+
             try:
-                self.create_record('leads', {
-                    **lead,
-                    'first_contacted': (datetime.now(timezone.utc) - timedelta(days=14)).isoformat() + 'Z',
-                    'last_updated': datetime.now(timezone.utc).isoformat() + 'Z'
-                })
-                print(f"   ✓ Created lead: @{lead['username']} ({lead['status']})")
+                data = {
+                    'company': company_id,
+                    'phone_number_record': phone_record_id,
+                    'note_type': note['note_type'],
+                    'content': note['content'],
+                    'created_by': note['created_by']
+                }
+                self.create_record('company_notes', data)
+                print(f"   ✓ Created note for {note['company_name']}")
             except Exception as e:
-                if 'already exists' in str(e).lower():
-                    print(f"   ⚠ Lead already exists: {lead['username']}")
-                else:
-                    print(f"   ✗ Failed to create lead: {e}")
-    
+                print(f"   ✗ Failed to create company note: {e}")
+
+    def seed_interactions(self):
+        """Create sample interactions."""
+        print("\n🤝 Creating interactions...")
+        
+        admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
+        if not admin_id: return
+
+        interactions = [
+            {
+                'company_name': 'Tech Diner',
+                'channel': 'email',
+                'direction': 'inbound',
+                'summary': 'Received signed contract via email.',
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            }
+        ]
+
+        for interaction in interactions:
+            company_id = self.id_maps['companies'].get(interaction['company_name'])
+            if not company_id: continue
+
+            try:
+                data = {
+                    'company': company_id,
+                    'channel': interaction['channel'],
+                    'direction': interaction['direction'],
+                    'summary': interaction['summary'],
+                    'timestamp': interaction['timestamp'],
+                    'user': admin_id
+                }
+                self.create_record('interactions', data)
+                print(f"   ✓ Created interaction for {interaction['company_name']}")
+            except Exception as e:
+                print(f"   ✗ Failed to create interaction: {e}")
+
     def seed_insta_actors(self):
         """Create sample Instagram actors."""
         print("\n📱 Creating Instagram actors...")
         
-        # Need user IDs first
         sarah_id = self.id_maps.get('users', {}).get('sarah@tableturnerr.com')
-        mike_id = self.id_maps.get('users', {}).get('mike@tableturnerr.com')
+        if not sarah_id:
+            # Fallback to admin if sarah not found
+            sarah_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
         
-        if not sarah_id and not mike_id:
-            print("   ⚠ No users found - skipping actors")
-            # Try to persist anyway if we have some ids
-        
-        # Safe defaults if users failed
-        owner_id = sarah_id or mike_id 
+        if not sarah_id: return
 
         actors = [
             {'username': 'tableturnerr_official', 'owner': sarah_id, 'status': 'Active'},
-            {'username': 'tableturnerr_sales', 'owner': sarah_id, 'status': 'Active'},
-            {'username': 'restaurant_innovation', 'owner': mike_id, 'status': 'Active'},
-            {'username': 'dining_tech_tips', 'owner': mike_id, 'status': 'Suspended By Team'},
         ]
         
         self.id_maps['actors'] = {}
         for actor in actors:
-            if not actor['owner']:
-                 # Fallback if specific owner not found but we have at least one
-                 if owner_id: actor['owner'] = owner_id
-                 else: continue
-
             try:
                 rec = self.create_record('insta_actors', {
                     **actor,
                     'last_activity': datetime.now(timezone.utc).isoformat() + 'Z'
                 })
                 self.id_maps['actors'][actor['username']] = rec['id']
-                print(f"   ✓ Created actor: @{actor['username']} ({actor['status']})")
+                print(f"   ✓ Created actor: @{actor['username']}")
             except Exception as e:
-                print(f"   ✗ Failed to create actor: {e}")
                 if 'already exists' in str(e).lower():
                    try:
                        res = self.client.get(f"{self.url}/api/collections/insta_actors/records", 
-                                             params={'filter': f'username="{actor["username"]}"'},
+                                             params={'filter': f'username="{actor["username"]}"'}, 
                                              headers=self._headers())
                        items = res.json().get('items', [])
                        if items:
                            self.id_maps['actors'][actor['username']] = items[0]['id']
                    except: pass
+                else:
+                    print(f"   ✗ Failed to create actor: {e}")
     
     def seed_notes(self):
-        """Create sample notes."""
-        print("\n📝 Creating notes...")
+        """Create generic system notes."""
+        print("\n🗒️ Creating generic notes...")
         
         admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
-        sarah_id = self.id_maps.get('users', {}).get('sarah@tableturnerr.com')
-        
-        if not admin_id:
-            print("   ⚠ No admin user found - skipping notes")
+        if not admin_id: return
         
         notes = [
             {
                 'title': 'Sales Strategy Q1',
-                'note_text': '# Q1 Focus Areas\n\n1. Target restaurants that recently renovated\n2. Focus on health-conscious menus (allergy info display)\n3. Partner with POS providers\n\n## Key Metrics\n- 50 demos per month\n- 15% conversion rate goal',
+                'note_text': '# Q1 Strategy\nFocus on recently renovated restaurants.',
                 'created_by': admin_id,
                 'is_archived': False,
                 'is_deleted': False
-            },
-            {
-                'title': 'Competitor Analysis',
-                'note_text': '## Main Competitors\n\n- **MenuPad Pro**: Higher price, more features\n- **DigiMenu**: Budget option, less reliable\n- **TableTech**: Good for large chains\n\n## Our Advantages\n- Better UX/UI\n- Faster implementation\n- Local support',
-                'created_by': sarah_id or admin_id,
-                'is_archived': False,
-                'is_deleted': False
-            },
-            {
-                'title': 'Call Script Template',
-                'note_text': '## Opening\n"Hi, is this [Restaurant Name]? I\'m [Name] from TableTurnerr."\n\n## Discovery Questions\n1. How often do you update your menu?\n2. Have you considered going digital?\n3. What\'s your biggest challenge with the current setup?\n\n## Closing\n"Can I send you some information and schedule a quick demo?"',
-                'created_by': admin_id,
-                'is_archived': True,
-                'is_deleted': False
-            },
+            }
         ]
         
         for note in notes:
-            if not note.get('created_by'): continue
             try:
                 self.create_record('notes', note)
-                print(f"   ✓ Created note: {note['title']}")
+                print(f"   ✓ Created generic note: {note['title']}")
             except Exception as e:
                 print(f"   ✗ Failed to create note: {e}")
     
-    def seed_event_logs(self):
-        """Create sample event logs."""
-        print("\n📊 Creating event logs...")
+    def seed_goals_rules_alerts(self):
+        """Create goals, rules, and alerts."""
+        print("\n🎯 Creating goals, rules, and alerts...")
         
         admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
         actor_id = list(self.id_maps.get('actors', {}).values())[0] if self.id_maps.get('actors') else None
         
-        if not admin_id:
-            print("   ⚠ No users found - skipping event logs")
-            return
-        
-        events = [
-            {'event_type': 'Cold Call', 'details': 'Made call to Sunrise Restaurant - Interested', 'source': 'Cold Call'},
-            {'event_type': 'User', 'details': 'Admin logged in', 'source': 'Cold Call'},
-            {'event_type': 'Outreach', 'details': 'Sent DM to @miami_foodie_blog', 'source': 'Instagram'},
-            {'event_type': 'System', 'details': 'Daily sync completed', 'source': 'Cold Call'},
-        ]
-        
-        for event in events:
-            try:
-                self.create_record('event_logs', {
-                    **event,
-                    'user': admin_id,
-                    'actor': actor_id if event['source'] == 'Instagram' else None
-                })
-                print(f"   ✓ Created event: {event['event_type']} - {event['details'][:40]}...")
-            except Exception as e:
-                print(f"   ✗ Failed to create event: {e}")
+        if not admin_id: return
 
-    def seed_goals(self):
-        """Create sample goals."""
-        print("\n🏆 Creating goals...")
-        
-        admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
-        # Get first actor ID safely
-        actor_id = None
-        if self.id_maps.get('actors'):
-            actor_id = list(self.id_maps['actors'].values())[0]
-
-        if not admin_id:
-            print("   ⚠ No admin user found - skipping goals")
-            return
-
-        goals = [
-            {
+        # Goal
+        try:
+            self.create_record('goals', {
                 'metric': 'Total Messages Sent',
-                'target_value': 100,
+                'target_value': 50,
                 'frequency': 'Daily',
                 'assigned_to_user': admin_id,
                 'assigned_to_actor': actor_id,
                 'status': 'Active',
                 'start_date': datetime.now(timezone.utc).date().isoformat(),
                 'end_date': (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
-            },
-            {
-                'metric': 'Calls Made',
-                'target_value': 50,
-                'frequency': 'Weekly',
-                'assigned_to_user': admin_id,
-                'status': 'Active',
-                'start_date': datetime.now(timezone.utc).date().isoformat()
-            }
-        ]
+            })
+            print(f"   ✓ Created goal")
+        except Exception as e:
+            print(f"   ✗ Failed goal: {e}")
 
-        for goal in goals:
-            try:
-                self.create_record('goals', goal)
-                print(f"   ✓ Created goal: {goal['frequency']} {goal['metric']}")
-            except Exception as e:
-                print(f"   ✗ Failed to create goal: {e}")
-
-    def seed_rules(self):
-        """Create sample rules."""
-        print("\n📏 Creating rules...")
-
-        admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
-        actor_id = None
-        if self.id_maps.get('actors'):
-            actor_id = list(self.id_maps['actors'].values())[0]
-
-        if not admin_id:
-            print("   ⚠ No admin user found - skipping rules")
-            return
-
-        rules = [
-            {
+        # Rule
+        try:
+            self.create_record('rules', {
                 'type': 'Frequency Cap',
                 'metric': 'Total Messages Sent',
-                'limit_value': 50,
-                'time_window_sec': 86400, # 24 hours
+                'limit_value': 30,
+                'time_window_sec': 3600,
                 'severity': 'High',
                 'assigned_to_user': admin_id,
-                'assigned_to_actor': actor_id,
                 'status': 'Active'
-            },
-            {
-                'type': 'Interval Spacing',
-                'metric': 'Calls Made',
-                'limit_value': 1,
-                'time_window_sec': 300, # 5 minutes
-                'severity': 'Medium',
-                'assigned_to_user': admin_id,
-                'status': 'Active'
-            }
-        ]
+            })
+            print(f"   ✓ Created rule")
+        except Exception as e:
+            print(f"   ✗ Failed rule: {e}")
 
-        for rule in rules:
-            try:
-                self.create_record('rules', rule)
-                print(f"   ✓ Created rule: {rule['type']} on {rule['metric']}")
-            except Exception as e:
-                print(f"   ✗ Failed to create rule: {e}")
-
-    def seed_alerts(self):
-        """Create sample alerts."""
-        print("\n🚨 Creating alerts...")
-
-        admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
-        
-        if not admin_id:
-            print("   ⚠ No admin user found - skipping alerts")
-            return
-            
-        alerts = [
-            {
+        # Alert
+        try:
+            self.create_record('alerts', {
                 'created_by': admin_id,
                 'target_user': admin_id,
                 'entity_type': 'goal',
-                'entity_label': 'Daily Messages Goal',
+                'entity_label': 'Daily Limit Warning',
                 'alert_time': datetime.now(timezone.utc).isoformat() + 'Z',
-                'message': 'You are close to reaching your daily message limit.',
+                'message': 'Approaching daily message limit.',
                 'is_dismissed': False
-            },
-            {
-                'created_by': admin_id,
-                'target_user': admin_id,
-                'entity_type': 'lead',
-                'entity_id': 'so_important',
-                'entity_label': 'VIP Lead',
-                'alert_time': (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat() + 'Z',
-                'message': 'Follow up required for VIP lead.',
-                'is_dismissed': True
-            }
-        ]
+            })
+            print(f"   ✓ Created alert")
+        except Exception as e:
+            print(f"   ✗ Failed alert: {e}")
 
-        for alert in alerts:
-            try:
-                self.create_record('alerts', alert)
-                print(f"   ✓ Created alert: {alert['message'][:30]}...")
-            except Exception as e:
-                print(f"   ✗ Failed to create alert: {e}")
-
-    def seed_outreach_logs(self):
-        """Create sample outreach logs (requires creating an event first)."""
-        print("\n📨 Creating outreach logs...")
+    def seed_event_logs(self):
+        """Create sample event logs."""
+        print("\n📊 Creating event logs...")
         
         admin_id = self.id_maps.get('users', {}).get('admin@tableturnerr.com')
-        actor_id = None
-        if self.id_maps.get('actors'):
-            actor_id = list(self.id_maps['actors'].values())[0]
-
-        if not admin_id or not actor_id:
-            print("   ⚠ Missing admin or actor - skipping outreach logs")
-            return
-
-        # 1. Create the parent event
-        event_data = {
-            'event_type': 'Outreach',
-            'details': 'Direct Message sent to potential lead',
-            'source': 'Instagram',
-            'user': admin_id,
-            'actor': actor_id
-        }
+        if not admin_id: return
         
-        try:
-            event_rec = self.create_record('event_logs', event_data)
-            print(f"   ✓ Created parent event for outreach")
-            
-            # 2. Create the outreach log
-            outreach_data = {
-                'event': event_rec['id'],
-                'message_text': "Hey! Loved your recent post about sustainable dining. We have a tool that helps with that.",
-                'sent_at': datetime.now(timezone.utc).isoformat() + 'Z'
-            }
-            
-            self.create_record('outreach_logs', outreach_data)
-            print(f"   ✓ Created outreach log")
-            
-        except Exception as e:
-            print(f"   ✗ Failed to create outreach sequence: {e}")
-    
+        events = [
+            {'event_type': 'System', 'details': 'Seed data initialized', 'source': 'System'}
+        ]
+        
+        for event in events:
+            try:
+                self.create_record('event_logs', {
+                    **event,
+                    'user': admin_id
+                })
+                print(f"   ✓ Created event log")
+            except Exception as e:
+                print(f"   ✗ Failed to create event: {e}")
+
     def close(self):
         self.client.close()
 
@@ -707,10 +594,8 @@ Caller: Wonderful! I'll bring some custom mockups for your menu. See you Thursda
 def main():
     parser = argparse.ArgumentParser(description='Seed PocketBase with sample data.')
     parser.add_argument('--clean', action='store_true', help='Remove previously created sample data')
-    parser.add_argument('--url', default=POCKETBASE_URL, help='PocketBase URL (default: env POCKETBASE_URL or http://127.0.0.1:8090)')
+    parser.add_argument('--url', default=POCKETBASE_URL, help='PocketBase URL')
     args = parser.parse_args()
-
-
 
     print("=" * 60)
     print("CRM-Tableturnerr: Seed Sample Data")
@@ -733,16 +618,14 @@ def main():
         else:
             # Seed in dependency order
             seeder.seed_users()
-            seeder.seed_companies()
+            seeder.seed_companies_and_phones()
             seeder.seed_cold_calls()
-            seeder.seed_leads()
             seeder.seed_insta_actors()
+            seeder.seed_company_notes()
+            seeder.seed_interactions()
             seeder.seed_notes()
             seeder.seed_event_logs()
-            seeder.seed_goals()
-            seeder.seed_rules()
-            seeder.seed_alerts()
-            seeder.seed_outreach_logs()
+            seeder.seed_goals_rules_alerts()
             
             # Save the log of created IDs
             seeder.save_seed_log()
@@ -751,8 +634,6 @@ def main():
             print("✅ Seeding Complete!")
             print("=" * 60)
             print("\nSample data created and logged to seed_log.json")
-            print("\nYou can now test the dashboard at:")
-            print(f"  http://localhost:3000")
         
     except Exception as e:
         print(f"\n❌ Error: {e}")

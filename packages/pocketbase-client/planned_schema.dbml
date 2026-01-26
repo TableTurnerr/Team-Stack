@@ -1,17 +1,21 @@
 // Use DBML to define your database structure
 // Docs: https://dbml.dbdiagram.io/docs
 
+// --- Core Auth ---
+
 Table users {
   id text [pk]
   name text
   email text
   avatar file
-  role text [note: 'admin | member (optional)'] // Made optional to support OAuth creation
-  status text [note: 'online | offline | suspended (optional)'] // Made optional in schema
-  last_activity date // Missing in current DB
+  role text [note: 'admin | member']
+  status text [note: 'online | offline | suspended']
+  last_activity date
   created date
   updated date
 }
+
+// --- CRM & Leads ---
 
 Table companies {
   id text [pk]
@@ -20,11 +24,43 @@ Table companies {
   company_location text
   google_maps_link url
   phone_numbers text
-  source text [note: 'Cold Call | Google Maps | Manual | Instagram']
+  source text
+  instagram_handle text
+  email email
+  status text [note: 'Cold No Reply | Replied | Warm | Booked | Paid | Client | Excluded']
+  first_contacted date
+  last_contacted date
+  notes text
+  contact_source text
+  created date
+  updated date
 }
 
+Table phone_numbers {
+  id text [pk]
+  company relation [ref: > companies.id]
+  phone_number text
+  label text
+  location_name text
+  location_address text
+  receptionist_name text
+  last_called date
+  created date
+  updated date
+}
 
+Table company_notes {
+  id text [pk]
+  company relation [ref: > companies.id]
+  phone_number_record relation [ref: > phone_numbers.id]
+  note_type text [note: 'pre_call | research | general']
+  content text
+  created_by relation [ref: > users.id]
+  created date
+  updated date
+}
 
+// --- Outreach (Instagram) ---
 
 Table insta_actors {
   id text [pk]
@@ -32,9 +68,29 @@ Table insta_actors {
   owner relation [ref: > users.id]
   status text [note: 'Active | Suspended By Team | Suspended By Insta | Discarded']
   last_activity date
+}
+
+Table event_logs {
+  id text [pk]
+  event_type text [note: 'Outreach | Change in Tar Info | Tar Exception Toggle | User | System | Cold Call']
+  actor relation [ref: > insta_actors.id]
+  user relation [ref: > users.id]
+  company relation [ref: > companies.id]
+  cold_call relation [ref: > cold_calls.id]
+  details text
+  source text
   created date
   updated date
 }
+
+Table outreach_logs {
+  id text [pk]
+  event relation [ref: - event_logs.id]
+  message_text text
+  sent_at date
+}
+
+// --- Calling & Recordings ---
 
 Table cold_calls {
   id text [pk]
@@ -58,34 +114,75 @@ Table cold_calls {
 
 Table call_transcripts {
   id text [pk]
-  call relation [ref: - cold_calls.id] // One-to-one
+  call relation [ref: - cold_calls.id]
   transcript text
 }
 
-Table event_logs {
+Table call_logs {
   id text [pk]
-  event_type text [note: 'Outreach | Change in Tar Info | Tar Exception Toggle | User | System | Cold Call']
-  actor relation [ref: > insta_actors.id]
-  user relation [ref: > users.id]
-  company relation [ref: > companies.id]   // NEW: Direct company link
-
-  cold_call relation [ref: > cold_calls.id]
-  details text
-  source text
+  company relation [ref: > companies.id]
+  phone_number_record relation [ref: > phone_numbers.id]
+  caller relation [ref: > users.id]
+  call_time date
+  duration number
+  call_outcome text [note: 'Interested | Not Interested | Callback | No Answer | Wrong Number | Other']
+  owner_name_found text
+  receptionist_name text
+  post_call_notes text
+  interest_level number
+  status_changed_to text [note: 'Cold No Reply | Replied | Warm | Booked | Paid | Client | Excluded']
+  has_recording bool
   created date
   updated date
 }
 
-Table outreach_logs {
+Table recordings {
   id text [pk]
-  event relation [ref: - event_logs.id] // One-to-one
-  message_text text
-  sent_at date
+  phone_number text
+  uploader relation [ref: > users.id]
+  file file
+  note text
+  recording_date date
+  duration number
+  call_log relation [ref: > call_logs.id]
+  company relation [ref: > companies.id]
+  phone_number_record relation [ref: > phone_numbers.id]
+  created date
+  updated date
 }
+
+Table follow_ups {
+  id text [pk]
+  call_log relation [ref: > call_logs.id]
+  company relation [ref: > companies.id]
+  scheduled_time date
+  client_timezone text
+  assigned_to relation [ref: > users.id]
+  notes text
+  status text [note: 'pending | completed | dismissed']
+  completed_at date
+  created date
+  updated date
+}
+
+Table interactions {
+  id text [pk]
+  company relation [ref: > companies.id]
+  channel text [note: 'phone | instagram | email']
+  direction text [note: 'outbound | inbound']
+  timestamp date
+  user relation [ref: > users.id]
+  summary text
+  call_log relation [ref: > call_logs.id]
+  created date
+  updated date
+}
+
+// --- Goals & Rules ---
 
 Table goals {
   id text [pk]
-  metric text [note: 'Total Messages Sent | Unique Profiles Contacted | ...']
+  metric text [note: 'Total Messages Sent | Unique Profiles Contacted | Replies Received | Warm Leads Generated | Bookings Made | Payments Received | Calls Made | Calls Transcribed']
   target_value number
   frequency text [note: 'Daily | Weekly | Monthly']
   assigned_to_user relation [ref: > users.id]
@@ -101,17 +198,17 @@ Table goals {
 Table rules {
   id text [pk]
   type text [note: 'Frequency Cap | Interval Spacing']
-  metric text
+  metric text [note: 'Total Messages Sent | Unique Profiles Contacted | Calls Made']
   limit_value number
   time_window_sec number
   severity text
   assigned_to_user relation [ref: > users.id]
   assigned_to_actor relation [ref: > insta_actors.id]
-  status text
+  status text [note: 'Active | Pending Suggestion | Rejected | Archived']
   suggested_by relation [ref: > users.id]
-  created date
-  updated date
 }
+
+// --- General & System ---
 
 Table alerts {
   id text [pk]

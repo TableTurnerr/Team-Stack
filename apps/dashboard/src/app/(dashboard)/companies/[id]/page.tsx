@@ -54,6 +54,9 @@ export default function CompanyDetailPage() {
   // Modals
   const [isLogCallOpen, setIsLogCallOpen] = useState(false);
   const [selectedPhoneId, setSelectedPhoneId] = useState<string | null>(null);
+  const [isEditingAll, setIsEditingAll] = useState(false);
+  const [isAddingNote, setIsAddingNote] = useState(false);
+  const [newNoteContent, setNewNoteContent] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -119,6 +122,38 @@ export default function CompanyDetailPage() {
     } catch (error) {
       console.error(`Failed to update ${String(field)}:`, error);
       throw error;
+    }
+  };
+
+  const handleAddNote = async () => {
+    if (!company || !newNoteContent.trim()) return;
+    try {
+      const newNote = await pb.collection(COLLECTIONS.COMPANY_NOTES).create<CompanyNote>({
+        company: company.id,
+        note_type: 'pre_call',
+        content: newNoteContent,
+        created_by: pb.authStore.model?.id
+      });
+      
+      const expandedNote = await pb.collection(COLLECTIONS.COMPANY_NOTES).getOne<CompanyNote>(newNote.id, {
+        expand: 'created_by'
+      });
+
+      setNotes(prev => [expandedNote, ...prev]);
+      setNewNoteContent('');
+      setIsAddingNote(false);
+
+      // Log interaction
+      await pb.collection(COLLECTIONS.INTERACTIONS).create({
+        company: company.id,
+        channel: 'email', // Defaulting to email for notes/research
+        direction: 'outbound',
+        timestamp: new Date().toISOString(),
+        user: pb.authStore.model?.id,
+        summary: `Added pre-call note: ${newNoteContent.substring(0, 50)}...`,
+      });
+    } catch (error) {
+      console.error('Failed to add note:', error);
     }
   };
 
@@ -242,10 +277,24 @@ export default function CompanyDetailPage() {
           </div>
           
           <div className="flex items-center gap-2">
-            <button className="px-4 py-2 rounded-xl border border-[var(--card-border)] text-sm font-bold hover:bg-[var(--card-hover)] transition-all">
-              Edit Details
+            <button 
+              onClick={() => {
+                setActiveTab('overview');
+                setIsEditingAll(!isEditingAll);
+              }}
+              className={cn(
+                "px-4 py-2 rounded-xl border text-sm font-bold transition-all",
+                isEditingAll 
+                  ? "bg-[var(--primary-subtle)] border-[var(--primary)] text-[var(--primary)]" 
+                  : "border-[var(--card-border)] hover:bg-[var(--card-hover)]"
+              )}
+            >
+              {isEditingAll ? 'Cancel Editing' : 'Edit Details'}
             </button>
-            <button className="px-6 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-sm font-bold hover:opacity-90 transition-all shadow-lg">
+            <button 
+              onClick={() => setIsEditingAll(false)}
+              className="px-6 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-sm font-bold hover:opacity-90 transition-all shadow-lg"
+            >
               Save Changes
             </button>
           </div>
@@ -293,6 +342,7 @@ export default function CompanyDetailPage() {
                     label="Company Name"
                     value={company.company_name}
                     onSave={(v) => handleUpdateCompany('company_name', v)}
+                    isEditing={isEditingAll}
                   />
                   <InlineEditField 
                     id={`company_${id}_owner`}
@@ -300,6 +350,7 @@ export default function CompanyDetailPage() {
                     value={company.owner_name || ''}
                     onSave={(v) => handleUpdateCompany('owner_name', v)}
                     placeholder="Enter owner name..."
+                    isEditing={isEditingAll}
                   />
                   <InlineEditField 
                     id={`company_${id}_status`}
@@ -316,6 +367,7 @@ export default function CompanyDetailPage() {
                       { value: 'Excluded', label: 'Excluded' },
                     ]}
                     onSave={(v) => handleUpdateCompany('status', v)}
+                    isEditing={isEditingAll}
                   />
                   <InlineEditField 
                     id={`company_${id}_ig`}
@@ -323,6 +375,7 @@ export default function CompanyDetailPage() {
                     value={company.instagram_handle || ''}
                     onSave={(v) => handleUpdateCompany('instagram_handle', v)}
                     placeholder="@username"
+                    isEditing={isEditingAll}
                   />
                 </div>
               </div>
@@ -366,6 +419,41 @@ export default function CompanyDetailPage() {
                     <span className="text-sm text-[var(--muted)]">Last Contact</span>
                     <span className="text-sm font-bold">{company.last_contacted ? formatDate(company.last_contacted) : 'Never'}</span>
                   </div>
+                </div>
+              </div>
+
+              <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-[var(--muted)] uppercase tracking-widest">Pre-Call Notes</h3>
+                  <button 
+                    onClick={() => {
+                      setActiveTab('notes');
+                      setIsAddingNote(true);
+                    }}
+                    className="p-1.5 rounded-lg bg-[var(--card-hover)] text-[var(--foreground)] hover:bg-[var(--sidebar-hover)] transition-all"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+                
+                <div className="space-y-3">
+                  {notes.slice(0, 2).map(note => (
+                    <div key={note.id} className="text-sm p-3 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
+                      <p className="line-clamp-3 text-[var(--foreground)] font-medium leading-relaxed">{note.content}</p>
+                      <p className="text-[10px] text-[var(--muted)] mt-2 font-bold">{formatDate(note.created)}</p>
+                    </div>
+                  ))}
+                  {notes.length === 0 && (
+                    <p className="text-xs text-[var(--muted)] italic py-4 text-center">No pre-call notes found.</p>
+                  )}
+                  {notes.length > 2 && (
+                    <button 
+                      onClick={() => setActiveTab('notes')}
+                      className="text-xs text-[var(--primary)] font-bold hover:underline w-full text-center"
+                    >
+                      View all notes
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -455,6 +543,87 @@ export default function CompanyDetailPage() {
                 <div className="py-24 text-center">
                   <History size={48} className="mx-auto text-[var(--card-border)] mb-4" />
                   <p className="text-[var(--muted)]">No call logs available for this company.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'notes' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Pre-Call Notes</h3>
+              <button 
+                onClick={() => setIsAddingNote(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-xs font-bold hover:opacity-90 transition-all shadow-sm"
+              >
+                <Plus size={14} />
+                Add Note
+              </button>
+            </div>
+            
+            {isAddingNote && (
+              <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <StickyNote size={16} className="text-[var(--primary)]" />
+                  <span className="text-sm font-bold">New Pre-Call Note</span>
+                </div>
+                <textarea
+                  value={newNoteContent}
+                  onChange={(e) => setNewNoteContent(e.target.value)}
+                  placeholder="Enter pre-call notes, research, or key talking points..."
+                  className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm min-h-[120px] transition-all"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <button 
+                    onClick={() => {
+                      setIsAddingNote(false);
+                      setNewNoteContent('');
+                    }}
+                    className="px-4 py-2 text-xs font-bold hover:bg-[var(--card-hover)] rounded-lg transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleAddNote}
+                    disabled={!newNoteContent.trim()}
+                    className="px-6 py-2 bg-[var(--foreground)] text-[var(--background)] text-xs font-bold rounded-lg hover:opacity-90 transition-all disabled:opacity-50"
+                  >
+                    Save Note
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-4">
+              {notes.map(note => (
+                <div key={note.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-3 hover:border-[var(--sidebar-border)] transition-all">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-lg bg-[var(--primary-subtle)] text-[var(--primary)]">
+                        <StickyNote size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--muted)] font-bold uppercase tracking-wider">{note.note_type.replace('_', ' ')}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-[10px] text-[var(--muted)]">{formatDate(note.created)}</p>
+                          {note.expand?.created_by && (
+                            <span className="text-[10px] text-[var(--muted)] flex items-center gap-1">
+                              • by <span className="font-bold text-[var(--foreground)]">{note.expand.created_by.name}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-sm whitespace-pre-wrap text-[var(--foreground)]">{note.content}</p>
+                </div>
+              ))}
+              {notes.length === 0 && !isAddingNote && (
+                <div className="py-24 text-center bg-[var(--sidebar-bg)] border-2 border-dashed border-[var(--card-border)] rounded-2xl">
+                  <StickyNote size={48} className="mx-auto text-[var(--card-border)] mb-4" />
+                  <p className="text-[var(--muted)] font-medium">No notes yet. Add one to prepare for your next call.</p>
                 </div>
               )}
             </div>

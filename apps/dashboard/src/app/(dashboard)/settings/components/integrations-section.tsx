@@ -149,6 +149,15 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
                     >
                         Export Settings
                     </button>
+                    <button
+                        disabled={true}
+                        className="px-4 py-2 text-sm font-medium rounded-lg btn-ghost border border-[var(--card-border)] opacity-50 cursor-not-allowed flex items-center gap-2"
+                    >
+                        Import Settings
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--muted)]/20 text-[var(--muted)] font-medium">
+                            Coming Soon
+                        </span>
+                    </button>
                 </div>
 
                 <p className="text-xs text-[var(--muted)]">

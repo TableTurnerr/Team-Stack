@@ -98,38 +98,41 @@ export function NotificationsSection({ preferences, updatePreferences, isSaving 
                 <div className="flex items-center gap-2">
                     <Mail size={18} className="text-[var(--muted)]" />
                     <h3 className="font-medium">Email Notifications</h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--muted)]/20 text-[var(--muted)] font-medium">
+                        Coming Soon
+                    </span>
                 </div>
 
                 <div className="space-y-4 pl-6">
                     <ToggleSwitch
                         checked={settings.daily_digest ?? false}
-                        onChange={(v) => updateSetting('daily_digest', v)}
+                        onChange={() => { }}
                         label="Daily follow-up digest"
                         description="Summary of upcoming follow-ups each morning"
-                        disabled={isSaving}
+                        disabled={true}
                     />
                     <ToggleSwitch
                         checked={settings.weekly_summary ?? false}
-                        onChange={(v) => updateSetting('weekly_summary', v)}
+                        onChange={() => { }}
                         label="Weekly performance summary"
                         description="Your stats and achievements each week"
-                        disabled={isSaving}
+                        disabled={true}
                     />
                     {isAdmin && (
                         <ToggleSwitch
                             checked={settings.new_team_member ?? true}
-                            onChange={(v) => updateSetting('new_team_member', v)}
+                            onChange={() => { }}
                             label="New team member joined"
                             description="When someone joins your team"
-                            disabled={isSaving}
+                            disabled={true}
                         />
                     )}
                     <ToggleSwitch
                         checked={settings.important_updates ?? true}
-                        onChange={(v) => updateSetting('important_updates', v)}
+                        onChange={() => { }}
                         label="Important system updates"
                         description="Critical security and feature updates"
-                        disabled={isSaving}
+                        disabled={true}
                     />
                 </div>
             </div>
@@ -146,10 +149,11 @@ export function NotificationsSection({ preferences, updatePreferences, isSaving 
                 <div className="pl-6">
                     <ToggleSwitch
                         checked={settings.sound_enabled ?? true}
-                        onChange={(v) => updateSetting('sound_enabled', v)}
+                        onChange={() => { }}
                         label="Notification sounds"
                         description="Play sound when notifications arrive"
-                        disabled={isSaving}
+                        disabled={true}
+                        badge="Coming Soon"
                     />
                 </div>
             </div>

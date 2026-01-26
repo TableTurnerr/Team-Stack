@@ -10,6 +10,7 @@ interface ToggleSwitchProps {
     description?: string;
     disabled?: boolean;
     size?: 'sm' | 'md';
+    badge?: string;
 }
 
 export function ToggleSwitch({
@@ -20,6 +21,7 @@ export function ToggleSwitch({
     description,
     disabled = false,
     size = 'md',
+    badge,
 }: ToggleSwitchProps) {
     const switchId = id || `toggle-${Math.random().toString(36).slice(2)}`;
 
@@ -55,15 +57,22 @@ export function ToggleSwitch({
             {(label || description) && (
                 <div className="flex flex-col">
                     {label && (
-                        <label
-                            htmlFor={switchId}
-                            className={cn(
-                                'text-sm font-medium cursor-pointer',
-                                disabled && 'opacity-50 cursor-not-allowed'
+                        <div className="flex items-center gap-2">
+                            <label
+                                htmlFor={switchId}
+                                className={cn(
+                                    'text-sm font-medium cursor-pointer',
+                                    disabled && 'opacity-50 cursor-not-allowed'
+                                )}
+                            >
+                                {label}
+                            </label>
+                            {badge && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--muted)]/20 text-[var(--muted)] font-medium">
+                                    {badge}
+                                </span>
                             )}
-                        >
-                            {label}
-                        </label>
+                        </div>
                     )}
                     {description && (
                         <p className="text-xs text-[var(--muted)] mt-0.5">{description}</p>

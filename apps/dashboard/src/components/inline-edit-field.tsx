@@ -13,6 +13,8 @@ interface InlineEditFieldProps {
   options?: { value: string; label: string }[];
   className?: string;
   placeholder?: string;
+  isEditing?: boolean;
+  onEditChange?: (isEditing: boolean) => void;
 }
 
 export function InlineEditField({
@@ -24,8 +26,19 @@ export function InlineEditField({
   options,
   className,
   placeholder,
+  isEditing: externalIsEditing,
+  onEditChange,
 }: InlineEditFieldProps) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [internalIsEditing, setInternalIsEditing] = useState(false);
+  
+  const isEditing = externalIsEditing !== undefined ? externalIsEditing : internalIsEditing;
+  const setIsEditing = useCallback((val: boolean) => {
+    if (onEditChange) {
+      onEditChange(val);
+    } else {
+      setInternalIsEditing(val);
+    }
+  }, [onEditChange]);
   const [currentValue, setCurrentValue] = useState(value);
   const [savedValue, setSavedValue] = useState(value);
   const [isSaving, setIsSaving] = useState(false);

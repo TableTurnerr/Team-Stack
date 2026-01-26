@@ -3130,5 +3130,137 @@
         ],
         "indexes": [],
         "system": false
+    },
+    {
+        "id": "pbc_user_prefs",
+        "listRule": "@request.auth.id = user.id",
+        "viewRule": "@request.auth.id = user.id",
+        "createRule": "@request.auth.id != ''",
+        "updateRule": "@request.auth.id = user.id",
+        "deleteRule": "@request.auth.id = user.id",
+        "name": "user_preferences",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "cascadeDelete": true,
+                "collectionId": "_pb_users_auth_",
+                "hidden": false,
+                "id": "relation_user",
+                "maxSelect": 1,
+                "minSelect": 1,
+                "name": "user",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "hidden": false,
+                "id": "select_theme",
+                "maxSelect": 1,
+                "name": "theme",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "light",
+                    "dark",
+                    "system"
+                ]
+            },
+            {
+                "hidden": false,
+                "id": "select_density",
+                "maxSelect": 1,
+                "name": "display_density",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "comfortable",
+                    "compact"
+                ]
+            },
+            {
+                "hidden": false,
+                "id": "json_timezones",
+                "maxSize": 2000,
+                "name": "timezones",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "json_notifications",
+                "maxSize": 2000,
+                "name": "notification_settings",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "json_preferences",
+                "maxSize": 2000,
+                "name": "workflow_preferences",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "json_privacy",
+                "maxSize": 1000,
+                "name": "privacy_settings",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE UNIQUE INDEX `idx_user_preferences_user` ON `user_preferences` (`user`)"
+        ],
+        "system": false
     }
 ]

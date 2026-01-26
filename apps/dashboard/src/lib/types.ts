@@ -256,6 +256,48 @@ export interface Recording extends RecordModel {
   };
 }
 
+export interface UserPreferences extends RecordModel {
+  user: string;
+  theme?: 'light' | 'dark' | 'system';
+  display_density?: 'comfortable' | 'compact';
+  timezones?: { timezone: string; label: string }[];
+  notification_settings?: {
+    follow_up_reminders?: boolean;
+    team_activity?: boolean;
+    new_recordings?: boolean;
+    system_announcements?: boolean;
+    daily_digest?: boolean;
+    weekly_summary?: boolean;
+    new_team_member?: boolean;
+    important_updates?: boolean;
+    sound_enabled?: boolean;
+    dnd_enabled?: boolean;
+    dnd_start?: string;
+    dnd_end?: string;
+    dnd_days?: string[];
+  };
+  workflow_preferences?: {
+    default_page_size?: number;
+    default_sort_order?: 'newest' | 'oldest' | 'alphabetical';
+    remember_columns?: boolean;
+    default_reminder_time?: string;
+    default_follow_up_interval?: '1_day' | '3_days' | '1_week';
+    auto_follow_up_callback?: boolean;
+    default_call_outcome?: string;
+    auto_start_recording?: boolean;
+    show_transcript_panel?: boolean;
+    default_status_filters?: string[];
+    expanded_view?: boolean;
+  };
+  privacy_settings?: {
+    show_online_status?: boolean;
+    activity_visibility?: 'team' | 'admins_only';
+  };
+  expand?: {
+    user?: User;
+  };
+}
+
 // ============================================================================
 // Collection Names Constants
 // ============================================================================
@@ -281,4 +323,5 @@ export const COLLECTIONS = {
   COMPANY_NOTES: 'company_notes',
   INTERACTIONS: 'interactions',
   RECORDINGS: 'recordings',
+  USER_PREFERENCES: 'user_preferences',
 } as const;

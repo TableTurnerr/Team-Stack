@@ -381,13 +381,13 @@ body {
 
 /* Button base styles */
 .btn-primary {
-  background: var(--primary);
-  color: white;
-  transition: background-color 0.15s ease;
+  background: var(--foreground);
+  color: var(--background);
+  transition: all 0.15s ease;
 }
 
 .btn-primary:hover {
-  background: var(--primary-hover);
+  opacity: 0.85;
 }
 
 .btn-danger {

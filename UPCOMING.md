@@ -64,3 +64,5 @@ The AI should visit the scraped URL and determine the following:
 ## Notes Editor Update
 * **Use Notion Like Text Editor:** Core Features and Code from (https://github.com/yoopta-editor/Yoopta-Editor.git)
  
+ ## Favourite Leads
+ * **Feature Request:** Add a favourite leads feature to the CRM to easily access and manage leads that have been marked as favourites.

@@ -30,9 +30,8 @@ export function AppearanceSection({ preferences, updatePreferences, isSaving }: 
     const { theme, setTheme } = useTheme();
     const { addToast } = useToast();
     const [mounted, setMounted] = useState(false);
-    const [timezones, setTimezones] = useState<{ timezone: string; label: string }[]>(
-        preferences?.timezones || []
-    );
+
+    const timezones = preferences?.timezones || [];
     const [showTimezoneSelector, setShowTimezoneSelector] = useState(false);
     const [density, setDensity] = useState<'comfortable' | 'compact'>(
         preferences?.display_density || 'comfortable'
@@ -43,9 +42,6 @@ export function AppearanceSection({ preferences, updatePreferences, isSaving }: 
     }, []);
 
     useEffect(() => {
-        if (preferences?.timezones) {
-            setTimezones(preferences.timezones);
-        }
         if (preferences?.display_density) {
             setDensity(preferences.display_density);
         }
@@ -75,18 +71,13 @@ export function AppearanceSection({ preferences, updatePreferences, isSaving }: 
         }
 
         const newTimezones = [...timezones, tz];
-        setTimezones(newTimezones);
         setShowTimezoneSelector(false);
         await updatePreferences({ timezones: newTimezones });
-        // Also update localStorage for sidebar
-        localStorage.setItem('sidebar_timezones', JSON.stringify(newTimezones));
     };
 
     const removeTimezone = async (tzToRemove: string) => {
         const newTimezones = timezones.filter(t => t.timezone !== tzToRemove);
-        setTimezones(newTimezones);
         await updatePreferences({ timezones: newTimezones });
-        localStorage.setItem('sidebar_timezones', JSON.stringify(newTimezones));
     };
 
     if (!mounted) return null;

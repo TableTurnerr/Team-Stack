@@ -18,21 +18,29 @@ import {
   LogOut,
   Loader2,
   Mic,
+  Plus,
+  Globe,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TimezoneClock } from './timezone-clock';
+import { useUserPreferences } from '@/hooks/use-user-preferences';
 
-const DEFAULT_TIMEZONES = [
+const POPULAR_TIMEZONES = [
   { timezone: 'America/New_York', label: 'EST' },
+  { timezone: 'America/Chicago', label: 'CST' },
+  { timezone: 'America/Denver', label: 'MST' },
   { timezone: 'America/Los_Angeles', label: 'PST' },
   { timezone: 'UTC', label: 'UTC' },
+  { timezone: 'Europe/London', label: 'GMT' },
+  { timezone: 'Europe/Paris', label: 'CET' },
+  { timezone: 'Asia/Tokyo', label: 'JST' },
+  { timezone: 'Australia/Sydney', label: 'AEST' },
 ];
 
 const navItems = [
-  // ... (rest of the imports and navItems)
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
   { href: '/recordings', label: 'Recordings', icon: Mic },
@@ -52,23 +60,23 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const { user, logout } = useAuth();
-  const [timezones, setTimezones] = useState<{ timezone: string; label: string }[]>(DEFAULT_TIMEZONES);
+  const { preferences, updatePreferences } = useUserPreferences();
+  const [showTzSelector, setShowTzSelector] = useState(false);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('sidebar_timezones');
-    if (saved) {
-      try {
-        setTimezones(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to parse saved timezones');
-      }
-    }
-  }, []);
+  const timezones = preferences?.timezones || [];
 
-  const removeTimezone = (tz: string) => {
+  const addTimezone = async (tz: { timezone: string; label: string }) => {
+    if (timezones.length >= 4) return;
+    if (timezones.find(t => t.timezone === tz.timezone)) return;
+
+    const newTimezones = [...timezones, tz];
+    await updatePreferences({ timezones: newTimezones });
+    setShowTzSelector(false);
+  };
+
+  const removeTimezone = async (tz: string) => {
     const next = timezones.filter(t => t.timezone !== tz);
-    setTimezones(next);
-    localStorage.setItem('sidebar_timezones', JSON.stringify(next));
+    await updatePreferences({ timezones: next });
   };
 
   useEffect(() => {
@@ -169,7 +177,39 @@ export function Sidebar() {
             <span className="text-[10px] font-bold text-[var(--muted)] uppercase tracking-wider">
               Time Zones
             </span>
+            {timezones.length < 4 && (
+              <button
+                onClick={() => setShowTzSelector(!showTzSelector)}
+                className="p-1 rounded-md hover:bg-[var(--sidebar-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                title="Add timezone"
+              >
+                <Plus size={14} />
+              </button>
+            )}
           </div>
+
+          {showTzSelector && (
+            <div className="p-2 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] shadow-xl animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="grid grid-cols-3 gap-1">
+                {POPULAR_TIMEZONES.filter(tz => !timezones.find(t => t.timezone === tz.timezone)).map((tz) => (
+                  <button
+                    key={tz.timezone}
+                    onClick={() => addTimezone(tz)}
+                    className="flex flex-col items-center justify-center p-1.5 rounded-md hover:bg-[var(--sidebar-hover)] transition-colors border border-transparent hover:border-[var(--card-border)]"
+                  >
+                    <span className="text-[10px] font-bold">{tz.label}</span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowTzSelector(false)}
+                className="w-full mt-2 py-1 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
           <div className="space-y-2">
             {timezones.map((tz) => (
               <TimezoneClock

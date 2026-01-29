@@ -3,3 +3,4 @@ soundcard
 numpy
 scipy
 keyboard
+pydub

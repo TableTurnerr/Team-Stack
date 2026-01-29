@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import numpy as np
 import scipy.io.wavfile as wav
+from pydub import AudioSegment
 
 try:
     import sounddevice as sd
@@ -1213,13 +1214,26 @@ class AudioRecorder:
         return np.array([])
 
     def save(self, filepath: str, audio: np.ndarray) -> bool:
-        """Save audio to WAV file."""
+        """Save audio to MP3 file."""
         if len(audio) == 0:
             return False
-        audio = np.clip(audio, -1, 1)
+
+        # Convert numpy array to pydub AudioSegment
+        # pydub expects audio in milliseconds and 16-bit PCM
         audio_int16 = (audio * 32767).astype(np.int16)
-        wav.write(filepath, SAMPLE_RATE, audio_int16)
-        return True
+        audio_segment = AudioSegment(
+            audio_int16.tobytes(),
+            frame_rate=SAMPLE_RATE,
+            sample_width=audio_int16.dtype.itemsize,
+            channels=1
+        )
+
+        try:
+            audio_segment.export(filepath, format="mp3")
+            return True
+        except Exception as e:
+            print(f"Error saving MP3: {e}")
+            return False
 
 
 class RecorderApp:
@@ -1782,9 +1796,9 @@ class RecorderApp:
         if phone_number:
             # Sanitize phone number for filename (remove invalid chars)
             safe_phone = "".join(c for c in phone_number if c.isalnum() or c in "-_")
-            filename = f"recording_{timestamp}_{safe_phone}.wav"
+            filename = f"recording_{timestamp}_{safe_phone}.mp3"
         else:
-            filename = f"recording_{timestamp}.wav"
+            filename = f"recording_{timestamp}.mp3"
 
         # Determine save directory based on approve/save choice
         base_dir = Path(__file__).parent / "recordings"

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CallRecorder.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Windows Graphics Capture API -->
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.19041.1" />
+    
+    <!-- OCR -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
+    
+    <!-- Audio Recording -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="NAudio.Lame" Version="2.1.0" />
+    
+    <!-- Image Processing -->
+    <PackageReference Include="System.Drawing.Common" Version="8.0.1" />
+  </ItemGroup>
+
+</Project>

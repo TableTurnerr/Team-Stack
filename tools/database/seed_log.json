@@ -1,1 +1,65 @@
-{}
+{
+  "users": [
+    "c5sg63uk6ozun05",
+    "srp6p3jnrnlobli"
+  ],
+  "companies": [
+    "g1iar09v4imnx38",
+    "s7y24wnuiv0p0wl",
+    "5eitvrn1ahyo00y",
+    "uwberi48ie0g12a",
+    "efbvbdp2163jgf0",
+    "242s3a8fj5c8qe5"
+  ],
+  "phone_numbers": [
+    "mt6sgvqiaew2n8s",
+    "1rrejjbevpbcqa4",
+    "o0uz0dbfhnffb5g",
+    "zg6j829vbi1fst9",
+    "s48gagmj50z4htg",
+    "t5fxs3i70b318fh"
+  ],
+  "cold_calls": [
+    "60hjxybgqdy6upt",
+    "5uzge5b0cjip2fb",
+    "rzxk1142ynov0f4",
+    "usi1or7nve2vf8j"
+  ],
+  "call_transcripts": [
+    "vi6cfxxxxlveev2",
+    "ddhjzk08kdh1j7p",
+    "d47dpkqd9357inj",
+    "pjn9wnb3q7fhgwy"
+  ],
+  "insta_actors": [
+    "zmo9yvkpnakereh",
+    "sl7xh4x02vof5tj"
+  ],
+  "company_notes": [
+    "dmqf1918gnze2kd",
+    "lue35s825iyvhfk"
+  ],
+  "notes": [
+    "llf0wtvsvrjbx5z",
+    "z3bku16gotm25tx"
+  ],
+  "event_logs": [
+    "a315d1acq7f5zfs",
+    "hhvan1it7wbl9hj"
+  ],
+  "goals": [
+    "zzyrku59df9sc7v",
+    "tkplwmips4jwnlf"
+  ],
+  "rules": [
+    "ndphrobrrgn3x1s",
+    "lis7y4jch8ryuhw"
+  ],
+  "alerts": [
+    "hbmvzzr8cdg6unh",
+    "0h08bwoplk5b9pe"
+  ],
+  "interactions": [
+    "nx84pzfs1hfwill"
+  ]
+}

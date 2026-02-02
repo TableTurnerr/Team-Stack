@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History } from 'lucide-react';
+import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Recording } from '@/lib/types';
 import { formatDate, formatDateTime, formatDuration, cn, sanitizeFilterValue } from '@/lib/utils';
@@ -53,6 +53,9 @@ export default function RecordingsPage() {
   // Upload State
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Audio player state - track which recording is expanded
+  const [expandedRecordingId, setExpandedRecordingId] = useState<string | null>(null);
 
   // Check for duplicate recordings by original_filename - parallelized for speed
   const checkDuplicates = async (fileNames: string[]): Promise<Map<string, DuplicateInfo>> => {
@@ -591,14 +594,47 @@ export default function RecordingsPage() {
                       </td>
                     )}
                     {isColumnVisible('file') && (
-                      <td className="py-3 px-4">
+                      <td
+                        className="py-3 px-4"
+                        colSpan={expandedRecordingId === recording.id ? 2 : 1}
+                      >
                         {recording.file ? (
-                          <audio
-                            controls
-                            preload="none"
-                            className="h-8 w-full min-w-[200px] max-w-[300px]"
-                            src={pb.files.getUrl(recording, recording.file)}
-                          />
+                          expandedRecordingId === recording.id ? (
+                            <div className="flex items-center gap-3">
+                              <audio
+                                controls
+                                autoPlay
+                                preload="metadata"
+                                className="h-8 flex-1 min-w-[200px]"
+                                src={pb.files.getUrl(recording, recording.file)}
+                                onEnded={() => setExpandedRecordingId(null)}
+                              />
+                              <button
+                                onClick={() => setExpandedRecordingId(null)}
+                                className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors shrink-0"
+                                title="Close player"
+                              >
+                                <X size={16} />
+                              </button>
+                              {isAdmin && (
+                                <button
+                                  onClick={() => handleDelete(recording.id)}
+                                  className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors shrink-0"
+                                  title="Delete recording"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setExpandedRecordingId(recording.id)}
+                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-sm font-medium hover:bg-[var(--card-hover)] hover:border-[var(--primary)] transition-all group"
+                            >
+                              <Headphones size={14} className="text-[var(--muted)] group-hover:text-[var(--primary)]" />
+                              <span className="group-hover:text-[var(--primary)]">Listen</span>
+                            </button>
+                          )
                         ) : (
                           <span className="text-xs text-[var(--muted)]">No file</span>
                         )}
@@ -609,17 +645,19 @@ export default function RecordingsPage() {
                         {recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A'}
                       </td>
                     )}
-                    <td className="py-3 px-4 text-right">
-                      {isAdmin && (
-                        <button
-                          onClick={() => handleDelete(recording.id)}
-                          className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors"
-                          title="Delete recording"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </td>
+                    {expandedRecordingId !== recording.id && (
+                      <td className="py-3 px-4 text-right">
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDelete(recording.id)}
+                            className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors"
+                            title="Delete recording"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

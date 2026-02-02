@@ -640,7 +640,7 @@ export default function RecordingsPage() {
                         )}
                       </td>
                     )}
-                    {isColumnVisible('uploader') && (
+                    {isColumnVisible('uploader') && expandedRecordingId !== recording.id && (
                       <td className="py-3 px-4 text-sm whitespace-nowrap">
                         {recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A'}
                       </td>

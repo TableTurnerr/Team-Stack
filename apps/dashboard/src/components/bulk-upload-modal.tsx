@@ -70,6 +70,7 @@ function DuplicateResolutionModal({
   const [showRenameInput, setShowRenameInput] = useState(false);
   const [newAudioUrl, setNewAudioUrl] = useState<string | null>(null);
   const [newDuration, setNewDuration] = useState<number | null>(null);
+  const [applyToAll, setApplyToAll] = useState(false);
 
   useEffect(() => {
     // Create object URL for the new file
@@ -294,60 +295,61 @@ function DuplicateResolutionModal({
 
         {/* Actions */}
         <div className="p-6 border-t border-[var(--card-border)] bg-[var(--sidebar-bg)]">
-          <p className="text-sm text-[var(--muted)] mb-4 font-medium">How would you like to handle this duplicate?</p>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-[var(--muted)] font-medium">How would you like to handle this duplicate?</p>
+            {duplicateCount > 1 && (
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={applyToAll}
+                  onChange={(e) => setApplyToAll(e.target.checked)}
+                  className="w-4 h-4 rounded border-[var(--card-border)] accent-[var(--primary)]"
+                />
+                <span className={cn(
+                  "text-sm font-medium transition-colors",
+                  applyToAll ? "text-[var(--foreground)]" : "text-[var(--muted)]"
+                )}>
+                  Apply to all ({duplicateCount - currentIndex} remaining)
+                </span>
+              </label>
+            )}
+          </div>
           <div className="flex flex-wrap gap-3">
-            <div className="flex flex-col gap-1">
-              <button
-                onClick={() => onResolve('keep_new')}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--primary)] text-white font-bold hover:opacity-90 transition-all"
-                title="Delete existing and upload new recording"
-              >
-                <Upload size={16} />
-                Replace with New
-              </button>
-              {duplicateCount > 1 && (
-                <button
-                  onClick={() => onResolveAll('keep_new')}
-                  className="text-[10px] text-[var(--primary)] font-bold uppercase tracking-wider hover:underline px-2"
-                >
-                  Apply to All ({duplicateCount - currentIndex})
-                </button>
-              )}
-            </div>
-            <div className="flex flex-col gap-1">
-              <button
-                onClick={() => onResolve('keep_existing')}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--card-border)] font-bold hover:bg-[var(--card-hover)] transition-all"
-                title="Keep existing recording, skip uploading this file"
-              >
-                <Check size={16} />
-                Keep Existing
-              </button>
-              {duplicateCount > 1 && (
-                <button
-                  onClick={() => onResolveAll('keep_existing')}
-                  className="text-[10px] text-[var(--muted)] font-bold uppercase tracking-wider hover:underline hover:text-[var(--foreground)] px-2"
-                >
-                  Apply to All ({duplicateCount - currentIndex})
-                </button>
-              )}
-            </div>
             <button
-              onClick={() => setShowRenameInput(!showRenameInput)}
+              onClick={() => applyToAll ? onResolveAll('keep_new') : onResolve('keep_new')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-[var(--background)] font-bold hover:bg-gray-100 transition-all"
+              title="Delete existing and upload new recording"
+            >
+              <Upload size={16} />
+              Replace with New
+            </button>
+            <button
+              onClick={() => applyToAll ? onResolveAll('keep_existing') : onResolve('keep_existing')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--card-border)] font-bold hover:bg-[var(--card-hover)] transition-all"
+              title="Keep existing recording, skip uploading this file"
+            >
+              <Check size={16} />
+              Keep Existing
+            </button>
+            <button
+              onClick={() => !applyToAll && setShowRenameInput(!showRenameInput)}
+              disabled={applyToAll}
               className={cn(
-                "flex items-center gap-2 px-4 py-2.5 rounded-xl border font-bold transition-all self-start",
-                showRenameInput
-                  ? "border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]"
-                  : "border-[var(--card-border)] hover:bg-[var(--card-hover)]"
+                "flex items-center gap-2 px-4 py-2.5 rounded-xl border font-bold transition-all",
+                applyToAll
+                  ? "opacity-50 cursor-not-allowed border-[var(--card-border)] text-[var(--muted)]"
+                  : showRenameInput
+                    ? "border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]"
+                    : "border-[var(--card-border)] hover:bg-[var(--card-hover)]"
               )}
-              title="Rename the new file and upload both"
+              title={applyToAll ? "Cannot rename when applying to all" : "Rename the new file and upload both"}
             >
               <Edit3 size={16} />
               Rename & Upload Both
             </button>
             <button
               onClick={onCancel}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--error)]/50 text-[var(--error)] hover:bg-[var(--error-subtle)] transition-all ml-auto font-bold self-start"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--error)]/50 text-[var(--error)] hover:bg-[var(--error-subtle)] transition-all ml-auto font-bold"
               title="Discard this file and don't upload"
             >
               <Trash2 size={16} />
@@ -372,18 +374,6 @@ export function BulkUploadModal({
   const [viewMode, setViewMode] = useState<'simple' | 'preview'>('preview');
   const [duplicateToResolve, setDuplicateToResolve] = useState<PendingFile | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const handleFileDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    addFiles(droppedFiles);
-  }, [addFiles]);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      addFiles(Array.from(e.target.files));
-    }
-  };
 
   const addFiles = useCallback(async (newFiles: File[]) => {
     const audioFiles = newFiles.filter(f => f.type.startsWith('audio/'));
@@ -429,6 +419,18 @@ export function BulkUploadModal({
       setIsCheckingDuplicates(false);
     }
   }, [checkDuplicates]);
+
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    addFiles(droppedFiles);
+  }, [addFiles]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      addFiles(Array.from(e.target.files));
+    }
+  };
 
   const handleDuplicateResolution = (
     fileId: string,

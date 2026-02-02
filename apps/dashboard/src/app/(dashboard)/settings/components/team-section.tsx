@@ -32,7 +32,7 @@ export function TeamSection() {
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [newRole, setNewRole] = useState<'admin' | 'member'>('member');
 
-    const fetchMembers = async () => {
+    const fetchMembers = useCallback(async () => {
         try {
             const records = await pb.collection(COLLECTIONS.USERS).getFullList<User>({
                 sort: '-created',
@@ -44,11 +44,11 @@ export function TeamSection() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [addToast]);
 
     useEffect(() => {
         fetchMembers();
-    }, []);
+    }, [fetchMembers]);
 
     const handleRoleChange = async () => {
         if (!selectedUser) return;

@@ -54,12 +54,14 @@ interface BulkUploadModalProps {
 function DuplicateResolutionModal({
   pendingFile,
   onResolve,
+  onResolveAll,
   onCancel,
   duplicateCount,
   currentIndex
 }: {
   pendingFile: PendingFile;
   onResolve: (resolution: 'keep_new' | 'keep_existing' | 'rename', newFileName?: string) => void;
+  onResolveAll: (resolution: 'keep_new' | 'keep_existing') => void;
   onCancel: () => void;
   duplicateCount: number;
   currentIndex: number;
@@ -294,26 +296,46 @@ function DuplicateResolutionModal({
         <div className="p-6 border-t border-[var(--card-border)] bg-[var(--sidebar-bg)]">
           <p className="text-sm text-[var(--muted)] mb-4 font-medium">How would you like to handle this duplicate?</p>
           <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => onResolve('keep_new')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--primary)] text-white font-bold hover:opacity-90 transition-all"
-              title="Delete existing and upload new recording"
-            >
-              <Upload size={16} />
-              Replace with New
-            </button>
-            <button
-              onClick={() => onResolve('keep_existing')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--card-border)] font-bold hover:bg-[var(--card-hover)] transition-all"
-              title="Keep existing recording, skip uploading this file"
-            >
-              <Check size={16} />
-              Keep Existing
-            </button>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => onResolve('keep_new')}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--primary)] text-white font-bold hover:opacity-90 transition-all"
+                title="Delete existing and upload new recording"
+              >
+                <Upload size={16} />
+                Replace with New
+              </button>
+              {duplicateCount > 1 && (
+                <button
+                  onClick={() => onResolveAll('keep_new')}
+                  className="text-[10px] text-[var(--primary)] font-bold uppercase tracking-wider hover:underline px-2"
+                >
+                  Apply to All ({duplicateCount - currentIndex})
+                </button>
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => onResolve('keep_existing')}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--card-border)] font-bold hover:bg-[var(--card-hover)] transition-all"
+                title="Keep existing recording, skip uploading this file"
+              >
+                <Check size={16} />
+                Keep Existing
+              </button>
+              {duplicateCount > 1 && (
+                <button
+                  onClick={() => onResolveAll('keep_existing')}
+                  className="text-[10px] text-[var(--muted)] font-bold uppercase tracking-wider hover:underline hover:text-[var(--foreground)] px-2"
+                >
+                  Apply to All ({duplicateCount - currentIndex})
+                </button>
+              )}
+            </div>
             <button
               onClick={() => setShowRenameInput(!showRenameInput)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2.5 rounded-xl border font-bold transition-all",
+                "flex items-center gap-2 px-4 py-2.5 rounded-xl border font-bold transition-all self-start",
                 showRenameInput
                   ? "border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]"
                   : "border-[var(--card-border)] hover:bg-[var(--card-hover)]"
@@ -325,7 +347,7 @@ function DuplicateResolutionModal({
             </button>
             <button
               onClick={onCancel}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--error)]/50 text-[var(--error)] hover:bg-[var(--error-subtle)] transition-all ml-auto font-bold"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--error)]/50 text-[var(--error)] hover:bg-[var(--error-subtle)] transition-all ml-auto font-bold self-start"
               title="Discard this file and don't upload"
             >
               <Trash2 size={16} />
@@ -355,7 +377,7 @@ export function BulkUploadModal({
     e.preventDefault();
     const droppedFiles = Array.from(e.dataTransfer.files);
     addFiles(droppedFiles);
-  }, []);
+  }, [addFiles]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -363,7 +385,7 @@ export function BulkUploadModal({
     }
   };
 
-  const addFiles = async (newFiles: File[]) => {
+  const addFiles = useCallback(async (newFiles: File[]) => {
     const audioFiles = newFiles.filter(f => f.type.startsWith('audio/'));
     if (audioFiles.length === 0) return;
 
@@ -406,7 +428,7 @@ export function BulkUploadModal({
     } finally {
       setIsCheckingDuplicates(false);
     }
-  };
+  }, [checkDuplicates]);
 
   const handleDuplicateResolution = (
     fileId: string,
@@ -432,6 +454,28 @@ export function BulkUploadModal({
           newFileName,
           duplicateInfo: undefined
         };
+      }
+
+      // keep_new - mark as resolved and ready to upload (will replace existing)
+      return {
+        ...f,
+        status: 'pending' as const,
+        resolution
+      };
+    }));
+    setDuplicateToResolve(null);
+  };
+
+  // Handle applying resolution to ALL remaining duplicates
+  const handleDuplicateResolutionAll = (
+    resolution: 'keep_new' | 'keep_existing'
+  ) => {
+    setFiles(prev => prev.map(f => {
+      // Only apply to files that are still duplicates
+      if (f.status !== 'duplicate') return f;
+
+      if (resolution === 'keep_existing') {
+        return { ...f, status: 'resolved' as const, resolution };
       }
 
       // keep_new - mark as resolved and ready to upload (will replace existing)
@@ -520,6 +564,9 @@ export function BulkUploadModal({
         currentIndex={currentDuplicateIndex >= 0 ? currentDuplicateIndex : 0}
         onResolve={(resolution, newFileName) => {
           handleDuplicateResolution(currentDuplicate.id, resolution, newFileName);
+        }}
+        onResolveAll={(resolution) => {
+          handleDuplicateResolutionAll(resolution);
         }}
         onCancel={() => {
           // Remove the file from the list (discard)

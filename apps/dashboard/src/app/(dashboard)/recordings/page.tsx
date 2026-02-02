@@ -596,7 +596,7 @@ export default function RecordingsPage() {
                     {isColumnVisible('file') && (
                       <td
                         className="py-3 px-4"
-                        colSpan={expandedRecordingId === recording.id ? 2 : 1}
+                        colSpan={expandedRecordingId === recording.id ? 3 : 1}
                       >
                         {recording.file ? (
                           expandedRecordingId === recording.id ? (
@@ -650,10 +650,10 @@ export default function RecordingsPage() {
                         {isAdmin && (
                           <button
                             onClick={() => handleDelete(recording.id)}
-                            className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors"
+                            className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
                             title="Delete recording"
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
                           </button>
                         )}
                       </td>

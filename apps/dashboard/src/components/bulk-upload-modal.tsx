@@ -780,10 +780,15 @@ export function BulkUploadModal({
                                 <Building2 size={12} />
                                 {f.matchedCompanyName}
                               </div>
+                            ) : f.matchedPhoneNumber ? (
+                              <div className="flex items-center gap-2 text-[var(--primary)] font-medium">
+                                <Phone size={12} />
+                                Will match by phone
+                              </div>
                             ) : (
                               <div className="flex items-center gap-2 text-[var(--muted)]">
                                 <AlertCircle size={12} />
-                                Auto-matching...
+                                No match found
                               </div>
                             )}
                           </td>

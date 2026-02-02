@@ -2958,6 +2958,20 @@
                 "type": "relation"
             },
             {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_original_filename",
+                "max": 500,
+                "min": 0,
+                "name": "original_filename",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
                 "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
@@ -2978,7 +2992,9 @@
                 "type": "autodate"
             }
         ],
-        "indexes": [],
+        "indexes": [
+            "CREATE INDEX idx_recordings_original_filename ON recordings (original_filename)"
+        ],
         "system": false
     },
     {

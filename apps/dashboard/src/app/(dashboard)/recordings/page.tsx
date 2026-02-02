@@ -10,7 +10,8 @@ import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
-import { BulkUploadModal } from '@/components/bulk-upload-modal';
+import { useDebounce } from '@/hooks/use-debounce';
+import { BulkUploadModal, type PendingFile, type DuplicateInfo } from '@/components/bulk-upload-modal';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -46,21 +47,80 @@ export default function RecordingsPage() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [showFilters, setShowFilters] = useState(false);
 
   // Upload State
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  const handleBulkUpload = async (pendingFiles: any[]) => {
+  // Check for duplicate recordings by original_filename - parallelized for speed
+  const checkDuplicates = async (fileNames: string[]): Promise<Map<string, DuplicateInfo>> => {
+    const duplicates = new Map<string, DuplicateInfo>();
+
+    // Process all files in parallel for faster checking
+    const checkPromises = fileNames.map(async (fileName) => {
+      // Escape quotes for PocketBase filter
+      const escapedFileName = fileName.replace(/"/g, '\\"');
+
+      try {
+        // Check for exact match on original_filename field
+        const existing = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+          `original_filename = "${escapedFileName}"`,
+          { expand: 'uploader,company,phone_number_record' }
+        );
+
+        if (existing) {
+          console.log(`Duplicate found: "${fileName}" matches existing original_filename "${existing.original_filename}"`);
+          return { fileName, existing };
+        }
+      } catch (e: any) {
+        // 404 means no duplicate found, which is expected
+        if (e.status !== 404) {
+          console.error(`Error checking duplicate for ${fileName}:`, e);
+        }
+      }
+
+      return null;
+    });
+
+    try {
+      const results = await Promise.all(checkPromises);
+      for (const result of results) {
+        if (result) {
+          duplicates.set(result.fileName, {
+            existingRecording: result.existing,
+            existingFileUrl: pb.files.getUrl(result.existing, result.existing.file || '')
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to check duplicates:', err);
+    }
+
+    return duplicates;
+  };
+
+  const handleBulkUpload = async (pendingFiles: PendingFile[]) => {
     if (!user) return;
     setIsUploading(true);
 
     try {
       for (const f of pendingFiles) {
+        // If this file is replacing an existing one, delete the existing first
+        if (f.resolution === 'keep_new' && f.duplicateInfo?.existingRecording) {
+          try {
+            await pb.collection(COLLECTIONS.RECORDINGS).delete(f.duplicateInfo.existingRecording.id);
+          } catch (deleteErr) {
+            console.error('Failed to delete existing recording:', deleteErr);
+            // Continue with upload anyway
+          }
+        }
+
         const formData = new FormData();
         formData.append('file', f.file);
         formData.append('uploader', user.id);
+        formData.append('original_filename', f.file.name);
 
         // Auto-match logic
         if (f.matchedPhoneNumber) {
@@ -87,7 +147,7 @@ export default function RecordingsPage() {
           formData.append('note', `Call on ${meta.displayDate}`);
         }
 
-        await pb.collection('recordings').create(formData);
+        await pb.collection(COLLECTIONS.RECORDINGS).create(formData);
       }
 
       fetchRecordings();
@@ -184,8 +244,8 @@ export default function RecordingsPage() {
       setError(null);
 
       const filters: string[] = [];
-      if (searchTerm) {
-        const safeSearch = sanitizeFilterValue(searchTerm);
+      if (debouncedSearchTerm) {
+        const safeSearch = sanitizeFilterValue(debouncedSearchTerm);
         if (safeSearch) {
           filters.push(`(phone_number ~ "${safeSearch}" || note ~ "${safeSearch}")`);
         }
@@ -217,7 +277,7 @@ export default function RecordingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, isAuthenticated, searchTerm]);
+  }, [page, isAuthenticated, debouncedSearchTerm]);
 
   const getRecordingDisplayDate = (recording: Recording) => {
     const pattern = /recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})/;
@@ -345,6 +405,7 @@ export default function RecordingsPage() {
         isOpen={isBulkUploadOpen}
         onClose={() => setIsBulkUploadOpen(false)}
         onUpload={handleBulkUpload}
+        checkDuplicates={checkDuplicates}
       />
 
       {/* Edit Note Modal */}

@@ -99,7 +99,7 @@ export default function ColdCallsPage() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+  const debouncedSearchTerm = useDebounce(searchTerm, 1500);
   const [outcomeFilter, setOutcomeFilter] = useState<string[]>([]);
   const [minInterest, setMinInterest] = useState(0);
   const [showFilters, setShowFilters] = useState(false);

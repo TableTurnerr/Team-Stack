@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { pb } from '@/lib/pocketbase';
 import { User, COLLECTIONS } from '@/lib/types';

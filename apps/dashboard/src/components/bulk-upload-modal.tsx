@@ -43,10 +43,16 @@ export interface PendingFile {
   newFileName?: string;
 }
 
+export interface UploadProgress {
+  current: number;
+  total: number;
+  currentFileName: string;
+}
+
 interface BulkUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUpload: (files: PendingFile[]) => Promise<void>;
+  onUpload: (files: PendingFile[], onProgress?: (progress: UploadProgress) => void) => Promise<void>;
   checkDuplicates: (fileNames: string[]) => Promise<Map<string, DuplicateInfo>>;
 }
 
@@ -374,6 +380,7 @@ export function BulkUploadModal({
   const [viewMode, setViewMode] = useState<'simple' | 'preview'>('preview');
   const [duplicateToResolve, setDuplicateToResolve] = useState<PendingFile | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   const addFiles = useCallback(async (newFiles: File[]) => {
     const audioFiles = newFiles.filter(f => f.type.startsWith('audio/'));
@@ -542,14 +549,18 @@ export function BulkUploadModal({
     }
 
     setIsUploading(true);
+    setUploadProgress({ current: 0, total: filesToUpload.length, currentFileName: '' });
     try {
-      await onUpload(filesToUpload);
+      await onUpload(filesToUpload, (progress) => {
+        setUploadProgress(progress);
+      });
       setFiles([]);
       onClose();
     } catch (error) {
       console.error('Upload failed:', error);
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -884,6 +895,34 @@ export function BulkUploadModal({
               <span className="text-sm text-[var(--primary)] font-medium">
                 Checking for duplicates...
               </span>
+            </div>
+          )}
+
+          {/* Upload Progress Bar */}
+          {isUploading && uploadProgress && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Loader2 size={14} className="text-[var(--primary)] animate-spin" />
+                  <span className="text-sm font-medium">
+                    Uploading {uploadProgress.current + 1} of {uploadProgress.total}
+                  </span>
+                </div>
+                <span className="text-sm text-[var(--muted)]">
+                  {Math.round(((uploadProgress.current) / uploadProgress.total) * 100)}%
+                </span>
+              </div>
+              <div className="h-2 bg-[var(--card-border)] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[var(--primary)] rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                />
+              </div>
+              {uploadProgress.currentFileName && (
+                <p className="text-xs text-[var(--muted)] mt-1.5 truncate">
+                  {uploadProgress.currentFileName}
+                </p>
+              )}
             </div>
           )}
 

@@ -11,7 +11,7 @@ import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { useDebounce } from '@/hooks/use-debounce';
-import { BulkUploadModal, type PendingFile, type DuplicateInfo } from '@/components/bulk-upload-modal';
+import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -104,12 +104,21 @@ export default function RecordingsPage() {
     return duplicates;
   };
 
-  const handleBulkUpload = async (pendingFiles: PendingFile[]) => {
+  const handleBulkUpload = async (pendingFiles: PendingFile[], onProgress?: (progress: UploadProgress) => void) => {
     if (!user) return;
     setIsUploading(true);
 
     try {
-      for (const f of pendingFiles) {
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const f = pendingFiles[i];
+
+        // Report progress
+        onProgress?.({
+          current: i,
+          total: pendingFiles.length,
+          currentFileName: f.file.name
+        });
+
         // If this file is replacing an existing one, delete the existing first
         if (f.resolution === 'keep_new' && f.duplicateInfo?.existingRecording) {
           try {
@@ -152,6 +161,13 @@ export default function RecordingsPage() {
 
         await pb.collection(COLLECTIONS.RECORDINGS).create(formData);
       }
+
+      // Final progress update
+      onProgress?.({
+        current: pendingFiles.length,
+        total: pendingFiles.length,
+        currentFileName: ''
+      });
 
       fetchRecordings();
     } catch (err) {

@@ -332,8 +332,8 @@ textarea:focus {
 }
 
 /* Remove default ring styles from Tailwind */
-.focus\\:ring-1:focus,
-.focus\\:ring-2:focus {
+.focus\:ring-1:focus,
+.focus\:ring-2:focus {
   --tw-ring-color: var(--foreground) !important;
 }
 

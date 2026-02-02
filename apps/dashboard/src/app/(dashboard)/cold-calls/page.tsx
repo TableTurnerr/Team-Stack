@@ -20,6 +20,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import { useDebounce } from '@/hooks/use-debounce';
 
 // Column definitions for cold calls table
 const COLD_CALL_COLUMNS: ColumnDefinition[] = [
@@ -98,6 +99,7 @@ export default function ColdCallsPage() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [outcomeFilter, setOutcomeFilter] = useState<string[]>([]);
   const [minInterest, setMinInterest] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
@@ -126,8 +128,8 @@ export default function ColdCallsPage() {
       // Build filter string
       const filters: string[] = [];
 
-      if (searchTerm) {
-        filters.push(`(expand.company.company_name ~ "${searchTerm}" || phone_number ~ "${searchTerm}" || owner_name ~ "${searchTerm}")`);
+      if (debouncedSearchTerm) {
+        filters.push(`(expand.company.company_name ~ "${debouncedSearchTerm}" || phone_number ~ "${debouncedSearchTerm}" || owner_name ~ "${debouncedSearchTerm}")`);
       }
 
       if (outcomeFilter.length > 0) {
@@ -155,7 +157,7 @@ export default function ColdCallsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, sort, searchTerm, outcomeFilter, minInterest, isAuthenticated]);
+  }, [page, sort, debouncedSearchTerm, outcomeFilter, minInterest, isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {

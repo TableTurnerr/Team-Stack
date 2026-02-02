@@ -26,6 +26,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import { useDebounce } from '@/hooks/use-debounce';
 
 // Column definitions for companies table
 const COMPANY_COLUMNS: ColumnDefinition[] = [
@@ -611,6 +612,7 @@ export default function CompaniesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [showAddModal, setShowAddModal] = useState(false);
 
   // Pagination
@@ -628,7 +630,7 @@ export default function CompaniesPage() {
       setLoading(true);
       setError(null);
 
-      const safeSearch = sanitizeFilterValue(searchTerm);
+      const safeSearch = sanitizeFilterValue(debouncedSearchTerm);
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
         sort: '-created',
         ...(safeSearch && { filter: `company_name ~ "${safeSearch}" || phone_numbers ~ "${safeSearch}" || owner_name ~ "${safeSearch}"` }),
@@ -644,7 +646,7 @@ export default function CompaniesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchTerm, isAuthenticated]);
+  }, [page, debouncedSearchTerm, isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {

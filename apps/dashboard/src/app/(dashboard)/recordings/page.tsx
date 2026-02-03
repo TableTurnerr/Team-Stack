@@ -8,9 +8,9 @@ import { COLLECTIONS, type Recording } from '@/lib/types';
 import { formatDate, formatDateTime, formatDuration, cn, sanitizeFilterValue } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
+import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
-import { useDebounce } from '@/hooks/use-debounce';
 import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
@@ -38,6 +38,18 @@ const getAudioDuration = (file: File): Promise<number> => {
   });
 };
 
+const formatPhoneNumber = (phone: string | undefined | null) => {
+  if (!phone) return 'N/A';
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length === 10) {
+    return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  }
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
+  }
+  return phone;
+};
+
 export default function RecordingsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -47,7 +59,6 @@ export default function RecordingsPage() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [showFilters, setShowFilters] = useState(false);
 
   // Upload State
@@ -129,20 +140,30 @@ export default function RecordingsPage() {
   const handleBulkUpload = async (
     pendingFiles: PendingFile[],
     onProgress?: (progress: UploadProgress) => void,
-    shouldCancel?: () => boolean
+    shouldCancel?: () => boolean,
+    onLog?: (message: string) => void
   ) => {
     if (!user) return;
     setIsUploading(true);
 
+    const UPLOAD_TIMEOUT_MS = 60000; // 60 seconds timeout per file
+    const MAX_RETRIES = 3;
+
     try {
       for (let i = 0; i < pendingFiles.length; i++) {
-        // Check for cancellation before each upload
+        // Check for cancellation
         if (shouldCancel?.()) {
-          console.log(`Upload cancelled after ${i} of ${pendingFiles.length} files`);
+          const msg = `Upload cancelled after ${i} of ${pendingFiles.length} files`;
+          console.log(msg);
+          onLog?.(msg);
           throw new Error('Upload cancelled');
         }
 
         const f = pendingFiles[i];
+
+        // Log progress
+        const sizeMB = (f.file.size / (1024 * 1024)).toFixed(2);
+        onLog?.(`Processing ${i + 1}/${pendingFiles.length}: ${f.file.name} (${sizeMB} MB)`);
 
         // Report progress
         onProgress?.({
@@ -151,13 +172,14 @@ export default function RecordingsPage() {
           currentFileName: f.file.name
         });
 
-        // If this file is replacing an existing one, delete the existing first
+        // Delete existing if needed
         if (f.resolution === 'keep_new' && f.duplicateInfo?.existingRecording) {
           try {
+            onLog?.(`Replacing existing recording (ID: ${f.duplicateInfo.existingRecording.id})...`);
             await pb.collection(COLLECTIONS.RECORDINGS).delete(f.duplicateInfo.existingRecording.id);
-          } catch (deleteErr) {
+          } catch (deleteErr: any) {
             console.error('Failed to delete existing recording:', deleteErr);
-            // Continue with upload anyway
+            onLog?.(`Warning: Failed to delete existing file: ${deleteErr.message}`);
           }
         }
 
@@ -174,41 +196,77 @@ export default function RecordingsPage() {
               formData.append('phone_number_record', phoneRecord.id);
               formData.append('company', phoneRecord.company);
               formData.append('phone_number', phoneRecord.phone_number);
+              onLog?.(`Matched to company via phone: ${f.matchedPhoneNumber}`);
             }
           } catch (e) {
-            // No match found, use raw phone from filename
             formData.append('phone_number', f.matchedPhoneNumber);
+            onLog?.(`No company match found for phone: ${f.matchedPhoneNumber}`);
           }
         }
 
         const duration = await getAudioDuration(f.file);
         if (duration) formData.append('duration', Math.round(duration).toString());
 
-        // Extract date from filename if possible
         const meta = extractMetadata(f.file.name);
         if (meta) {
           formData.append('recording_date', meta.isoDate);
           formData.append('note', `Call on ${meta.displayDate}`);
         }
 
-        await pb.collection(COLLECTIONS.RECORDINGS).create(formData);
+        // Upload with retry and timeout
+        let attempts = 0;
+        let uploaded = false;
+
+        while (attempts < MAX_RETRIES && !uploaded) {
+          try {
+            attempts++;
+            if (attempts > 1) onLog?.(`Retry attempt ${attempts}/${MAX_RETRIES} for ${f.file.name}...`);
+
+            // Create a promise that rejects after timeout
+            const uploadPromise = pb.collection(COLLECTIONS.RECORDINGS).create(formData);
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Upload timed out')), UPLOAD_TIMEOUT_MS)
+            );
+
+            await Promise.race([uploadPromise, timeoutPromise]);
+            uploaded = true;
+            onLog?.(`Successfully uploaded ${f.file.name}`);
+          } catch (err: any) {
+            console.error(`Upload error for ${f.file.name} (Attempt ${attempts}):`, err);
+
+            if (shouldCancel?.()) throw new Error('Upload cancelled');
+
+            if (attempts >= MAX_RETRIES) {
+              onLog?.(`Failed to upload ${f.file.name} after ${MAX_RETRIES} attempts. Error: ${err.message}`);
+              // We don't throw here to allow continuing with other files? 
+              // Or user prefers partial success? user said "cancel/skip the uploads (except the ones that were already uploaded)" implying stop on cancel, but continue on error?
+              // Usually bulk upload should try to continue or stop. I'll log failure and Continue.
+              onLog?.(`Skipping ${f.file.name}...`);
+            } else {
+              const delay = 1000 * Math.pow(2, attempts);
+              onLog?.(`Error: ${err.message}. Retrying in ${delay}ms...`);
+              await new Promise(r => setTimeout(r, delay));
+            }
+          }
+        }
       }
 
-      // Final progress update
       onProgress?.({
         current: pendingFiles.length,
         total: pendingFiles.length,
-        currentFileName: ''
+        currentFileName: 'Completed'
       });
+      onLog?.('Bulk upload completed.');
 
       fetchRecordings();
     } catch (err: any) {
       if (err?.message === 'Upload cancelled') {
-        // Refresh to show any files that were uploaded before cancellation
         fetchRecordings();
+        onLog?.('Upload process cancelled.');
       } else {
         console.error('Bulk upload failed:', err);
-        alert('Some files failed to upload. Check console for details.');
+        alert('Bulk upload process encountered errors. Check logs for details.');
+        onLog?.(`Critical Error: ${err.message}`);
       }
     } finally {
       setIsUploading(false);
@@ -300,10 +358,21 @@ export default function RecordingsPage() {
       setError(null);
 
       const filters: string[] = [];
-      if (debouncedSearchTerm) {
-        const safeSearch = sanitizeFilterValue(debouncedSearchTerm);
+      if (searchTerm) {
+        const safeSearch = sanitizeFilterValue(searchTerm);
         if (safeSearch) {
-          filters.push(`(phone_number ~ "${safeSearch}" || note ~ "${safeSearch}")`);
+          const searchConditions = [
+            `phone_number ~ "${safeSearch}"`,
+            `note ~ "${safeSearch}"`
+          ];
+
+          // If search resembles a phone number, try also searching by raw digits
+          const cleanedSearch = safeSearch.replace(/\D/g, '');
+          if (cleanedSearch.length >= 3 && cleanedSearch !== safeSearch) {
+            searchConditions.push(`phone_number ~ "${cleanedSearch}"`);
+          }
+
+          filters.push(`(${searchConditions.join(' || ')})`);
         }
       }
 
@@ -333,7 +402,7 @@ export default function RecordingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, isAuthenticated, debouncedSearchTerm]);
+  }, [page, isAuthenticated, searchTerm]);
 
   const getRecordingDisplayDate = (recording: Recording) => {
     const pattern = /recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})/;
@@ -423,13 +492,12 @@ export default function RecordingsPage() {
 
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+            <SearchInput
               placeholder="Search recordings..."
-              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-full sm:w-64"
+              onSearch={setSearchTerm}
+              defaultValue={searchTerm}
+              key={searchTerm} // Reset input when search term is cleared externally
+              className="w-full sm:w-64"
             />
           </div>
 
@@ -612,7 +680,9 @@ export default function RecordingsPage() {
                       <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
                         {recording.expand?.phone_number_record ? (
                           <div className="flex flex-col">
-                            <span className="font-bold text-[var(--foreground)]">{recording.expand.phone_number_record.phone_number}</span>
+                            <span className="font-bold text-[var(--foreground)]">
+                              {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
+                            </span>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               {recording.expand.phone_number_record.label && (
                                 <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
@@ -630,7 +700,7 @@ export default function RecordingsPage() {
                             </div>
                           </div>
                         ) : (
-                          <span className="text-[var(--muted)]">{recording.phone_number || 'N/A'}</span>
+                          <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
                         )}
                       </td>
                     )}

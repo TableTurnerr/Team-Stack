@@ -22,7 +22,9 @@ import {
   Square,
   MinusSquare,
   Minimize2,
-  Maximize2
+  Maximize2,
+  Terminal,
+  Activity
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Recording } from '@/lib/types';
@@ -57,9 +59,31 @@ interface BulkUploadModalProps {
   onUpload: (
     files: PendingFile[],
     onProgress?: (progress: UploadProgress) => void,
-    shouldCancel?: () => boolean
+    shouldCancel?: () => boolean,
+    onLog?: (message: string) => void
   ) => Promise<void>;
   checkDuplicates: (fileNames: string[]) => Promise<Map<string, DuplicateInfo>>;
+}
+
+function TerminalLogs({ logs }: { logs: string[] }) {
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+  return (
+    <div className="flex-1 bg-black p-4 overflow-y-auto font-mono text-xs border-y border-[var(--card-border)]">
+      <div className="space-y-1">
+        {logs.length === 0 && <div className="text-gray-500 italic">Waiting for logs...</div>}
+        {logs.map((log, i) => (
+          <div key={i} className="text-green-500 break-all border-b border-green-900/30 pb-0.5 mb-0.5 last:border-0">
+            <span className="opacity-50 mr-2">{log.split(']')[0]}]</span>
+            <span>{log.split(']').slice(1).join(']')}</span>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+    </div>
+  );
 }
 
 // Duplicate Resolution Modal Component
@@ -370,7 +394,7 @@ function DuplicateResolutionModal({
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 
@@ -389,12 +413,25 @@ export function BulkUploadModal({
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
   const cancelUploadRef = useRef(false);
+
+  const handleLog = useCallback((message: string) => {
+    setLogs(prev => {
+      // Keep last 500 logs
+      const newLogs = [...prev, `[${new Date().toLocaleTimeString()}] ${message}`];
+      return newLogs.slice(-500);
+    });
+  }, []);
 
   // Expose cancellation check via ref for parent component
   const handleCancelUpload = () => {
-    cancelUploadRef.current = true;
-    setIsCancelling(true);
+    if (confirm("Are you sure you want to stop the upload? Current file will finish, remaining will be skipped.")) {
+      cancelUploadRef.current = true;
+      setIsCancelling(true);
+      handleLog("User initiated cancellation...");
+    }
   };
 
   // Reset cancel state when upload completes or modal closes
@@ -574,12 +611,14 @@ export function BulkUploadModal({
     setIsUploading(true);
     setUploadProgress({ current: 0, total: filesToUpload.length, currentFileName: '' });
     try {
+      if (showTerminal) handleLog("Starting upload process...");
       await onUpload(
         filesToUpload,
         (progress) => {
           setUploadProgress(progress);
         },
-        () => cancelUploadRef.current // Pass cancellation check
+        () => cancelUploadRef.current, // Pass cancellation check
+        handleLog
       );
       if (!cancelUploadRef.current) {
         setFiles([]);
@@ -768,287 +807,316 @@ export function BulkUploadModal({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {files.length === 0 ? (
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleFileDrop}
-              className="h-full min-h-[300px] border-2 border-dashed border-[var(--card-border)] rounded-2xl flex flex-col items-center justify-center text-center p-12 transition-colors hover:border-[var(--primary)] hover:bg-[var(--primary-subtle)]/5"
-            >
-              <div className="w-16 h-16 rounded-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] flex items-center justify-center mb-6 text-[var(--muted)]">
-                <FileAudio size={32} />
+        {showTerminal ? (
+          <TerminalLogs logs={logs} />
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6">
+            {files.length === 0 ? (
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleFileDrop}
+                className="h-full min-h-[300px] border-2 border-dashed border-[var(--card-border)] rounded-2xl flex flex-col items-center justify-center text-center p-12 transition-colors hover:border-[var(--primary)] hover:bg-[var(--primary-subtle)]/5"
+              >
+                <div className="w-16 h-16 rounded-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] flex items-center justify-center mb-6 text-[var(--muted)]">
+                  <FileAudio size={32} />
+                </div>
+                <h3 className="text-lg font-bold mb-2">Drag & drop recordings here</h3>
+                <p className="text-sm text-[var(--muted)] mb-8 max-w-xs mx-auto">
+                  Select multiple MP3 or WAV files. We&apos;ll automatically try to match them by phone number in the filename.
+                </p>
+                <label className="px-6 py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-bold cursor-pointer hover:opacity-90 transition-all">
+                  Browse Files
+                  <input type="file" multiple accept="audio/*" className="hidden" onChange={handleFileSelect} />
+                </label>
               </div>
-              <h3 className="text-lg font-bold mb-2">Drag & drop recordings here</h3>
-              <p className="text-sm text-[var(--muted)] mb-8 max-w-xs mx-auto">
-                Select multiple MP3 or WAV files. We&apos;ll automatically try to match them by phone number in the filename.
-              </p>
-              <label className="px-6 py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-bold cursor-pointer hover:opacity-90 transition-all">
-                Browse Files
-                <input type="file" multiple accept="audio/*" className="hidden" onChange={handleFileSelect} />
-              </label>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Bulk Action Bar */}
-              {viewMode === 'preview' && files.length > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-xl">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={allSelected ? deselectAll : selectAll}
-                      className="flex items-center gap-2 text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                    >
-                      {allSelected ? (
-                        <>
-                          <CheckSquare size={16} className="text-[var(--primary)]" />
-                          Deselect All
-                        </>
-                      ) : someSelected ? (
-                        <>
-                          <MinusSquare size={16} className="text-[var(--primary)]" />
-                          Select All
-                        </>
-                      ) : (
-                        <>
-                          <Square size={16} />
-                          Select All
-                        </>
+            ) : (
+              <div className="space-y-4">
+                {/* Bulk Action Bar */}
+                {viewMode === 'preview' && files.length > 0 && (
+                  <div className="flex items-center justify-between px-4 py-3 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-xl">
+                    <div className="flex items-center gap-4">
+                      <button
+                        onClick={allSelected ? deselectAll : selectAll}
+                        className="flex items-center gap-2 text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                      >
+                        {allSelected ? (
+                          <>
+                            <CheckSquare size={16} className="text-[var(--primary)]" />
+                            Deselect All
+                          </>
+                        ) : someSelected ? (
+                          <>
+                            <MinusSquare size={16} className="text-[var(--primary)]" />
+                            Select All
+                          </>
+                        ) : (
+                          <>
+                            <Square size={16} />
+                            Select All
+                          </>
+                        )}
+                      </button>
+                      {selectedIds.size > 0 && (
+                        <span className="text-sm text-[var(--muted)]">
+                          <span className="font-bold text-[var(--foreground)]">{selectedIds.size}</span> of {files.length} selected
+                        </span>
                       )}
-                    </button>
+                    </div>
                     {selectedIds.size > 0 && (
-                      <span className="text-sm text-[var(--muted)]">
-                        <span className="font-bold text-[var(--foreground)]">{selectedIds.size}</span> of {files.length} selected
-                      </span>
+                      <button
+                        onClick={removeSelected}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-bold text-sm hover:bg-[var(--error)]/20 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                        Remove Selected ({selectedIds.size})
+                      </button>
                     )}
                   </div>
-                  {selectedIds.size > 0 && (
-                    <button
-                      onClick={removeSelected}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-bold text-sm hover:bg-[var(--error)]/20 transition-colors"
-                    >
-                      <Trash2 size={14} />
-                      Remove Selected ({selectedIds.size})
-                    </button>
-                  )}
-                </div>
-              )}
+                )}
 
-              {viewMode === 'preview' ? (
-                <div className="border border-[var(--card-border)] rounded-xl overflow-hidden">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] text-[var(--muted)]">
-                      <tr>
-                        <th className="px-4 py-3 w-12">
-                          <button
-                            onClick={allSelected ? deselectAll : selectAll}
-                            className="flex items-center justify-center text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                          >
-                            {allSelected ? (
-                              <CheckSquare size={18} className="text-[var(--primary)]" />
-                            ) : someSelected ? (
-                              <MinusSquare size={18} className="text-[var(--primary)]" />
-                            ) : (
-                              <Square size={18} />
-                            )}
-                          </button>
-                        </th>
-                        <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px]">Filename</th>
-                        <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px]">Detected Phone</th>
-                        <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px]">Match Status</th>
-                        <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px] text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--card-border)]">
-                      {files.map((f, index) => (
-                        <tr
-                          key={f.id}
-                          className={cn(
-                            "hover:bg-[var(--sidebar-bg)] transition-colors group",
-                            selectedIds.has(f.id) && "bg-[var(--primary-subtle)]/30"
-                          )}
-                        >
-                          <td className="px-4 py-4 w-12">
-                            <div className="relative w-5 h-5 flex items-center justify-center">
-                              <span className={cn(
-                                "text-xs text-[var(--muted)] font-medium transition-opacity",
-                                selectedIds.has(f.id) ? "opacity-0" : "group-hover:opacity-0"
-                              )}>
-                                {index + 1}
-                              </span>
-                              <button
-                                onClick={() => toggleSelect(f.id)}
-                                className={cn(
-                                  "absolute inset-0 flex items-center justify-center transition-opacity",
-                                  selectedIds.has(f.id) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                                )}
-                              >
-                                {selectedIds.has(f.id) ? (
-                                  <CheckSquare size={16} className="text-[var(--primary)]" />
-                                ) : (
-                                  <Square size={16} className="text-[var(--muted)] hover:text-[var(--foreground)]" />
-                                )}
-                              </button>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4 truncate max-w-[200px] font-medium">
-                            {f.file.name}
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-2 font-mono">
-                              <Phone size={12} className="text-[var(--muted)]" />
-                              {f.matchedPhoneNumber || <span className="text-[var(--error)] text-xs font-sans">No phone found</span>}
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            {f.status === 'duplicate' ? (
-                              <button
-                                onClick={() => setDuplicateToResolve(f)}
-                                className="flex items-center gap-2 text-[var(--error)] font-medium hover:underline"
-                              >
-                                <AlertTriangle size={12} />
-                                Duplicate Found - Resolve
-                              </button>
-                            ) : f.status === 'resolved' && f.resolution === 'keep_existing' ? (
-                              <div className="flex items-center gap-2 text-[var(--muted)] font-medium">
-                                <Check size={12} />
-                                Keeping Existing
-                              </div>
-                            ) : f.resolution === 'rename' ? (
-                              <div className="flex items-center gap-2 text-[var(--success)] font-medium">
-                                <Edit3 size={12} />
-                                Renamed
-                              </div>
-                            ) : f.resolution === 'keep_new' ? (
-                              <div className="flex items-center gap-2 text-[var(--primary)] font-medium">
-                                <Upload size={12} />
-                                Will Replace
-                              </div>
-                            ) : f.matchedCompanyName ? (
-                              <div className="flex items-center gap-2 text-[var(--success)] font-medium">
-                                <Building2 size={12} />
-                                {f.matchedCompanyName}
-                              </div>
-                            ) : f.matchedPhoneNumber ? (
-                              <div className="flex items-center gap-2 text-[var(--primary)] font-medium">
-                                <Phone size={12} />
-                                Will match by phone
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2 text-[var(--muted)]">
-                                <AlertCircle size={12} />
-                                No match found
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-4 text-right">
+                {viewMode === 'preview' ? (
+                  <div className="border border-[var(--card-border)] rounded-xl overflow-hidden">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] text-[var(--muted)]">
+                        <tr>
+                          <th className="px-4 py-3 w-12">
                             <button
-                              onClick={() => removeFile(f.id)}
-                              className="p-1.5 rounded-lg text-[var(--muted)] hover:bg-[var(--error-subtle)] hover:text-[var(--error)] transition-colors"
+                              onClick={allSelected ? deselectAll : selectAll}
+                              className="flex items-center justify-center text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
                             >
-                              <Trash2 size={16} />
+                              {allSelected ? (
+                                <CheckSquare size={18} className="text-[var(--primary)]" />
+                              ) : someSelected ? (
+                                <MinusSquare size={18} className="text-[var(--primary)]" />
+                              ) : (
+                                <Square size={18} />
+                              )}
                             </button>
-                          </td>
+                          </th>
+                          <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px]">Filename</th>
+                          <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px]">Detected Phone</th>
+                          <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px]">Match Status</th>
+                          <th className="px-4 py-3 font-bold uppercase tracking-wider text-[10px] text-right">Action</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {files.map((f) => (
-                    <div
-                      key={f.id}
-                      className={cn(
-                        "p-4 rounded-xl border bg-[var(--card-bg)] flex items-center gap-3",
-                        f.status === 'duplicate'
-                          ? "border-[var(--error)] bg-[var(--error-subtle)]"
-                          : f.resolution === 'keep_existing'
-                            ? "border-[var(--card-border)] opacity-50"
-                            : "border-[var(--card-border)]"
-                      )}
-                    >
-                      <div className={cn(
-                        "w-10 h-10 rounded-lg border flex items-center justify-center",
-                        f.status === 'duplicate'
-                          ? "bg-[var(--error)]/10 border-[var(--error)]/30 text-[var(--error)]"
-                          : "bg-[var(--sidebar-bg)] border-[var(--card-border)] text-[var(--muted)]"
-                      )}>
-                        {f.status === 'duplicate' ? <AlertTriangle size={20} /> : <FileAudio size={20} />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{f.file.name}</p>
-                        {f.status === 'duplicate' ? (
-                          <button
-                            onClick={() => setDuplicateToResolve(f)}
-                            className="text-[10px] text-[var(--error)] font-bold uppercase tracking-wider mt-0.5 hover:underline"
+                      </thead>
+                      <tbody className="divide-y divide-[var(--card-border)]">
+                        {files.map((f, index) => (
+                          <tr
+                            key={f.id}
+                            className={cn(
+                              "hover:bg-[var(--sidebar-bg)] transition-colors group",
+                              selectedIds.has(f.id) && "bg-[var(--primary-subtle)]/30"
+                            )}
                           >
-                            Duplicate - Click to resolve
-                          </button>
-                        ) : f.resolution === 'keep_existing' ? (
-                          <p className="text-[10px] text-[var(--muted)] uppercase tracking-wider mt-0.5">
-                            Skipped (keeping existing)
-                          </p>
-                        ) : (
-                          <p className="text-[10px] text-[var(--muted)] uppercase tracking-wider mt-0.5">
-                            {f.matchedPhoneNumber || 'Unknown Phone'}
-                          </p>
+                            <td className="px-4 py-4 w-12">
+                              <div className="relative w-5 h-5 flex items-center justify-center">
+                                <span className={cn(
+                                  "text-xs text-[var(--muted)] font-medium transition-opacity",
+                                  selectedIds.has(f.id) ? "opacity-0" : "group-hover:opacity-0"
+                                )}>
+                                  {index + 1}
+                                </span>
+                                <button
+                                  onClick={() => toggleSelect(f.id)}
+                                  className={cn(
+                                    "absolute inset-0 flex items-center justify-center transition-opacity",
+                                    selectedIds.has(f.id) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                                  )}
+                                >
+                                  {selectedIds.has(f.id) ? (
+                                    <CheckSquare size={16} className="text-[var(--primary)]" />
+                                  ) : (
+                                    <Square size={16} className="text-[var(--muted)] hover:text-[var(--foreground)]" />
+                                  )}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 truncate max-w-[200px] font-medium">
+                              {f.file.name}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-2 font-mono">
+                                <Phone size={12} className="text-[var(--muted)]" />
+                                {f.matchedPhoneNumber || <span className="text-[var(--error)] text-xs font-sans">No phone found</span>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4">
+                              {f.status === 'duplicate' ? (
+                                <button
+                                  onClick={() => setDuplicateToResolve(f)}
+                                  className="flex items-center gap-2 text-[var(--error)] font-medium hover:underline"
+                                >
+                                  <AlertTriangle size={12} />
+                                  Duplicate Found - Resolve
+                                </button>
+                              ) : f.status === 'resolved' && f.resolution === 'keep_existing' ? (
+                                <div className="flex items-center gap-2 text-[var(--muted)] font-medium">
+                                  <Check size={12} />
+                                  Keeping Existing
+                                </div>
+                              ) : f.resolution === 'rename' ? (
+                                <div className="flex items-center gap-2 text-[var(--success)] font-medium">
+                                  <Edit3 size={12} />
+                                  Renamed
+                                </div>
+                              ) : f.resolution === 'keep_new' ? (
+                                <div className="flex items-center gap-2 text-[var(--primary)] font-medium">
+                                  <Upload size={12} />
+                                  Will Replace
+                                </div>
+                              ) : f.matchedCompanyName ? (
+                                <div className="flex items-center gap-2 text-[var(--success)] font-medium">
+                                  <Building2 size={12} />
+                                  {f.matchedCompanyName}
+                                </div>
+                              ) : f.matchedPhoneNumber ? (
+                                <div className="flex items-center gap-2 text-[var(--primary)] font-medium">
+                                  <Phone size={12} />
+                                  Will match by phone
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 text-[var(--muted)]">
+                                  <AlertCircle size={12} />
+                                  No match found
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 text-right">
+                              <button
+                                onClick={() => removeFile(f.id)}
+                                className="p-1.5 rounded-lg text-[var(--muted)] hover:bg-[var(--error-subtle)] hover:text-[var(--error)] transition-colors"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {files.map((f) => (
+                      <div
+                        key={f.id}
+                        className={cn(
+                          "p-4 rounded-xl border bg-[var(--card-bg)] flex items-center gap-3",
+                          f.status === 'duplicate'
+                            ? "border-[var(--error)] bg-[var(--error-subtle)]"
+                            : f.resolution === 'keep_existing'
+                              ? "border-[var(--card-border)] opacity-50"
+                              : "border-[var(--card-border)]"
                         )}
-                      </div>
-                      <button
-                        onClick={() => removeFile(f.id)}
-                        className="text-[var(--muted)] hover:text-[var(--error)] transition-colors"
                       >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ))}
-                  <label className="p-4 rounded-xl border-2 border-dashed border-[var(--card-border)] flex items-center justify-center gap-2 text-sm text-[var(--muted)] hover:border-[var(--primary)] hover:text-[var(--foreground)] cursor-pointer transition-all">
-                    <Plus size={16} />
-                    Add More
-                    <input type="file" multiple accept="audio/*" className="hidden" onChange={handleFileSelect} />
-                  </label>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                        <div className={cn(
+                          "w-10 h-10 rounded-lg border flex items-center justify-center",
+                          f.status === 'duplicate'
+                            ? "bg-[var(--error)]/10 border-[var(--error)]/30 text-[var(--error)]"
+                            : "bg-[var(--sidebar-bg)] border-[var(--card-border)] text-[var(--muted)]"
+                        )}>
+                          {f.status === 'duplicate' ? <AlertTriangle size={20} /> : <FileAudio size={20} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{f.file.name}</p>
+                          {f.status === 'duplicate' ? (
+                            <button
+                              onClick={() => setDuplicateToResolve(f)}
+                              className="text-[10px] text-[var(--error)] font-bold uppercase tracking-wider mt-0.5 hover:underline"
+                            >
+                              Duplicate - Click to resolve
+                            </button>
+                          ) : f.resolution === 'keep_existing' ? (
+                            <p className="text-[10px] text-[var(--muted)] uppercase tracking-wider mt-0.5">
+                              Skipped (keeping existing)
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-[var(--muted)] uppercase tracking-wider mt-0.5">
+                              {f.matchedPhoneNumber || 'Unknown Phone'}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => removeFile(f.id)}
+                          className="text-[var(--muted)] hover:text-[var(--error)] transition-colors"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                    <label className="p-4 rounded-xl border-2 border-dashed border-[var(--card-border)] flex items-center justify-center gap-2 text-sm text-[var(--muted)] hover:border-[var(--primary)] hover:text-[var(--foreground)] cursor-pointer transition-all">
+                      <Plus size={16} />
+                      Add More
+                      <input type="file" multiple accept="audio/*" className="hidden" onChange={handleFileSelect} />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer */}
-        <div className="p-6 border-t border-[var(--card-border)] bg-[var(--sidebar-bg)]">
+        <div className="p-6 border-t border-[var(--card-border)] bg-[var(--sidebar-bg)] flex justify-between items-center gap-4">
+          <div className="flex items-center gap-4 text-sm text-[var(--muted)]">
+            <div className="flex items-center gap-2">
+              <FileAudio size={16} />
+              <span>{files.length} files total</span>
+            </div>
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-2 text-[var(--primary)]">
+                <CheckSquare size={16} />
+                <span>{selectedIds.size} selected</span>
+              </div>
+            )}
+            <button
+              onClick={() => setShowTerminal(!showTerminal)}
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-1 rounded hover:bg-[var(--card-hover)] transition-colors",
+                showTerminal ? "text-[var(--primary)] font-bold bg-[var(--primary-subtle)]" : "hover:text-[var(--foreground)]"
+              )}
+            >
+              <Terminal size={14} />
+              {showTerminal ? "Hide Details" : "More Details"}
+            </button>
+          </div>
+
+          <div className="flex-1"></div>
+
           {/* Duplicate Warning */}
           {hasUnresolvedDuplicates && (
-            <div className="flex items-center gap-2 mb-4 px-4 py-3 rounded-lg bg-[var(--error-subtle)] border border-[var(--error)]/30">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] border border-[var(--error)]/30 mr-2">
               <AlertTriangle size={16} className="text-[var(--error)]" />
               <span className="text-sm text-[var(--error)] font-medium">
-                {duplicateFiles.length} duplicate{duplicateFiles.length > 1 ? 's' : ''} found. Please resolve before uploading.
+                {duplicateFiles.length} duplicate{duplicateFiles.length > 1 ? 's' : ''} to resolve
               </span>
             </div>
           )}
 
           {/* Checking duplicates indicator */}
           {isCheckingDuplicates && (
-            <div className="flex items-center gap-2 mb-4 px-4 py-3 rounded-lg bg-[var(--primary-subtle)] border border-[var(--primary)]/30">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary-subtle)] border border-[var(--primary)]/30 mr-2">
               <Loader2 size={16} className="text-[var(--primary)] animate-spin" />
               <span className="text-sm text-[var(--primary)] font-medium">
-                Checking for duplicates...
+                Checking...
               </span>
             </div>
           )}
 
           {/* Upload Progress Bar */}
           {isUploading && uploadProgress && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
+            <div className="flex-1 mx-4 max-w-sm">
+              <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
-                  <Loader2 size={14} className="text-[var(--primary)] animate-spin" />
-                  <span className="text-sm font-medium">
-                    Uploading {uploadProgress.current + 1} of {uploadProgress.total}
+                  <Loader2 size={12} className="text-[var(--primary)] animate-spin" />
+                  <span className="text-xs font-medium">
+                    {uploadProgress.current + 1} / {uploadProgress.total}
                   </span>
                 </div>
-                <span className="text-sm text-[var(--muted)]">
+                <span className="text-xs text-[var(--muted)]">
                   {Math.round(((uploadProgress.current) / uploadProgress.total) * 100)}%
                 </span>
               </div>
-              <div className="h-2 bg-[var(--card-border)] rounded-full overflow-hidden">
+              <div className="h-1.5 bg-[var(--card-border)] rounded-full overflow-hidden">
                 <div
                   className="h-full bg-[var(--primary)] rounded-full transition-all duration-300 ease-out"
                   style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
@@ -1099,7 +1167,7 @@ export function BulkUploadModal({
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 

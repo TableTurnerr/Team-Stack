@@ -57,48 +57,55 @@ export default function RecordingsPage() {
   // Audio player state - track which recording is expanded
   const [expandedRecordingId, setExpandedRecordingId] = useState<string | null>(null);
 
-  // Check for duplicate recordings by original_filename - parallelized for speed
+  // Check for duplicate recordings by original_filename - batched to avoid rate limits
   const checkDuplicates = async (fileNames: string[]): Promise<Map<string, DuplicateInfo>> => {
     const duplicates = new Map<string, DuplicateInfo>();
+    const BATCH_SIZE = 5; // Process 5 files at a time to avoid 429 rate limits
 
-    // Process all files in parallel for faster checking
-    const checkPromises = fileNames.map(async (fileName) => {
-      // Escape quotes for PocketBase filter
-      const escapedFileName = fileName.replace(/"/g, '\\"');
+    // Process files in batches
+    for (let i = 0; i < fileNames.length; i += BATCH_SIZE) {
+      const batch = fileNames.slice(i, i + BATCH_SIZE);
+
+      const checkPromises = batch.map(async (fileName) => {
+        const escapedFileName = fileName.replace(/"/g, '\\"');
+
+        try {
+          const existing = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+            `original_filename = "${escapedFileName}"`,
+            { expand: 'uploader,company,phone_number_record' }
+          );
+
+          if (existing) {
+            console.log(`Duplicate found: "${fileName}" matches existing original_filename "${existing.original_filename}"`);
+            return { fileName, existing };
+          }
+        } catch (e: any) {
+          if (e.status !== 404) {
+            console.error(`Error checking duplicate for ${fileName}:`, e);
+          }
+        }
+
+        return null;
+      });
 
       try {
-        // Check for exact match on original_filename field
-        const existing = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
-          `original_filename = "${escapedFileName}"`,
-          { expand: 'uploader,company,phone_number_record' }
-        );
-
-        if (existing) {
-          console.log(`Duplicate found: "${fileName}" matches existing original_filename "${existing.original_filename}"`);
-          return { fileName, existing };
+        const results = await Promise.all(checkPromises);
+        for (const result of results) {
+          if (result) {
+            duplicates.set(result.fileName, {
+              existingRecording: result.existing,
+              existingFileUrl: pb.files.getUrl(result.existing, result.existing.file || '')
+            });
+          }
         }
-      } catch (e: any) {
-        // 404 means no duplicate found, which is expected
-        if (e.status !== 404) {
-          console.error(`Error checking duplicate for ${fileName}:`, e);
-        }
+      } catch (err) {
+        console.error('Failed to check duplicates in batch:', err);
       }
 
-      return null;
-    });
-
-    try {
-      const results = await Promise.all(checkPromises);
-      for (const result of results) {
-        if (result) {
-          duplicates.set(result.fileName, {
-            existingRecording: result.existing,
-            existingFileUrl: pb.files.getUrl(result.existing, result.existing.file || '')
-          });
-        }
+      // Small delay between batches to be gentle on the server
+      if (i + BATCH_SIZE < fileNames.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
-    } catch (err) {
-      console.error('Failed to check duplicates:', err);
     }
 
     return duplicates;
@@ -350,7 +357,20 @@ export default function RecordingsPage() {
     if (!confirm(`Are you sure you want to delete ${selectedIds.size} recordings?`)) return;
 
     try {
-      await Promise.all(Array.from(selectedIds).map(id => pb.collection('recordings').delete(id)));
+      const ids = Array.from(selectedIds);
+      const BATCH_SIZE = 5;
+
+      // Delete in batches to avoid rate limits
+      for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+        const batch = ids.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(id => pb.collection('recordings').delete(id)));
+
+        // Small delay between batches
+        if (i + BATCH_SIZE < ids.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
       setRecordings(prev => prev.filter(r => !selectedIds.has(r.id)));
       setSelectedIds(new Set());
     } catch (err: any) {

@@ -104,12 +104,22 @@ export default function RecordingsPage() {
     return duplicates;
   };
 
-  const handleBulkUpload = async (pendingFiles: PendingFile[], onProgress?: (progress: UploadProgress) => void) => {
+  const handleBulkUpload = async (
+    pendingFiles: PendingFile[],
+    onProgress?: (progress: UploadProgress) => void,
+    shouldCancel?: () => boolean
+  ) => {
     if (!user) return;
     setIsUploading(true);
 
     try {
       for (let i = 0; i < pendingFiles.length; i++) {
+        // Check for cancellation before each upload
+        if (shouldCancel?.()) {
+          console.log(`Upload cancelled after ${i} of ${pendingFiles.length} files`);
+          throw new Error('Upload cancelled');
+        }
+
         const f = pendingFiles[i];
 
         // Report progress
@@ -170,9 +180,14 @@ export default function RecordingsPage() {
       });
 
       fetchRecordings();
-    } catch (err) {
-      console.error('Bulk upload failed:', err);
-      alert('Some files failed to upload. Check console for details.');
+    } catch (err: any) {
+      if (err?.message === 'Upload cancelled') {
+        // Refresh to show any files that were uploaded before cancellation
+        fetchRecordings();
+      } else {
+        console.error('Bulk upload failed:', err);
+        alert('Some files failed to upload. Check console for details.');
+      }
     } finally {
       setIsUploading(false);
     }

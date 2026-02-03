@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   X,
   Upload,
@@ -20,7 +20,9 @@ import {
   Copy,
   CheckSquare,
   Square,
-  MinusSquare
+  MinusSquare,
+  Minimize2,
+  Maximize2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Recording } from '@/lib/types';
@@ -52,7 +54,11 @@ export interface UploadProgress {
 interface BulkUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUpload: (files: PendingFile[], onProgress?: (progress: UploadProgress) => void) => Promise<void>;
+  onUpload: (
+    files: PendingFile[],
+    onProgress?: (progress: UploadProgress) => void,
+    shouldCancel?: () => boolean
+  ) => Promise<void>;
   checkDuplicates: (fileNames: string[]) => Promise<Map<string, DuplicateInfo>>;
 }
 
@@ -381,6 +387,23 @@ export function BulkUploadModal({
   const [duplicateToResolve, setDuplicateToResolve] = useState<PendingFile | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const cancelUploadRef = useRef(false);
+
+  // Expose cancellation check via ref for parent component
+  const handleCancelUpload = () => {
+    cancelUploadRef.current = true;
+    setIsCancelling(true);
+  };
+
+  // Reset cancel state when upload completes or modal closes
+  useEffect(() => {
+    if (!isUploading) {
+      cancelUploadRef.current = false;
+      setIsCancelling(false);
+    }
+  }, [isUploading]);
 
   const addFiles = useCallback(async (newFiles: File[]) => {
     const audioFiles = newFiles.filter(f => f.type.startsWith('audio/'));
@@ -551,13 +574,23 @@ export function BulkUploadModal({
     setIsUploading(true);
     setUploadProgress({ current: 0, total: filesToUpload.length, currentFileName: '' });
     try {
-      await onUpload(filesToUpload, (progress) => {
-        setUploadProgress(progress);
-      });
-      setFiles([]);
-      onClose();
-    } catch (error) {
-      console.error('Upload failed:', error);
+      await onUpload(
+        filesToUpload,
+        (progress) => {
+          setUploadProgress(progress);
+        },
+        () => cancelUploadRef.current // Pass cancellation check
+      );
+      if (!cancelUploadRef.current) {
+        setFiles([]);
+        onClose();
+      }
+    } catch (error: any) {
+      if (error?.message === 'Upload cancelled') {
+        console.log('Upload was cancelled by user');
+      } else {
+        console.error('Upload failed:', error);
+      }
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
@@ -587,6 +620,102 @@ export function BulkUploadModal({
           setDuplicateToResolve(null);
         }}
       />
+    );
+  }
+
+  // Minimized floating view - shows at bottom right during uploads
+  if (isMinimized) {
+    const progressPercent = uploadProgress
+      ? Math.round((uploadProgress.current / uploadProgress.total) * 100)
+      : 0;
+
+    return (
+      <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl shadow-2xl overflow-hidden w-80">
+          {/* Minimized Header */}
+          <div className="flex items-center justify-between px-4 py-3 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
+            <div className="flex items-center gap-3">
+              {isUploading ? (
+                <Loader2 size={18} className="text-[var(--primary)] animate-spin" />
+              ) : (
+                <Upload size={18} className="text-[var(--primary)]" />
+              )}
+              <span className="font-bold text-sm">
+                {isUploading ? 'Uploading...' : 'Bulk Upload'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsMinimized(false)}
+                className="p-1.5 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                title="Maximize"
+              >
+                <Maximize2 size={16} />
+              </button>
+              {!isUploading && (
+                <button
+                  onClick={onClose}
+                  className="p-1.5 rounded-lg hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors"
+                  title="Close"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Minimized Content */}
+          <div className="p-4">
+            {isUploading && uploadProgress ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium">
+                    {isCancelling ? 'Cancelling...' : `${uploadProgress.current + 1} of ${uploadProgress.total}`}
+                  </span>
+                  <span className="text-[var(--primary)] font-bold">{progressPercent}%</span>
+                </div>
+                <div className="h-2 bg-[var(--card-border)] rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all duration-300 ease-out",
+                      isCancelling ? "bg-[var(--error)]" : "bg-[var(--primary)]"
+                    )}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  {uploadProgress.currentFileName ? (
+                    <p className="text-xs text-[var(--muted)] truncate flex-1 mr-2">
+                      {uploadProgress.currentFileName}
+                    </p>
+                  ) : <div />}
+                  <button
+                    onClick={handleCancelUpload}
+                    disabled={isCancelling}
+                    className="text-xs font-bold text-[var(--error)] hover:underline disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    {isCancelling ? 'Stopping...' : 'Cancel'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <div className="text-sm">
+                  <span className="font-bold text-[var(--foreground)]">{uploadableFiles.length}</span>
+                  <span className="text-[var(--muted)]"> files ready</span>
+                </div>
+                <button
+                  onClick={handleUpload}
+                  disabled={uploadableFiles.length === 0 || isUploading || hasUnresolvedDuplicates || isCheckingDuplicates}
+                  className="px-4 py-1.5 rounded-lg bg-[var(--foreground)] text-[var(--background)] text-sm font-bold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  Upload
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -625,7 +754,14 @@ export function BulkUploadModal({
                 Preview Table
               </button>
             </div>
-            <button onClick={onClose} className="p-2 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)]">
+            <button
+              onClick={() => setIsMinimized(true)}
+              className="p-2 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+              title="Minimize"
+            >
+              <Minimize2 size={20} />
+            </button>
+            <button onClick={onClose} className="p-2 rounded-lg hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--error)] transition-colors">
               <X size={20} />
             </button>
           </div>

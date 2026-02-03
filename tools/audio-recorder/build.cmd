@@ -4,18 +4,21 @@ echo Building AudioRecorder Executable
 echo =========================================
 echo.
 
-REM Check if PyInstaller is installed
-pip show pyinstaller >nul 2>&1
-if errorlevel 1 (
-    echo Installing PyInstaller...
-    pip install pyinstaller
-)
+REM Display Python version for debugging
+echo Python version:
+py --version
+echo.
+
+cd /d "%~dp0"
+
+REM Install all requirements
+echo Installing requirements...
+pip install -r requirements.txt --quiet
+pip install pyinstaller --quiet
 
 echo.
 echo Building with PyInstaller...
 echo.
-
-cd /d "%~dp0"
 
 REM Clean previous builds
 if exist dist rmdir /s /q dist

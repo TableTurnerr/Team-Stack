@@ -38,6 +38,11 @@ a = Analysis(
         'scipy.io.wavfile',
         'keyboard',
         'keyboard._winkeyboard',
+        # Python 3.13+ compatibility: audioop was removed from stdlib
+        'pydub',
+        'pydub.audio_segment',
+        'pydub.utils',
+        'audioop',  # May be provided by audioop-lts package
     ],
     hookspath=[],
     hooksconfig={},

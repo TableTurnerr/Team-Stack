@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History } from 'lucide-react';
+import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Recording } from '@/lib/types';
 import { formatDate, formatDateTime, formatDuration, cn, sanitizeFilterValue } from '@/lib/utils';
@@ -10,7 +10,8 @@ import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
-import { BulkUploadModal } from '@/components/bulk-upload-modal';
+import { useDebounce } from '@/hooks/use-debounce';
+import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -46,21 +47,92 @@ export default function RecordingsPage() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [showFilters, setShowFilters] = useState(false);
 
   // Upload State
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  const handleBulkUpload = async (pendingFiles: any[]) => {
+  // Audio player state - track which recording is expanded
+  const [expandedRecordingId, setExpandedRecordingId] = useState<string | null>(null);
+
+  // Check for duplicate recordings by original_filename - parallelized for speed
+  const checkDuplicates = async (fileNames: string[]): Promise<Map<string, DuplicateInfo>> => {
+    const duplicates = new Map<string, DuplicateInfo>();
+
+    // Process all files in parallel for faster checking
+    const checkPromises = fileNames.map(async (fileName) => {
+      // Escape quotes for PocketBase filter
+      const escapedFileName = fileName.replace(/"/g, '\\"');
+
+      try {
+        // Check for exact match on original_filename field
+        const existing = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+          `original_filename = "${escapedFileName}"`,
+          { expand: 'uploader,company,phone_number_record' }
+        );
+
+        if (existing) {
+          console.log(`Duplicate found: "${fileName}" matches existing original_filename "${existing.original_filename}"`);
+          return { fileName, existing };
+        }
+      } catch (e: any) {
+        // 404 means no duplicate found, which is expected
+        if (e.status !== 404) {
+          console.error(`Error checking duplicate for ${fileName}:`, e);
+        }
+      }
+
+      return null;
+    });
+
+    try {
+      const results = await Promise.all(checkPromises);
+      for (const result of results) {
+        if (result) {
+          duplicates.set(result.fileName, {
+            existingRecording: result.existing,
+            existingFileUrl: pb.files.getUrl(result.existing, result.existing.file || '')
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to check duplicates:', err);
+    }
+
+    return duplicates;
+  };
+
+  const handleBulkUpload = async (pendingFiles: PendingFile[], onProgress?: (progress: UploadProgress) => void) => {
     if (!user) return;
     setIsUploading(true);
 
     try {
-      for (const f of pendingFiles) {
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const f = pendingFiles[i];
+
+        // Report progress
+        onProgress?.({
+          current: i,
+          total: pendingFiles.length,
+          currentFileName: f.file.name
+        });
+
+        // If this file is replacing an existing one, delete the existing first
+        if (f.resolution === 'keep_new' && f.duplicateInfo?.existingRecording) {
+          try {
+            await pb.collection(COLLECTIONS.RECORDINGS).delete(f.duplicateInfo.existingRecording.id);
+          } catch (deleteErr) {
+            console.error('Failed to delete existing recording:', deleteErr);
+            // Continue with upload anyway
+          }
+        }
+
         const formData = new FormData();
         formData.append('file', f.file);
         formData.append('uploader', user.id);
+        formData.append('original_filename', f.file.name);
 
         // Auto-match logic
         if (f.matchedPhoneNumber) {
@@ -87,8 +159,15 @@ export default function RecordingsPage() {
           formData.append('note', `Call on ${meta.displayDate}`);
         }
 
-        await pb.collection('recordings').create(formData);
+        await pb.collection(COLLECTIONS.RECORDINGS).create(formData);
       }
+
+      // Final progress update
+      onProgress?.({
+        current: pendingFiles.length,
+        total: pendingFiles.length,
+        currentFileName: ''
+      });
 
       fetchRecordings();
     } catch (err) {
@@ -184,8 +263,8 @@ export default function RecordingsPage() {
       setError(null);
 
       const filters: string[] = [];
-      if (searchTerm) {
-        const safeSearch = sanitizeFilterValue(searchTerm);
+      if (debouncedSearchTerm) {
+        const safeSearch = sanitizeFilterValue(debouncedSearchTerm);
         if (safeSearch) {
           filters.push(`(phone_number ~ "${safeSearch}" || note ~ "${safeSearch}")`);
         }
@@ -217,7 +296,7 @@ export default function RecordingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, isAuthenticated, searchTerm]);
+  }, [page, isAuthenticated, debouncedSearchTerm]);
 
   const getRecordingDisplayDate = (recording: Recording) => {
     const pattern = /recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})/;
@@ -345,6 +424,7 @@ export default function RecordingsPage() {
         isOpen={isBulkUploadOpen}
         onClose={() => setIsBulkUploadOpen(false)}
         onUpload={handleBulkUpload}
+        checkDuplicates={checkDuplicates}
       />
 
       {/* Edit Note Modal */}
@@ -530,35 +610,70 @@ export default function RecordingsPage() {
                       </td>
                     )}
                     {isColumnVisible('file') && (
-                      <td className="py-3 px-4">
+                      <td
+                        className="py-3 px-4"
+                        colSpan={expandedRecordingId === recording.id ? 3 : 1}
+                      >
                         {recording.file ? (
-                          <audio
-                            controls
-                            preload="none"
-                            className="h-8 w-full min-w-[200px] max-w-[300px]"
-                            src={pb.files.getUrl(recording, recording.file)}
-                          />
+                          expandedRecordingId === recording.id ? (
+                            <div className="flex items-center gap-3">
+                              <audio
+                                controls
+                                autoPlay
+                                preload="metadata"
+                                className="h-8 flex-1 min-w-[200px]"
+                                src={pb.files.getUrl(recording, recording.file)}
+                                onEnded={() => setExpandedRecordingId(null)}
+                              />
+                              <button
+                                onClick={() => setExpandedRecordingId(null)}
+                                className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors shrink-0"
+                                title="Close player"
+                              >
+                                <X size={16} />
+                              </button>
+                              {isAdmin && (
+                                <button
+                                  onClick={() => handleDelete(recording.id)}
+                                  className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors shrink-0"
+                                  title="Delete recording"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setExpandedRecordingId(recording.id)}
+                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-sm font-medium hover:bg-[var(--card-hover)] hover:border-[var(--primary)] transition-all group"
+                            >
+                              <Headphones size={14} className="text-[var(--muted)] group-hover:text-[var(--primary)]" />
+                              <span className="group-hover:text-[var(--primary)]">Listen</span>
+                            </button>
+                          )
                         ) : (
                           <span className="text-xs text-[var(--muted)]">No file</span>
                         )}
                       </td>
                     )}
-                    {isColumnVisible('uploader') && (
+                    {isColumnVisible('uploader') && expandedRecordingId !== recording.id && (
                       <td className="py-3 px-4 text-sm whitespace-nowrap">
                         {recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A'}
                       </td>
                     )}
-                    <td className="py-3 px-4 text-right">
-                      {isAdmin && (
-                        <button
-                          onClick={() => handleDelete(recording.id)}
-                          className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors"
-                          title="Delete recording"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </td>
+                    {expandedRecordingId !== recording.id && (
+                      <td className="py-3 px-4 text-right">
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDelete(recording.id)}
+                            className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
+                            title="Delete recording"
+                          >
+                            <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

@@ -242,6 +242,7 @@ export interface Recording extends RecordModel {
   phone_number?: string;
   uploader?: string;
   file?: string;
+  original_filename?: string;
   note?: string;
   recording_date?: string;
   duration?: number;

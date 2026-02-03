@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { pb } from '@/lib/pocketbase';
 import { Note, COLLECTIONS, User } from '@/lib/types';
 import { format } from 'date-fns';
-import { Plus, Archive, Trash2, RotateCcw, FileText, Search, X, StickyNote, Expand } from 'lucide-react';
+import { Plus, Archive, Trash2, RotateCcw, FileText, X, StickyNote, Expand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm';
 import '@uiw/react-md-editor/markdown-editor.css';
 import '@uiw/react-markdown-preview/markdown.css';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
+import { SearchInput } from '@/components/search-input';
 
 // Dynamic import to avoid SSR issues with the markdown editor
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
@@ -240,13 +241,12 @@ export default function NotesPage() {
         </div>
 
         <div className="relative flex-1 w-full sm:max-w-sm">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-          <input
-            type="text"
+          <SearchInput
             placeholder="Search notes..."
-            className="w-full pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            onSearch={setSearch}
+            defaultValue={search}
+            key={search}
+            className="w-full sm:max-w-sm"
           />
         </div>
       </div>

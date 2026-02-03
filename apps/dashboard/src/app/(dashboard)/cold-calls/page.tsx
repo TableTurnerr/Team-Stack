@@ -8,7 +8,7 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
-  Search,
+  ChevronUp,
   Eye,
   X,
   RefreshCw
@@ -18,9 +18,9 @@ import { COLLECTIONS, type ColdCall, type Company, type User } from '@/lib/types
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
+import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
-import { useDebounce } from '@/hooks/use-debounce';
 
 // Column definitions for cold calls table
 const COLD_CALL_COLUMNS: ColumnDefinition[] = [
@@ -99,7 +99,6 @@ export default function ColdCallsPage() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const debouncedSearchTerm = useDebounce(searchTerm, 1500);
   const [outcomeFilter, setOutcomeFilter] = useState<string[]>([]);
   const [minInterest, setMinInterest] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
@@ -128,8 +127,8 @@ export default function ColdCallsPage() {
       // Build filter string
       const filters: string[] = [];
 
-      if (debouncedSearchTerm) {
-        filters.push(`(expand.company.company_name ~ "${debouncedSearchTerm}" || phone_number ~ "${debouncedSearchTerm}" || owner_name ~ "${debouncedSearchTerm}")`);
+      if (searchTerm) {
+        filters.push(`(expand.company.company_name ~ "${searchTerm}" || phone_number ~ "${searchTerm}" || owner_name ~ "${searchTerm}")`);
       }
 
       if (outcomeFilter.length > 0) {
@@ -157,7 +156,7 @@ export default function ColdCallsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, sort, debouncedSearchTerm, outcomeFilter, minInterest, isAuthenticated]);
+  }, [page, sort, searchTerm, outcomeFilter, minInterest, isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -225,13 +224,12 @@ export default function ColdCallsPage() {
 
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+            <SearchInput
               placeholder="Search..."
-              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-full sm:w-64"
+              onSearch={setSearchTerm}
+              defaultValue={searchTerm}
+              key={searchTerm}
+              className="w-full sm:w-64"
             />
           </div>
 

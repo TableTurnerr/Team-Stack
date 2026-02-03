@@ -8,7 +8,6 @@ import {
   MapPin,
   ExternalLink,
   Plus,
-  Search,
   Edit,
   X,
   Check,
@@ -24,9 +23,9 @@ import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/t
 import { formatDate, cn, sanitizeFilterValue } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
+import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
-import { useDebounce } from '@/hooks/use-debounce';
 
 // Column definitions for companies table
 const COMPANY_COLUMNS: ColumnDefinition[] = [
@@ -612,7 +611,6 @@ export default function CompaniesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const debouncedSearchTerm = useDebounce(searchTerm, 1500);
   const [showAddModal, setShowAddModal] = useState(false);
 
   // Pagination
@@ -630,7 +628,7 @@ export default function CompaniesPage() {
       setLoading(true);
       setError(null);
 
-      const safeSearch = sanitizeFilterValue(debouncedSearchTerm);
+      const safeSearch = sanitizeFilterValue(searchTerm);
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
         sort: '-created',
         ...(safeSearch && { filter: `company_name ~ "${safeSearch}" || phone_numbers ~ "${safeSearch}" || owner_name ~ "${safeSearch}"` }),
@@ -646,7 +644,7 @@ export default function CompaniesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearchTerm, isAuthenticated]);
+  }, [page, searchTerm, isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -687,13 +685,12 @@ export default function CompaniesPage() {
 
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+            <SearchInput
               placeholder="Search companies..."
-              className="pl-9 pr-4 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-full sm:w-64"
+              onSearch={setSearchTerm}
+              defaultValue={searchTerm}
+              key={searchTerm}
+              className="w-full sm:w-64"
             />
           </div>
 

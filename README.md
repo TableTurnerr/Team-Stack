@@ -1,132 +1,256 @@
 # CRM-Tableturnerr
 
-A unified, full-stack CRM and Outreach platform designed to streamline sales operations by integrating cold call monitoring, automated transcription, multi-channel outreach (Instagram, Email, Phone), and smart follow-up management.
+> **AI Context**: A full-stack sales CRM monorepo for restaurant owner outreach, combining cold calling with audio transcription, Instagram DM automation, and lead scraping tools—all backed by a self-hosted PocketBase database.
 
-This monorepo contains the complete ecosystem including a modern Next.js dashboard, a shared PocketBase backend, and specialized Python tools for data capture and processing.
+---
 
-## 🏗️ Architecture
+## 🎯 What This Project Does
+
+**Domain**: B2B restaurant SaaS sales  
+**Problem Solved**: Managing multi-channel outreach (phone, Instagram, email) for selling SaaS to restaurant owners  
+**Target Users**: Sales teams performing cold calls and social media outreach
+
+### Core Workflows
+1. **Lead Acquisition** → Scrape restaurants from Google Maps or Instagram
+2. **Cold Calling** → Record calls, auto-transcribe with AI, track outcomes
+3. **Instagram Outreach** → Automated DM campaigns via actor accounts
+4. **Pipeline Management** → Track status from Cold → Warm → Booked → Client
+
+---
+
+## 🏗️ Repository Structure
 
 ```
 CRM-Tableturnerr/
 ├── apps/
-│   ├── dashboard/             # 🖥️ Unified Web Interface (Next.js 15, React 19, Tailwind)
-│   └── insta-outreach-agent/  # 🤖 Python desktop agent for Instagram DM automation
+│   ├── dashboard/                 # 🖥️ Next.js 15 web interface (main CRM UI)
+│   │   ├── src/app/(dashboard)/   # Route groups: companies, cold-calls, leads, etc.
+│   │   ├── src/components/        # Reusable UI components
+│   │   └── src/lib/               # PocketBase client, utilities
+│   │
+│   └── insta-outreach-agent/      # 🤖 Python desktop agent for Instagram DM automation
+│       └── src/                   # Browser automation scripts
+│
 ├── packages/
-│   └── pocketbase-client/     # 📦 Shared SDK wrapper & schema definitions for PocketBase
-└── tools/
-    ├── audio-recorder/        # 🎙️ Desktop audio recording tool (PyQt) with hotkey support
-    ├── transcriber/           # 🧠 AI Transcription service (Gemini API) for cold calls
-    ├── google-maps-easy-scrape/ # 🗺️ Chrome extension for scraping restaurant leads
-    └── database/              # 🗄️ Database seeding scripts
+│   ├── pocketbase-client/         # 📦 Shared TypeScript SDK with type definitions
+│   │   ├── src/index.ts           # CRMPocketBase class + all collection types
+│   │   └── pb_schema_exported.json # Full database schema (source of truth)
+│   │
+│   ├── google-sheets/             # 📊 Google Sheets API integration utilities
+│   └── hubspot/                   # 🔗 HubSpot CRM migration context & mapping
+│
+├── tools/
+│   ├── audio-recorder/            # 🎙️ PyQt desktop app with hotkey recording
+│   │   ├── recorder.py            # Main GUI application
+│   │   └── installer.nsi          # NSIS installer script
+│   │
+│   ├── transcriber/               # 🧠 Gemini AI transcription service
+│   │   ├── transcribe_calls.py    # Main transcription script
+│   │   └── pocketbase_service.py  # DB integration
+│   │
+│   ├── google-maps-easy-scrape/   # 🗺️ Chrome extension for lead scraping
+│   │   ├── manifest.json          # Extension config (Manifest V3)
+│   │   ├── popup.js               # Extension popup logic
+│   │   └── background.js          # Service worker
+│   │
+│   ├── database/                  # 🗄️ Seeding and migration scripts
+│   └── call-recorder-v2/          # 🎤 Alternative recording implementation
+│
+├── antigravity-docs/              # 📚 AI agent implementation docs
+└── [Root Config Files]
+    ├── package.json               # pnpm workspace root
+    ├── pnpm-workspace.yaml        # Workspace package definitions
+    ├── SETUP_GUIDE.md             # Detailed setup instructions
+    ├── UPCOMING.md                # Feature roadmap
+    └── .env.info.example          # Environment variable reference
 ```
 
-## 🚀 Key Features
+---
 
-### Core CRM
-- **Company Management**: Track restaurants/businesses with multiple locations and phone numbers
-- **Phone Number Labels**: Custom labels per number (Main Line, Owner Direct, Branch Name)
-- **Call Logging**: Per-call notes with owner name, receptionist, outcome tracking
-- **Pre-Call Research**: Notes and research organized by company
+## 🔧 Technology Stack
 
-### Multi-Channel Outreach
-- **Cold Calling**: Record, transcribe, and analyze calls with AI
-- **Instagram DMs**: Automated outreach with status sync
-- **Email**: Track email interactions in unified timeline
+| Layer | Technology | Version |
+|-------|------------|---------|
+| **Frontend** | Next.js | 15.x |
+| | React | 19.x |
+| | Tailwind CSS | 4.x |
+| | Lucide Icons | Latest |
+| **Backend** | PocketBase | 0.22+ |
+| | SQLite | (built into PocketBase) |
+| **AI/ML** | Google Gemini API | gemini-2.5-flash |
+| **Desktop Tools** | Python | 3.10+ |
+| | PyQt6 | (audio recorder GUI) |
+| | PyInstaller | (Windows executables) |
+| **Browser Extension** | Chrome Manifest V3 | |
+| **Package Manager** | pnpm | 9.x |
 
-### Smart Follow-ups
-- **Timezone-Aware**: Schedule follow-ups in client's timezone, see in your timezone
-- **Auto-Reminders**: Callback outcomes auto-create follow-up tasks
-- **Sidebar Clocks**: Multiple timezone clocks for quick reference
+---
 
-### Data Management
-- **Bulk Upload**: Drag-drop recordings with auto-matching by phone number
-- **Inline Editing**: Edit any field with Ctrl+Z undo and auto-save
-- **Import from Google Sheets**: Bulk CSV import for legacy data
-
-### Integrations
-- **Google Maps Scraper** → Direct PocketBase upload
-- **Audio Recorder** → Auto-sync recordings to dashboard
-- **AI Transcription** → Built into dashboard (no Python needed)
-
-## 📊 Data Model
+## 📊 Data Model (PocketBase Collections)
 
 ```mermaid
 erDiagram
-    companies ||--o{ phone_numbers : "has"
-    companies ||--o{ company_notes : "has"
-    companies ||--o{ interactions : "has"
-    phone_numbers ||--o{ call_logs : "called via"
-    call_logs ||--o| recordings : "may have"
-    call_logs ||--o| follow_ups : "schedules"
+    users ||--o{ insta_actors : "owns"
+    users ||--o{ cold_calls : "claims"
+    users ||--o{ notes : "creates"
+    users ||--o{ event_logs : "triggers"
+    
+    companies ||--o{ cold_calls : "receives"
+    companies ||--o{ event_logs : "has"
+    
+    cold_calls ||--o| call_transcripts : "has"
+    
+    insta_actors ||--o{ outreach_logs : "sends"
+    event_logs ||--o{ outreach_logs : "contains"
 ```
 
-| Collection | Purpose |
-|------------|---------|
-| `companies` | Restaurant/business entities with status tracking |
-| `phone_numbers` | Per-location phone numbers with labels |
-| `call_logs` | Individual call records with notes and outcomes |
-| `follow_ups` | Scheduled reminders with timezone support |
-| `company_notes` | Pre-call research and general notes |
-| `interactions` | Unified timeline across all channels |
-| `recordings` | Audio files linked to calls |
+### Collection Reference
 
-## 🛠️ Quick Start
+| Collection | Purpose | Key Fields |
+|------------|---------|------------|
+| `users` | Team members | `name`, `email`, `role` (admin/operator/member), `status` |
+| `companies` | Restaurant entities | `company_name`, `owner_name`, `phone_numbers`, `status`, `source` |
+| `cold_calls` | Call records | `company`, `call_outcome`, `interest_level`, `phone_number`, `claimed_by` |
+| `call_transcripts` | AI transcriptions | `call` (relation), `transcript` |
+| `insta_actors` | Instagram accounts | `username`, `owner` (relation), `status` (Active/Suspended) |
+| `event_logs` | Audit trail | `event_type`, `actor`, `user`, `company`, `source` |
+| `outreach_logs` | Message tracking | `event` (relation), `message_text`, `sent_at` |
+| `goals` | KPI targets | `metric`, `target_value`, `frequency`, `status` |
+| `rules` | Rate limiting | `type`, `metric`, `limit_value`, `time_window_sec` |
+| `alerts` | Notifications | `target_user`, `entity_type`, `message`, `is_dismissed` |
+| `notes` | Markdown notes | `title`, `note_text`, `is_archived`, `is_deleted` |
+| `leads` | ⚠️ Deprecated | Merged into `companies` |
 
-### Prerequisites
-- **Node.js** v18+ (with pnpm)
-- **Python** 3.10+
-- **PocketBase** v0.22+
+> **Schema Location**: `packages/pocketbase-client/pb_schema_exported.json`
 
-### Install & Run
+---
+
+## 🖥️ Component Details
+
+### Dashboard (`apps/dashboard`)
+Modern Next.js 15 web application with:
+- **Route Groups**: `(dashboard)/` contains all authenticated routes
+  - `/companies` - Company CRUD with inline editing
+  - `/cold-calls` - Call log with transcript viewer
+  - `/leads` - Legacy leads view
+  - `/actors` - Instagram actor management
+  - `/recordings` - Bulk audio upload
+  - `/notes` - Markdown note editor
+  - `/goals` - KPI tracking
+  - `/settings` - App configuration
+  - `/team` - User management
+
+- **Key Components**:
+  - `sidebar.tsx` - Navigation with timezone clocks
+  - `inline-edit-field.tsx` - Inline editing with Ctrl+Z undo
+  - `bulk-upload-modal.tsx` - Drag-drop recording upload
+  - `column-selector.tsx` - Table column visibility
+
+### Audio Recorder (`tools/audio-recorder`)
+PyQt6 desktop application:
+- **Hotkey**: Alt+R for quick recording
+- **Auto-naming**: Timestamps + phone number
+- **Build**: PyInstaller → NSIS installer
+- **Entry Point**: `recorder.py`
+
+### Transcriber (`tools/transcriber`)
+Python service for AI transcription:
+- **AI Model**: Gemini 2.5 Flash
+- **Extracts**: Transcript, owner name, call outcome, follow-up needs
+- **Entry Point**: `transcribe_calls.py`
+- **Requires**: `GEMINI_API_KEY` environment variable
+
+### Google Maps Scraper (`tools/google-maps-easy-scrape`)
+Chrome extension (Manifest V3):
+- **Modes**: Automated list scraping, Manual single-add
+- **Output**: Direct PocketBase upload or CSV export
+- **Key Files**: `popup.js`, `background.js`, `manifest.json`
+
+---
+
+## 🤖 AI Agent Onboarding
+
+### Key Files to Read First
+1. `packages/pocketbase-client/src/index.ts` - All TypeScript types and SDK methods
+2. `packages/pocketbase-client/pb_schema_exported.json` - Database schema
+3. `apps/dashboard/src/app/(dashboard)/layout.tsx` - Dashboard structure
+4. `.env.info.example` - All environment variables
+
+### Common Modification Patterns
+- **Add new page**: Create folder in `apps/dashboard/src/app/(dashboard)/`
+- **Add new collection**: Update `pb_schema_exported.json`, add types to `pocketbase-client/src/index.ts`
+- **Add component**: Create in `apps/dashboard/src/components/`
+
+### Where to Find Things
+| Looking for... | Location |
+|----------------|----------|
+| TypeScript types | `packages/pocketbase-client/src/index.ts` |
+| Database schema | `packages/pocketbase-client/pb_schema_exported.json` |
+| UI components | `apps/dashboard/src/components/` |
+| Page routes | `apps/dashboard/src/app/(dashboard)/` |
+| API utilities | `apps/dashboard/src/lib/` |
+| Environment vars | `.env.info.example` |
+
+---
+
+## ⚙️ Configuration Reference
+
+### Environment Variables
 
 ```bash
-# Install dependencies
+# PocketBase (all Python tools + dashboard)
+POCKETBASE_URL=http://localhost:8090        # Local dev
+NEXT_PUBLIC_POCKETBASE_URL=http://localhost:8090  # Dashboard browser
+
+# PocketBase Admin (server-side tools only)
+PB_ADMIN_EMAIL=admin@example.com
+PB_ADMIN_PASSWORD=your_password
+
+# Gemini AI (transcriber only)
+GEMINI_API_KEY=your_api_key
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+### Service URLs
+| Service | Local | Production |
+|---------|-------|------------|
+| PocketBase API | `http://localhost:8090` | `https://api.yourdomain.com` |
+| Dashboard | `http://localhost:3000` | `https://app.yourdomain.com` |
+| PocketBase Admin | `http://localhost:8090/_/` | `https://api.yourdomain.com/_/` |
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# 1. Install dependencies
 pnpm install
 
-# Start PocketBase
+# 2. Start PocketBase
 pocketbase serve  # http://localhost:8090
 
-# Import schema (Admin UI → Settings → Import Collections)
+# 3. Import schema (Admin UI → Settings → Import Collections)
 # Use: packages/pocketbase-client/pb_schema_exported.json
 
-# Start Dashboard
+# 4. Start Dashboard
 cd apps/dashboard
 cp .env.example .env.local
 pnpm dev  # http://localhost:3000
 ```
 
-## 📘 Documentation
+> **Detailed Setup**: See [SETUP_GUIDE.md](SETUP_GUIDE.md)
 
-- **[Setup Guide](SETUP_GUIDE.md)**: Detailed installation and deployment
-- **[Upcoming Features](UPCOMING.md)**: Planned enhancements
-- **Data Schema**: `packages/pocketbase-client/pb_schema_exported.json`
+---
 
-## 🧩 Components
+## 📘 Related Documentation
 
-### Dashboard (`apps/dashboard`)
-Next.js 15 web app with:
-- Company detail pages with tabbed interface
-- Inline editing with undo support
-- Bulk recording upload with preview
-- Timezone clocks in sidebar
+| Document | Purpose |
+|----------|---------|
+| [SETUP_GUIDE.md](SETUP_GUIDE.md) | Detailed installation, seeding, and deployment |
+| [UPCOMING.md](UPCOMING.md) | Feature roadmap (Instagram scraper, AI enrichment) |
+| [packages/hubspot/HUBSPOT_CONTEXT.md](packages/hubspot/HUBSPOT_CONTEXT.md) | HubSpot CRM migration mapping |
 
-### Transcriber (`tools/transcriber`)
-Python service using Gemini AI to:
-- Transcribe call recordings
-- Extract owner/receptionist names
-- Identify call outcomes and follow-up needs
-
-### Audio Recorder (`tools/audio-recorder`)
-PyQt desktop app with:
-- Global hotkey recording (Alt+R)
-- Auto-naming with timestamp and phone number
-- One-click save workflow
-
-### Google Maps Scraper (`tools/google-maps-easy-scrape`)
-Chrome extension for:
-- Scraping restaurant listings from Maps
-- Quick-add overlay on business pages
-- CSV export or direct PocketBase upload
+---
 
 ## 📄 License
 

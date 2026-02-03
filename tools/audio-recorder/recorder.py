@@ -535,11 +535,12 @@ class AutoRecordListener:
     3. Requires consecutive detections to confirm
     """
 
-    # Detection parameters
+    # Detection parameters - tuned to reduce false positives
     BEEP_FREQUENCY = 440  # Hz - standard calling beep frequency
-    FREQUENCY_TOLERANCE = 50  # Hz tolerance around target frequency
-    CONSECUTIVE_REQUIRED = 2  # Require 2 consecutive detections to confirm
-    DETECTION_WINDOW = 2.0  # Seconds within which consecutive detections must occur
+    FREQUENCY_TOLERANCE = 30  # Hz tolerance around target frequency (was 50)
+    CONSECUTIVE_REQUIRED = 3  # Require 3 consecutive detections to confirm (was 2)
+    DETECTION_WINDOW = 1.5  # Seconds within which consecutive detections must occur (was 2.0)
+    MIN_RMS_THRESHOLD = 0.03  # Minimum audio level to consider (was 0.01)
 
     def __init__(self, app, beep_path: Path):
         self.app = app
@@ -692,9 +693,9 @@ class AutoRecordListener:
             return False
 
         try:
-            # Stage 1: Energy check - reject silence
+            # Stage 1: Energy check - reject silence or low noise
             rms = np.sqrt(np.mean(audio_buffer ** 2))
-            if rms < 0.01:  # Too quiet, likely silence
+            if rms < self.MIN_RMS_THRESHOLD:  # Too quiet
                 return False
 
             # Stage 2: Frequency analysis
@@ -712,7 +713,7 @@ class AutoRecordListener:
             return False
 
     def _check_frequency(self, audio_buffer: np.ndarray) -> bool:
-        """Check if the target beep frequency is present in the audio."""
+        """Check if the target beep frequency is strictly present."""
         try:
             # Use FFT to analyze frequency content
             fft = np.fft.rfft(audio_buffer)
@@ -723,28 +724,38 @@ class AutoRecordListener:
             peak_idx = np.argmax(magnitudes)
             peak_freq = freqs[peak_idx]
             
-            # Also check the magnitude around target frequency
+            # Check magnitude around target frequency
             target_low = self.BEEP_FREQUENCY - self.FREQUENCY_TOLERANCE
             target_high = self.BEEP_FREQUENCY + self.FREQUENCY_TOLERANCE
             target_mask = (freqs >= target_low) & (freqs <= target_high)
-            target_magnitude = magnitudes[target_mask].max() if target_mask.any() else 0
             
-            # Check if target frequency is strong relative to overall signal
+            if not target_mask.any():
+                return False
+                
+            target_magnitude = magnitudes[target_mask].max()
             total_magnitude = magnitudes.max()
+            
             if total_magnitude < 1e-10:
                 return False
                 
             target_ratio = target_magnitude / total_magnitude
             
-            # The 440Hz tone should be prominent (at least 30% of max)
-            # Or the dominant frequency should be near our target
+            # Stricter checks:
+            # 1. Peak frequency must be close to target
             freq_match = abs(peak_freq - self.BEEP_FREQUENCY) < self.FREQUENCY_TOLERANCE
-            strong_target = target_ratio > 0.3
             
-            if freq_match or strong_target:
+            # 2. Target frequency must be very prominent relative to other frequencies
+            # Increased ratio threshold from 0.3 to 0.5 (must be >50% of max energy)
+            strong_target = target_ratio > 0.5
+            
+            # Require BOTH conditions for higher confidence
+            # Or EXTREMELY strong target signal (>80%)
+            pass_check = (freq_match and target_ratio > 0.3) or target_ratio > 0.8
+            
+            if pass_check:
                 print(f"  [Freq Pass] Peak: {peak_freq:.1f}Hz, Target Ratio: {target_ratio:.2f}")
             
-            return freq_match or strong_target
+            return pass_check
             
         except Exception:
             return False
@@ -771,11 +782,12 @@ class AutoRecordListener:
             # Normalize by length for consistent threshold
             norm_corr = max_corr / len(ref)
             
-            print(f"  [Corr Check] Value: {norm_corr:.3f}")
-
-            # Threshold based on observed values: beep peaks at ~0.15
-            # Using 0.12 to require strong match while allowing detection
-            threshold = 0.12
+            # Increased threshold from 0.12 to 0.15 for stronger match requirement
+            threshold = 0.15
+            
+            if norm_corr > threshold:
+                print(f"  [Corr Pass] Value: {norm_corr:.3f}")
+                
             return norm_corr > threshold
 
         except Exception:

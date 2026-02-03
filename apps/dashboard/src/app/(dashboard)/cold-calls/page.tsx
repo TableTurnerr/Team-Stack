@@ -8,7 +8,7 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
-  ChevronUp,
+
   Eye,
   X,
   RefreshCw

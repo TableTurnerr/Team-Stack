@@ -7,6 +7,8 @@ import { useAuth } from '@/contexts/auth-context';
 import { Loader2 } from 'lucide-react';
 
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
+import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
+import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -45,14 +47,17 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthGuard>
-      <div className="min-h-screen">
-        <Sidebar />
-        <main className="lg:ml-64 min-h-screen">
-          <div className="p-4 lg:p-8 pt-16 lg:pt-8">
-            {children}
-          </div>
-        </main>
-      </div>
+      <ZoomPhoneProvider>
+        <div className="min-h-screen">
+          <Sidebar />
+          <main className="lg:ml-64 min-h-screen">
+            <div className="p-4 lg:p-8 pt-16 lg:pt-8">
+              {children}
+            </div>
+          </main>
+          <ZoomPhoneDialer />
+        </div>
+      </ZoomPhoneProvider>
     </AuthGuard>
   );
 }

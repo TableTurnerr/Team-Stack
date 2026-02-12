@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones } from 'lucide-react';
+import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones, Download } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Recording } from '@/lib/types';
 import { formatDate, formatDateTime, formatDuration, cn, sanitizeFilterValue } from '@/lib/utils';
@@ -761,6 +761,16 @@ export default function RecordingsPage() {
                               >
                                 <X size={16} />
                               </button>
+                              <a
+                                href={pb.files.getUrl(recording, recording.file)}
+                                download
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors shrink-0"
+                                title="Download recording"
+                              >
+                                <Download size={16} />
+                              </a>
                               {isAdmin && (
                                 <button
                                   onClick={() => handleDelete(recording.id)}
@@ -792,15 +802,29 @@ export default function RecordingsPage() {
                     )}
                     {expandedRecordingId !== recording.id && (
                       <td className="py-3 px-4 text-right">
-                        {isAdmin && (
-                          <button
-                            onClick={() => handleDelete(recording.id)}
-                            className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
-                            title="Delete recording"
-                          >
-                            <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
-                          </button>
-                        )}
+                        <div className="flex items-center justify-end gap-1">
+                          {recording.file && (
+                            <a
+                              href={pb.files.getUrl(recording, recording.file)}
+                              download
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors"
+                              title="Download recording"
+                            >
+                              <Download size={16} className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors" />
+                            </a>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDelete(recording.id)}
+                              className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
+                              title="Delete recording"
+                            >
+                              <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>

@@ -8,6 +8,8 @@ import { Plug, Instagram, Database, CheckCircle, XCircle, RefreshCw, Loader2, Ph
 import Link from 'next/link';
 
 const ZOOM_AUTODIAL_KEY = 'zoom-phone-autodial';
+const ZOOM_AUTORECORD_KEY = 'call-recorder-auto-mode';
+const ZOOM_SHOW_NATIVE_KEY = 'zoom-show-native-dialer';
 
 interface IntegrationsSectionProps {
     preferences: UserPreferences | null;
@@ -20,12 +22,20 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
     const [isTesting, setIsTesting] = useState(false);
     const [pbStatus, setPbStatus] = useState<'unknown' | 'connected' | 'error'>('unknown');
     const [autoDial, setAutoDial] = useState(false);
+    const [autoRecord, setAutoRecord] = useState(true);
+    const [showNativeDialer, setShowNativeDialer] = useState(false);
 
-    // Load autoDial setting from localStorage on mount
+    // Load settings from localStorage on mount
     useEffect(() => {
         try {
-            const saved = localStorage.getItem(ZOOM_AUTODIAL_KEY);
-            if (saved !== null) setAutoDial(JSON.parse(saved));
+            const savedAutoDial = localStorage.getItem(ZOOM_AUTODIAL_KEY);
+            if (savedAutoDial !== null) setAutoDial(JSON.parse(savedAutoDial));
+
+            const savedAutoRecord = localStorage.getItem(ZOOM_AUTORECORD_KEY);
+            if (savedAutoRecord !== null) setAutoRecord(JSON.parse(savedAutoRecord));
+
+            const savedNative = localStorage.getItem(ZOOM_SHOW_NATIVE_KEY);
+            if (savedNative !== null) setShowNativeDialer(JSON.parse(savedNative));
         } catch {
             // ignore
         }
@@ -41,6 +51,32 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
         addToast('success', enabled
             ? 'Auto-dial enabled — calls will be routed through the Zoom desktop app'
             : 'Auto-dial disabled — numbers will populate in the web dialer'
+        );
+    };
+
+    const handleAutoRecordToggle = (enabled: boolean) => {
+        setAutoRecord(enabled);
+        try {
+            localStorage.setItem(ZOOM_AUTORECORD_KEY, JSON.stringify(enabled));
+        } catch {
+            // ignore
+        }
+        addToast('success', enabled
+            ? 'Auto-record enabled — calls will be recorded automatically'
+            : 'Auto-record disabled — you will need to start recordings manually'
+        );
+    };
+
+    const handleShowNativeDialerToggle = (enabled: boolean) => {
+        setShowNativeDialer(enabled);
+        try {
+            localStorage.setItem(ZOOM_SHOW_NATIVE_KEY, JSON.stringify(enabled));
+        } catch {
+            // ignore
+        }
+        addToast('success', enabled
+            ? 'Zoom native dialer toggle enabled in the dialer header'
+            : 'Zoom native dialer toggle hidden'
         );
     };
 
@@ -98,13 +134,14 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
                 </div>
 
                 <div className="p-4 rounded-lg border border-[var(--card-border)] space-y-4">
+                    {/* Auto-Dial */}
                     <div className="flex items-center justify-between">
                         <div>
-                            <p className="text-sm font-medium">Auto-Dial</p>
+                            <p className="text-sm font-medium">Auto-Dial <span className="text-[10px] font-normal text-[var(--muted)] ml-1">(Default: Off)</span></p>
                             <p className="text-xs text-[var(--muted)] max-w-md">
-                                When enabled, clicking a phone button will automatically start the call
-                                via the Zoom desktop app. When disabled, the number will be populated
-                                in the embedded web dialer for you to call manually.
+                                When enabled, clicking a phone button will automatically populate the
+                                number in the Zoom dialer. When disabled, the number will only be
+                                populated in the custom dialer for you to confirm manually.
                             </p>
                         </div>
                         <button
@@ -116,6 +153,58 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
                         >
                             <span
                                 className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${autoDial ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                            />
+                        </button>
+                    </div>
+
+                    <hr className="border-[var(--card-border)]" />
+
+                    {/* Auto-Record */}
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium">Auto-Record Calls <span className="text-[10px] font-normal text-[var(--muted)] ml-1">(Default: On)</span></p>
+                            <p className="text-xs text-[var(--muted)] max-w-md">
+                                When enabled, recording starts automatically when a call connects
+                                and stops when the call ends. When disabled, you must start and stop
+                                recordings manually from the dialer.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => handleAutoRecordToggle(!autoRecord)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${autoRecord ? 'bg-blue-500' : 'bg-[var(--card-border)]'
+                                }`}
+                            role="switch"
+                            aria-checked={autoRecord}
+                        >
+                            <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${autoRecord ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                            />
+                        </button>
+                    </div>
+
+                    <hr className="border-[var(--card-border)]" />
+
+                    {/* Show Native Dialer */}
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium">Show Zoom Native Dialer Toggle <span className="text-[10px] font-normal text-[var(--muted)] ml-1">(Default: Off)</span></p>
+                            <p className="text-xs text-[var(--muted)] max-w-md">
+                                When enabled, a swap button appears in the dialer header to switch
+                                between the custom dialer (which captures phone numbers for recordings)
+                                and the Zoom native dialer. Keep disabled unless needed.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => handleShowNativeDialerToggle(!showNativeDialer)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${showNativeDialer ? 'bg-blue-500' : 'bg-[var(--card-border)]'
+                                }`}
+                            role="switch"
+                            aria-checked={showNativeDialer}
+                        >
+                            <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${showNativeDialer ? 'translate-x-5' : 'translate-x-0'
                                     }`}
                             />
                         </button>

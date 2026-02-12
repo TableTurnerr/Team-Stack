@@ -2,6 +2,9 @@
 
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
 
+// ── Zoom Call Status ────────────────────────────────────────────────────
+export type ZoomCallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
+
 interface ZoomPhoneContextType {
     /** Whether the dialer panel is currently visible */
     isDialerOpen: boolean;
@@ -9,10 +12,24 @@ interface ZoomPhoneContextType {
     toggleDialer: () => void;
     /** Open the dialer and auto-dial a phone number */
     dialNumber: (phoneNumber: string) => void;
+    /** The last phone number that was dialed via CRM buttons */
+    lastDialedNumber: string | null;
+    /** Current call status as reported by the Zoom embed via postMessage */
+    callStatus: ZoomCallStatus;
+    /** Phone number of the active/last call from the Zoom dialer UI */
+    activeCallNumber: string | null;
     /** Reference to the iframe element for postMessage communication */
     iframeRef: React.RefObject<HTMLIFrameElement | null>;
     /** Function to notify context when iframe is loaded */
     setIframeReady: (ready: boolean) => void;
+    /** Current number being typed in the custom dialer (for syncing with recorder) */
+    customDialerNumber: string;
+    /** Update the number being typed in the custom dialer */
+    setCustomDialerNumber: (num: string) => void;
+    /** Whether a dial is in progress (hides custom overlay immediately) */
+    isDialing: boolean;
+    /** Register a callback to be invoked synchronously when dialNumber is called (for auto-starting recording session within user gesture) */
+    registerDialCallback: (cb: (() => void) | null) => void;
 }
 
 const ZoomPhoneContext = createContext<ZoomPhoneContextType | null>(null);
@@ -33,11 +50,43 @@ export function useZoomPhoneOptional() {
     return useContext(ZoomPhoneContext);
 }
 
+/**
+ * Extract a phone number from Zoom embed event data.
+ * Zoom events can send the number in different fields depending on the event.
+ */
+function extractPhoneNumber(data: Record<string, unknown>): string | null {
+    // Try common fields where Zoom puts the phone number
+    const candidates = [
+        data?.phoneNumber,
+        data?.callee,
+        data?.number,
+        data?.caller,
+        (data?.contact as Record<string, unknown>)?.phoneNumber,
+    ];
+
+    for (const c of candidates) {
+        if (typeof c === 'string' && c.replace(/\D/g, '').length >= 7) {
+            return c;
+        }
+    }
+    return null;
+}
+
 export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     const [isDialerOpen, setIsDialerOpen] = useState(false);
     const [iframeReady, setIframeReadyState] = useState(false);
+    const [lastDialedNumber, setLastDialedNumber] = useState<string | null>(null);
+    const [callStatus, setCallStatus] = useState<ZoomCallStatus>('idle');
+    const [activeCallNumber, setActiveCallNumber] = useState<string | null>(null);
     const pendingCallRef = useRef<string | null>(null);
     const iframeRef = useRef<HTMLIFrameElement | null>(null);
+    const [customDialerNumber, setCustomDialerNumber] = useState('');
+    const [isDialing, setIsDialing] = useState(false);
+    const dialCallbackRef = useRef<(() => void) | null>(null);
+
+    const registerDialCallback = useCallback((cb: (() => void) | null) => {
+        dialCallbackRef.current = cb;
+    }, []);
 
     const setIframeReady = useCallback((ready: boolean) => {
         setIframeReadyState(ready);
@@ -47,26 +96,58 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         setIsDialerOpen(prev => !prev);
     }, []);
 
+    // ── Listen for postMessage events from the Zoom embed ───────────
+    useEffect(() => {
+        const handleMessage = (event: MessageEvent) => {
+            // Only accept messages from Zoom's origin
+            if (event.origin !== 'https://applications.zoom.us') return;
+
+            const { type, data } = event.data || {};
+            if (!type || typeof type !== 'string') return;
+
+            // Log for debugging (remove in production later)
+            console.log('[Zoom Event]', type, data);
+
+            // Normalize event type — Zoom may use different naming conventions
+            const eventLower = type.toLowerCase();
+
+            if (eventLower.includes('ringing')) {
+                setCallStatus('ringing');
+                const phone = extractPhoneNumber(data || {});
+                if (phone) setActiveCallNumber(phone);
+            } else if (eventLower.includes('connected') || eventLower.includes('answered')) {
+                setCallStatus('connected');
+                const phone = extractPhoneNumber(data || {});
+                if (phone) setActiveCallNumber(phone);
+            } else if (eventLower.includes('ended') || eventLower.includes('hangup') || eventLower.includes('disconnect')) {
+                setCallStatus('ended');
+                setIsDialing(false);
+                // We keep activeCallNumber so the recorder can use it for the upload
+                // Reset to idle after a brief delay so consumers can react to 'ended' first
+                setTimeout(() => setCallStatus('idle'), 2000);
+            }
+
+            // Also try to pick up phone number from any Zoom event that has one
+            // (e.g. dial pad events, call-log events, etc.)
+            if (data && typeof data === 'object') {
+                const phone = extractPhoneNumber(data as Record<string, unknown>);
+                if (phone) setActiveCallNumber(phone);
+            }
+        };
+
+        window.addEventListener('message', handleMessage);
+        return () => window.removeEventListener('message', handleMessage);
+    }, []);
+
     const sendDialMessage = useCallback((phoneNumber: string) => {
         if (!iframeRef.current?.contentWindow) return false;
-
-        // Read the user's autoDial preference from localStorage
-        // Default: false (populate number only, user presses Call in dialer)
-        // When true: Zoom routes the call through the desktop app automatically
-        let autoDialEnabled = false;
-        try {
-            const saved = localStorage.getItem('zoom-phone-autodial');
-            if (saved !== null) autoDialEnabled = JSON.parse(saved);
-        } catch {
-            // ignore
-        }
 
         iframeRef.current.contentWindow.postMessage(
             {
                 type: 'zp-make-call',
                 data: {
                     number: phoneNumber,
-                    autoDial: autoDialEnabled
+                    autoDial: true
                 }
             },
             'https://applications.zoom.us'
@@ -111,8 +192,18 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
         if (!cleaned || digits.length < 7) return;
 
+        // Invoke dial callback synchronously (within user gesture) so
+        // CallRecorderControls can auto-start the recording session
+        dialCallbackRef.current?.();
+
         // Open the dialer if it's not already open
         setIsDialerOpen(true);
+        // Track dialed number for the call recorder
+        setLastDialedNumber(cleaned);
+        // Also update the active call number
+        setActiveCallNumber(cleaned);
+        // Hide custom overlay immediately
+        setIsDialing(true);
 
         if (iframeReady && iframeRef.current?.contentWindow) {
             // Dialer is loaded — send immediately and also retry in case
@@ -126,7 +217,13 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, [iframeReady, sendDialMessage]);
 
     return (
-        <ZoomPhoneContext.Provider value={{ isDialerOpen, toggleDialer, dialNumber, iframeRef, setIframeReady }}>
+        <ZoomPhoneContext.Provider value={{
+            isDialerOpen, toggleDialer, dialNumber,
+            lastDialedNumber, callStatus, activeCallNumber,
+            iframeRef, setIframeReady,
+            customDialerNumber, setCustomDialerNumber,
+            isDialing, registerDialCallback
+        }}>
             {children}
         </ZoomPhoneContext.Provider>
     );

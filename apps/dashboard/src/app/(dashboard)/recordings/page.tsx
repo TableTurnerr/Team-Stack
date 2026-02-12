@@ -12,6 +12,7 @@ import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
+import { ZoomCallButton } from '@/components/zoom-call-button';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -679,28 +680,36 @@ export default function RecordingsPage() {
                     {isColumnVisible('phone_number') && (
                       <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
                         {recording.expand?.phone_number_record ? (
-                          <div className="flex flex-col">
-                            <span className="font-bold text-[var(--foreground)]">
-                              {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
-                            </span>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              {recording.expand.phone_number_record.label && (
-                                <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
-                                  {recording.expand.phone_number_record.label}
-                                </span>
-                              )}
-                              {recording.expand.company && (
-                                <Link
-                                  href={`/companies/${recording.company}`}
-                                  className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
-                                >
-                                  {recording.expand.company.company_name}
-                                </Link>
-                              )}
+                          <div className="flex items-center gap-1">
+                            <div className="flex flex-col">
+                              <span className="font-bold text-[var(--foreground)]">
+                                {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
+                              </span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                {recording.expand.phone_number_record.label && (
+                                  <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
+                                    {recording.expand.phone_number_record.label}
+                                  </span>
+                                )}
+                                {recording.expand.company && (
+                                  <Link
+                                    href={`/companies/${recording.company}`}
+                                    className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
+                                  >
+                                    {recording.expand.company.company_name}
+                                  </Link>
+                                )}
+                              </div>
                             </div>
+                            <ZoomCallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
                           </div>
                         ) : (
-                          <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
+                            {recording.phone_number && (
+                              <ZoomCallButton phoneNumber={recording.phone_number} />
+                            )}
+                          </div>
                         )}
                       </td>
                     )}

@@ -26,6 +26,7 @@ import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import { ZoomCallButton, extractFirstPhone } from '@/components/zoom-call-button';
 
 // Column definitions for companies table
 const COMPANY_COLUMNS: ColumnDefinition[] = [
@@ -273,9 +274,14 @@ function CompanyRow({
       )}
       {isColumnVisible('phone_numbers') && (
         <td className="py-3 px-4">
-          <span className="text-sm font-mono">
-            {company.phone_numbers || <span className="text-[var(--muted)]">-</span>}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-mono">
+              {company.phone_numbers || <span className="text-[var(--muted)]">-</span>}
+            </span>
+            {company.phone_numbers && (
+              <ZoomCallButton phoneNumber={extractFirstPhone(company.phone_numbers)} />
+            )}
+          </div>
         </td>
       )}
       {isColumnVisible('email') && (

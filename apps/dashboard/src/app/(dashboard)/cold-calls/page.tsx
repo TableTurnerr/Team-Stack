@@ -21,6 +21,7 @@ import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import { ZoomCallButton } from '@/components/zoom-call-button';
 
 // Column definitions for cold calls table
 const COLD_CALL_COLUMNS: ColumnDefinition[] = [
@@ -388,9 +389,14 @@ export default function ColdCallsPage() {
                       )}
                       {isColumnVisible('phone_number') && (
                         <td className="py-3 px-4">
-                          <span className="text-sm font-mono">
-                            {call.phone_number || '-'}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-mono">
+                              {call.phone_number || '-'}
+                            </span>
+                            {call.phone_number && (
+                              <ZoomCallButton phoneNumber={call.phone_number} />
+                            )}
+                          </div>
                         </td>
                       )}
                       {isColumnVisible('recipients') && (

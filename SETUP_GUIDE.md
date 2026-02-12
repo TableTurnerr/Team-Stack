@@ -12,9 +12,10 @@
 4. [Seed Sample Data](#4-seed-sample-data)
 5. [Dashboard Setup](#5-dashboard-setup)
 6. [Transcriber Setup](#6-transcriber-setup)
-7. [Testing Checklist](#7-testing-checklist)
-8. [Production Deployment](#8-production-deployment)
-9. [Troubleshooting](#9-troubleshooting)
+7. [Zoom Phone Configuration](#7-zoom-phone-configuration)
+8. [Testing Checklist](#8-testing-checklist)
+9. [Production Deployment](#9-production-deployment)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -153,26 +154,45 @@ python transcribe_calls.py test_audio.mp3 --dry-run
 
 ---
 
-## 7. Testing Checklist
+## 7. Zoom Phone Configuration
+
+Configuring the browser-based dialer integration.
+
+### Settings Location
+Access via **Settings → Integrations → Zoom Phone**.
+
+### Available Options
+1. **Auto-Dial** (Default: `Off`)
+   - When enabled, clicking phone buttons routes calls through the Zoom desktop app.
+   - When disabled, numbers populate in the web-based custom dialer.
+2. **Auto-Record Calls** (Default: `On`)
+   - Automatically starts/stops recording when calls connect/end.
+3. **Show Zoom Native Dialer Toggle** (Default: `Off`)
+   - Adds a "swap" button to the dialer header to access the standard Zoom dialer interface.
+
+---
+
+## 8. Testing Checklist
 
 Use this checklist to verify system health.
 
-### 7.1 Dashboard Pages
+### 8.1 Dashboard Pages
 - [ ] **Overview**: Stats cards load without error. Recent activity list is populated.
 - [ ] **Cold Calls**: Table displays seeded calls. Detail view shows transcript and AI summary.
 - [ ] **Companies**: Can add a new company. Inline editing works.
 - [ ] **Leads**: Filters (status, source) function correctly.
 - [ ] **Team**: Team members list loads.
 - [ ] **Notes**: Can create and edit a markdown note.
+- [ ] **Zoom Phone**: Verify settings toggle correctly and persist in localStorage.
 
-### 7.2 Transcriber Integration
+### 8.2 Transcriber Integration
 1. Place a test `.mp3` or `.wav` file in `tools/audio-recorder/recordings/`.
 2. Run the transcriber: `python tools/transcriber/transcribe_calls.py`
 3. Verify a new `Cold Call` record appears in the Dashboard with the transcript.
 
 ---
 
-## 8. Production Deployment
+## 9. Production Deployment
 
 Recommended architecture:
 
@@ -184,12 +204,12 @@ Recommended architecture:
 └─────────────────┘     └───────────────────┘     └──────────────────┘
 ```
 
-### 8.1 Ubuntu Server (PocketBase)
+### 9.1 Ubuntu Server (PocketBase)
 1. Install PocketBase on a VPS (DigitalOcean/Hetzner/AWS).
 2. Set up a systemd service to keep it running `serve --http="0.0.0.0:8090"`.
 3. Use **Cloudflare Tunnel** (`cloudflared`) to expose `localhost:8090` to `https://api.yourdomain.com`. This handles SSL automatically.
 
-### 8.2 Vercel (Dashboard)
+### 9.2 Vercel (Dashboard)
 1. Connect your GitHub repo to Vercel.
 2. Set Root Directory to `apps/dashboard`.
 3. Add Environment Variable: `NEXT_PUBLIC_POCKETBASE_URL=https://api.yourdomain.com`.
@@ -197,7 +217,7 @@ Recommended architecture:
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 ### "ClientResponseError 0" (Auto-cancellation)
 - **Cause**: React Strict Mode double-invoking effects or rapid navigation cancelling pending requests.

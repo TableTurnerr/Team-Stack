@@ -78,6 +78,7 @@ CRM-Tableturnerr/
 | **Backend** | PocketBase | 0.22+ |
 | | SQLite | (built into PocketBase) |
 | **AI/ML** | Google Gemini API | gemini-2.5-flash |
+| **Integrations** | Zoom Phone Smart Embed | Latest |
 | **Desktop Tools** | Python | 3.10+ |
 | | PyQt6 | (audio recorder GUI) |
 | | PyInstaller | (Windows executables) |
@@ -145,6 +146,16 @@ Modern Next.js 15 web application with:
   - `inline-edit-field.tsx` - Inline editing with Ctrl+Z undo
   - `bulk-upload-modal.tsx` - Drag-drop recording upload
   - `column-selector.tsx` - Table column visibility
+  - `zoom-call-button.tsx` - Click-to-call via Zoom Phone
+  - `zoom-phone-context.tsx` - Zoom Phone state management
+
+- **Zoom Phone Integration**:
+  - Embedded Smart Embed dialer with postMessage API
+  - Auto-dial setting to route calls through Zoom desktop app
+  - Auto-record calls setting for automatic recording
+  - Native dialer toggle for switching between custom and Zoom dialers
+  - Call status tracking (idle, ringing, connected, ended)
+  - Configurable via Settings → Integrations
 
 ### Audio Recorder (`tools/audio-recorder`)
 PyQt6 desktop application:
@@ -210,6 +221,16 @@ PB_ADMIN_PASSWORD=your_password
 GEMINI_API_KEY=your_api_key
 GEMINI_MODEL=gemini-2.5-flash
 ```
+
+### Zoom Phone Settings (localStorage)
+
+Zoom Phone integration settings are stored in the browser's localStorage:
+
+- `zoom-phone-autodial` - Auto-dial through Zoom desktop app (default: `false`)
+- `call-recorder-auto-mode` - Auto-record calls (default: `true`)
+- `zoom-show-native-dialer` - Show native dialer toggle (default: `false`)
+
+These can be configured via **Settings → Integrations → Zoom Phone**.
 
 ### Service URLs
 | Service | Local | Production |

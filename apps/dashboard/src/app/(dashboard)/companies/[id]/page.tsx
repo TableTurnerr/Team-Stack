@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { 
-  Building2, 
-  Phone, 
-  History, 
-  StickyNote, 
-  ChevronLeft, 
-  Save, 
+import {
+  Building2,
+  Phone,
+  History,
+  StickyNote,
+  ChevronLeft,
+  Save,
   Undo2,
   Plus,
   Loader2,
@@ -21,12 +21,12 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { 
-  COLLECTIONS, 
-  type Company, 
-  type PhoneNumber, 
-  type CallLog, 
-  type CompanyNote, 
+import {
+  COLLECTIONS,
+  type Company,
+  type PhoneNumber,
+  type CallLog,
+  type CompanyNote,
   type Interaction,
   type FollowUp
 } from '@/lib/types';
@@ -34,6 +34,7 @@ import { cn, formatDate } from '@/lib/utils';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
 import { CallLogForm } from '@/components/call-log-form';
+import { ZoomCallButton } from '@/components/zoom-call-button';
 
 type TabType = 'overview' | 'phones' | 'calls' | 'notes' | 'timeline';
 
@@ -42,7 +43,7 @@ export default function CompanyDetailPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
-  
+
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumber[]>([]);
@@ -134,7 +135,7 @@ export default function CompanyDetailPage() {
         content: newNoteContent,
         created_by: pb.authStore.model?.id
       });
-      
+
       const expandedNote = await pb.collection(COLLECTIONS.COMPANY_NOTES).getOne<CompanyNote>(newNote.id, {
         expand: 'created_by'
       });
@@ -166,10 +167,10 @@ export default function CompanyDetailPage() {
         phone_number_record: selectedPhoneId,
         caller: pb.authStore.model?.id
       });
-      
+
       // Update local state
       setCallLogs(prev => [newCall, ...prev]);
-      
+
       // Also update the phone number's last_called date
       await pb.collection(COLLECTIONS.PHONE_NUMBERS).update(selectedPhoneId, {
         last_called: newCall.call_time,
@@ -212,7 +213,7 @@ export default function CompanyDetailPage() {
     return (
       <div className="p-8 text-center">
         <h2 className="text-xl font-bold">Company not found</h2>
-        <button 
+        <button
           onClick={() => router.push('/companies')}
           className="mt-4 text-[var(--primary)] hover:underline flex items-center gap-2 justify-center"
         >
@@ -226,14 +227,14 @@ export default function CompanyDetailPage() {
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
       {/* Breadcrumbs & Header */}
       <div className="flex flex-col gap-4">
-        <button 
+        <button
           onClick={() => router.push('/companies')}
           className="flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors w-fit"
         >
           <ChevronLeft size={16} />
           Back to Companies
         </button>
-        
+
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
@@ -242,8 +243,8 @@ export default function CompanyDetailPage() {
                 <span className={cn(
                   "px-2 py-0.5 text-xs font-bold rounded-full border",
                   company.status === 'Warm' ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                  company.status === 'Replied' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                  "bg-[var(--card-hover)] text-[var(--muted)] border-[var(--card-border)]"
+                    company.status === 'Replied' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                      "bg-[var(--card-hover)] text-[var(--muted)] border-[var(--card-border)]"
                 )}>
                   {company.status}
                 </span>
@@ -275,23 +276,23 @@ export default function CompanyDetailPage() {
               )}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
-            <button 
+            <button
               onClick={() => {
                 setActiveTab('overview');
                 setIsEditingAll(!isEditingAll);
               }}
               className={cn(
                 "px-4 py-2 rounded-xl border text-sm font-bold transition-all",
-                isEditingAll 
-                  ? "bg-[var(--primary-subtle)] border-[var(--primary)] text-[var(--primary)]" 
+                isEditingAll
+                  ? "bg-[var(--primary-subtle)] border-[var(--primary)] text-[var(--primary)]"
                   : "border-[var(--card-border)] hover:bg-[var(--card-hover)]"
               )}
             >
               {isEditingAll ? 'Cancel Editing' : 'Edit Details'}
             </button>
-            <button 
+            <button
               onClick={() => setIsEditingAll(false)}
               className="px-6 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-sm font-bold hover:opacity-90 transition-all shadow-lg"
             >
@@ -315,8 +316,8 @@ export default function CompanyDetailPage() {
             onClick={() => setActiveTab(tab.id as TabType)}
             className={cn(
               "flex items-center gap-2 px-6 py-4 text-sm font-bold transition-all relative whitespace-nowrap",
-              activeTab === tab.id 
-                ? "text-[var(--foreground)]" 
+              activeTab === tab.id
+                ? "text-[var(--foreground)]"
                 : "text-[var(--muted)] hover:text-[var(--foreground)]"
             )}
           >
@@ -337,14 +338,14 @@ export default function CompanyDetailPage() {
               <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-6">
                 <h3 className="text-lg font-bold">General Information</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-6">
-                  <InlineEditField 
+                  <InlineEditField
                     id={`company_${id}_name`}
                     label="Company Name"
                     value={company.company_name}
                     onSave={(v) => handleUpdateCompany('company_name', v)}
                     isEditing={isEditingAll}
                   />
-                  <InlineEditField 
+                  <InlineEditField
                     id={`company_${id}_owner`}
                     label="Owner / Decision Maker"
                     value={company.owner_name || ''}
@@ -352,7 +353,7 @@ export default function CompanyDetailPage() {
                     placeholder="Enter owner name..."
                     isEditing={isEditingAll}
                   />
-                  <InlineEditField 
+                  <InlineEditField
                     id={`company_${id}_status`}
                     label="CRM Status"
                     value={company.status || 'Cold No Reply'}
@@ -369,7 +370,7 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('status', v)}
                     isEditing={isEditingAll}
                   />
-                  <InlineEditField 
+                  <InlineEditField
                     id={`company_${id}_ig`}
                     label="Instagram Handle"
                     value={company.instagram_handle || ''}
@@ -425,7 +426,7 @@ export default function CompanyDetailPage() {
               <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-[var(--muted)] uppercase tracking-widest">Pre-Call Notes</h3>
-                  <button 
+                  <button
                     onClick={() => {
                       setActiveTab('notes');
                       setIsAddingNote(true);
@@ -435,7 +436,7 @@ export default function CompanyDetailPage() {
                     <Plus size={14} />
                   </button>
                 </div>
-                
+
                 <div className="space-y-3">
                   {notes.slice(0, 2).map(note => (
                     <div key={note.id} className="text-sm p-3 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
@@ -447,7 +448,7 @@ export default function CompanyDetailPage() {
                     <p className="text-xs text-[var(--muted)] italic py-4 text-center">No pre-call notes found.</p>
                   )}
                   {notes.length > 2 && (
-                    <button 
+                    <button
                       onClick={() => setActiveTab('notes')}
                       className="text-xs text-[var(--primary)] font-bold hover:underline w-full text-center"
                     >
@@ -469,10 +470,10 @@ export default function CompanyDetailPage() {
                 Add Phone Number
               </button>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {phoneNumbers.map(phone => (
-                <PhoneNumberCard 
+                <PhoneNumberCard
                   key={phone.id}
                   phoneNumber={phone}
                   recentCalls={callLogs.filter(c => c.phone_number_record === phone.id).slice(0, 3)}
@@ -499,7 +500,7 @@ export default function CompanyDetailPage() {
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold">Call History</h3>
             </div>
-            
+
             <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] text-[var(--muted)]">
@@ -516,15 +517,22 @@ export default function CompanyDetailPage() {
                     <tr key={call.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
                       <td className="px-6 py-4 text-sm font-medium">{formatDate(call.call_time)}</td>
                       <td className="px-6 py-4">
-                        <div className="text-sm font-mono">{call.expand?.phone_number_record?.phone_number}</div>
-                        <div className="text-[10px] text-[var(--muted)] font-bold">{call.expand?.phone_number_record?.label}</div>
+                        <div className="flex items-center gap-1">
+                          <div>
+                            <div className="text-sm font-mono">{call.expand?.phone_number_record?.phone_number}</div>
+                            <div className="text-[10px] text-[var(--muted)] font-bold">{call.expand?.phone_number_record?.label}</div>
+                          </div>
+                          {call.expand?.phone_number_record?.phone_number && (
+                            <ZoomCallButton phoneNumber={call.expand.phone_number_record.phone_number} />
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className={cn(
                           "px-2 py-0.5 rounded-full text-[10px] font-bold",
                           call.call_outcome === 'Interested' ? "bg-green-500/10 text-green-400" :
-                          call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                          "bg-[var(--card-hover)] text-[var(--muted)]"
+                            call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
+                              "bg-[var(--card-hover)] text-[var(--muted)]"
                         )}>
                           {call.call_outcome}
                         </span>
@@ -553,7 +561,7 @@ export default function CompanyDetailPage() {
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold">Pre-Call Notes</h3>
-              <button 
+              <button
                 onClick={() => setIsAddingNote(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-xs font-bold hover:opacity-90 transition-all shadow-sm"
               >
@@ -561,7 +569,7 @@ export default function CompanyDetailPage() {
                 Add Note
               </button>
             </div>
-            
+
             {isAddingNote && (
               <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-2">
@@ -576,7 +584,7 @@ export default function CompanyDetailPage() {
                   autoFocus
                 />
                 <div className="flex justify-end gap-2">
-                  <button 
+                  <button
                     onClick={() => {
                       setIsAddingNote(false);
                       setNewNoteContent('');
@@ -585,7 +593,7 @@ export default function CompanyDetailPage() {
                   >
                     Cancel
                   </button>
-                  <button 
+                  <button
                     onClick={handleAddNote}
                     disabled={!newNoteContent.trim()}
                     className="px-6 py-2 bg-[var(--foreground)] text-[var(--background)] text-xs font-bold rounded-lg hover:opacity-90 transition-all disabled:opacity-50"
@@ -641,9 +649,9 @@ export default function CompanyDetailPage() {
                   </div>
                   <div className="relative z-10 flex-none w-10 h-10 md:w-16 md:h-16 flex items-center justify-center">
                     <div className="w-8 h-8 rounded-full bg-[var(--card-bg)] border border-[var(--card-border)] flex items-center justify-center text-[var(--muted)] shadow-sm">
-                      {interaction.channel === 'phone' ? <Phone size={14} /> : 
-                       interaction.channel === 'instagram' ? <Instagram size={14} /> : 
-                       <Mail size={14} />}
+                      {interaction.channel === 'phone' ? <Phone size={14} /> :
+                        interaction.channel === 'instagram' ? <Instagram size={14} /> :
+                          <Mail size={14} />}
                     </div>
                   </div>
                   <div className="flex-auto pb-8">
@@ -674,7 +682,7 @@ export default function CompanyDetailPage() {
       </div>
 
       {/* Modals */}
-      <CallLogForm 
+      <CallLogForm
         isOpen={isLogCallOpen}
         onClose={() => setIsLogCallOpen(false)}
         onSubmit={handleLogCall}

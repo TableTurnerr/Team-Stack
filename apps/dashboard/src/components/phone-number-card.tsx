@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Phone, MapPin, User, Calendar, MoreVertical, Edit2, Trash2, History, Plus } from 'lucide-react';
 import { cn, formatDate } from '@/lib/utils';
 import type { PhoneNumber, CallLog } from '@/lib/types';
+import { ZoomCallButton } from '@/components/zoom-call-button';
+import { useZoomPhoneOptional } from '@/contexts/zoom-phone-context';
 
 interface PhoneNumberCardProps {
   phoneNumber: PhoneNumber;
@@ -30,6 +32,7 @@ export function PhoneNumberCard({
   className
 }: PhoneNumberCardProps) {
   const [showHistory, setShowHistory] = useState(false);
+  const zoomPhone = useZoomPhoneOptional();
 
   return (
     <div className={cn(
@@ -44,6 +47,7 @@ export function PhoneNumberCard({
               <span className="text-lg font-mono font-bold tracking-tight">
                 {phoneNumber.phone_number}
               </span>
+              <ZoomCallButton phoneNumber={phoneNumber.phone_number} />
               {phoneNumber.label && (
                 <span className={cn(
                   "px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border",
@@ -110,6 +114,19 @@ export function PhoneNumberCard({
             Log Call
           </button>
           <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (zoomPhone) {
+                const cleaned = phoneNumber.phone_number.replace(/\D/g, '');
+                zoomPhone.dialNumber(cleaned);
+              }
+            }}
+            className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-all text-xs font-semibold"
+          >
+            <Phone size={14} />
+            Call via Zoom
+          </button>
+          <button
             onClick={() => setShowHistory(!showHistory)}
             className={cn(
               "p-2 rounded-lg border border-[var(--card-border)] transition-colors",
@@ -140,8 +157,8 @@ export function PhoneNumberCard({
                     <span className={cn(
                       "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
                       call.call_outcome === 'Interested' ? "bg-green-500/10 text-green-400" :
-                      call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                      "bg-[var(--card-hover)] text-[var(--muted)]"
+                        call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
+                          "bg-[var(--card-hover)] text-[var(--muted)]"
                     )}>
                       {call.call_outcome}
                     </span>

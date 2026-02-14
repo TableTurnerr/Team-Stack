@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, ArrowLeft, Check } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type Company } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -18,40 +18,99 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
 interface LastCallPreviewProps {
     callLog: CallLog | null;
     companyName: string;
+    sessionId?: string; // Optional - for fetching all calls in session
 }
 
-export function LastCallPreview({ callLog, companyName }: LastCallPreviewProps) {
+export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPreviewProps) {
     const [isExpanded, setIsExpanded] = useState(true);
     const [notes, setNotes] = useState(callLog?.post_call_notes || '');
     const [updating, setUpdating] = useState(false);
     const [updated, setUpdated] = useState(false);
+    const [ownerReached, setOwnerReached] = useState(callLog?.owner_reached || false);
+    const [pitchCompleted, setPitchCompleted] = useState(callLog?.pitch_completed || false);
+    const [appointmentSet, setAppointmentSet] = useState(callLog?.appointment_set || false);
 
-    // Sync notes when callLog changes
-    const callId = callLog?.id;
+    // Call browser state
+    const [showBrowser, setShowBrowser] = useState(false);
+    const [allCalls, setAllCalls] = useState<CallLog[]>([]);
+    const [loadingCalls, setLoadingCalls] = useState(false);
+    const [viewingCall, setViewingCall] = useState<CallLog | null>(null);
+    const [viewingCompanyName, setViewingCompanyName] = useState('');
+
+    // Track which call we're showing
+    const displayCall = viewingCall || callLog;
+    const displayCompany = viewingCall ? viewingCompanyName : companyName;
+    const isViewingOlderCall = viewingCall !== null;
+
+    // Sync form fields when displayed call changes
+    const callId = displayCall?.id;
     const [trackedCallId, setTrackedCallId] = useState(callId);
     if (callId !== trackedCallId) {
         setTrackedCallId(callId);
-        setNotes(callLog?.post_call_notes || '');
+        setNotes(displayCall?.post_call_notes || '');
+        setOwnerReached(displayCall?.owner_reached || false);
+        setPitchCompleted(displayCall?.pitch_completed || false);
+        setAppointmentSet(displayCall?.appointment_set || false);
         setUpdated(false);
     }
 
+    // Fetch all calls in session
+    const fetchAllCalls = useCallback(async () => {
+        if (!sessionId) return;
+        try {
+            setLoadingCalls(true);
+            const calls = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                filter: `session = "${sessionId}"`,
+                sort: '-call_time',
+                expand: 'company,phone_number_record',
+            });
+            setAllCalls(calls);
+            setShowBrowser(true);
+        } catch (err) {
+            console.error('Failed to fetch calls:', err);
+        } finally {
+            setLoadingCalls(false);
+        }
+    }, [sessionId]);
+
+    // View a specific call from history
+    const handleViewCall = useCallback((call: CallLog) => {
+        setViewingCall(call);
+        setViewingCompanyName(call.expand?.company?.company_name || 'Unknown');
+        setShowBrowser(false);
+    }, []);
+
+    // Go back to last call
+    const handleBackToLastCall = useCallback(() => {
+        setViewingCall(null);
+        setViewingCompanyName('');
+    }, []);
+
     const handleUpdate = useCallback(async () => {
-        if (!callLog) return;
+        if (!displayCall) return;
         try {
             setUpdating(true);
-            await pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
+            await pb.collection(COLLECTIONS.CALL_LOGS).update(displayCall.id, {
                 post_call_notes: notes,
+                owner_reached: ownerReached,
+                pitch_completed: pitchCompleted,
+                appointment_set: appointmentSet,
             });
             setUpdated(true);
-            setTimeout(() => setUpdated(false), 2000);
+            setTimeout(() => {
+                setUpdated(false);
+                if (isViewingOlderCall) {
+                    handleBackToLastCall();
+                }
+            }, 1000);
         } catch (err) {
             console.error('Failed to update call log:', err);
         } finally {
             setUpdating(false);
         }
-    }, [callLog, notes]);
+    }, [displayCall, notes, ownerReached, pitchCompleted, appointmentSet, isViewingOlderCall, handleBackToLastCall]);
 
-    if (!callLog) {
+    if (!displayCall) {
         return (
             <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5">
                 <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
@@ -62,11 +121,31 @@ export function LastCallPreview({ callLog, companyName }: LastCallPreviewProps) 
         );
     }
 
-    const outcome = callLog.call_outcome || '';
+    const outcome = displayCall.call_outcome || '';
     const colors = OUTCOME_COLORS[outcome] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' };
+
+    const hasChanged =
+        notes !== (displayCall.post_call_notes || '') ||
+        ownerReached !== (displayCall.owner_reached || false) ||
+        pitchCompleted !== (displayCall.pitch_completed || false) ||
+        appointmentSet !== (displayCall.appointment_set || false);
 
     return (
         <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
+            {/* Viewing older call indicator */}
+            {isViewingOlderCall && (
+                <div className="bg-[var(--warning-subtle)] border-b border-[var(--warning)] px-4 py-2 flex items-center justify-between">
+                    <span className="text-xs font-medium text-[var(--warning)]">Viewing Previous Call</span>
+                    <button
+                        onClick={handleBackToLastCall}
+                        className="flex items-center gap-1 text-xs font-medium text-[var(--warning)] hover:underline"
+                    >
+                        <ArrowLeft size={12} />
+                        Back to Last Call
+                    </button>
+                </div>
+            )}
+
             {/* Header (clickable to toggle) */}
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
@@ -74,7 +153,7 @@ export function LastCallPreview({ callLog, companyName }: LastCallPreviewProps) 
             >
                 <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
-                        Last Call
+                        {isViewingOlderCall ? 'Previous Call' : 'Last Call'}
                     </h3>
                     {outcome && (
                         <span className={cn('px-2 py-0.5 rounded text-xs font-medium', colors.bg, colors.text)}>
@@ -82,7 +161,22 @@ export function LastCallPreview({ callLog, companyName }: LastCallPreviewProps) 
                         </span>
                     )}
                 </div>
-                {isExpanded ? <ChevronUp size={16} className="text-[var(--muted)]" /> : <ChevronDown size={16} className="text-[var(--muted)]" />}
+                <div className="flex items-center gap-2">
+                    {sessionId && !isViewingOlderCall && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                fetchAllCalls();
+                            }}
+                            className="p-1.5 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                            title="View all calls in session"
+                            disabled={loadingCalls}
+                        >
+                            <History size={14} />
+                        </button>
+                    )}
+                    {isExpanded ? <ChevronUp size={16} className="text-[var(--muted)]" /> : <ChevronDown size={16} className="text-[var(--muted)]" />}
+                </div>
             </button>
 
             {/* Content */}
@@ -91,33 +185,70 @@ export function LastCallPreview({ callLog, companyName }: LastCallPreviewProps) 
                     {/* Company */}
                     <div className="flex items-center gap-2 pt-3">
                         <Building2 size={14} className="text-[var(--muted)]" />
-                        <span className="text-sm font-medium">{companyName || 'Unknown Company'}</span>
+                        <span className="text-sm font-medium">{displayCompany || 'Unknown Company'}</span>
                     </div>
 
                     {/* Phone number */}
-                    {callLog.expand?.phone_number_record?.phone_number && (
+                    {displayCall.expand?.phone_number_record?.phone_number && (
                         <div className="text-sm text-[var(--muted)] font-mono">
-                            {callLog.expand.phone_number_record.phone_number}
+                            {displayCall.expand.phone_number_record.phone_number}
                         </div>
                     )}
 
                     {/* Interest level */}
-                    {callLog.interest_level !== undefined && (
+                    {displayCall.interest_level !== undefined && (
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-[var(--muted)]">Interest:</span>
                             <div className="flex-1 h-1.5 bg-[var(--card-border)] rounded-full overflow-hidden max-w-[100px]">
                                 <div
                                     className={cn(
                                         'h-full rounded-full',
-                                        callLog.interest_level >= 7 ? 'bg-[var(--success)]' :
-                                            callLog.interest_level >= 4 ? 'bg-[var(--warning)]' : 'bg-[var(--error)]'
+                                        displayCall.interest_level >= 7 ? 'bg-[var(--success)]' :
+                                            displayCall.interest_level >= 4 ? 'bg-[var(--warning)]' : 'bg-[var(--error)]'
                                     )}
-                                    style={{ width: `${callLog.interest_level * 10}%` }}
+                                    style={{ width: `${displayCall.interest_level * 10}%` }}
                                 />
                             </div>
-                            <span className="text-xs text-[var(--muted)]">{callLog.interest_level}/10</span>
+                            <span className="text-xs text-[var(--muted)]">{displayCall.interest_level}/10</span>
                         </div>
                     )}
+
+                    {/* Performance tracking checkboxes */}
+                    <div className="space-y-2 pt-1">
+                        <label className="text-xs text-[var(--muted)] mb-1 block">Performance</label>
+                        <div className="flex flex-col gap-1.5">
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    checked={ownerReached}
+                                    onChange={e => setOwnerReached(e.target.checked)}
+                                    className="w-3.5 h-3.5 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
+                                />
+                                <span className="text-xs group-hover:text-[var(--foreground)] transition-colors">Owner Reached</span>
+                                {ownerReached && <Check size={12} className="text-[var(--success)]" />}
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    checked={pitchCompleted}
+                                    onChange={e => setPitchCompleted(e.target.checked)}
+                                    className="w-3.5 h-3.5 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
+                                />
+                                <span className="text-xs group-hover:text-[var(--foreground)] transition-colors">Pitch Completed</span>
+                                {pitchCompleted && <Check size={12} className="text-[var(--success)]" />}
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    checked={appointmentSet}
+                                    onChange={e => setAppointmentSet(e.target.checked)}
+                                    className="w-3.5 h-3.5 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
+                                />
+                                <span className="text-xs group-hover:text-[var(--foreground)] transition-colors">Appointment Set</span>
+                                {appointmentSet && <Check size={12} className="text-[var(--success)]" />}
+                            </label>
+                        </div>
+                    </div>
 
                     {/* Editable notes */}
                     <div>
@@ -137,7 +268,7 @@ export function LastCallPreview({ callLog, companyName }: LastCallPreviewProps) 
                     {/* Update button */}
                     <button
                         onClick={handleUpdate}
-                        disabled={updating || notes === (callLog.post_call_notes || '')}
+                        disabled={updating || !hasChanged}
                         className={cn(
                             'w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all',
                             updated
@@ -146,8 +277,50 @@ export function LastCallPreview({ callLog, companyName }: LastCallPreviewProps) 
                         )}
                     >
                         <RotateCcw size={12} />
-                        {updated ? 'Updated!' : updating ? 'Updating...' : 'Update Last Call'}
+                        {updated ? 'Updated!' : updating ? 'Updating...' : isViewingOlderCall ? 'Save & Back to Last Call' : 'Update Call'}
                     </button>
+                </div>
+            )}
+
+            {/* Call browser modal */}
+            {showBrowser && (
+                <div className="border-t border-[var(--card-border)] bg-[var(--sidebar-bg)] p-4 max-h-[300px] overflow-y-auto">
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-[10px] font-bold text-[var(--muted)] uppercase tracking-widest">
+                            All Calls ({allCalls.length})
+                        </h4>
+                        <button
+                            onClick={() => setShowBrowser(false)}
+                            className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+                        >
+                            Close
+                        </button>
+                    </div>
+                    <div className="space-y-2">
+                        {allCalls.map((call, idx) => (
+                            <button
+                                key={call.id}
+                                onClick={() => handleViewCall(call)}
+                                className="w-full text-left p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors border border-[var(--card-border)]"
+                            >
+                                <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-medium">
+                                        {call.expand?.company?.company_name || 'Unknown'}
+                                    </span>
+                                    <span className={cn(
+                                        'text-[9px] px-1.5 py-0.5 rounded-full font-medium',
+                                        OUTCOME_COLORS[call.call_outcome || '']?.bg || 'bg-[var(--card-hover)]',
+                                        OUTCOME_COLORS[call.call_outcome || '']?.text || 'text-[var(--muted)]'
+                                    )}>
+                                        {call.call_outcome}
+                                    </span>
+                                </div>
+                                <div className="text-[10px] text-[var(--muted)]">
+                                    {new Date(call.call_time).toLocaleString()}
+                                </div>
+                            </button>
+                        ))}
+                    </div>
                 </div>
             )}
         </div>

@@ -33,6 +33,9 @@ export interface CallFormData {
     interestLevel: number;
     postCallNotes: string;
     wasPickedUp: boolean;
+    ownerReached: boolean;
+    pitchCompleted: boolean;
+    appointmentSet: boolean;
 }
 
 interface CurrentCallFormProps {
@@ -50,6 +53,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
     const [callOutcome, setCallOutcome] = useState('');
     const [interestLevel, setInterestLevel] = useState(5);
     const [postCallNotes, setPostCallNotes] = useState('');
+    const [ownerReached, setOwnerReached] = useState(false);
+    const [pitchCompleted, setPitchCompleted] = useState(false);
+    const [appointmentSet, setAppointmentSet] = useState(false);
+    const [isNewCompany, setIsNewCompany] = useState(false); // Track if creating new company
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -59,6 +66,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
 
         if (companySearch.length < 2) {
             setCompanyResults([]);
+            setIsNewCompany(false);
             return;
         }
 
@@ -69,9 +77,27 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
                     sort: 'company_name',
                 });
                 setCompanyResults(result.items);
-                setShowCompanyDropdown(true);
+
+                // Check if there's an exact match
+                const exactMatch = result.items.find(
+                    c => c.company_name.toLowerCase() === companySearch.toLowerCase()
+                );
+
+                if (exactMatch) {
+                    // Exact match found - not a new company
+                    setIsNewCompany(false);
+                } else if (result.items.length === 0) {
+                    // No results - definitely new company
+                    setIsNewCompany(true);
+                } else {
+                    // Partial matches but no exact match - treat as new company
+                    setIsNewCompany(true);
+                }
+
+                setShowCompanyDropdown(result.items.length > 0);
             } catch {
                 // silent
+                setIsNewCompany(true);
             }
         }, 300);
 
@@ -95,35 +121,67 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
         setSelectedCompany(company);
         setCompanySearch(company.company_name);
         setShowCompanyDropdown(false);
+        setIsNewCompany(false); // Existing company selected
         if (company.owner_name) {
             setRecipientName(company.owner_name);
         }
     };
 
-    const handleSave = useCallback(() => {
-        if (!selectedCompany) return;
+    const handleSave = useCallback(async () => {
+        // Need either an existing company or a new company name
+        if (!selectedCompany && !isNewCompany) return;
+        if (!companySearch.trim()) return;
 
-        onSave({
-            companyId: selectedCompany.id,
-            companyName: selectedCompany.company_name,
-            phoneNumber,
-            recipientName,
-            callOutcome,
-            interestLevel,
-            postCallNotes,
-            wasPickedUp: callOutcome !== 'No Answer' && callOutcome !== 'Wrong Number' && callOutcome !== '',
-        });
+        try {
+            let companyId: string;
+            let companyName: string;
 
-        // Reset form
-        setCompanySearch('');
-        setSelectedCompany(null);
-        setRecipientName('');
-        setCallOutcome('');
-        setInterestLevel(5);
-        setPostCallNotes('');
-    }, [selectedCompany, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, onSave]);
+            if (isNewCompany) {
+                // Create new company
+                const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>({
+                    company_name: companySearch.trim(),
+                    owner_name: recipientName || undefined,
+                });
+                companyId = newCompany.id;
+                companyName = newCompany.company_name;
+            } else if (selectedCompany) {
+                companyId = selectedCompany.id;
+                companyName = selectedCompany.company_name;
+            } else {
+                return;
+            }
 
-    const canSave = selectedCompany && callOutcome && !saving;
+            onSave({
+                companyId,
+                companyName,
+                phoneNumber,
+                recipientName,
+                callOutcome,
+                interestLevel,
+                postCallNotes,
+                wasPickedUp: callOutcome !== 'No Answer' && callOutcome !== 'Wrong Number' && callOutcome !== '',
+                ownerReached,
+                pitchCompleted,
+                appointmentSet,
+            });
+
+            // Reset form
+            setCompanySearch('');
+            setSelectedCompany(null);
+            setIsNewCompany(false);
+            setRecipientName('');
+            setCallOutcome('');
+            setInterestLevel(5);
+            setPostCallNotes('');
+            setOwnerReached(false);
+            setPitchCompleted(false);
+            setAppointmentSet(false);
+        } catch (err) {
+            console.error('Failed to save call:', err);
+        }
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave]);
+
+    const canSave = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2 && callOutcome && !saving;
 
     return (
         <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5 space-y-4">
@@ -133,7 +191,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
 
             {/* Company autocomplete */}
             <div className="relative" ref={dropdownRef}>
-                <label className="text-xs text-[var(--muted)] mb-1 block">Company</label>
+                <label className="text-xs text-[var(--muted)] mb-1 flex items-center justify-between">
+                    <span>Company</span>
+                    {isNewCompany && companySearch.trim().length >= 2 && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold uppercase tracking-wider">
+                            New
+                        </span>
+                    )}
+                </label>
                 <div className="relative">
                     <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
                     <input
@@ -143,7 +208,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
                             setCompanySearch(e.target.value);
                             setSelectedCompany(null);
                         }}
-                        placeholder="Search companies..."
+                        placeholder="Search or create company..."
                         className="w-full pl-8 pr-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
                     />
                     {selectedCompany && (
@@ -233,6 +298,40 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
                     onChange={e => setInterestLevel(parseInt(e.target.value))}
                     className="w-full accent-[var(--foreground)]"
                 />
+            </div>
+
+            {/* Performance Tracking */}
+            <div className="space-y-2">
+                <label className="text-xs text-[var(--muted)] mb-1 block">Performance</label>
+                <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                            type="checkbox"
+                            checked={ownerReached}
+                            onChange={e => setOwnerReached(e.target.checked)}
+                            className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
+                        />
+                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Owner Reached</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                            type="checkbox"
+                            checked={pitchCompleted}
+                            onChange={e => setPitchCompleted(e.target.checked)}
+                            className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
+                        />
+                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Pitch Completed</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                            type="checkbox"
+                            checked={appointmentSet}
+                            onChange={e => setAppointmentSet(e.target.checked)}
+                            className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
+                        />
+                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Appointment Set</span>
+                    </label>
+                </div>
             </div>
 
             {/* Notes */}

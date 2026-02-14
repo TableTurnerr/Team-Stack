@@ -28,7 +28,8 @@ interface SessionDialerProps {
  * Adapted from CustomDialerOverlay but styled for inline use with dark theme.
  */
 export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
-    const [number, setNumber] = useState('');
+    const [number, setNumber] = useState('+1');
+    const [showKeypad, setShowKeypad] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -36,21 +37,46 @@ export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
     }, []);
 
     const appendDigit = useCallback((digit: string) => {
-        setNumber(prev => prev + digit);
+        setNumber(prev => {
+            // If somehow empty or just '+' (shouldn't happen with strict enforcement but safe to handle), reset
+            if (!prev || prev === '+') return '+1' + digit;
+            return prev + digit;
+        });
         inputRef.current?.focus();
     }, []);
 
     const handleBackspace = useCallback(() => {
-        setNumber(prev => prev.slice(0, -1));
+        setNumber(prev => {
+            if (prev.length <= 2) return '+1'; // Don't delete +1
+            return prev.slice(0, -1);
+        });
         inputRef.current?.focus();
     }, []);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const cleaned = e.target.value.replace(/[^0-9+*#]/g, '');
-        setNumber(cleaned);
+        let val = e.target.value;
+
+        // Strip everything non-numeric
+        let digits = val.replace(/\D/g, '');
+
+        // Handling:
+        // 1. "1203..." -> clean "1203..." -> +1203...
+        // 2. "203..." -> clean "203..." -> prepend 1 -> 1203... -> +1203...
+        // 3. "11203..." (double 1 from paste) -> replace leading 1s with single 1 -> 1203... -> +1203...
+
+        // Collapse multiple leading 1s into a single 1
+        digits = digits.replace(/^1+/, '1');
+
+        // Ensure it starts with 1
+        if (!digits.startsWith('1')) {
+            digits = '1' + digits;
+        }
+
+        setNumber('+' + digits);
     };
 
-    const canDial = number.replace(/\D/g, '').length >= 3 && !disabled;
+    // Valid US number: +1 + 10 digits = 12 chars
+    const canDial = number.length === 12 && number.startsWith('+1') && !disabled;
 
     const handleDial = () => {
         if (canDial) {
@@ -63,15 +89,26 @@ export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
             e.preventDefault();
             handleDial();
         }
+        // Prevent deleting the +1 with backspace if specifically targeting it?
+        // handleBackspace logic covers it via state update, but standard backspace in input might fight it.
+        // We'll rely on handleInputChange to fix it up.
     };
 
     return (
-        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5 space-y-4">
-            <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
-                Dialer
-            </h3>
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
+                    Dialer
+                </h3>
+                <button
+                    onClick={() => setShowKeypad(!showKeypad)}
+                    className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] px-2 py-1 rounded hover:bg-[var(--sidebar-bg)] transition-colors"
+                >
+                    {showKeypad ? 'Hide' : 'Show'} Keypad
+                </button>
+            </div>
 
-            {/* Number input */}
+            {/* Number input with inline dial button */}
             <div className="flex items-center gap-2">
                 <input
                     ref={inputRef}
@@ -80,74 +117,26 @@ export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     placeholder="Enter number..."
-                    className="flex-1 text-center text-xl font-semibold tracking-wide bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2.5 placeholder:text-[var(--muted)] placeholder:font-normal placeholder:text-base focus:outline-none focus:border-[var(--primary)] transition-colors"
+                    className="flex-1 text-center text-lg font-semibold tracking-wide bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 placeholder:text-[var(--muted)] placeholder:font-normal placeholder:text-base focus:outline-none focus:border-[var(--primary)] transition-colors"
                     style={{
                         caretColor: 'var(--primary)',
                         color: 'var(--foreground)',
                     }}
                     autoComplete="off"
                 />
-                {number && (
+                {number.length > 2 && (
                     <button
                         onClick={handleBackspace}
                         className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--sidebar-bg)] transition-colors"
                         title="Delete"
                     >
-                        <Delete size={18} />
+                        <Delete size={16} />
                     </button>
                 )}
-            </div>
-
-            {/* Keypad grid */}
-            <div className="grid grid-cols-3 gap-2.5 max-w-[260px] mx-auto">
-                {DIAL_PAD.map(({ digit, letters }) => {
-                    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
-
-                    return (
-                        <button
-                            key={digit}
-                            onClick={() => appendDigit(digit)}
-                            onMouseDown={() => {
-                                if (digit === '0') {
-                                    longPressTimer = setTimeout(() => {
-                                        setNumber(prev => prev + '+');
-                                        longPressTimer = null;
-                                    }, 500);
-                                }
-                            }}
-                            onMouseUp={() => {
-                                if (longPressTimer) {
-                                    clearTimeout(longPressTimer);
-                                    longPressTimer = null;
-                                }
-                            }}
-                            onMouseLeave={() => {
-                                if (longPressTimer) {
-                                    clearTimeout(longPressTimer);
-                                    longPressTimer = null;
-                                }
-                            }}
-                            className="flex flex-col items-center justify-center w-[60px] h-[60px] mx-auto rounded-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] hover:bg-[var(--card-hover)] active:scale-95 transition-all duration-100"
-                        >
-                            <span className="text-lg font-semibold text-[var(--foreground)] leading-none">
-                                {digit}
-                            </span>
-                            {letters && (
-                                <span className="text-[7px] tracking-[0.15em] text-[var(--muted)] mt-0.5 font-semibold uppercase">
-                                    {letters}
-                                </span>
-                            )}
-                        </button>
-                    );
-                })}
-            </div>
-
-            {/* Call button */}
-            <div className="flex justify-center pt-1">
                 <button
                     onClick={handleDial}
                     disabled={!canDial}
-                    className="w-14 h-14 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{
                         background: canDial
                             ? 'var(--success)'
@@ -155,9 +144,31 @@ export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
                     }}
                     title="Call"
                 >
-                    <Phone size={22} className="text-white" />
+                    <Phone size={18} className="text-white" />
                 </button>
             </div>
+
+            {/* Collapsible Keypad grid */}
+            {showKeypad && (
+                <div className="grid grid-cols-3 gap-2 max-w-[240px] mx-auto pt-2">
+                    {DIAL_PAD.map(({ digit, letters }) => (
+                        <button
+                            key={digit}
+                            onClick={() => appendDigit(digit)}
+                            className="flex flex-col items-center justify-center w-[52px] h-[52px] mx-auto rounded-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] hover:bg-[var(--card-hover)] active:scale-95 transition-all duration-100"
+                        >
+                            <span className="text-base font-semibold text-[var(--foreground)] leading-none">
+                                {digit}
+                            </span>
+                            {letters && (
+                                <span className="text-[6px] tracking-[0.15em] text-[var(--muted)] mt-0.5 font-semibold uppercase">
+                                    {letters}
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

@@ -147,9 +147,9 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
             )}
 
             {/* Header (clickable to toggle) */}
-            <button
+            <div
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center justify-between p-4 hover:bg-[var(--sidebar-bg)] transition-colors"
+                className="w-full flex items-center justify-between p-4 hover:bg-[var(--sidebar-bg)] transition-colors cursor-pointer"
             >
                 <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
@@ -177,7 +177,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                     )}
                     {isExpanded ? <ChevronUp size={16} className="text-[var(--muted)]" /> : <ChevronDown size={16} className="text-[var(--muted)]" />}
                 </div>
-            </button>
+            </div>
 
             {/* Content */}
             {isExpanded && (

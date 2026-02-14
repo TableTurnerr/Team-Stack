@@ -10,6 +10,8 @@ interface SessionContextType {
     setSession: (session: ColdCallingSession | null) => void;
     isLoading: boolean;
     refreshSession: () => Promise<void>;
+    isStandaloneMode: boolean;
+    setStandaloneMode: (enabled: boolean) => void;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -18,6 +20,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const { user, isAuthenticated } = useAuth();
     const [session, setSession] = useState<ColdCallingSession | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isStandaloneMode, setStandaloneMode] = useState(false);
 
     const fetchSession = useCallback(async () => {
         if (!isAuthenticated || !user) {
@@ -52,7 +55,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // Real-time subscription could go here, but for now manual updates are fine
 
     return (
-        <SessionContext.Provider value={{ session, setSession, isLoading, refreshSession: fetchSession }}>
+        <SessionContext.Provider value={{ session, setSession, isLoading, refreshSession: fetchSession, isStandaloneMode, setStandaloneMode }}>
             {children}
         </SessionContext.Provider>
     );

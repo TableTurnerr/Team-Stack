@@ -21,6 +21,7 @@ import {
   Plus,
   Globe,
   Headphones,
+  History,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -45,6 +46,7 @@ const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
   { href: '/session', label: 'Call Session', icon: Headphones },
+  { href: '/session-logs', label: 'Session Logs', icon: History },
   { href: '/recordings', label: 'Recordings', icon: Mic },
   { href: '/companies', label: 'Companies', icon: Building2 },
   { href: '/actors', label: 'Actors', icon: Instagram },

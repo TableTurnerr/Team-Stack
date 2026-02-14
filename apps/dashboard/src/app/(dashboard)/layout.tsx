@@ -8,10 +8,10 @@ import { Loader2 } from 'lucide-react';
 
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
 import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
-import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { SessionProvider } from '@/contexts/session-context';
 import { CallRecordingProvider } from '@/contexts/call-recording-context';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
+import { CallPreviewBanner } from '@/components/call-preview-banner';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -63,7 +63,7 @@ export default function DashboardLayout({
                   </div>
                 </main>
               </div>
-              <ZoomPhoneDialer />
+              <CallPreviewBanner />
             </div>
           </CallRecordingProvider>
         </SessionProvider>

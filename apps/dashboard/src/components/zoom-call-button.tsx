@@ -1,8 +1,11 @@
 'use client';
 
 import { Phone } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useZoomPhoneOptional } from '@/contexts/zoom-phone-context';
+import { useCallRecording } from '@/contexts/call-recording-context';
+import { useSession } from '@/contexts/session-context';
 
 /**
  * Strips a phone number string down to digits (preserving leading +).
@@ -35,8 +38,9 @@ interface ZoomCallButtonProps {
 }
 
 /**
- * A small clickable phone icon that initiates a Zoom Phone call
- * through the embedded Smart Embed dialer via postMessage.
+ * A small clickable phone icon that initiates a Zoom Phone call.
+ * Checks for screen share before allowing the call.
+ * If no session is active, starts standalone mode.
  */
 export function ZoomCallButton({
     phoneNumber,
@@ -44,7 +48,10 @@ export function ZoomCallButton({
     size = 'sm',
     className
 }: ZoomCallButtonProps) {
+    const router = useRouter();
     const zoomPhone = useZoomPhoneOptional();
+    const { isSessionActive } = useCallRecording();
+    const { session, setStandaloneMode } = useSession();
     const cleaned = cleanPhoneForUri(phoneNumber);
 
     if (!cleaned || cleaned.length < 7) return null;
@@ -53,10 +60,32 @@ export function ZoomCallButton({
         e.preventDefault();
         e.stopPropagation();
 
-        // Use the embedded Smart Embed dialer
+        // Check if screen share is active (recording session started)
+        if (!isSessionActive) {
+            // Show alert asking user to start screen share first
+            const shouldNavigate = window.confirm(
+                'Screen sharing is required to make and record calls.\n\n' +
+                'Click OK to go to the Call Session page and start screen sharing.'
+            );
+
+            if (shouldNavigate) {
+                router.push('/session');
+            }
+            return;
+        }
+
+        // If no active session, enable standalone mode
+        if (!session) {
+            setStandaloneMode(true);
+        }
+
+        // Initiate the call
         if (zoomPhone) {
             zoomPhone.dialNumber(cleaned);
         }
+
+        // Navigate to session page to show the call
+        router.push('/session');
     };
 
     const iconSize = size === 'sm' ? 13 : 16;

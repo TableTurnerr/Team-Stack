@@ -1,11 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Phone, MapPin, User, Calendar, MoreVertical, Edit2, Trash2, History, Plus } from 'lucide-react';
 import { cn, formatDate } from '@/lib/utils';
 import type { PhoneNumber, CallLog } from '@/lib/types';
 import { ZoomCallButton } from '@/components/zoom-call-button';
 import { useZoomPhoneOptional } from '@/contexts/zoom-phone-context';
+import { useCallRecording } from '@/contexts/call-recording-context';
+import { useSession } from '@/contexts/session-context';
 
 interface PhoneNumberCardProps {
   phoneNumber: PhoneNumber;
@@ -31,8 +34,11 @@ export function PhoneNumberCard({
   onLogCall,
   className
 }: PhoneNumberCardProps) {
+  const router = useRouter();
   const [showHistory, setShowHistory] = useState(false);
   const zoomPhone = useZoomPhoneOptional();
+  const { isSessionActive } = useCallRecording();
+  const { session, setStandaloneMode } = useSession();
 
   return (
     <div className={cn(
@@ -116,10 +122,32 @@ export function PhoneNumberCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
+
+              // Check if screen share is active
+              if (!isSessionActive) {
+                const shouldNavigate = window.confirm(
+                  'Screen sharing is required to make and record calls.\n\n' +
+                  'Click OK to go to the Call Session page and start screen sharing.'
+                );
+                if (shouldNavigate) {
+                  router.push('/session');
+                }
+                return;
+              }
+
+              // If no active session, enable standalone mode
+              if (!session) {
+                setStandaloneMode(true);
+              }
+
+              // Initiate the call
               if (zoomPhone) {
                 const cleaned = phoneNumber.phone_number.replace(/\D/g, '');
                 zoomPhone.dialNumber(cleaned);
               }
+
+              // Navigate to session page
+              router.push('/session');
             }}
             className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-all text-xs font-semibold"
           >

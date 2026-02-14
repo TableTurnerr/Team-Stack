@@ -46,6 +46,7 @@ export function useCallRecorder(
 
     const streamRef = useRef<MediaStream | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
+    const sourceStreamRef = useRef<MediaStream | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
@@ -56,8 +57,21 @@ export function useCallRecorder(
     useEffect(() => {
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
+            // Stop output stream
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach((t) => t.stop());
+            }
+            // Stop source stream (screen share)
+            if (sourceStreamRef.current) {
+                sourceStreamRef.current.getTracks().forEach((t) => t.stop());
+            }
+            // Stop mic stream
+            if (micStreamRef.current) {
+                micStreamRef.current.getTracks().forEach((t) => t.stop());
+            }
+            // Close audio context
+            if (audioCtxRef.current) {
+                audioCtxRef.current.close().catch(console.error);
             }
         };
     }, []);
@@ -141,19 +155,22 @@ export function useCallRecorder(
         try {
             setError(null);
 
-            // 1. Capture system audio
+            // 1. Capture system audio (User preference: Window + System Audio)
             const displayStream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
-                audio: true,
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                },
                 systemAudio: 'include',
                 selfBrowserSurface: 'include',
-            } as DisplayMediaStreamOptions);
+                surfaceSwitching: 'include',
+                monitorTypeSurfaces: 'exclude', // Hint to exclude entire screens if possible (browser dependent)
+            } as any); // Cast to any because some constraints are newer/experimental
 
-            // Drop the video track — we only need audio
-            displayStream.getVideoTracks().forEach((track) => {
-                track.stop();
-                displayStream.removeTrack(track);
-            });
+            // We keep the video track alive to maintain the browser's "Sharing" session,
+            // but we won't use it for recording (createMediaStreamSource ignores video).
 
             if (displayStream.getAudioTracks().length === 0) {
                 displayStream.getTracks().forEach((t) => t.stop());
@@ -205,22 +222,34 @@ export function useCallRecorder(
             const mixedStream = destination.stream;
 
             // Clean up when the browser's "Stop sharing" button is clicked
-            displayStream.getAudioTracks().forEach((track) => {
-                track.onended = () => {
-                    if (mediaRecorderRef.current?.state === 'recording') {
-                        mediaRecorderRef.current.stop();
-                    }
-                    // Clean up mic + audio context
-                    micStreamRef.current?.getTracks().forEach(t => t.stop());
+            const handleStreamEnded = () => {
+                if (mediaRecorderRef.current?.state === 'recording') {
+                    mediaRecorderRef.current.stop();
+                }
+                // Clean up mic + audio context
+                if (micStreamRef.current) {
+                    micStreamRef.current.getTracks().forEach(t => t.stop());
                     micStreamRef.current = null;
-                    audioCtxRef.current?.close();
+                }
+                if (audioCtxRef.current) {
+                    audioCtxRef.current.close().catch(console.error);
                     audioCtxRef.current = null;
-                    streamRef.current = null;
-                    setIsSessionActive(false);
-                };
+                }
+                // Clean up source stream
+                if (sourceStreamRef.current) {
+                    sourceStreamRef.current.getTracks().forEach((t) => t.stop());
+                    sourceStreamRef.current = null;
+                }
+                streamRef.current = null;
+                setIsSessionActive(false);
+            };
+
+            displayStream.getTracks().forEach((track) => {
+                track.onended = handleStreamEnded;
             });
 
             streamRef.current = mixedStream;
+            sourceStreamRef.current = displayStream;
             setIsSessionActive(true);
         } catch (err: unknown) {
             if (err instanceof DOMException && err.name === 'NotAllowedError') {
@@ -244,6 +273,21 @@ export function useCallRecorder(
         if (streamRef.current) {
             streamRef.current.getTracks().forEach((t) => t.stop());
             streamRef.current = null;
+        }
+
+        if (sourceStreamRef.current) {
+            sourceStreamRef.current.getTracks().forEach((t) => t.stop());
+            sourceStreamRef.current = null;
+        }
+
+        if (micStreamRef.current) {
+            micStreamRef.current.getTracks().forEach((t) => t.stop());
+            micStreamRef.current = null;
+        }
+
+        if (audioCtxRef.current) {
+            audioCtxRef.current.close().catch(console.error);
+            audioCtxRef.current = null;
         }
 
         setIsSessionActive(false);

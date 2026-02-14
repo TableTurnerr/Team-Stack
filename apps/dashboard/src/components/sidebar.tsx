@@ -20,6 +20,7 @@ import {
   Mic,
   Plus,
   Globe,
+  Headphones,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -43,6 +44,7 @@ const POPULAR_TIMEZONES = [
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
+  { href: '/session', label: 'Call Session', icon: Headphones },
   { href: '/recordings', label: 'Recordings', icon: Mic },
   { href: '/companies', label: 'Companies', icon: Building2 },
   { href: '/actors', label: 'Actors', icon: Instagram },
@@ -106,7 +108,7 @@ export function Sidebar() {
       <aside
         className={cn(
           'fixed top-0 left-0 z-40 h-screen w-64 bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)] transition-transform duration-200 flex flex-col',
-          'lg:translate-x-0',
+          'lg:translate-x-0 lg:static',
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >

@@ -7,6 +7,7 @@ import {
     Loader2,
     Zap,
     AlertTriangle,
+    Phone,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber } from '@/lib/types';
@@ -18,6 +19,8 @@ import { PerformanceTracker } from './performance-tracker';
 import { SessionDialer } from './session-dialer';
 import { CurrentCallForm, type CallFormData } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
+import { SessionModeSelector } from '@/components/session-mode-selector';
+import { StandaloneCallInterface } from './standalone-call-interface';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
@@ -30,10 +33,12 @@ import { useSession } from '@/contexts/session-context';
 
 // ... other imports
 
+const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
+
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber } = useZoomPhone();
-    const { session, setSession, isLoading: sessionLoading } = useSession();
+    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady } = useZoomPhone();
+    const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode } = useSession();
 
     // Loading combined
     const loading = sessionLoading;
@@ -65,6 +70,14 @@ export default function SessionPage() {
     const [lastCallLog, setLastCallLog] = useState<CallLog | null>(null);
     const [lastCallCompanyName, setLastCallCompanyName] = useState('');
 
+    // Call timing state
+    const [ringStartTime, setRingStartTime] = useState<number | null>(null);
+    const [connectTime, setConnectTime] = useState<number | null>(null);
+    const [currentCallDuration, setCurrentCallDuration] = useState(0);
+    const [dialCountIncremented, setDialCountIncremented] = useState(false);
+    const [pickupCountIncremented, setPickupCountIncremented] = useState(false);
+    const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
     // ---------------------------------------------------------------------------
     // Check for existing active session on mount
     // ---------------------------------------------------------------------------
@@ -94,6 +107,73 @@ export default function SessionPage() {
             if (timerRef.current) clearInterval(timerRef.current);
         }
     }, [session]);
+
+    // ---------------------------------------------------------------------------
+    // Track call status and timing
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        if (callStatus === 'ringing') {
+            // Call is ringing - start ring timer
+            if (!ringStartTime) {
+                setRingStartTime(Date.now());
+                setConnectTime(null);
+                setCurrentCallDuration(0);
+
+                // Increment dial count only once when ringing starts (and only for session mode)
+                if (session && !dialCountIncremented) {
+                    setDialCountIncremented(true);
+                    pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
+                        total_dials: (session.total_dials || 0) + 1
+                    }).then(updatedSession => {
+                        setSession(updatedSession);
+                    }).catch(err => console.error('Failed to increment dial count:', err));
+                }
+            }
+        } else if (callStatus === 'connected') {
+            // Call connected - mark connect time and start call duration timer
+            if (!connectTime) {
+                setConnectTime(Date.now());
+
+                // Increment pickup count when call is connected (only for session mode)
+                if (session && !pickupCountIncremented) {
+                    setPickupCountIncremented(true);
+                    pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
+                        total_pickups: (session.total_pickups || 0) + 1
+                    }).then(updatedSession => {
+                        setSession(updatedSession);
+                    }).catch(err => console.error('Failed to increment pickup count:', err));
+                }
+
+                // Start call duration timer
+                if (callTimerRef.current) clearInterval(callTimerRef.current);
+                callTimerRef.current = setInterval(() => {
+                    if (connectTime) {
+                        setCurrentCallDuration(Math.floor((Date.now() - connectTime) / 1000));
+                    }
+                }, 1000);
+            }
+        } else if (callStatus === 'ended' || callStatus === 'idle') {
+            // Call ended - clear timers only (phone number will be cleared when call is saved or new call is dialed)
+            if (callTimerRef.current) {
+                clearInterval(callTimerRef.current);
+                callTimerRef.current = null;
+            }
+        }
+
+        return () => {
+            if (callTimerRef.current) {
+                clearInterval(callTimerRef.current);
+            }
+        };
+    }, [callStatus, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession]);
+
+    // Reset count incremented flags when current phone number changes (new call)
+    useEffect(() => {
+        if (currentPhoneNumber) {
+            setDialCountIncremented(false);
+            setPickupCountIncremented(false);
+        }
+    }, [currentPhoneNumber]);
 
     // ---------------------------------------------------------------------------
     // Start session
@@ -150,20 +230,42 @@ export default function SessionPage() {
     }, [session, elapsedSec, setSession, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------
+    // Start standalone mode
+    // ---------------------------------------------------------------------------
+    const startStandalone = useCallback(() => {
+        setStandaloneMode(true);
+    }, [setStandaloneMode]);
+
+    // ---------------------------------------------------------------------------
+    // Exit standalone mode
+    // ---------------------------------------------------------------------------
+    const exitStandalone = useCallback(() => {
+        setStandaloneMode(false);
+        setLastCallLog(null);
+        setLastCallCompanyName('');
+        setCurrentPhoneNumber('');
+    }, [setStandaloneMode]);
+
+    // ---------------------------------------------------------------------------
     // Handle dial
     // ---------------------------------------------------------------------------
     const handleDial = useCallback((phoneNumber: string) => {
+        // Prevent double dialing
+        if (isDialing || callStatus === 'ringing' || callStatus === 'connected') {
+            console.log('Call already in progress, ignoring dial request');
+            return;
+        }
+
         setCurrentPhoneNumber(phoneNumber);
         setContextPhoneNumber(phoneNumber); // Update phone number in context
 
         // Start recording immediately when dialing IF session is active
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         if (isSessionActive) {
             startRecording();
         }
 
         dialNumber(phoneNumber);
-    }, [dialNumber, isSessionActive, startRecording, setContextPhoneNumber]);
+    }, [dialNumber, isSessionActive, startRecording, setContextPhoneNumber, isDialing, callStatus]);
 
     // ---------------------------------------------------------------------------
     // Save call
@@ -200,43 +302,83 @@ export default function SessionPage() {
                 // If phone number lookup/creation fails, still log the call
             }
 
-            // Create call log
+            // Calculate call durations
+            let ringDuration = 0;
+            let callDuration = 0;
+            let totalDuration = 0;
+
+            if (ringStartTime) {
+                const endTime = Date.now();
+                if (connectTime) {
+                    // Call was picked up
+                    ringDuration = Math.floor((connectTime - ringStartTime) / 1000);
+                    callDuration = Math.floor((endTime - connectTime) / 1000);
+                    totalDuration = ringDuration + callDuration;
+                } else {
+                    // Call was not picked up (just rang)
+                    ringDuration = Math.floor((endTime - ringStartTime) / 1000);
+                    totalDuration = ringDuration;
+                }
+            }
+
+            // Create call log with performance tracking
             const callLog = await pb.collection(COLLECTIONS.CALL_LOGS).create<CallLog>({
                 company: data.companyId,
                 phone_number_record: phoneNumberRecordId || undefined,
                 caller: user.id,
                 call_time: new Date().toISOString(),
+                duration: totalDuration > 0 ? totalDuration : undefined,
+                ring_duration: ringDuration > 0 ? ringDuration : undefined,
+                call_duration: callDuration > 0 ? callDuration : undefined,
                 call_outcome: data.callOutcome,
                 interest_level: data.interestLevel,
                 post_call_notes: data.postCallNotes,
                 owner_name_found: data.recipientName || undefined,
                 session: session.id,
+                owner_reached: data.ownerReached,
+                pitch_completed: data.pitchCompleted,
+                appointment_set: data.appointmentSet,
             });
 
-            // Update session counters
-            const updates: Partial<ColdCallingSession> = {
-                total_dials: (session.total_dials || 0) + 1,
-            };
-            if (data.wasPickedUp) {
-                updates.total_pickups = (session.total_pickups || 0) + 1;
+            // Update session performance totals based on this call
+            const sessionUpdates: Partial<ColdCallingSession> = {};
+            if (data.ownerReached) {
+                sessionUpdates.owner_reached = (session.owner_reached || 0) + 1;
+            }
+            if (data.pitchCompleted) {
+                sessionUpdates.pitch_completed = (session.pitch_completed || 0) + 1;
+            }
+            if (data.appointmentSet) {
+                sessionUpdates.appointment_set = (session.appointment_set || 0) + 1;
             }
 
-            const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(
-                session.id,
-                updates
-            );
+            // Update session if there are any performance updates
+            if (Object.keys(sessionUpdates).length > 0) {
+                await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, sessionUpdates);
+            }
+
+            // Note: dial count and pickup count are now incremented automatically when calls ring/connect
+            // No need to update them here - just refresh the session
+            const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getOne<ColdCallingSession>(session.id);
             setSession(updatedSession);
 
             // Shift to last call preview
             setLastCallLog(callLog);
             setLastCallCompanyName(data.companyName);
             setCurrentPhoneNumber('');
+
+            // Reset call timing state for next call
+            setRingStartTime(null);
+            setConnectTime(null);
+            setCurrentCallDuration(0);
+            setDialCountIncremented(false);
+            setPickupCountIncremented(false);
         } catch (err) {
             console.error('Failed to save call:', err);
         } finally {
             setSavingCall(false);
         }
-    }, [session, user, stopRecording, setSession, setContextPhoneNumber]);
+    }, [session, user, stopRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime]);
 
     // ---------------------------------------------------------------------------
     // Update performance counters
@@ -293,36 +435,60 @@ export default function SessionPage() {
     }
 
     // ---------------------------------------------------------------------------
-    // No active session — show start CTA
+    // No active session — show mode selector or standalone interface
     // ---------------------------------------------------------------------------
     if (!session) {
-        return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="text-center space-y-6 max-w-md">
-                    <div className="w-20 h-20 rounded-2xl bg-[var(--info-subtle)] flex items-center justify-center mx-auto">
-                        <Headphones size={36} className="text-[var(--info)]" />
+        // If standalone mode is active, show standalone interface
+        if (isStandaloneMode) {
+            // Check if audio is connected
+            if (!isSessionActive) {
+                return (
+                    <div className="flex items-center justify-center min-h-[60vh]">
+                        <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
+                            <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
+                                <Headphones size={32} className="text-[var(--error)]" />
+                            </div>
+
+                            <div>
+                                <h2 className="text-xl font-bold mb-2">Connect Audio to Start</h2>
+                                <p className="text-[var(--muted)] text-sm mb-4">
+                                    Recording must be enabled before you can make standalone calls.
+                                </p>
+                            </div>
+
+                            <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
+                                <p className="font-medium text-[var(--foreground)]">Instructions:</p>
+                                <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
+                                    <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio</span> below</li>
+                                    <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
+                                    <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
+                                    <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
+                                </ol>
+                            </div>
+
+                            {recorderError && (
+                                <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
+                                    {recorderError}
+                                </div>
+                            )}
+
+                            <button
+                                onClick={startAudioSession}
+                                className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
+                            >
+                                Connect Audio & Start
+                            </button>
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-2xl font-bold mb-2">Cold Calling Session</h1>
-                        <p className="text-[var(--muted)] text-sm leading-relaxed">
-                            Start a session to dial companies, track your metrics, and log calls — all in one place.
-                        </p>
-                    </div>
-                    <button
-                        onClick={startSession}
-                        disabled={starting}
-                        className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
-                    >
-                        {starting ? (
-                            <Loader2 size={18} className="animate-spin" />
-                        ) : (
-                            <Zap size={18} />
-                        )}
-                        {starting ? 'Starting...' : 'Start Session'}
-                    </button>
-                </div>
-            </div>
-        );
+                );
+            }
+
+            // Audio is connected, show standalone interface
+            return <StandaloneCallInterface onExit={exitStandalone} />;
+        }
+
+        // Not in standalone mode and no session - show mode selector
+        return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} />;
     }
 
     // ---------------------------------------------------------------------------
@@ -398,6 +564,49 @@ export default function SessionPage() {
                 </button>
             </div>
 
+            {/* Current Call Timer - shown when call is active */}
+            {(callStatus === 'ringing' || callStatus === 'connected') && (
+                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            {callStatus === 'ringing' ? (
+                                <>
+                                    <div className="w-12 h-12 rounded-full bg-[var(--warning-subtle)] flex items-center justify-center">
+                                        <Phone className="w-6 h-6 text-[var(--warning)] animate-bounce" />
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold text-lg">Ringing...</p>
+                                        <p className="text-sm text-[var(--muted)]">
+                                            Ring Duration: {ringStartTime ? Math.floor((Date.now() - ringStartTime) / 1000) : 0}s
+                                        </p>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="w-12 h-12 rounded-full bg-[var(--success-subtle)] flex items-center justify-center">
+                                        <Phone className="w-6 h-6 text-[var(--success)]" />
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold text-lg">Call Connected</p>
+                                        <div className="flex gap-4 text-sm text-[var(--muted)]">
+                                            <span>Ring: {ringStartTime && connectTime ? Math.floor((connectTime - ringStartTime) / 1000) : 0}s</span>
+                                            <span>Call: {currentCallDuration}s</span>
+                                            <span className="font-medium text-[var(--foreground)]">
+                                                Total: {(ringStartTime && connectTime ? Math.floor((connectTime - ringStartTime) / 1000) : 0) + currentCallDuration}s
+                                            </span>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <div className="text-right">
+                            <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Phone Number</p>
+                            <p className="font-mono text-sm font-medium">{currentPhoneNumber || 'Unknown'}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Main layout */}
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                 {/* Left column — 60% */}
@@ -426,9 +635,21 @@ export default function SessionPage() {
                     <LastCallPreview
                         callLog={lastCallLog}
                         companyName={lastCallCompanyName}
+                        sessionId={session.id}
                     />
                 </div>
             </div>
+
+            {/* Hidden Zoom Phone iframe for making calls */}
+            <iframe
+                ref={iframeRef}
+                src={ZOOM_EMBED_URL}
+                onLoad={() => setIframeReady(true)}
+                className="hidden"
+                allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
+                title="Zoom Phone"
+                style={{ display: 'none' }}
+            />
         </div>
     );
 }

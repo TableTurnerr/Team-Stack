@@ -11,7 +11,7 @@ import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
 import { SessionProvider } from '@/contexts/session-context';
 import { CallRecordingProvider } from '@/contexts/call-recording-context';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
-import { CallPreviewBanner } from '@/components/call-preview-banner';
+import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -63,7 +63,7 @@ export default function DashboardLayout({
                   </div>
                 </main>
               </div>
-              <CallPreviewBanner />
+              <ZoomPhoneDialer />
             </div>
           </CallRecordingProvider>
         </SessionProvider>

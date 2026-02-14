@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Phone, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight } from 'lucide-react';
+import { Phone, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, PhoneOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { CallRecorderControls } from '@/components/call-recorder-controls';
@@ -23,12 +23,12 @@ interface Position {
 }
 
 export function ZoomPhoneDialer() {
-    const { isDialerOpen, toggleDialer, callStatus, dialNumber, iframeRef, setIframeReady, isDialing } = useZoomPhone();
+    const { isDialerOpen, toggleDialer, callStatus, dialNumber, iframeRef, setIframeReady, isDialing, endCall } = useZoomPhone();
     const [position, setPosition] = useState<Position>(DEFAULT_POSITION);
     const [height, setHeight] = useState(DEFAULT_HEIGHT);
     const [isDragging, setIsDragging] = useState(false);
     const [isResizing, setIsResizing] = useState(false);
-    const [isMinimized, setIsMinimized] = useState(false);
+    const [isMinimized, setIsMinimized] = useState(true);
     const [iframeLoadedLocal, setIframeLoadedLocal] = useState(false);
 
     // "Show Zoom Native Dialer" setting from integrations
@@ -37,6 +37,20 @@ export function ZoomPhoneDialer() {
     const [forceNativeDialer, setForceNativeDialer] = useState(false);
     // Show custom dialer overlay when not in an active call, user hasn't forced native, and not mid-dial
     const showCustomDialer = !forceNativeDialer && !isDialing && (callStatus === 'idle' || callStatus === 'ended');
+
+    // Auto-minimize when call ends
+    useEffect(() => {
+        if (callStatus === 'ended' || callStatus === 'idle') {
+            setIsMinimized(true);
+        }
+    }, [callStatus]);
+
+    // Un-minimize when dialing starts
+    useEffect(() => {
+        if (isDialing) {
+            setIsMinimized(false);
+        }
+    }, [isDialing]);
 
     // Load the native dialer setting
     useEffect(() => {
@@ -201,115 +215,130 @@ export function ZoomPhoneDialer() {
                 </button>
             )}
 
-            {/* Dialer Panel */}
-            {isDialerOpen && (
+            {/* Dialer Panel - ALWAYS rendered but hidden when closed to keep iframe alive */}
+            <div
+                ref={panelRef}
+                className={cn(
+                    "fixed z-[998] flex flex-col rounded-xl overflow-hidden shadow-2xl",
+                    "border border-[var(--card-border)]",
+                    "bg-[var(--card-bg)] transition-all duration-300",
+                    isDragging ? "cursor-grabbing select-none" : "",
+                    !isDialerOpen && "opacity-0 pointer-events-none translate-y-10 scale-95"
+                )}
+                style={{
+                    ...panelStyle,
+                    width: '380px',
+                    height: currentHeight,
+                    visibility: isDialerOpen ? 'visible' : 'hidden',
+                }}
+            >
+                {/* Header / Drag Handle */}
                 <div
-                    ref={panelRef}
+                    onMouseDown={handleMouseDown}
                     className={cn(
-                        "fixed z-[998] flex flex-col rounded-xl overflow-hidden shadow-2xl",
-                        "border border-[var(--card-border)]",
-                        "bg-[var(--card-bg)]",
-                        isDragging ? "cursor-grabbing select-none" : ""
+                        "flex items-center justify-between px-3 py-2",
+                        "bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]",
+                        "cursor-grab select-none shrink-0",
+                        isDragging && "cursor-grabbing"
                     )}
-                    style={{
-                        ...panelStyle,
-                        width: '380px',
-                        height: currentHeight,
-                        transition: (isDragging || isResizing) ? 'none' : 'height 0.2s ease, opacity 0.2s ease',
-                    }}
                 >
-                    {/* Header / Drag Handle */}
-                    <div
-                        onMouseDown={handleMouseDown}
-                        className={cn(
-                            "flex items-center justify-between px-3 py-2",
-                            "bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]",
-                            "cursor-grab select-none shrink-0",
-                            isDragging && "cursor-grabbing"
-                        )}
-                    >
-                        <div className="flex items-center gap-2">
-                            <GripHorizontal size={14} className="text-[var(--muted)]" />
-                            <div className="flex items-center gap-1.5">
-                                <Phone size={14} className="text-blue-400" />
-                                <span className="text-xs font-semibold">Zoom Phone</span>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                            {/* Swap to Zoom Native Dialer — only visible when enabled in Settings */}
-                            {showNativeEnabled && (
-                                <button
-                                    onClick={() => setForceNativeDialer(!forceNativeDialer)}
-                                    className={`p-1 rounded hover:bg-[var(--card-hover)] transition-colors ${forceNativeDialer
-                                        ? 'text-blue-400 hover:text-blue-300'
-                                        : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-                                        }`}
-                                    title={forceNativeDialer ? 'Switch to Custom Dialer' : 'Switch to Zoom Native Dialer'}
-                                >
-                                    <ArrowLeftRight size={12} />
-                                </button>
-                            )}
-                            <button
-                                onClick={() => setIsMinimized(!isMinimized)}
-                                className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                                title={isMinimized ? 'Expand' : 'Minimize'}
-                            >
-                                {isMinimized ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
-                            </button>
-                            <button
-                                onClick={toggleDialer}
-                                className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-red-400 transition-colors"
-                                title="Close"
-                            >
-                                <X size={12} />
-                            </button>
+                    <div className="flex items-center gap-2">
+                        <GripHorizontal size={14} className="text-[var(--muted)]" />
+                        <div className="flex items-center gap-1.5">
+                            <Phone size={14} className="text-blue-400" />
+                            <span className="text-xs font-semibold">Zoom Phone</span>
                         </div>
                     </div>
+                    <div className="flex items-center gap-1">
+                        {/* End Call Button — only visible during active call */}
+                        {(callStatus === 'ringing' || callStatus === 'connected') && (
+                            <button
+                                onClick={endCall}
+                                className="mr-2 px-2 py-1 rounded bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold flex items-center gap-1 transition-colors animate-pulse"
+                                title="End Call"
+                            >
+                                <Phone size={10} className="rotate-[135deg]" />
+                                <span>END CALL</span>
+                            </button>
+                        )}
 
-                    {/* Resize Handle (Top Bar) - Only show when NOT minimized */}
-                    {!isMinimized && (
-                        <div
-                            className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-[1000] hover:bg-blue-400/50 transition-colors"
-                            onMouseDown={handleResizeMouseDown}
-                            title="Drag to resize height"
-                        />
-                    )}
-
-                    {/* Content Area */}
-                    {!isMinimized && (
-                        <div className="flex-1 flex flex-col bg-white overflow-hidden">
-                            {/* Call Recorder Controls — always visible above the dialer/iframe */}
-                            <CallRecorderControls />
-
-                            {/* Dialer / Iframe area */}
-                            <div className="flex-1 relative">
-                                {/* Custom Dialer Overlay — shown when no active call */}
-                                {showCustomDialer && (
-                                    <CustomDialerOverlay onDial={handleCustomDial} />
-                                )}
-
-                                {/* Loading State (visible only when Zoom iframe is showing) */}
-                                {!showCustomDialer && !iframeLoadedLocal && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--card-bg)] z-[5]">
-                                        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                                        <span className="text-xs text-[var(--muted)]">Loading Zoom Phone...</span>
-                                    </div>
-                                )}
-
-                                {/* Zoom iframe — always mounted but hidden behind overlay when idle */}
-                                <iframe
-                                    ref={iframeRef}
-                                    src={ZOOM_EMBED_URL}
-                                    onLoad={() => { setIframeLoadedLocal(true); setIframeReady(true); }}
-                                    className="w-full h-full border-0"
-                                    allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
-                                    title="Zoom Phone Dialer"
-                                />
-                            </div>
-                        </div>
-                    )}
+                        {/* Swap to Zoom Native Dialer — only visible when enabled in Settings */}
+                        {showNativeEnabled && (
+                            <button
+                                onClick={() => setForceNativeDialer(!forceNativeDialer)}
+                                className={`p-1 rounded hover:bg-[var(--card-hover)] transition-colors ${forceNativeDialer
+                                    ? 'text-blue-400 hover:text-blue-300'
+                                    : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                                    }`}
+                                title={forceNativeDialer ? 'Switch to Custom Dialer' : 'Switch to Zoom Native Dialer'}
+                            >
+                                <ArrowLeftRight size={12} />
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setIsMinimized(!isMinimized)}
+                            className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                            title={isMinimized ? 'Expand' : 'Minimize'}
+                        >
+                            {isMinimized ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
+                        </button>
+                        <button
+                            onClick={toggleDialer}
+                            className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-red-400 transition-colors"
+                            title="Close"
+                        >
+                            <X size={12} />
+                        </button>
+                    </div>
                 </div>
-            )}
+
+                {/* Resize Handle (Top Bar) - Only show when NOT minimized */}
+                {!isMinimized && (
+                    <div
+                        className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-[1000] hover:bg-blue-400/50 transition-colors"
+                        onMouseDown={handleResizeMouseDown}
+                        title="Drag to resize height"
+                    />
+                )}
+
+                {/* Content Area - Always rendered to keep iframe alive */}
+                <div 
+                    className={cn(
+                        "flex-1 flex flex-col bg-white overflow-hidden transition-opacity duration-200", 
+                        isMinimized ? "opacity-0 pointer-events-none h-0" : "opacity-100"
+                    )}
+                >
+                    {/* Call Recorder Controls — always visible above the dialer/iframe */}
+                    <CallRecorderControls />
+
+                    {/* Dialer / Iframe area */}
+                    <div className="flex-1 relative">
+                        {/* Custom Dialer Overlay — shown when no active call */}
+                        {showCustomDialer && (
+                            <CustomDialerOverlay onDial={handleCustomDial} />
+                        )}
+
+                        {/* Loading State (visible only when Zoom iframe is showing) */}
+                        {!showCustomDialer && !iframeLoadedLocal && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--card-bg)] z-[5]">
+                                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                <span className="text-xs text-[var(--muted)]">Loading Zoom Phone...</span>
+                            </div>
+                        )}
+
+                        {/* Zoom iframe — ALWAYS MOUNTED */}
+                        <iframe
+                            id="zoom-iframe"
+                            ref={iframeRef}
+                            src={ZOOM_EMBED_URL}
+                            onLoad={() => { setIframeLoadedLocal(true); setIframeReady(true); }}
+                            className="w-full h-full border-0"
+                            allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
+                            title="Zoom Phone Dialer"
+                        />
+                    </div>
+                </div>
+            </div>
         </>
     );
 }

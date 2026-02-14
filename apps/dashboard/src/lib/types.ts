@@ -187,10 +187,28 @@ export interface CallLog extends RecordModel {
   interest_level?: number;
   status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
   has_recording?: boolean;
+  session?: string;
   expand?: {
     company?: Company;
     phone_number_record?: PhoneNumber;
     caller?: User;
+    session?: ColdCallingSession;
+  };
+}
+
+export interface ColdCallingSession extends RecordModel {
+  user: string;
+  started_at: string;
+  ended_at?: string;
+  total_dials: number;
+  total_pickups: number;
+  total_duration_sec: number;
+  owner_reached: number;
+  pitch_completed: number;
+  appointment_set: number;
+  status: 'active' | 'completed';
+  expand?: {
+    user?: User;
   };
 }
 
@@ -325,4 +343,5 @@ export const COLLECTIONS = {
   INTERACTIONS: 'interactions',
   RECORDINGS: 'recordings',
   USER_PREFERENCES: 'user_preferences',
+  COLD_CALLING_SESSIONS: 'cold_calling_sessions',
 } as const;

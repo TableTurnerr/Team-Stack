@@ -1032,6 +1032,30 @@
             },
             {
                 "hidden": false,
+                "id": "number_ring_duration",
+                "max": null,
+                "min": 0,
+                "name": "ring_duration",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_call_duration",
+                "max": null,
+                "min": 0,
+                "name": "call_duration",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
                 "id": "select_call_outcome",
                 "maxSelect": 1,
                 "name": "call_outcome",
@@ -1142,6 +1166,33 @@
                 "required": false,
                 "system": false,
                 "type": "relation"
+            },
+            {
+                "hidden": false,
+                "id": "bool_owner_reached",
+                "name": "owner_reached",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
+            },
+            {
+                "hidden": false,
+                "id": "bool_pitch_completed",
+                "name": "pitch_completed",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
+            },
+            {
+                "hidden": false,
+                "id": "bool_appointment_set",
+                "name": "appointment_set",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
             },
             {
                 "hidden": false,
@@ -3436,6 +3487,19 @@
                     "active",
                     "completed"
                 ]
+            },
+            {
+                "hidden": false,
+                "id": "text_session_notes",
+                "max": 5000,
+                "min": 0,
+                "name": "session_notes",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
             },
             {
                 "hidden": false,

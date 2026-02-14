@@ -179,7 +179,9 @@ export interface CallLog extends RecordModel {
   phone_number_record: string;
   caller?: string;
   call_time: string;
-  duration?: number;
+  duration?: number; // Total duration (ring_duration + call_duration) in seconds
+  ring_duration?: number; // Time spent ringing before pickup (in seconds)
+  call_duration?: number; // Time spent on actual call after pickup (in seconds)
   call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Wrong Number' | 'Other';
   owner_name_found?: string;
   receptionist_name?: string;
@@ -187,7 +189,11 @@ export interface CallLog extends RecordModel {
   interest_level?: number;
   status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
   has_recording?: boolean;
-  session?: string;
+  session?: string; // Optional - null for standalone calls, populated for session-based calls
+  // Per-call performance tracking (tied to specific calls, aggregated to session level)
+  owner_reached?: boolean;
+  pitch_completed?: boolean;
+  appointment_set?: boolean;
   expand?: {
     company?: Company;
     phone_number_record?: PhoneNumber;
@@ -207,6 +213,7 @@ export interface ColdCallingSession extends RecordModel {
   pitch_completed: number;
   appointment_set: number;
   status: 'active' | 'completed';
+  session_notes?: string; // Optional notes about the session (e.g., overall observations, issues)
   expand?: {
     user?: User;
   };

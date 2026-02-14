@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Phone, Delete } from 'lucide-react';
+import { Phone, Delete, PhoneOff } from 'lucide-react';
+import { useZoomPhone } from '@/contexts/zoom-phone-context';
 
 const DIAL_PAD: { digit: string; letters: string }[] = [
     { digit: '1', letters: '' },
@@ -28,9 +29,12 @@ interface SessionDialerProps {
  * Adapted from CustomDialerOverlay but styled for inline use with dark theme.
  */
 export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
+    const { callStatus, endCall } = useZoomPhone();
     const [number, setNumber] = useState('+1');
     const [showKeypad, setShowKeypad] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
+
+    const isCallActive = callStatus === 'ringing' || callStatus === 'connected';
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -76,7 +80,7 @@ export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
     };
 
     // Valid US number: +1 + 10 digits = 12 chars
-    const canDial = number.length === 12 && number.startsWith('+1') && !disabled;
+    const canDial = number.length === 12 && number.startsWith('+1') && !disabled && !isCallActive;
 
     const handleDial = () => {
         if (canDial) {
@@ -116,15 +120,16 @@ export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
                     value={number}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
+                    disabled={isCallActive}
                     placeholder="Enter number..."
-                    className="flex-1 text-center text-lg font-semibold tracking-wide bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 placeholder:text-[var(--muted)] placeholder:font-normal placeholder:text-base focus:outline-none focus:border-[var(--primary)] transition-colors"
+                    className="flex-1 text-center text-lg font-semibold tracking-wide bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 placeholder:text-[var(--muted)] placeholder:font-normal placeholder:text-base focus:outline-none focus:border-[var(--primary)] transition-colors disabled:opacity-70"
                     style={{
                         caretColor: 'var(--primary)',
                         color: 'var(--foreground)',
                     }}
                     autoComplete="off"
                 />
-                {number.length > 2 && (
+                {number.length > 2 && !isCallActive && (
                     <button
                         onClick={handleBackspace}
                         className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--sidebar-bg)] transition-colors"
@@ -133,19 +138,29 @@ export function SessionDialer({ onDial, disabled }: SessionDialerProps) {
                         <Delete size={16} />
                     </button>
                 )}
-                <button
-                    onClick={handleDial}
-                    disabled={!canDial}
-                    className="w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                    style={{
-                        background: canDial
-                            ? 'var(--success)'
-                            : 'var(--card-border)',
-                    }}
-                    title="Call"
-                >
-                    <Phone size={18} className="text-white" />
-                </button>
+                {isCallActive ? (
+                    <button
+                        onClick={endCall}
+                        className="w-10 h-10 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-600 transition-all duration-150 active:scale-90 shadow-lg shadow-red-500/20"
+                        title="End Call"
+                    >
+                        <Phone size={18} className="text-white rotate-[135deg]" />
+                    </button>
+                ) : (
+                    <button
+                        onClick={handleDial}
+                        disabled={!canDial}
+                        className="w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{
+                            background: canDial
+                                ? 'var(--success)'
+                                : 'var(--card-border)',
+                        }}
+                        title="Call"
+                    >
+                        <Phone size={18} className="text-white" />
+                    </button>
+                )}
             </div>
 
             {/* Collapsible Keypad grid */}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Power, Loader2, Mic, MicOff } from 'lucide-react';
+import { Power, Loader2, Mic, MicOff, Phone, Square } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type PhoneNumber } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -17,7 +17,7 @@ interface StandaloneCallInterfaceProps {
 
 export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps) {
     const { user } = useAuth();
-    const { dialNumber } = useZoomPhone();
+    const { dialNumber, callStatus, endCall } = useZoomPhone();
     const {
         status: recorderStatus,
         duration: recordingDuration,
@@ -144,9 +144,18 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                                 </div>
                                 <div>
                                     <p className="font-medium">Recording</p>
-                                    <p className="text-sm text-[var(--muted)]">
-                                        {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
-                                    </p>
+                                    <div className="flex items-center gap-2">
+                                        <p className="text-sm text-[var(--muted)]">
+                                            {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
+                                        </p>
+                                        <button
+                                            onClick={() => stopRecording()}
+                                            className="ml-2 p-1 rounded bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all"
+                                            title="Stop Recording"
+                                        >
+                                            <Square size={12} fill="currentColor" />
+                                        </button>
+                                    </div>
                                 </div>
                             </>
                         ) : (
@@ -162,13 +171,29 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                         )}
                     </div>
 
-                    <div className="text-right">
-                        <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Status</p>
-                        <p className="text-sm font-medium capitalize">{recorderStatus}</p>
+                    <div className="flex items-center gap-6">
+                        {(callStatus === 'ringing' || callStatus === 'connected') && (
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={endCall}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white font-semibold text-sm transition-all active:scale-95 shadow-lg shadow-red-500/20"
+                                >
+                                    <Phone size={16} className="rotate-[135deg]" />
+                                    End Call
+                                </button>
+                                <span className="text-xs text-red-400 font-medium animate-pulse">
+                                    {callStatus === 'ringing' ? 'Ringing...' : 'In Progress'}
+                                </span>
+                            </div>
+                        )}
+
+                        <div className="text-right">
+                            <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Status</p>
+                            <p className="text-sm font-medium capitalize">{recorderStatus}</p>
+                        </div>
                     </div>
                 </div>
             </div>
-
             {/* Main layout - simplified single column on mobile, two columns on large screens */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Left column */}

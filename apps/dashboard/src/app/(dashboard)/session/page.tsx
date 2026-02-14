@@ -8,6 +8,7 @@ import {
     Zap,
     AlertTriangle,
     Phone,
+    Square,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber } from '@/lib/types';
@@ -37,7 +38,7 @@ const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddabl
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady } = useZoomPhone();
+    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady, endCall } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode } = useSession();
 
     // Loading combined
@@ -51,6 +52,8 @@ export default function SessionPage() {
     // Recording state
     const {
         isSessionActive,
+        status: recorderStatus,
+        duration: recorderDuration,
         startSession: startAudioSession,
         startRecording,
         stopRecording,
@@ -400,256 +403,251 @@ export default function SessionPage() {
     }, [session, setSession]);
 
     // ---------------------------------------------------------------------------
-    // Collection not set up yet
+    // Helper to render the main UI content
     // ---------------------------------------------------------------------------
-    if (collectionMissing) {
-        return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="text-center space-y-4 max-w-md">
-                    <div className="w-16 h-16 rounded-2xl bg-[var(--warning-subtle)] flex items-center justify-center mx-auto">
-                        <AlertTriangle size={28} className="text-[var(--warning)]" />
-                    </div>
-                    <h1 className="text-xl font-bold">Collection Setup Required</h1>
-                    <p className="text-sm text-[var(--muted)] leading-relaxed">
-                        The <code className="px-1.5 py-0.5 rounded bg-[var(--sidebar-bg)] text-xs font-mono">cold_calling_sessions</code> collection
-                        doesn&apos;t exist in PocketBase yet. Import the updated schema to enable Call Sessions.
-                    </p>
-                    <p className="text-xs text-[var(--muted)]">
-                        Import <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">pb_schema_exported.json</code> from
-                        the <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">packages/pocketbase-client</code> directory.
-                    </p>
-                </div>
-            </div>
-        );
-    }
-
-    // ---------------------------------------------------------------------------
-    // Loading state
-    // ---------------------------------------------------------------------------
-    if (authLoading || loading) {
-        return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <Loader2 size={32} className="animate-spin text-[var(--muted)]" />
-            </div>
-        );
-    }
-
-    // ---------------------------------------------------------------------------
-    // No active session — show mode selector or standalone interface
-    // ---------------------------------------------------------------------------
-    if (!session) {
-        // If standalone mode is active, show standalone interface
-        if (isStandaloneMode) {
-            // Check if audio is connected
-            if (!isSessionActive) {
-                return (
-                    <div className="flex items-center justify-center min-h-[60vh]">
-                        <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
-                            <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
-                                <Headphones size={32} className="text-[var(--error)]" />
-                            </div>
-
-                            <div>
-                                <h2 className="text-xl font-bold mb-2">Connect Audio to Start</h2>
-                                <p className="text-[var(--muted)] text-sm mb-4">
-                                    Recording must be enabled before you can make standalone calls.
-                                </p>
-                            </div>
-
-                            <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
-                                <p className="font-medium text-[var(--foreground)]">Instructions:</p>
-                                <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
-                                    <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio</span> below</li>
-                                    <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
-                                    <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
-                                    <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
-                                </ol>
-                            </div>
-
-                            {recorderError && (
-                                <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
-                                    {recorderError}
-                                </div>
-                            )}
-
-                            <button
-                                onClick={startAudioSession}
-                                className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
-                            >
-                                Connect Audio & Start
-                            </button>
+    const renderContent = () => {
+        if (collectionMissing) {
+            return (
+                <div className="flex items-center justify-center min-h-[60vh]">
+                    <div className="text-center space-y-4 max-w-md">
+                        <div className="w-16 h-16 rounded-2xl bg-[var(--warning-subtle)] flex items-center justify-center mx-auto">
+                            <AlertTriangle size={28} className="text-[var(--warning)]" />
                         </div>
-                    </div>
-                );
-            }
-
-            // Audio is connected, show standalone interface
-            return <StandaloneCallInterface onExit={exitStandalone} />;
-        }
-
-        // Not in standalone mode and no session - show mode selector
-        return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} />;
-    }
-
-    // ---------------------------------------------------------------------------
-    // Active session BUT Audio Not Connected
-    // ---------------------------------------------------------------------------
-    if (!isSessionActive) {
-        return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
-                    <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
-                        <Headphones size={32} className="text-[var(--error)]" />
-                    </div>
-
-                    <div>
-                        <h2 className="text-xl font-bold mb-2">Connect Audio to Start</h2>
-                        <p className="text-[var(--muted)] text-sm mb-4">
-                            Recording must be enabled before you can start calling.
+                        <h1 className="text-xl font-bold">Collection Setup Required</h1>
+                        <p className="text-sm text-[var(--muted)] leading-relaxed">
+                            The <code className="px-1.5 py-0.5 rounded bg-[var(--sidebar-bg)] text-xs font-mono">cold_calling_sessions</code> collection
+                            doesn&apos;t exist in PocketBase yet. Import the updated schema to enable Call Sessions.
+                        </p>
+                        <p className="text-xs text-[var(--muted)]">
+                            Import <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">pb_schema_exported.json</code> from
+                            the <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">packages/pocketbase-client</code> directory.
                         </p>
                     </div>
+                </div>
+            );
+        }
 
-                    <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
-                        <p className="font-medium text-[var(--foreground)]">Instructions:</p>
-                        <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
-                            <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio</span> below</li>
-                            <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
-                            <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
-                            <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
-                        </ol>
+        if (authLoading || loading) {
+            return (
+                <div className="flex items-center justify-center min-h-[60vh]">
+                    <Loader2 size={32} className="animate-spin text-[var(--muted)]" />
+                </div>
+            );
+        }
+
+        if (!session) {
+            if (isStandaloneMode) {
+                if (!isSessionActive) {
+                    return (
+                        <div className="flex items-center justify-center min-h-[60vh]">
+                            <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
+                                <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
+                                    <Headphones size={32} className="text-[var(--error)]" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold mb-2">Connect Audio to Start</h2>
+                                    <p className="text-[var(--muted)] text-sm mb-4">
+                                        Recording must be enabled before you can make standalone calls.
+                                    </p>
+                                </div>
+                                <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
+                                    <p className="font-medium text-[var(--foreground)]">Instructions:</p>
+                                    <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
+                                        <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio</span> below</li>
+                                        <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
+                                        <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
+                                        <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
+                                    </ol>
+                                </div>
+                                {recorderError && (
+                                    <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
+                                        {recorderError}
+                                    </div>
+                                )}
+                                <button
+                                    onClick={startAudioSession}
+                                    className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
+                                >
+                                    Connect Audio & Start
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+                return <StandaloneCallInterface onExit={exitStandalone} />;
+            }
+            return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} />;
+        }
+
+        if (!isSessionActive) {
+            return (
+                <div className="flex items-center justify-center min-h-[60vh]">
+                    <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
+                        <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
+                            <Headphones size={32} className="text-[var(--error)]" />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold mb-2">Connect Audio to Start</h2>
+                            <p className="text-[var(--muted)] text-sm mb-4">
+                                Recording must be enabled before you can start calling.
+                            </p>
+                        </div>
+                        <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
+                            <p className="font-medium text-[var(--foreground)]">Instructions:</p>
+                            <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
+                                <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio</span> below</li>
+                                <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
+                                <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
+                                <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
+                            </ol>
+                        </div>
+                        {recorderError && (
+                            <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
+                                {recorderError}
+                            </div>
+                        )}
+                        <button
+                            onClick={startAudioSession}
+                            className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
+                        >
+                            Connect Audio & Start
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="space-y-6">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl font-bold">Call Session</h1>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+                            Active
+                        </span>
+                        <span className="text-lg font-mono font-semibold tabular-nums text-[var(--muted)]">
+                            {formatDuration(elapsedSec)}
+                        </span>
                     </div>
 
-                    {recorderError && (
-                        <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
-                            {recorderError}
-                        </div>
-                    )}
-
                     <button
-                        onClick={startAudioSession}
-                        className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
+                        onClick={endSession}
+                        disabled={ending}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
                     >
-                        Connect Audio & Start
+                        {ending ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
+                        {ending ? 'Ending...' : 'End Session'}
                     </button>
+                </div>
+
+                {/* Current Call Timer - shown when call is active */}
+                {(callStatus === 'ringing' || callStatus === 'connected') && (
+                    <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                {callStatus === 'ringing' ? (
+                                    <>
+                                        <div className="w-12 h-12 rounded-full bg-[var(--warning-subtle)] flex items-center justify-center">
+                                            <Phone className="w-6 h-6 text-[var(--warning)] animate-bounce" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-lg">Ringing...</p>
+                                            <p className="text-sm text-[var(--muted)]">
+                                                Ring Duration: {ringStartTime ? Math.floor((Date.now() - ringStartTime) / 1000) : 0}s
+                                            </p>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="w-12 h-12 rounded-full bg-[var(--success-subtle)] flex items-center justify-center">
+                                            <Phone className="w-6 h-6 text-[var(--success)]" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-lg">Call Connected</p>
+                                            <div className="flex gap-4 text-sm text-[var(--muted)]">
+                                                <span>Ring: {ringStartTime && connectTime ? Math.floor((connectTime - ringStartTime) / 1000) : 0}s</span>
+                                                <span>Call: {currentCallDuration}s</span>
+                                                <span className="font-medium text-[var(--foreground)]">
+                                                    Total: {(ringStartTime && connectTime ? Math.floor((connectTime - ringStartTime) / 1000) : 0) + currentCallDuration}s
+                                                </span>
+                                            </div>
+                                        </div>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-6">
+                                                                {/* Recording Indicator & Manual Stop */}
+                                                                {recorderStatus === 'recording' && (
+                                                                    <div className="flex items-center gap-3 pr-6 border-r border-[var(--card-border)]">
+                                                                        <div className="flex flex-col items-end">
+                                                                            <div className="flex items-center gap-1.5">
+                                                                                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                                                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Recording</span>
+                                                                            </div>
+                                                                            <span className="text-xs font-mono font-medium">{Math.floor(recorderDuration / 60)}:{(recorderDuration % 60).toString().padStart(2, '0')}</span>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => stopRecording()}
+                                                                            className="p-2 rounded-lg bg-[var(--sidebar-bg)] border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all group"
+                                                                            title="Stop Recording"
+                                                                        >
+                                                                            <Square size={16} fill="currentColor" className="group-hover:fill-white" />
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                    
+                                                                <div className="text-right">
+                                                                    <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Phone Number</p>
+                                                                    <p className="font-mono text-sm font-medium">{currentPhoneNumber || 'Unknown'}</p>
+                                                                </div>                                <button
+                                    onClick={endCall}
+                                    className="w-12 h-12 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white transition-all duration-150 active:scale-90 shadow-lg shadow-red-500/20"
+                                    title="End Call"
+                                >
+                                    <Phone size={20} className="rotate-[135deg]" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Main layout */}
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                    {/* Left column — 60% */}
+                    <div className="lg:col-span-3 space-y-6">
+                        <SessionDialer onDial={handleDial} />
+                        <CurrentCallForm
+                            phoneNumber={currentPhoneNumber}
+                            onSave={handleSaveCall}
+                            saving={savingCall}
+                        />
+                    </div>
+
+                    {/* Right column — 40% */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <SessionMetrics
+                            totalDials={session.total_dials || 0}
+                            totalPickups={session.total_pickups || 0}
+                            durationSec={elapsedSec}
+                        />
+                        <PerformanceTracker
+                            ownerReached={session.owner_reached || 0}
+                            pitchCompleted={session.pitch_completed || 0}
+                            appointmentSet={session.appointment_set || 0}
+                            onUpdate={handlePerformanceUpdate}
+                        />
+                        <LastCallPreview
+                            callLog={lastCallLog}
+                            companyName={lastCallCompanyName}
+                            sessionId={session.id}
+                        />
+                    </div>
                 </div>
             </div>
         );
-    }
+    };
 
-    // ---------------------------------------------------------------------------
-    // Active session
-    // ---------------------------------------------------------------------------
-    return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold">Call Session</h1>
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
-                        Active
-                    </span>
-                    <span className="text-lg font-mono font-semibold tabular-nums text-[var(--muted)]">
-                        {formatDuration(elapsedSec)}
-                    </span>
-                </div>
-
-                <button
-                    onClick={endSession}
-                    disabled={ending}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
-                >
-                    {ending ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
-                    {ending ? 'Ending...' : 'End Session'}
-                </button>
-            </div>
-
-            {/* Current Call Timer - shown when call is active */}
-            {(callStatus === 'ringing' || callStatus === 'connected') && (
-                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            {callStatus === 'ringing' ? (
-                                <>
-                                    <div className="w-12 h-12 rounded-full bg-[var(--warning-subtle)] flex items-center justify-center">
-                                        <Phone className="w-6 h-6 text-[var(--warning)] animate-bounce" />
-                                    </div>
-                                    <div>
-                                        <p className="font-semibold text-lg">Ringing...</p>
-                                        <p className="text-sm text-[var(--muted)]">
-                                            Ring Duration: {ringStartTime ? Math.floor((Date.now() - ringStartTime) / 1000) : 0}s
-                                        </p>
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <div className="w-12 h-12 rounded-full bg-[var(--success-subtle)] flex items-center justify-center">
-                                        <Phone className="w-6 h-6 text-[var(--success)]" />
-                                    </div>
-                                    <div>
-                                        <p className="font-semibold text-lg">Call Connected</p>
-                                        <div className="flex gap-4 text-sm text-[var(--muted)]">
-                                            <span>Ring: {ringStartTime && connectTime ? Math.floor((connectTime - ringStartTime) / 1000) : 0}s</span>
-                                            <span>Call: {currentCallDuration}s</span>
-                                            <span className="font-medium text-[var(--foreground)]">
-                                                Total: {(ringStartTime && connectTime ? Math.floor((connectTime - ringStartTime) / 1000) : 0) + currentCallDuration}s
-                                            </span>
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                        <div className="text-right">
-                            <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Phone Number</p>
-                            <p className="font-mono text-sm font-medium">{currentPhoneNumber || 'Unknown'}</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Main layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                {/* Left column — 60% */}
-                <div className="lg:col-span-3 space-y-6">
-                    <SessionDialer onDial={handleDial} />
-                    <CurrentCallForm
-                        phoneNumber={currentPhoneNumber}
-                        onSave={handleSaveCall}
-                        saving={savingCall}
-                    />
-                </div>
-
-                {/* Right column — 40% */}
-                <div className="lg:col-span-2 space-y-6">
-                    <SessionMetrics
-                        totalDials={session.total_dials || 0}
-                        totalPickups={session.total_pickups || 0}
-                        durationSec={elapsedSec}
-                    />
-                    <PerformanceTracker
-                        ownerReached={session.owner_reached || 0}
-                        pitchCompleted={session.pitch_completed || 0}
-                        appointmentSet={session.appointment_set || 0}
-                        onUpdate={handlePerformanceUpdate}
-                    />
-                    <LastCallPreview
-                        callLog={lastCallLog}
-                        companyName={lastCallCompanyName}
-                        sessionId={session.id}
-                    />
-                </div>
-            </div>
-
-            {/* Hidden Zoom Phone iframe for making calls */}
-            <iframe
-                ref={iframeRef}
-                src={ZOOM_EMBED_URL}
-                onLoad={() => setIframeReady(true)}
-                className="hidden"
-                allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
-                title="Zoom Phone"
-                style={{ display: 'none' }}
-            />
-        </div>
-    );
+    return renderContent();
 }

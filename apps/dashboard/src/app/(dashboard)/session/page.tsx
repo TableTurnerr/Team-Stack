@@ -17,11 +17,11 @@ import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
-import { SessionDialer } from './session-dialer';
 import { CurrentCallForm, type CallFormData } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
+import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
@@ -38,7 +38,7 @@ const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddabl
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady, endCall } = useZoomPhone();
+    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode } = useSession();
 
     // Loading combined
@@ -48,6 +48,7 @@ export default function SessionPage() {
     const [starting, setStarting] = useState(false);
     const [ending, setEnding] = useState(false);
     const [collectionMissing, setCollectionMissing] = useState(false);
+    const [zoomAppConfirmed, setZoomAppConfirmed] = useState(false);
 
     // Recording state
     const {
@@ -80,6 +81,9 @@ export default function SessionPage() {
     const [dialCountIncremented, setDialCountIncremented] = useState(false);
     const [pickupCountIncremented, setPickupCountIncremented] = useState(false);
     const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Track unsaved call state — true when call ended but form not yet submitted
+    const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
 
     // ---------------------------------------------------------------------------
     // Check for existing active session on mount
@@ -124,12 +128,18 @@ export default function SessionPage() {
 
                 // Increment dial count only once when ringing starts (and only for session mode)
                 if (session && !dialCountIncremented) {
+                    console.log('[Session Page] Incrementing dial count for session:', session.id);
                     setDialCountIncremented(true);
                     pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
                         total_dials: (session.total_dials || 0) + 1
                     }).then(updatedSession => {
+                        console.log('[Session Page] Dial count updated:', updatedSession.total_dials);
                         setSession(updatedSession);
                     }).catch(err => console.error('Failed to increment dial count:', err));
+                } else if (!session) {
+                    console.log('[Session Page] No active session, dial count not incremented');
+                } else if (dialCountIncremented) {
+                    console.log('[Session Page] Dial already counted for this call');
                 }
             }
         } else if (callStatus === 'connected') {
@@ -155,8 +165,17 @@ export default function SessionPage() {
                     }
                 }, 1000);
             }
-        } else if (callStatus === 'ended' || callStatus === 'idle') {
-            // Call ended - clear timers only (phone number will be cleared when call is saved or new call is dialed)
+        } else if (callStatus === 'ended') {
+            // Call ended - clear timers, mark as unsaved if there was a phone number
+            if (callTimerRef.current) {
+                clearInterval(callTimerRef.current);
+                callTimerRef.current = null;
+            }
+            if (currentPhoneNumber) {
+                setHasUnsavedCall(true);
+            }
+        } else if (callStatus === 'idle') {
+            // Idle - just clear timers (don't set unsaved here, it's set on 'ended')
             if (callTimerRef.current) {
                 clearInterval(callTimerRef.current);
                 callTimerRef.current = null;
@@ -168,7 +187,7 @@ export default function SessionPage() {
                 clearInterval(callTimerRef.current);
             }
         };
-    }, [callStatus, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession]);
+    }, [callStatus, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
 
     // Reset count incremented flags when current phone number changes (new call)
     useEffect(() => {
@@ -177,6 +196,38 @@ export default function SessionPage() {
             setPickupCountIncremented(false);
         }
     }, [currentPhoneNumber]);
+
+    // Sync currentPhoneNumber from zoom context when a call is initiated from docked dialer
+    useEffect(() => {
+        if (activeCallNumber && callStatus === 'ringing') {
+            // Check if this is a new call (different number or no current number)
+            if (!currentPhoneNumber || activeCallNumber !== currentPhoneNumber) {
+                console.log('[Session Page] New call detected from dialer:', activeCallNumber);
+                setCurrentPhoneNumber(activeCallNumber);
+                setContextPhoneNumber(activeCallNumber);
+
+                // Start recording if session is active
+                if (isSessionActive) {
+                    console.log('[Session Page] Starting recording for call:', activeCallNumber);
+                    startRecording();
+                }
+            }
+        }
+    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, isSessionActive, startRecording]);
+
+    // Warn user before closing tab if session is active
+    useEffect(() => {
+        if (!session || session.status !== 'active') return;
+
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = 'Your active session will end if you close this tab. Are you sure you want to leave?';
+            return e.returnValue;
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [session]);
 
     // ---------------------------------------------------------------------------
     // Start session
@@ -370,6 +421,9 @@ export default function SessionPage() {
             setLastCallCompanyName(data.companyName);
             setCurrentPhoneNumber('');
 
+            // Clear unsaved call state
+            setHasUnsavedCall(false);
+
             // Reset call timing state for next call
             setRingStartTime(null);
             setConnectTime(null);
@@ -457,8 +511,23 @@ export default function SessionPage() {
                                         <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
                                         <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
                                         <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
+                                        <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
                                     </ol>
                                 </div>
+                                <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
+                                    <input
+                                        type="checkbox"
+                                        checked={zoomAppConfirmed}
+                                        onChange={(e) => {
+                                            setZoomAppConfirmed(e.target.checked);
+                                            if (e.target.checked) refreshDialer();
+                                        }}
+                                        className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
+                                    />
+                                    <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
+                                        <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
+                                    </span>
+                                </label>
                                 {recorderError && (
                                     <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                         {recorderError}
@@ -466,7 +535,8 @@ export default function SessionPage() {
                                 )}
                                 <button
                                     onClick={startAudioSession}
-                                    className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
+                                    disabled={!zoomAppConfirmed}
+                                    className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                                 >
                                     Connect Audio & Start
                                 </button>
@@ -499,8 +569,23 @@ export default function SessionPage() {
                                 <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
                                 <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
                                 <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
+                                <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
                             </ol>
                         </div>
+                        <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
+                            <input
+                                type="checkbox"
+                                checked={zoomAppConfirmed}
+                                onChange={(e) => {
+                                    setZoomAppConfirmed(e.target.checked);
+                                    if (e.target.checked) refreshDialer();
+                                }}
+                                className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
+                            />
+                            <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
+                                <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
+                            </span>
+                        </label>
                         {recorderError && (
                             <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                 {recorderError}
@@ -508,7 +593,8 @@ export default function SessionPage() {
                         )}
                         <button
                             onClick={startAudioSession}
-                            className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
+                            disabled={!zoomAppConfirmed}
+                            className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                         >
                             Connect Audio & Start
                         </button>
@@ -574,54 +660,51 @@ export default function SessionPage() {
                                                 </span>
                                             </div>
                                         </div>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                            <div className="flex items-center gap-6">
-                                                                {/* Recording Indicator & Manual Stop */}
-                                                                {recorderStatus === 'recording' && (
-                                                                    <div className="flex items-center gap-3 pr-6 border-r border-[var(--card-border)]">
-                                                                        <div className="flex flex-col items-end">
-                                                                            <div className="flex items-center gap-1.5">
-                                                                                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                                                                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Recording</span>
-                                                                            </div>
-                                                                            <span className="text-xs font-mono font-medium">{Math.floor(recorderDuration / 60)}:{(recorderDuration % 60).toString().padStart(2, '0')}</span>
-                                                                        </div>
-                                                                        <button
-                                                                            onClick={() => stopRecording()}
-                                                                            className="p-2 rounded-lg bg-[var(--sidebar-bg)] border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all group"
-                                                                            title="Stop Recording"
-                                                                        >
-                                                                            <Square size={16} fill="currentColor" className="group-hover:fill-white" />
-                                                                        </button>
-                                                                    </div>
-                                                                )}
-                                    
-                                                                <div className="text-right">
-                                                                    <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Phone Number</p>
-                                                                    <p className="font-mono text-sm font-medium">{currentPhoneNumber || 'Unknown'}</p>
-                                                                </div>                                <button
-                                    onClick={endCall}
-                                    className="w-12 h-12 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white transition-all duration-150 active:scale-90 shadow-lg shadow-red-500/20"
-                                    title="End Call"
-                                >
-                                    <Phone size={20} className="rotate-[135deg]" />
-                                </button>
+                                    </>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-6">
+                                {/* Recording Indicator & Manual Stop */}
+                                {recorderStatus === 'recording' && (
+                                    <div className="flex items-center gap-3 pr-6 border-r border-[var(--card-border)]">
+                                        <div className="flex flex-col items-end">
+                                            <div className="flex items-center gap-1.5">
+                                                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Recording</span>
+                                            </div>
+                                            <span className="text-xs font-mono font-medium">{Math.floor(recorderDuration / 60)}:{(recorderDuration % 60).toString().padStart(2, '0')}</span>
+                                        </div>
+                                        <button
+                                            onClick={() => stopRecording()}
+                                            className="p-2 rounded-lg bg-[var(--sidebar-bg)] border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all group"
+                                            title="Stop Recording"
+                                        >
+                                            <Square size={16} fill="currentColor" className="group-hover:fill-white" />
+                                        </button>
+                                    </div>
+                                )}
+
+                                <div className="text-right">
+                                    <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Phone Number</p>
+                                    <p className="font-mono text-sm font-medium">{currentPhoneNumber || 'Unknown'}</p>
+                                </div>
                             </div>
                         </div>
                     </div>
                 )}
 
+                {/* Docked Zoom Phone Dialer - Above Current Call section */}
+                <ZoomPhoneDialer docked disabled={hasUnsavedCall} />
+
                 {/* Main layout */}
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                     {/* Left column — 60% */}
                     <div className="lg:col-span-3 space-y-6">
-                        <SessionDialer onDial={handleDial} />
                         <CurrentCallForm
                             phoneNumber={currentPhoneNumber}
                             onSave={handleSaveCall}
                             saving={savingCall}
+                            hasUnsavedCall={hasUnsavedCall}
                         />
                     </div>
 

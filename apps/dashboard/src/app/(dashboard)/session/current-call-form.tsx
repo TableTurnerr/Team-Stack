@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, ChevronDown } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -42,9 +42,11 @@ interface CurrentCallFormProps {
     phoneNumber: string;
     onSave: (data: CallFormData) => void;
     saving?: boolean;
+    /** Whether a recorded call is waiting to be submitted */
+    hasUnsavedCall?: boolean;
 }
 
-export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallFormProps) {
+export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }: CurrentCallFormProps) {
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -56,9 +58,17 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
     const [ownerReached, setOwnerReached] = useState(false);
     const [pitchCompleted, setPitchCompleted] = useState(false);
     const [appointmentSet, setAppointmentSet] = useState(false);
-    const [isNewCompany, setIsNewCompany] = useState(false); // Track if creating new company
+    const [noneSelected, setNoneSelected] = useState(true);
+    const [isNewCompany, setIsNewCompany] = useState(false);
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Sync "None" with other performance options
+    useEffect(() => {
+        if (ownerReached || pitchCompleted || appointmentSet) {
+            setNoneSelected(false);
+        }
+    }, [ownerReached, pitchCompleted, appointmentSet]);
 
     // Search companies
     useEffect(() => {
@@ -78,25 +88,20 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
                 });
                 setCompanyResults(result.items);
 
-                // Check if there's an exact match
                 const exactMatch = result.items.find(
                     c => c.company_name.toLowerCase() === companySearch.toLowerCase()
                 );
 
                 if (exactMatch) {
-                    // Exact match found - not a new company
                     setIsNewCompany(false);
                 } else if (result.items.length === 0) {
-                    // No results - definitely new company
                     setIsNewCompany(true);
                 } else {
-                    // Partial matches but no exact match - treat as new company
                     setIsNewCompany(true);
                 }
 
                 setShowCompanyDropdown(result.items.length > 0);
             } catch {
-                // silent
                 setIsNewCompany(true);
             }
         }, 300);
@@ -121,14 +126,30 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
         setSelectedCompany(company);
         setCompanySearch(company.company_name);
         setShowCompanyDropdown(false);
-        setIsNewCompany(false); // Existing company selected
+        setIsNewCompany(false);
         if (company.owner_name) {
             setRecipientName(company.owner_name);
         }
     };
 
+    // Toggle recipient tag between Receptionist and Owner
+    const handleTagClick = () => {
+        const newOwnerState = !ownerReached;
+        setOwnerReached(newOwnerState);
+        if (newOwnerState) {
+            setNoneSelected(false);
+        }
+    };
+
+    // Handle "None" toggle
+    const handleNoneToggle = () => {
+        setNoneSelected(true);
+        setOwnerReached(false);
+        setPitchCompleted(false);
+        setAppointmentSet(false);
+    };
+
     const handleSave = useCallback(async () => {
-        // Need either an existing company or a new company name
         if (!selectedCompany && !isNewCompany) return;
         if (!companySearch.trim()) return;
 
@@ -137,7 +158,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
             let companyName: string;
 
             if (isNewCompany) {
-                // Create new company
                 const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>({
                     company_name: companySearch.trim(),
                     owner_name: recipientName || undefined,
@@ -176,23 +196,45 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
             setOwnerReached(false);
             setPitchCompleted(false);
             setAppointmentSet(false);
+            setNoneSelected(true);
         } catch (err) {
             console.error('Failed to save call:', err);
         }
     }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave]);
 
-    const canSave = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2 && callOutcome && !saving;
+    // Required fields: Company, Phone Number (auto-filled), Call Outcome, Interest Level (always has value), Post-call Notes
+    const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
+    const hasPhoneNumber = !!phoneNumber;
+    const hasOutcome = !!callOutcome;
+    const hasNotes = postCallNotes.trim().length > 0;
+    const canSave = hasCompany && hasPhoneNumber && hasOutcome && hasNotes && !saving;
 
     return (
-        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5 space-y-4">
-            <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
-                Current Call
-            </h3>
+        <div className={cn(
+            "bg-[var(--card-bg)] border rounded-xl p-5 space-y-4 transition-all duration-300",
+            hasUnsavedCall
+                ? "border-[var(--warning)] shadow-[0_0_0_1px_var(--warning),0_0_15px_-3px_var(--warning)] animate-[pulse-border_2s_ease-in-out_infinite]"
+                : "border-[var(--card-border)]"
+        )}>
+            {/* Header with unsaved indicator */}
+            <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
+                    Current Call
+                </h3>
+                {hasUnsavedCall && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--warning-subtle)] border border-[var(--warning)]/30">
+                        <AlertCircle size={12} className="text-[var(--warning)]" />
+                        <span className="text-[10px] font-semibold text-[var(--warning)] uppercase tracking-wider">
+                            Recorded but unsubmitted
+                        </span>
+                    </div>
+                )}
+            </div>
 
             {/* Company autocomplete */}
             <div className="relative" ref={dropdownRef}>
                 <label className="text-xs text-[var(--muted)] mb-1 flex items-center justify-between">
-                    <span>Company</span>
+                    <span>Company <span className="text-[var(--error)]">*</span></span>
                     {isNewCompany && companySearch.trim().length >= 2 && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold uppercase tracking-wider">
                             New
@@ -237,23 +279,37 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
 
             {/* Phone number display */}
             <div>
-                <label className="text-xs text-[var(--muted)] mb-1 block">Phone Number</label>
+                <label className="text-xs text-[var(--muted)] mb-1 block">Phone Number <span className="text-[var(--error)]">*</span></label>
                 <div className="flex items-center gap-2 px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm">
                     <PhoneIcon size={14} className="text-[var(--muted)]" />
                     <span className="font-mono">{phoneNumber || '—'}</span>
                 </div>
             </div>
 
-            {/* Recipient */}
+            {/* Recipient with Receptionist/Owner tag */}
             <div>
-                <label className="text-xs text-[var(--muted)] mb-1 block">Recipient Name</label>
+                <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-2">
+                    <span>Recipient Name</span>
+                    <button
+                        type="button"
+                        onClick={handleTagClick}
+                        className={cn(
+                            "text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider border transition-all cursor-pointer",
+                            ownerReached
+                                ? "bg-[var(--success-subtle)] text-[var(--success)] border-[var(--success)]/30 hover:bg-[var(--success)]/20"
+                                : "bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]"
+                        )}
+                    >
+                        {ownerReached ? 'Owner' : 'Receptionist'}
+                    </button>
+                </label>
                 <div className="relative">
                     <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
                     <input
                         type="text"
                         value={recipientName}
                         onChange={e => setRecipientName(e.target.value)}
-                        placeholder="Who did you speak to?"
+                        placeholder="Who did you speak to? (Only write the name)"
                         className="w-full pl-8 pr-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
                     />
                 </div>
@@ -261,7 +317,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
 
             {/* Call Outcome pills */}
             <div>
-                <label className="text-xs text-[var(--muted)] mb-1.5 block">Call Outcome</label>
+                <label className="text-xs text-[var(--muted)] mb-1.5 block">Call Outcome <span className="text-[var(--error)]">*</span></label>
                 <div className="flex flex-wrap gap-1.5">
                     {OUTCOMES.map(outcome => {
                         const colors = OUTCOME_COLORS[outcome];
@@ -287,7 +343,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
             {/* Interest Level */}
             <div>
                 <label className="text-xs text-[var(--muted)] mb-1 flex items-center justify-between">
-                    <span>Interest Level</span>
+                    <span>Interest Level <span className="text-[var(--error)]">*</span></span>
                     <span className="font-semibold text-[var(--foreground)]">{interestLevel}/10</span>
                 </label>
                 <input
@@ -300,15 +356,28 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
                 />
             </div>
 
-            {/* Performance Tracking */}
+            {/* Performance Tracking with None option */}
             <div className="space-y-2">
                 <label className="text-xs text-[var(--muted)] mb-1 block">Performance</label>
                 <div className="flex flex-col gap-2">
+                    {/* None option - default */}
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                        <input
+                            type="checkbox"
+                            checked={noneSelected}
+                            onChange={handleNoneToggle}
+                            className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--muted)] checked:border-[var(--muted)] transition-colors"
+                        />
+                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors text-[var(--muted)]">None</span>
+                    </label>
                     <label className="flex items-center gap-2 cursor-pointer group">
                         <input
                             type="checkbox"
                             checked={ownerReached}
-                            onChange={e => setOwnerReached(e.target.checked)}
+                            onChange={e => {
+                                setOwnerReached(e.target.checked);
+                                if (e.target.checked) setNoneSelected(false);
+                            }}
                             className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                         />
                         <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Owner Reached</span>
@@ -317,7 +386,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
                         <input
                             type="checkbox"
                             checked={pitchCompleted}
-                            onChange={e => setPitchCompleted(e.target.checked)}
+                            onChange={e => {
+                                setPitchCompleted(e.target.checked);
+                                if (e.target.checked) setNoneSelected(false);
+                            }}
                             className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                         />
                         <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Pitch Completed</span>
@@ -326,7 +398,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
                         <input
                             type="checkbox"
                             checked={appointmentSet}
-                            onChange={e => setAppointmentSet(e.target.checked)}
+                            onChange={e => {
+                                setAppointmentSet(e.target.checked);
+                                if (e.target.checked) setNoneSelected(false);
+                            }}
                             className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                         />
                         <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Appointment Set</span>
@@ -338,7 +413,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
             <div>
                 <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-1">
                     <StickyNote size={12} />
-                    <span>Post-call Notes</span>
+                    <span>Post-call Notes <span className="text-[var(--error)]">*</span></span>
                 </label>
                 <textarea
                     value={postCallNotes}
@@ -353,10 +428,15 @@ export function CurrentCallForm({ phoneNumber, onSave, saving }: CurrentCallForm
             <button
                 onClick={handleSave}
                 disabled={!canSave}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 active:scale-[0.98]"
+                className={cn(
+                    "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]",
+                    hasUnsavedCall
+                        ? "bg-[var(--warning)] text-white hover:opacity-90"
+                        : "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90"
+                )}
             >
                 <Save size={16} />
-                {saving ? 'Saving...' : 'Save Call & Next'}
+                {saving ? 'Saving...' : hasUnsavedCall ? 'Submit Call Log' : 'Save Call & Next'}
             </button>
         </div>
     );

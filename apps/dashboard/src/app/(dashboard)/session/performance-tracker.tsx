@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect } from 'react';
-import { Plus, Minus, UserCheck, Presentation, CalendarCheck } from 'lucide-react';
+import { Plus, Minus, UserCheck, Presentation, CalendarCheck, type LucideIcon } from 'lucide-react';
 
 interface PerformanceTrackerProps {
     ownerReached: number;
@@ -13,7 +13,7 @@ interface PerformanceTrackerProps {
 interface CounterRowProps {
     label: string;
     value: number;
-    icon: React.ElementType;
+    icon: LucideIcon;
     color: string;
     onIncrement: () => void;
     onDecrement: () => void;

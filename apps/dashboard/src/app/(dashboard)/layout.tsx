@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { useAuth } from '@/contexts/auth-context';
 import { Loader2 } from 'lucide-react';
@@ -43,6 +43,27 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isSessionPage = pathname === '/session';
+
+  return (
+    <div className="flex min-h-screen bg-[var(--background)]">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
+        <ActiveSessionBanner />
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[var(--background)]">
+          <div className="container mx-auto px-4 py-8 lg:px-8 max-w-[1600px]">
+            {children}
+          </div>
+        </main>
+      </div>
+      {/* Only show floating dialer when NOT on session page */}
+      {!isSessionPage && <ZoomPhoneDialer />}
+    </div>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -53,18 +74,7 @@ export default function DashboardLayout({
       <ZoomPhoneProvider>
         <SessionProvider>
           <CallRecordingProvider>
-            <div className="flex min-h-screen bg-[var(--background)]">
-              <Sidebar />
-              <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
-                <ActiveSessionBanner />
-                <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[var(--background)]">
-                  <div className="container mx-auto px-4 py-8 lg:px-8 max-w-[1600px]">
-                    {children}
-                  </div>
-                </main>
-              </div>
-              <ZoomPhoneDialer />
-            </div>
+            <DashboardLayoutContent>{children}</DashboardLayoutContent>
           </CallRecordingProvider>
         </SessionProvider>
       </ZoomPhoneProvider>

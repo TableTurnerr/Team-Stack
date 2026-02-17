@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Power, Loader2, Mic, MicOff, Phone, Square } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type PhoneNumber } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
-import { SessionDialer } from './session-dialer';
+import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { CurrentCallForm, type CallFormData } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 
@@ -17,7 +17,7 @@ interface StandaloneCallInterfaceProps {
 
 export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps) {
     const { user } = useAuth();
-    const { dialNumber, callStatus, endCall } = useZoomPhone();
+    const { callStatus, endCall, activeCallNumber } = useZoomPhone();
     const {
         status: recorderStatus,
         duration: recordingDuration,
@@ -32,14 +32,20 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     const [lastCallCompanyName, setLastCallCompanyName] = useState('');
     const [exiting, setExiting] = useState(false);
 
-    // Handle dialing
-    const handleDial = useCallback((phoneNumber: string) => {
-        setCurrentPhoneNumber(phoneNumber);
-        setContextPhoneNumber(phoneNumber);
-        dialNumber(phoneNumber);
-        // Auto-start recording
-        startRecording();
-    }, [dialNumber, setContextPhoneNumber, startRecording]);
+    // Track active call from Zoom Phone context
+    useEffect(() => {
+        if (activeCallNumber && callStatus === 'ringing') {
+            // Check if this is a new call (different number or no current number)
+            if (!currentPhoneNumber || activeCallNumber !== currentPhoneNumber) {
+                console.log('[Standalone] New call detected from dialer:', activeCallNumber);
+                setCurrentPhoneNumber(activeCallNumber);
+                setContextPhoneNumber(activeCallNumber);
+
+                // Auto-start recording
+                startRecording();
+            }
+        }
+    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, startRecording]);
 
     // Handle saving standalone call
     const handleSaveCall = useCallback(async (data: CallFormData) => {
@@ -48,20 +54,24 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         try {
             // Stop recording and upload
             stopRecording();
+            setContextPhoneNumber('');
 
             // Find or create phone number record
             let phoneNumberRecordId: string | null = null;
             try {
-                const existingPhones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
-                    filter: `phone_number ~ "${currentPhoneNumber}"`,
-                    limit: 1,
+                // Strip non-digits for search
+                const cleanNumber = data.phoneNumber.replace(/\D/g, '').slice(-10);
+                const existingPhones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
+                    filter: `company = "${data.companyId}" && phone_number ~ "${cleanNumber}"`,
                 });
-                if (existingPhones.length > 0) {
-                    phoneNumberRecordId = existingPhones[0].id;
+                if (existingPhones.items.length > 0) {
+                    phoneNumberRecordId = existingPhones.items[0].id;
                 } else {
                     const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
                         company: data.companyId,
-                        phone_number: currentPhoneNumber,
+                        phone_number: data.phoneNumber,
+                        receptionist_name: data.recipientName || undefined,
+                        last_called: new Date().toISOString(),
                     });
                     phoneNumberRecordId = newPhone.id;
                 }
@@ -85,6 +95,19 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 // session field is omitted (will be null) - this marks it as a standalone call
             });
 
+            // Update company metadata
+            try {
+                const companyUpdates: Record<string, any> = {
+                    last_contacted: new Date().toISOString(),
+                };
+                if (data.ownerReached && data.recipientName) {
+                    companyUpdates.owner_name = data.recipientName;
+                }
+                await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
+            } catch (err) {
+                // ignore
+            }
+
             // Show last call preview
             setLastCallLog(callLog);
             setLastCallCompanyName(data.companyName);
@@ -94,7 +117,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         } finally {
             setSavingCall(false);
         }
-    }, [user, currentPhoneNumber, stopRecording]);
+    }, [user, stopRecording, setContextPhoneNumber]);
 
     // Handle exit
     const handleExit = useCallback(async () => {
@@ -110,6 +133,9 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             setExiting(false);
         }
     }, [recorderStatus, stopRecording, onExit]);
+
+    // Track unsaved call state
+    const hasUnsavedCall = !!(callStatus === 'ended' && currentPhoneNumber);
 
     return (
         <div className="space-y-6">
@@ -165,7 +191,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                                 </div>
                                 <div>
                                     <p className="font-medium">Not Recording</p>
-                                    <p className="text-sm text-[var(--muted)]">Dial a number to start</p>
+                                    <p className="text-sm text-[var(--muted)]">Hover over the dialer bar to make a call</p>
                                 </div>
                             </>
                         )}
@@ -194,20 +220,24 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                     </div>
                 </div>
             </div>
-            {/* Main layout - simplified single column on mobile, two columns on large screens */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left column */}
-                <div className="space-y-6">
-                    <SessionDialer onDial={handleDial} />
-                </div>
 
-                {/* Right column */}
-                <div className="space-y-6">
+            {/* Docked Zoom Phone Dialer */}
+            <ZoomPhoneDialer docked disabled={hasUnsavedCall} />
+
+            {/* Main layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                {/* Left column - Form */}
+                <div className="lg:col-span-3 space-y-6">
                     <CurrentCallForm
                         phoneNumber={currentPhoneNumber}
                         onSave={handleSaveCall}
                         saving={savingCall}
+                        hasUnsavedCall={hasUnsavedCall}
                     />
+                </div>
+
+                {/* Right column - Past Call */}
+                <div className="lg:col-span-2 space-y-6">
                     <LastCallPreview
                         callLog={lastCallLog}
                         companyName={lastCallCompanyName}

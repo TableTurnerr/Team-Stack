@@ -30,17 +30,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { TimezoneClock } from './timezone-clock';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 
-const POPULAR_TIMEZONES = [
-  { timezone: 'America/New_York', label: 'EST' },
-  { timezone: 'America/Chicago', label: 'CST' },
-  { timezone: 'America/Denver', label: 'MST' },
-  { timezone: 'America/Los_Angeles', label: 'PST' },
-  { timezone: 'UTC', label: 'UTC' },
-  { timezone: 'Europe/London', label: 'GMT' },
-  { timezone: 'Europe/Paris', label: 'CET' },
-  { timezone: 'Asia/Tokyo', label: 'JST' },
-  { timezone: 'Australia/Sydney', label: 'AEST' },
-];
+import { TimezoneSearch } from './timezone-search';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -176,7 +166,7 @@ export function Sidebar() {
         </nav>
 
         {/* Timezones */}
-        <div className="px-4 py-4 border-t border-[var(--sidebar-border)] space-y-3">
+        <div className="px-4 py-4 border-t border-[var(--sidebar-border)] space-y-3 relative">
           <div className="flex items-center justify-between px-1">
             <span className="text-[10px] font-bold text-[var(--muted)] uppercase tracking-wider">
               Time Zones
@@ -193,24 +183,12 @@ export function Sidebar() {
           </div>
 
           {showTzSelector && (
-            <div className="p-2 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] shadow-xl animate-in fade-in slide-in-from-top-1 duration-200">
-              <div className="grid grid-cols-3 gap-1">
-                {POPULAR_TIMEZONES.filter(tz => !timezones.find(t => t.timezone === tz.timezone)).map((tz) => (
-                  <button
-                    key={tz.timezone}
-                    onClick={() => addTimezone(tz)}
-                    className="flex flex-col items-center justify-center p-1.5 rounded-md hover:bg-[var(--sidebar-hover)] transition-colors border border-transparent hover:border-[var(--card-border)]"
-                  >
-                    <span className="text-[10px] font-bold">{tz.label}</span>
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => setShowTzSelector(false)}
-                className="w-full mt-2 py-1 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-              >
-                Cancel
-              </button>
+            <div className="absolute bottom-full left-0 mb-2 w-full z-50">
+              <TimezoneSearch
+                onSelect={addTimezone}
+                onCancel={() => setShowTzSelector(false)}
+                existingTimezones={timezones.map(t => t.timezone)}
+              />
             </div>
           )}
 

@@ -38,7 +38,7 @@ export function ActiveSessionBanner() {
     // Standalone mode banner
     if (isStandaloneMode && !session) {
         return (
-            <div className="bg-[var(--warning)] text-[var(--background)] px-4 py-3 shadow-lg flex items-center justify-between animate-in slide-in-from-top duration-300 relative z-30">
+            <div className="bg-[var(--warning)] text-[var(--background)] px-4 py-3 shadow-lg flex items-center justify-between animate-in slide-in-from-top duration-300 relative z-[1001]">
                 <div className="flex items-center gap-3">
                     <div className="p-1.5 rounded-full bg-[var(--background)]/20 animate-pulse">
                         <Phone size={16} className="text-[var(--background)]" />
@@ -62,7 +62,7 @@ export function ActiveSessionBanner() {
     // Session mode banner
     if (session) {
         return (
-            <div className="bg-[var(--foreground)] text-[var(--background)] px-4 py-3 shadow-lg flex items-center justify-between animate-in slide-in-from-top duration-300 relative z-30">
+            <div className="bg-[var(--foreground)] text-[var(--background)] px-4 py-3 shadow-lg flex items-center justify-between animate-in slide-in-from-top duration-300 relative z-[1001]">
                 <div className="flex items-center gap-3">
                     <div className="p-1.5 rounded-full bg-[var(--background)]/20 animate-pulse">
                         <Headphones size={16} className="text-[var(--background)]" />

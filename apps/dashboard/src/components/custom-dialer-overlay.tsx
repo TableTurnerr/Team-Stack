@@ -83,26 +83,7 @@ export function CustomDialerOverlay({ onDial }: { onDial: (phoneNumber: string) 
 
     return (
         <div className="absolute inset-0 z-10 flex flex-col bg-white">
-            {/* ── Header ─ replaces Zoom logo area ── */}
-            <div className="px-5 pt-4 pb-2">
-                <span className="text-[15px] font-bold tracking-tight text-[#232333]"
-                    style={{ fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}
-                >
-                    Custom Dialer
-                </span>
-            </div>
 
-            {/* ── Tab bar ─ static "Keypad" tab active ── */}
-            <div className="flex items-center px-4" style={{ borderBottom: '1px solid #f0f0f4' }}>
-                <div className="relative px-3 py-2.5">
-                    <span className="text-[13px] font-semibold text-[#2d8cff]"
-                        style={{ fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}
-                    >
-                        Keypad
-                    </span>
-                    <div className="absolute bottom-0 left-3 right-3 h-[2px] rounded-full bg-[#2d8cff]" />
-                </div>
-            </div>
 
             {/* ── Number input ── */}
             <div className="flex items-center px-5 pt-5 pb-2">

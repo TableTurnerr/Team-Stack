@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Phone, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, PhoneOff, ChevronLeft, Power, Loader2, Delete } from 'lucide-react';
+import { Phone, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, ChevronLeft, Power, Loader2, Delete } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useSession } from '@/contexts/session-context';
@@ -61,15 +61,17 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
     const [isResizing, setIsResizing] = useState(false);
     const [isMinimized, setIsMinimized] = useState(true);
     const [showKeypad, setShowKeypad] = useState(false);
-    const [showDialPad, setShowDialPad] = useState(false);
-    const [dialerNumber, setDialerNumber] = useState('+1');
+
     const [ending, setEnding] = useState(false);
     const [elapsedSec, setElapsedSec] = useState(0);
     const [isHovering, setIsHovering] = useState(false);
+    const [dockedDialInput, setDockedDialInput] = useState('');
 
-    const dialerInputRef = useRef<HTMLInputElement>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const positionBeforeExpand = useRef<number | null>(null);
+    const dragStartPos = useRef<{ x: number, y: number } | null>(null);
+
+
 
     // "Show Zoom Native Dialer" setting from integrations
     const [showNativeEnabled, setShowNativeEnabled] = useState(false);
@@ -270,6 +272,15 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
         dialNumber(phoneNumber);   // dialNumber sets isDialing in context
     }, [dialNumber]);
 
+    // Docked mode dial handler
+    const handleDockedDial = useCallback(() => {
+        const cleaned = dockedDialInput.trim();
+        if (cleaned.length >= 3) {
+            dialNumber(cleaned);
+            setDockedDialInput('');
+        }
+    }, [dockedDialInput, dialNumber]);
+
     // End session handler
     const handleEndSession = useCallback(async () => {
         if (!session) return;
@@ -294,54 +305,75 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
     }, [router]);
 
     // Dialer functions
-    const appendDigit = useCallback((digit: string) => {
-        setDialerNumber(prev => {
-            if (!prev || prev === '+') return '+1' + digit;
-            return prev + digit;
-        });
-        dialerInputRef.current?.focus();
-    }, []);
 
-    const handleBackspace = useCallback(() => {
-        setDialerNumber(prev => {
-            if (prev.length <= 2) return '+1';
-            return prev.slice(0, -1);
-        });
-        dialerInputRef.current?.focus();
-    }, []);
-
-    const handleDialerInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        let val = e.target.value;
-        let digits = val.replace(/\D/g, '');
-        digits = digits.replace(/^1+/, '1');
-        if (!digits.startsWith('1')) {
-            digits = '1' + digits;
-        }
-        setDialerNumber('+' + digits);
-    };
-
-    const canDial = dialerNumber.length === 12 && dialerNumber.startsWith('+1') && !isCallActive;
-
-    const handleDialFromStats = () => {
-        if (canDial) {
-            dialNumber(dialerNumber);
-            setShowKeypad(true); // Show iframe when dialing
-        }
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter' && canDial) {
-            e.preventDefault();
-            handleDialFromStats();
-        }
-    };
 
     // Compute panel dimensions
     const hasSession = session && session.status === 'active';
     // In docked mode, use hover state; in floating mode, use button-controlled minimized state
     // When disabled, always keep collapsed
-    const isCollapsed = disabled ? true : (docked ? !isHovering : isMinimized);
-    const currentHeight = isCollapsed ? '48px' : (showKeypad ? `${height}px` : (hasSession ? '500px' : `${height}px`));
+    // In docked mode, expand on hover OR during active call
+    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive) : isMinimized);
+    const currentHeight = docked
+        ? (isCollapsed ? '52px' : '550px')
+        : (isCollapsed ? '48px' : (showKeypad ? `${height}px` : (hasSession ? 'auto' : `${height}px`)));
+
+    const isFloatingMinimized = !docked && isMinimized;
+
+    // Determine status color and icon for minimized button
+    let buttonColor = 'bg-[var(--sidebar-bg)] border-[var(--card-border)] text-[var(--muted)]';
+    let buttonIcon = <Phone size={20} className="opacity-50" />;
+
+    if (isCallActive) {
+        buttonColor = 'bg-green-500 text-white animate-pulse shadow-green-500/20';
+        buttonIcon = <Phone size={20} />;
+    } else if (hasSession) {
+        buttonColor = 'bg-blue-500 text-white shadow-blue-500/20';
+        buttonIcon = <Phone size={20} />;
+    }
+
+    if (isFloatingMinimized) {
+        return (
+            <div
+                ref={panelRef}
+                style={{
+                    top: `${yPosition}px`,
+                    right: '24px',
+                    position: 'fixed',
+                    zIndex: 998,
+                    transform: isDragging ? 'scale(1.1)' : 'scale(1)',
+                    transition: isDragging ? 'transform 0.1s ease-out' : 'top 0.3s ease-out, transform 0.2s ease-out',
+                }}
+                className={cn(
+                    "rounded-full shadow-2xl cursor-pointer select-none",
+                    isDragging && "cursor-grabbing"
+                )}
+                onMouseDown={(e) => {
+                    dragStartPos.current = { x: e.clientX, y: e.clientY };
+                    handleMouseDown(e);
+                }}
+                onMouseUp={(e) => {
+                    // Only expand if it wasn't a drag (movement < 5px)
+                    if (dragStartPos.current) {
+                        const dist = Math.sqrt(
+                            Math.pow(e.clientX - dragStartPos.current.x, 2) +
+                            Math.pow(e.clientY - dragStartPos.current.y, 2)
+                        );
+                        if (dist < 5) {
+                            setIsMinimized(false);
+                        }
+                    }
+                    dragStartPos.current = null;
+                }}
+            >
+                <div className={cn(
+                    "w-12 h-12 rounded-full flex items-center justify-center border shadow-lg transition-all hover:scale-105 active:scale-95",
+                    buttonColor
+                )}>
+                    {buttonIcon}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div
@@ -377,9 +409,60 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
             }}
         >
             {/* Header / Drag Handle */}
-            <div className="flex shrink-0">
-                {/* Vertical Drag Handle - Only show when not docked */}
-                {!docked && (
+            {docked ? (
+                /* Docked mode: Simple dial input row */
+                <div className="flex items-center gap-2 px-3 py-2.5 shrink-0 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
+                    <Phone size={16} className={cn(
+                        "shrink-0 transition-colors",
+                        isCallActive ? "text-[var(--success)] animate-pulse" : "text-blue-400"
+                    )} />
+                    {disabled ? (
+                        <span className="flex-1 text-xs text-[var(--warning)] font-medium">
+                            Submit call log first
+                        </span>
+                    ) : isCallActive ? (
+                        <div className="flex-1 flex items-center gap-2">
+                            <span className="text-xs font-semibold text-[var(--success)]">
+                                {callStatus === 'ringing' ? 'Ringing...' : 'Connected'}
+                            </span>
+                            <span className="text-[10px] text-[var(--muted)] italic ml-auto">
+                                Hover for Zoom controls
+                            </span>
+                        </div>
+                    ) : (
+                        <>
+                            <input
+                                type="text"
+                                value={dockedDialInput}
+                                onChange={e => setDockedDialInput(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleDockedDial();
+                                    }
+                                }}
+                                placeholder="Enter phone number..."
+                                className="flex-1 bg-transparent border-0 text-sm font-medium placeholder:text-[var(--muted)] focus:outline-none"
+                            />
+                            <button
+                                onClick={handleDockedDial}
+                                disabled={dockedDialInput.trim().length < 3}
+                                className={cn(
+                                    "w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 active:scale-90",
+                                    dockedDialInput.trim().length >= 3
+                                        ? "bg-[var(--success)] text-white hover:opacity-90"
+                                        : "bg-[var(--card-border)] text-[var(--muted)] opacity-40"
+                                )}
+                                title="Dial"
+                            >
+                                <Phone size={14} />
+                            </button>
+                        </>
+                    )}
+                </div>
+            ) : (
+                /* Floating mode: Drag handle + header */
+                <div className="flex shrink-0">
                     <div
                         onMouseDown={handleMouseDown}
                         className={cn(
@@ -391,43 +474,26 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
                     >
                         <GripHorizontal size={14} className="text-[var(--muted)] rotate-90" />
                     </div>
-                )}
 
-                {/* Header Content */}
-                <div className="flex-1 flex items-center justify-between px-3 py-2 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
-                    <div className="flex items-center gap-2">
-                        <Phone size={14} className="text-blue-400" />
-                        <span className="text-xs font-semibold">
-                            {hasSession ? 'Call Session' : 'Zoom Phone'}
-                        </span>
-                        {/* Show session info when minimized */}
-                        {hasSession && isCollapsed && (
-                            <>
-                                <span className="text-xs text-[var(--muted)]">•</span>
-                                <div className="flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
-                                    <span className="text-xs font-mono font-semibold tabular-nums text-[var(--muted)]">
-                                        {formatDuration(elapsedSec)}
-                                    </span>
-                                </div>
-                            </>
-                        )}
-                        {/* Disabled hint when unsaved call */}
-                        {disabled && (
-                            <span className="text-[10px] text-[var(--warning)] font-medium">
-                                Submit call log first
+                    <div className="flex-1 flex items-center justify-between px-3 py-2 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
+                        <div className="flex items-center gap-2">
+                            <Phone size={14} className="text-blue-400" />
+                            <span className="text-xs font-semibold">
+                                {hasSession ? 'Call Session' : 'Zoom Phone'}
                             </span>
-                        )}
-                        {/* Hover hint for docked mode when collapsed */}
-                        {docked && isCollapsed && !hasSession && !disabled && (
-                            <span className="text-[10px] text-[var(--muted)] italic">
-                                Hover to expand
-                            </span>
-                        )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                        {/* Minimize/Maximize button - only in floating mode */}
-                        {!docked && (
+                            {hasSession && isCollapsed && (
+                                <>
+                                    <span className="text-xs text-[var(--muted)]">•</span>
+                                    <div className="flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+                                        <span className="text-xs font-mono font-semibold tabular-nums text-[var(--muted)]">
+                                            {formatDuration(elapsedSec)}
+                                        </span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-1">
                             <button
                                 onClick={() => setIsMinimized(!isMinimized)}
                                 className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
@@ -435,10 +501,10 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
                             >
                                 {isMinimized ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
                             </button>
-                        )}
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             {/* Content Area - Keep mounted but hide with CSS to prevent iframe reload */}
             <div
@@ -449,200 +515,151 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
             >
                 {/* Session Stats Panel - Only show when session is active and NOT docked (stats already on page) */}
                 {hasSession && !showKeypad && !docked && (
-                        <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-                            {/* Header with session info */}
-                            <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
-                                            <span className="w-1 h-1 rounded-full bg-[var(--success)] animate-pulse" />
-                                            Active
-                                        </span>
-                                        <span className="text-xs font-mono font-semibold tabular-nums text-[var(--muted)]">
-                                            {formatDuration(elapsedSec)}
-                                        </span>
-                                    </div>
-                                </div>
-                                {/* Only show "Go to Session" button when not docked (floating mode) */}
-                                {!docked && (
-                                    <button
-                                        onClick={handleGoToSession}
-                                        className="p-2 rounded-lg hover:bg-[var(--sidebar-bg)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-                                        title="Go to Session Page"
-                                    >
-                                        <ChevronLeft size={16} />
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Session Stats */}
-                            <div className="grid grid-cols-3 gap-2 text-center">
-                                <div className="bg-[var(--sidebar-bg)] rounded-lg p-2">
-                                    <div className="text-lg font-bold text-[var(--foreground)]">{session.total_dials || 0}</div>
-                                    <div className="text-[10px] text-[var(--muted)] uppercase">Dials</div>
-                                </div>
-                                <div className="bg-[var(--sidebar-bg)] rounded-lg p-2">
-                                    <div className="text-lg font-bold text-[var(--foreground)]">{session.total_pickups || 0}</div>
-                                    <div className="text-[10px] text-[var(--muted)] uppercase">Pickups</div>
-                                </div>
-                                <div className="bg-[var(--sidebar-bg)] rounded-lg p-2">
-                                    <div className="text-lg font-bold text-[var(--foreground)]">
-                                        {session.total_dials > 0 ? Math.round((session.total_pickups / session.total_dials) * 100) : 0}%
-                                    </div>
-                                    <div className="text-[10px] text-[var(--muted)] uppercase">Rate</div>
-                                </div>
-                            </div>
-
-                            {/* Dialer Section */}
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <h4 className="text-xs font-semibold text-[var(--muted)] uppercase">Quick Dial</h4>
-                                    <button
-                                        onClick={() => setShowDialPad(!showDialPad)}
-                                        className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] px-2 py-1 rounded hover:bg-[var(--sidebar-bg)] transition-colors"
-                                    >
-                                        {showDialPad ? 'Hide' : 'Show'} Keypad
-                                    </button>
-                                </div>
-
-                                {/* Number input */}
+                    <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+                        {/* Header with session info */}
+                        <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+                            <div>
                                 <div className="flex items-center gap-2">
-                                    <input
-                                        ref={dialerInputRef}
-                                        type="text"
-                                        value={dialerNumber}
-                                        onChange={handleDialerInputChange}
-                                        onKeyDown={handleKeyDown}
-                                        disabled={isCallActive}
-                                        placeholder="Enter number..."
-                                        className="flex-1 text-center text-sm font-semibold bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-2 py-1.5 placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--primary)] transition-colors disabled:opacity-70"
-                                        autoComplete="off"
-                                    />
-                                    {dialerNumber.length > 2 && !isCallActive && (
-                                        <button
-                                            onClick={handleBackspace}
-                                            className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--sidebar-bg)] transition-colors"
-                                            title="Delete"
-                                        >
-                                            <Delete size={16} />
-                                        </button>
-                                    )}
-                                    {!isCallActive && (
-                                        <button
-                                            onClick={handleDialFromStats}
-                                            disabled={!canDial}
-                                            className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 disabled:opacity-40"
-                                            style={{ background: canDial ? 'var(--success)' : 'var(--card-border)' }}
-                                            title="Call"
-                                        >
-                                            <Phone size={14} className="text-white" />
-                                        </button>
-                                    )}
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
+                                        <span className="w-1 h-1 rounded-full bg-[var(--success)] animate-pulse" />
+                                        Active
+                                    </span>
+                                    <span className="text-xs font-mono font-semibold tabular-nums text-[var(--muted)]">
+                                        {formatDuration(elapsedSec)}
+                                    </span>
                                 </div>
+                            </div>
+                            {/* Only show "Go to Session" button when not docked (floating mode) */}
+                            {!docked && (
+                                <button
+                                    onClick={handleGoToSession}
+                                    className="p-2 rounded-lg hover:bg-[var(--sidebar-bg)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                                    title="Go to Session Page"
+                                >
+                                    <ChevronLeft size={16} />
+                                </button>
+                            )}
+                        </div>
 
-                                {/* Dial Pad */}
-                                {showDialPad && (
-                                    <div className="grid grid-cols-3 gap-2 max-w-[200px] mx-auto">
-                                        {DIAL_PAD.map(({ digit, letters }) => (
-                                            <button
-                                                key={digit}
-                                                onClick={() => appendDigit(digit)}
-                                                className="flex flex-col items-center justify-center h-10 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] hover:bg-[var(--card-hover)] active:scale-95 transition-all"
-                                                disabled={isCallActive}
-                                            >
-                                                <span className="text-sm font-semibold text-[var(--foreground)]">{digit}</span>
-                                                {letters && (
-                                                    <span className="text-[6px] text-[var(--muted)] font-semibold uppercase tracking-wider">
-                                                        {letters}
-                                                    </span>
-                                                )}
-                                            </button>
-                                        ))}
+                        {/* Session Stats */}
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-[var(--sidebar-bg)] rounded-lg p-2">
+                                <div className="text-lg font-bold text-[var(--foreground)]">{session.total_dials || 0}</div>
+                                <div className="text-[10px] text-[var(--muted)] uppercase">Dials</div>
+                            </div>
+                            <div className="bg-[var(--sidebar-bg)] rounded-lg p-2">
+                                <div className="text-lg font-bold text-[var(--foreground)]">{session.total_pickups || 0}</div>
+                                <div className="text-[10px] text-[var(--muted)] uppercase">Pickups</div>
+                            </div>
+                            <div className="bg-[var(--sidebar-bg)] rounded-lg p-2">
+                                <div className="text-lg font-bold text-[var(--foreground)]">
+                                    {session.total_dials > 0 ? Math.round((session.total_pickups / session.total_dials) * 100) : 0}%
+                                </div>
+                                <div className="text-[10px] text-[var(--muted)] uppercase">Rate</div>
+                            </div>
+                        </div>
+
+                        {/* Dialer Section */}
+                        <div className="flex items-center justify-between gap-3 px-1 py-1">
+                            <span className="text-xs font-semibold text-[var(--muted)] uppercase whitespace-nowrap">Dialer:</span>
+                            <div className="flex bg-[var(--sidebar-bg)] p-1 rounded-lg border border-[var(--card-border)] w-full">
+                                <button
+                                    onClick={() => {
+                                        setForceNativeDialer(false);
+                                        setShowKeypad(true);
+                                    }}
+                                    className={cn(
+                                        "flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)]"
+                                    )}
+                                >
+                                    Custom
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setForceNativeDialer(true);
+                                        setShowKeypad(true);
+                                    }}
+                                    className={cn(
+                                        "flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)]"
+                                    )}
+                                >
+                                    Zoom
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* End Session Button */}
+                        <button
+                            onClick={handleEndSession}
+                            disabled={ending}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
+                        >
+                            {ending ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
+                            {ending ? 'Ending...' : 'End Session'}
+                        </button>
+                    </div>
+                )}
+
+                {/* Zoom Iframe - Show when keypad is toggled, no session, or docked mode */}
+                {(showKeypad || !hasSession || docked) && (
+                    <>
+                        {/* Resize Handle - Only show when keypad is visible */}
+                        {showKeypad && (
+                            <div
+                                className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-[1000] hover:bg-blue-400/50 transition-colors"
+                                onMouseDown={handleResizeMouseDown}
+                                title="Drag to resize height"
+                            />
+                        )}
+
+                        {/* Hide Keypad Button - Only show when session is active */}
+                        {hasSession && showKeypad && (
+                            <div className="px-4 pt-3 pb-2 border-b border-[var(--card-border)] bg-[var(--sidebar-bg)]">
+                                <button
+                                    onClick={() => setShowKeypad(false)}
+                                    className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors text-xs"
+                                >
+                                    <ChevronLeft size={12} />
+                                    Back to Session Stats
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="flex-1 flex flex-col bg-white overflow-hidden">
+                            {/* Call Recorder Controls */}
+                            <CallRecorderControls />
+
+                            {/* Dialer / Iframe area */}
+                            <div className="flex-1 relative">
+                                {/* Custom Dialer Overlay */}
+                                {showCustomDialer && (
+                                    <CustomDialerOverlay onDial={handleCustomDial} />
+                                )}
+
+                                {/* Loading State */}
+                                {!showCustomDialer && !iframeReady && (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--card-bg)] z-[5]">
+                                        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                        <span className="text-xs text-[var(--muted)]">Loading Zoom Phone...</span>
                                     </div>
                                 )}
-                            </div>
 
-                            {/* Show Keypad Button */}
-                            <button
-                                onClick={() => setShowKeypad(true)}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-500/10 text-blue-400 font-medium text-sm border border-blue-500/30 hover:bg-blue-500/20 transition-all"
-                            >
-                                <Phone size={14} />
-                                Show Zoom Keypad
-                            </button>
-
-                            {/* End Session Button */}
-                            <button
-                                onClick={handleEndSession}
-                                disabled={ending}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
-                            >
-                                {ending ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
-                                {ending ? 'Ending...' : 'End Session'}
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Zoom Iframe - Show when keypad is toggled, no session, or docked mode */}
-                    {(showKeypad || !hasSession || docked) && (
-                        <>
-                            {/* Resize Handle - Only show when keypad is visible */}
-                            {showKeypad && (
-                                <div
-                                    className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-[1000] hover:bg-blue-400/50 transition-colors"
-                                    onMouseDown={handleResizeMouseDown}
-                                    title="Drag to resize height"
+                                {/* Zoom iframe — ALWAYS MOUNTED */}
+                                <iframe
+                                    id="zoom-iframe"
+                                    key={refreshKey}
+                                    ref={iframeRef}
+                                    src={ZOOM_EMBED_URL}
+                                    onLoad={() => setIframeReady(true)}
+                                    className="w-full h-full border-0"
+                                    allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
+                                    title="Zoom Phone Dialer"
                                 />
-                            )}
-
-                            {/* Hide Keypad Button - Only show when session is active */}
-                            {hasSession && showKeypad && (
-                                <div className="px-4 pt-3 pb-2 border-b border-[var(--card-border)] bg-[var(--sidebar-bg)]">
-                                    <button
-                                        onClick={() => setShowKeypad(false)}
-                                        className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors text-xs"
-                                    >
-                                        <ChevronLeft size={12} />
-                                        Back to Session Stats
-                                    </button>
-                                </div>
-                            )}
-
-                            <div className="flex-1 flex flex-col bg-white overflow-hidden">
-                                {/* Call Recorder Controls */}
-                                <CallRecorderControls />
-
-                                {/* Dialer / Iframe area */}
-                                <div className="flex-1 relative">
-                                    {/* Custom Dialer Overlay */}
-                                    {showCustomDialer && (
-                                        <CustomDialerOverlay onDial={handleCustomDial} />
-                                    )}
-
-                                    {/* Loading State */}
-                                    {!showCustomDialer && !iframeReady && (
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--card-bg)] z-[5]">
-                                            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                                            <span className="text-xs text-[var(--muted)]">Loading Zoom Phone...</span>
-                                        </div>
-                                    )}
-
-                                    {/* Zoom iframe — ALWAYS MOUNTED */}
-                                    <iframe
-                                        id="zoom-iframe"
-                                        key={refreshKey}
-                                        ref={iframeRef}
-                                        src={ZOOM_EMBED_URL}
-                                        onLoad={() => setIframeReady(true)}
-                                        className="w-full h-full border-0"
-                                        allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
-                                        title="Zoom Phone Dialer"
-                                    />
-                                </div>
                             </div>
-                        </>
-                    )}
-                </div>
+                        </div>
+                    </>
+                )}
+            </div>
         </div>
     );
 }

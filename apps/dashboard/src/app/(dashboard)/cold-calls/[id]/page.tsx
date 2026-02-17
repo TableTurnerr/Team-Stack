@@ -1,18 +1,416 @@
-import React from 'react';
+'use client';
 
-export default async function Page({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
-  const { id } = await params;
+import { useEffect, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import {
+  ArrowLeft,
+  Phone,
+  Building2,
+  User,
+  Clock,
+  Target,
+  UserCheck,
+  CalendarCheck,
+  StickyNote,
+  Zap,
+  Loader2,
+} from 'lucide-react';
+import { pb } from '@/lib/pocketbase';
+import { COLLECTIONS, type CallLog, type ColdCall, type Company, type ColdCallingSession, type PhoneNumber, type User as UserType } from '@/lib/types';
+import { formatDate, cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+
+const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
+  'Interested': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
+  'Not Interested': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]' },
+  'Callback': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]' },
+  'No Answer': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' },
+  'Wrong Number': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]' },
+  'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
+};
+
+function formatDuration(seconds?: number): string {
+  if (!seconds || seconds === 0) return '-';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s}s`;
+}
+
+function InfoRow({ label, value, icon: Icon }: { label: string; value: React.ReactNode; icon?: React.ComponentType<{ size?: number; className?: string }> }) {
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Cold Call Details</h1>
-      <p className="text-[var(--muted)]">Displaying details for ID: {id}</p>
-      <div className="mt-4 p-4 border border-[var(--card-border)] rounded bg-[var(--card-bg)]">
-        <p>Work in progress...</p>
+    <div className="flex items-start gap-3 py-3 border-b border-[var(--card-border)] last:border-0">
+      {Icon && <Icon size={16} className="text-[var(--muted)] mt-0.5 shrink-0" />}
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-[var(--muted)] uppercase tracking-wider mb-0.5">{label}</p>
+        <div className="text-sm font-medium">{value || <span className="text-[var(--muted)]">-</span>}</div>
       </div>
+    </div>
+  );
+}
+
+export default function ColdCallDetailPage() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const id = params.id as string;
+  const isCallLog = searchParams.get('type') === 'log';
+
+  const { isAuthenticated } = useAuth();
+  const [callLog, setCallLog] = useState<CallLog | null>(null);
+  const [coldCall, setColdCall] = useState<ColdCall | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated || !id) return;
+
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        if (isCallLog) {
+          const log = await pb.collection(COLLECTIONS.CALL_LOGS).getOne<CallLog>(id, {
+            expand: 'company,phone_number_record,caller,session',
+          });
+          setCallLog(log);
+        } else {
+          // Try call_log first, fallback to cold_call
+          try {
+            const log = await pb.collection(COLLECTIONS.CALL_LOGS).getOne<CallLog>(id, {
+              expand: 'company,phone_number_record,caller,session',
+            });
+            setCallLog(log);
+          } catch {
+            const call = await pb.collection(COLLECTIONS.COLD_CALLS).getOne<ColdCall>(id, {
+              expand: 'company,claimed_by',
+            });
+            setColdCall(call);
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to fetch call details:', err);
+        setError('Failed to load call details');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [id, isCallLog, isAuthenticated]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 size={32} className="animate-spin text-[var(--muted)]" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <Link href="/cold-calls" className="inline-flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors">
+          <ArrowLeft size={16} /> Back to Cold Calls
+        </Link>
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400">{error}</div>
+      </div>
+    );
+  }
+
+  if (callLog) {
+    return <CallLogDetail log={callLog} />;
+  }
+
+  if (coldCall) {
+    return <ColdCallDetail call={coldCall} />;
+  }
+
+  return null;
+}
+
+// ─── Call Log Detail View ────────────────────────────────────────────────────
+
+function CallLogDetail({ log }: { log: CallLog }) {
+  const company = log.expand?.company;
+  const phoneRecord = log.expand?.phone_number_record;
+  const caller = log.expand?.caller;
+  const session = log.expand?.session;
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      {/* Back link */}
+      <Link href="/cold-calls" className="inline-flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors">
+        <ArrowLeft size={16} /> Back to Cold Calls
+      </Link>
+
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Call Log Details</h1>
+          <p className="text-[var(--muted)] text-sm mt-1">
+            {log.call_time ? formatDate(log.call_time) : 'Unknown date'}
+          </p>
+        </div>
+        {log.call_outcome && (
+          <span className={cn(
+            "px-3 py-1.5 rounded-lg text-sm font-semibold",
+            OUTCOME_COLORS[log.call_outcome]?.bg || 'bg-gray-500/20',
+            OUTCOME_COLORS[log.call_outcome]?.text || 'text-gray-400'
+          )}>
+            {log.call_outcome}
+          </span>
+        )}
+      </div>
+
+      {/* Main info card */}
+      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+        <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Call Information</h2>
+
+        <InfoRow
+          label="Company"
+          icon={Building2}
+          value={company ? (
+            <Link href={`/companies/${company.id}`} className="text-[var(--primary)] hover:underline">
+              {company.company_name}
+            </Link>
+          ) : 'Unknown'}
+        />
+        <InfoRow
+          label="Phone Number"
+          icon={Phone}
+          value={phoneRecord?.phone_number || '-'}
+        />
+        <InfoRow
+          label="Recipient"
+          icon={User}
+          value={
+            <div className="flex items-center gap-2">
+              <span>{log.owner_name_found || '-'}</span>
+              {log.owner_reached && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] font-semibold uppercase">Owner</span>
+              )}
+            </div>
+          }
+        />
+        <InfoRow
+          label="Caller"
+          icon={User}
+          value={caller?.name || '-'}
+        />
+        <InfoRow
+          label="Interest Level"
+          icon={Target}
+          value={log.interest_level ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-2 bg-[var(--card-border)] rounded-full overflow-hidden max-w-[120px]">
+                <div
+                  className={cn(
+                    "h-full rounded-full",
+                    log.interest_level >= 7 ? "bg-[var(--success)]" :
+                      log.interest_level >= 4 ? "bg-[var(--warning)]" : "bg-[var(--error)]"
+                  )}
+                  style={{ width: `${log.interest_level * 10}%` }}
+                />
+              </div>
+              <span>{log.interest_level}/10</span>
+            </div>
+          ) : '-'}
+        />
+      </div>
+
+      {/* Timing card */}
+      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+        <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Call Timing</h2>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="text-center p-3 bg-[var(--sidebar-bg)] rounded-lg">
+            <p className="text-xs text-[var(--muted)] mb-1">Ring Duration</p>
+            <p className="text-lg font-semibold">{formatDuration(log.ring_duration)}</p>
+          </div>
+          <div className="text-center p-3 bg-[var(--sidebar-bg)] rounded-lg">
+            <p className="text-xs text-[var(--muted)] mb-1">Call Duration</p>
+            <p className="text-lg font-semibold">{formatDuration(log.call_duration)}</p>
+          </div>
+          <div className="text-center p-3 bg-[var(--sidebar-bg)] rounded-lg">
+            <p className="text-xs text-[var(--muted)] mb-1">Total</p>
+            <p className="text-lg font-semibold">{formatDuration(log.duration)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Performance card */}
+      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+        <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Performance</h2>
+        <div className="grid grid-cols-3 gap-4">
+          <div className={cn(
+            "flex items-center gap-2 p-3 rounded-lg border",
+            log.owner_reached
+              ? "bg-[var(--success-subtle)] border-[var(--success)]/30"
+              : "bg-[var(--sidebar-bg)] border-[var(--card-border)]"
+          )}>
+            <UserCheck size={16} className={log.owner_reached ? "text-[var(--success)]" : "text-[var(--muted)]"} />
+            <span className="text-sm font-medium">Owner Reached</span>
+          </div>
+          <div className={cn(
+            "flex items-center gap-2 p-3 rounded-lg border",
+            log.pitch_completed
+              ? "bg-[var(--info-subtle)] border-[var(--info)]/30"
+              : "bg-[var(--sidebar-bg)] border-[var(--card-border)]"
+          )}>
+            <Target size={16} className={log.pitch_completed ? "text-[var(--info)]" : "text-[var(--muted)]"} />
+            <span className="text-sm font-medium">Pitch Completed</span>
+          </div>
+          <div className={cn(
+            "flex items-center gap-2 p-3 rounded-lg border",
+            log.appointment_set
+              ? "bg-[var(--warning-subtle)] border-[var(--warning)]/30"
+              : "bg-[var(--sidebar-bg)] border-[var(--card-border)]"
+          )}>
+            <CalendarCheck size={16} className={log.appointment_set ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
+            <span className="text-sm font-medium">Appointment Set</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Notes card */}
+      {log.post_call_notes && (
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4 flex items-center gap-2">
+            <StickyNote size={14} />
+            Post-call Notes
+          </h2>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{log.post_call_notes}</p>
+        </div>
+      )}
+
+      {/* Session info card */}
+      {session && (
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Session Info</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="text-center p-3 bg-[var(--sidebar-bg)] rounded-lg">
+              <p className="text-xs text-[var(--muted)] mb-1">Started</p>
+              <p className="text-sm font-semibold">{session.started_at ? formatDate(session.started_at) : '-'}</p>
+            </div>
+            <div className="text-center p-3 bg-[var(--sidebar-bg)] rounded-lg">
+              <p className="text-xs text-[var(--muted)] mb-1">Total Dials</p>
+              <p className="text-lg font-semibold">{session.total_dials || 0}</p>
+            </div>
+            <div className="text-center p-3 bg-[var(--sidebar-bg)] rounded-lg">
+              <p className="text-xs text-[var(--muted)] mb-1">Total Pickups</p>
+              <p className="text-lg font-semibold">{session.total_pickups || 0}</p>
+            </div>
+            <div className="text-center p-3 bg-[var(--sidebar-bg)] rounded-lg">
+              <p className="text-xs text-[var(--muted)] mb-1">Session Duration</p>
+              <p className="text-sm font-semibold">{formatDuration(session.total_duration_sec)}</p>
+            </div>
+          </div>
+          {session.session_notes && (
+            <div className="mt-4 p-3 bg-[var(--sidebar-bg)] rounded-lg">
+              <p className="text-xs text-[var(--muted)] mb-1">Session Notes</p>
+              <p className="text-sm">{session.session_notes}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Cold Call (AI Transcript) Detail View ───────────────────────────────────
+
+function ColdCallDetail({ call }: { call: ColdCall }) {
+  const company = call.expand?.company;
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <Link href="/cold-calls" className="inline-flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors">
+        <ArrowLeft size={16} /> Back to Cold Calls
+      </Link>
+
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">AI Transcript Details</h1>
+          <p className="text-[var(--muted)] text-sm mt-1">
+            {call.created ? formatDate(call.created) : 'Unknown date'}
+          </p>
+        </div>
+        {call.call_outcome && (
+          <span className={cn(
+            "px-3 py-1.5 rounded-lg text-sm font-semibold",
+            OUTCOME_COLORS[call.call_outcome]?.bg || 'bg-gray-500/20',
+            OUTCOME_COLORS[call.call_outcome]?.text || 'text-gray-400'
+          )}>
+            {call.call_outcome}
+          </span>
+        )}
+      </div>
+
+      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+        <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Call Information</h2>
+        <InfoRow label="Company" icon={Building2} value={company?.company_name || 'Unknown'} />
+        <InfoRow label="Phone Number" icon={Phone} value={call.phone_number || '-'} />
+        <InfoRow label="Recipient" icon={User} value={call.recipients || '-'} />
+        <InfoRow label="Owner Name" icon={User} value={call.owner_name || '-'} />
+        <InfoRow label="Caller" icon={User} value={call.caller_name || '-'} />
+        <InfoRow label="Duration Estimate" icon={Clock} value={call.call_duration_estimate || '-'} />
+        <InfoRow
+          label="Interest Level"
+          icon={Target}
+          value={call.interest_level ? `${call.interest_level}/10` : '-'}
+        />
+        <InfoRow label="Model Used" icon={Zap} value={call.model_used || '-'} />
+      </div>
+
+      {call.call_summary && (
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Call Summary</h2>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{call.call_summary}</p>
+        </div>
+      )}
+
+      {call.objections && call.objections.length > 0 && (
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Objections</h2>
+          <ul className="space-y-2">
+            {call.objections.map((obj, i) => (
+              <li key={i} className="text-sm flex items-start gap-2">
+                <span className="text-[var(--error)] mt-0.5">&#x2022;</span>
+                {obj}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {call.pain_points && call.pain_points.length > 0 && (
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Pain Points</h2>
+          <ul className="space-y-2">
+            {call.pain_points.map((point, i) => (
+              <li key={i} className="text-sm flex items-start gap-2">
+                <span className="text-[var(--warning)] mt-0.5">&#x2022;</span>
+                {point}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {call.follow_up_actions && call.follow_up_actions.length > 0 && (
+        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Follow-up Actions</h2>
+          <ul className="space-y-2">
+            {call.follow_up_actions.map((action, i) => (
+              <li key={i} className="text-sm flex items-start gap-2">
+                <span className="text-[var(--success)] mt-0.5">&#x2022;</span>
+                {action}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

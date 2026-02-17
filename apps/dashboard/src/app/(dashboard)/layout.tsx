@@ -58,8 +58,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
-      {/* Only show floating dialer when NOT on session page */}
-      {!isSessionPage && <ZoomPhoneDialer />}
+      {/* Floating dialer — always mounted for persistence, hidden on session page */}
+      <ZoomPhoneDialer hidden={isSessionPage} />
     </div>
   );
 }

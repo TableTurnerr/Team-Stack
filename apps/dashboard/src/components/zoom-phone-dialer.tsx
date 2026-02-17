@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Phone, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, ChevronLeft, Power, Loader2, Delete } from 'lucide-react';
+import { Phone, PhoneCall, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, ChevronLeft, Power, Loader2, Delete } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useSession } from '@/contexts/session-context';
@@ -48,9 +48,11 @@ interface ZoomPhoneDialerProps {
     docked?: boolean;
     /** If true, the dialer is disabled (e.g. unsaved call waiting) */
     disabled?: boolean;
+    /** If true, the dialer is hidden but stays mounted for persistence */
+    hidden?: boolean;
 }
 
-export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneDialerProps = {}) {
+export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = false }: ZoomPhoneDialerProps = {}) {
     const router = useRouter();
     const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey } = useZoomPhone();
     const { session, setSession } = useSession();
@@ -66,6 +68,8 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
     const [elapsedSec, setElapsedSec] = useState(0);
     const [isHovering, setIsHovering] = useState(false);
     const [dockedDialInput, setDockedDialInput] = useState('');
+    const [isInputFocused, setIsInputFocused] = useState(false);
+    const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const positionBeforeExpand = useRef<number | null>(null);
@@ -312,7 +316,7 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
     // In docked mode, use hover state; in floating mode, use button-controlled minimized state
     // When disabled, always keep collapsed
     // In docked mode, expand on hover OR during active call
-    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive) : isMinimized);
+    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive && !isInputFocused) : isMinimized);
     const currentHeight = docked
         ? (isCollapsed ? '52px' : '550px')
         : (isCollapsed ? '48px' : (showKeypad ? `${height}px` : (hasSession ? 'auto' : `${height}px`)));
@@ -331,83 +335,96 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
         buttonIcon = <Phone size={20} />;
     }
 
-    if (isFloatingMinimized) {
-        return (
+    return (
+        <>
+            {/* Floating minimized button */}
+            {isFloatingMinimized && !hidden && (
+                <div
+                    style={{
+                        top: `${yPosition}px`,
+                        right: '24px',
+                        position: 'fixed',
+                        zIndex: 998,
+                        transform: isDragging ? 'scale(1.1)' : 'scale(1)',
+                        transition: isDragging ? 'transform 0.1s ease-out' : 'top 0.3s ease-out, transform 0.2s ease-out',
+                    }}
+                    className={cn(
+                        "rounded-full shadow-2xl cursor-pointer select-none",
+                        isDragging && "cursor-grabbing"
+                    )}
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        dragOffsetY.current = e.clientY - rect.top;
+                        dragStartPos.current = { x: e.clientX, y: e.clientY };
+                        setIsDragging(true);
+                    }}
+                    onMouseUp={(e) => {
+                        if (dragStartPos.current) {
+                            const dist = Math.sqrt(
+                                Math.pow(e.clientX - dragStartPos.current.x, 2) +
+                                Math.pow(e.clientY - dragStartPos.current.y, 2)
+                            );
+                            if (dist < 5) {
+                                setIsMinimized(false);
+                            }
+                        }
+                        dragStartPos.current = null;
+                    }}
+                >
+                    <div className={cn(
+                        "w-12 h-12 rounded-full flex items-center justify-center border shadow-lg transition-all hover:scale-105 active:scale-95",
+                        buttonColor
+                    )}>
+                        {buttonIcon}
+                    </div>
+                </div>
+            )}
+
+            {/* Main dialer panel — always mounted for persistence */}
             <div
                 ref={panelRef}
-                style={{
-                    top: `${yPosition}px`,
-                    right: '24px',
-                    position: 'fixed',
-                    zIndex: 998,
-                    transform: isDragging ? 'scale(1.1)' : 'scale(1)',
-                    transition: isDragging ? 'transform 0.1s ease-out' : 'top 0.3s ease-out, transform 0.2s ease-out',
-                }}
-                className={cn(
-                    "rounded-full shadow-2xl cursor-pointer select-none",
-                    isDragging && "cursor-grabbing"
-                )}
-                onMouseDown={(e) => {
-                    dragStartPos.current = { x: e.clientX, y: e.clientY };
-                    handleMouseDown(e);
-                }}
-                onMouseUp={(e) => {
-                    // Only expand if it wasn't a drag (movement < 5px)
-                    if (dragStartPos.current) {
-                        const dist = Math.sqrt(
-                            Math.pow(e.clientX - dragStartPos.current.x, 2) +
-                            Math.pow(e.clientY - dragStartPos.current.y, 2)
-                        );
-                        if (dist < 5) {
-                            setIsMinimized(false);
-                        }
+                onMouseEnter={docked ? () => {
+                    if (hoverTimeoutRef.current) {
+                        clearTimeout(hoverTimeoutRef.current);
+                        hoverTimeoutRef.current = null;
                     }
-                    dragStartPos.current = null;
+                    setIsHovering(true);
+                } : undefined}
+                onMouseLeave={docked ? () => {
+                    hoverTimeoutRef.current = setTimeout(() => {
+                        setIsHovering(false);
+                    }, 300);
+                } : undefined}
+                className={cn(
+                    "flex flex-col overflow-hidden",
+                    "border border-[var(--card-border)]",
+                    "bg-[var(--card-bg)]",
+                    disabled && "opacity-60",
+                    docked ? (
+                        "rounded-xl shadow-lg w-full transition-all duration-300 ease-in-out"
+                    ) : (
+                        cn(
+                            "fixed right-0 z-[998] rounded-l-xl",
+                            isDragging ? "cursor-grabbing select-none shadow-[0_20px_60px_rgba(0,0,0,0.3)]" : "shadow-2xl"
+                        )
+                    )
+                )}
+                style={{
+                    ...(docked ? {
+                        height: currentHeight,
+                        transition: 'height 0.3s ease-out',
+                    } : {
+                        top: `${yPosition}px`,
+                        width: '380px',
+                        height: currentHeight,
+                        transform: isDragging ? 'scale(1.01)' : 'scale(1)',
+                        transition: isDragging ? 'transform 0.1s ease-out, box-shadow 0.1s ease-out' : 'top 0.3s ease-out, height 0.3s ease-out, transform 0.2s ease-out, box-shadow 0.2s ease-out',
+                        willChange: isDragging ? 'top, transform' : 'auto',
+                    }),
+                    ...((isFloatingMinimized || hidden) && { display: 'none' }),
                 }}
             >
-                <div className={cn(
-                    "w-12 h-12 rounded-full flex items-center justify-center border shadow-lg transition-all hover:scale-105 active:scale-95",
-                    buttonColor
-                )}>
-                    {buttonIcon}
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div
-            ref={panelRef}
-            onMouseEnter={docked ? () => setIsHovering(true) : undefined}
-            onMouseLeave={docked ? () => setIsHovering(false) : undefined}
-            className={cn(
-                "flex flex-col overflow-hidden",
-                "border border-[var(--card-border)]",
-                "bg-[var(--card-bg)]",
-                disabled && "opacity-60",
-                docked ? (
-                    // Docked mode: static positioning, full width, rounded corners, hover cursor
-                    "rounded-xl shadow-lg w-full transition-all duration-300 ease-in-out"
-                ) : (
-                    // Floating mode: fixed positioning, right edge
-                    cn(
-                        "fixed right-0 z-[998] rounded-l-xl",
-                        isDragging ? "cursor-grabbing select-none shadow-[0_20px_60px_rgba(0,0,0,0.3)]" : "shadow-2xl"
-                    )
-                )
-            )}
-            style={docked ? {
-                height: currentHeight,
-                transition: 'height 0.3s ease-out',
-            } : {
-                top: `${yPosition}px`,
-                width: '380px',
-                height: currentHeight,
-                transform: isDragging ? 'scale(1.01)' : 'scale(1)',
-                transition: isDragging ? 'transform 0.1s ease-out, box-shadow 0.1s ease-out' : 'top 0.3s ease-out, height 0.3s ease-out, transform 0.2s ease-out, box-shadow 0.2s ease-out',
-                willChange: isDragging ? 'top, transform' : 'auto',
-            }}
-        >
             {/* Header / Drag Handle */}
             {docked ? (
                 /* Docked mode: Simple dial input row */
@@ -431,32 +448,11 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
                         </div>
                     ) : (
                         <>
-                            <input
-                                type="text"
-                                value={dockedDialInput}
-                                onChange={e => setDockedDialInput(e.target.value)}
-                                onKeyDown={e => {
-                                    if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handleDockedDial();
-                                    }
-                                }}
-                                placeholder="Enter phone number..."
-                                className="flex-1 bg-transparent border-0 text-sm font-medium placeholder:text-[var(--muted)] focus:outline-none"
-                            />
-                            <button
-                                onClick={handleDockedDial}
-                                disabled={dockedDialInput.trim().length < 3}
-                                className={cn(
-                                    "w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 active:scale-90",
-                                    dockedDialInput.trim().length >= 3
-                                        ? "bg-[var(--success)] text-white hover:opacity-90"
-                                        : "bg-[var(--card-border)] text-[var(--muted)] opacity-40"
-                                )}
-                                title="Dial"
-                            >
-                                <Phone size={14} />
-                            </button>
+                            <div className="flex-1 flex items-center justify-end">
+                                <span className="text-xs font-medium text-[var(--muted)] italic mr-2">
+                                    Hover to Dial
+                                </span>
+                            </div>
                         </>
                     )}
                 </div>
@@ -600,9 +596,11 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
                     </div>
                 )}
 
-                {/* Zoom Iframe - Show when keypad is toggled, no session, or docked mode */}
-                {(showKeypad || !hasSession || docked) && (
-                    <>
+                {/* Zoom Iframe section — always mounted, visibility toggled via CSS */}
+                <div
+                    className="flex-1 flex flex-col"
+                    style={{ display: (showKeypad || !hasSession || docked) ? undefined : 'none' }}
+                >
                         {/* Resize Handle - Only show when keypad is visible */}
                         {showKeypad && (
                             <div
@@ -631,10 +629,10 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
 
                             {/* Dialer / Iframe area */}
                             <div className="flex-1 relative">
-                                {/* Custom Dialer Overlay */}
-                                {showCustomDialer && (
-                                    <CustomDialerOverlay onDial={handleCustomDial} />
-                                )}
+                                {/* Custom Dialer Overlay — always mounted for persistence */}
+                                <div style={{ display: showCustomDialer ? undefined : 'none' }}>
+                                    <CustomDialerOverlay onDial={handleCustomDial} onFocusChange={setIsInputFocused} visible={showCustomDialer} />
+                                </div>
 
                                 {/* Loading State */}
                                 {!showCustomDialer && !iframeReady && (
@@ -646,9 +644,9 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
 
                                 {/* Zoom iframe — ALWAYS MOUNTED */}
                                 <iframe
-                                    id="zoom-iframe"
+                                    id={hidden ? 'zoom-iframe-hidden' : 'zoom-iframe'}
                                     key={refreshKey}
-                                    ref={iframeRef}
+                                    ref={hidden ? undefined : iframeRef}
                                     src={ZOOM_EMBED_URL}
                                     onLoad={() => setIframeReady(true)}
                                     className="w-full h-full border-0"
@@ -657,9 +655,9 @@ export function ZoomPhoneDialer({ docked = false, disabled = false }: ZoomPhoneD
                                 />
                             </div>
                         </div>
-                    </>
-                )}
+                </div>
             </div>
         </div>
+        </>
     );
 }

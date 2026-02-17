@@ -24,7 +24,11 @@ const DIAL_PAD: { digit: string; letters: string }[] = [
  * Replaces the Zoom logo area with "Custom Dialer" branding and
  * adds an explanatory note at the bottom.
  */
-export function CustomDialerOverlay({ onDial }: { onDial: (phoneNumber: string) => void }) {
+export function CustomDialerOverlay({ onDial, onFocusChange, visible = true }: {
+    onDial: (phoneNumber: string) => void;
+    onFocusChange?: (focused: boolean) => void;
+    visible?: boolean;
+}) {
     const { lastDialedNumber, setCustomDialerNumber } = useZoomPhone();
     const [number, setNumber] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -36,10 +40,12 @@ export function CustomDialerOverlay({ onDial }: { onDial: (phoneNumber: string) 
         }
     }, [lastDialedNumber]);
 
-    // Focus input on mount
+    // Focus input when becoming visible
     useEffect(() => {
-        inputRef.current?.focus();
-    }, []);
+        if (visible) {
+            inputRef.current?.focus();
+        }
+    }, [visible]);
 
     const appendDigit = useCallback((digit: string) => {
         setNumber(prev => {
@@ -94,6 +100,8 @@ export function CustomDialerOverlay({ onDial }: { onDial: (phoneNumber: string) 
                         value={number}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
+                        onFocus={() => onFocusChange?.(true)}
+                        onBlur={() => onFocusChange?.(false)}
                         placeholder="Enter a name or number..."
                         className="flex-1 text-center text-[22px] font-semibold tracking-wide bg-transparent placeholder:text-[#c0c0cc] placeholder:font-normal placeholder:text-[18px]"
                         style={{

@@ -161,6 +161,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
                 const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>({
                     company_name: companySearch.trim(),
                     owner_name: recipientName || undefined,
+                    source: 'Cold Call',
+                    first_contacted: new Date().toISOString(),
+                    last_contacted: new Date().toISOString(),
                 });
                 companyId = newCompany.id;
                 companyName = newCompany.company_name;

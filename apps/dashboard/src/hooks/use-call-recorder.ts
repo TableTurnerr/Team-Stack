@@ -16,7 +16,7 @@ interface UseCallRecorderReturn {
     /** Error message if status is 'error' */
     error: string | null;
     /** Start persistent audio session — prompts screen/tab share once */
-    startSession: () => Promise<void>;
+    startSession: () => Promise<boolean>;
     /** End the persistent audio session */
     endSession: () => void;
     /** Start a new recording on the active session (no prompt) */
@@ -151,7 +151,7 @@ export function useCallRecorder(
      * 2. getUserMedia → microphone (user's own voice)
      * 3. Mix both via Web Audio API into one stream for MediaRecorder
      */
-    const startSession = useCallback(async () => {
+    const startSession = useCallback(async (): Promise<boolean> => {
         try {
             setError(null);
 
@@ -175,7 +175,7 @@ export function useCallRecorder(
             if (displayStream.getAudioTracks().length === 0) {
                 displayStream.getTracks().forEach((t) => t.stop());
                 setError('No system audio captured. Select "Entire Screen" and check "Share system audio".');
-                return;
+                return false;
             }
 
             // 2. Capture microphone
@@ -251,13 +251,15 @@ export function useCallRecorder(
             streamRef.current = mixedStream;
             sourceStreamRef.current = displayStream;
             setIsSessionActive(true);
+            return true;
         } catch (err: unknown) {
             if (err instanceof DOMException && err.name === 'NotAllowedError') {
                 // User cancelled — not an error
-                return;
+                return false;
             }
             console.error('Failed to start session:', err);
             setError(err instanceof Error ? err.message : 'Failed to start audio session');
+            return false;
         }
     }, []);
 

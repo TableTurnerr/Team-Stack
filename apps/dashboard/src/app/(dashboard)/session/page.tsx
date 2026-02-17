@@ -49,6 +49,7 @@ export default function SessionPage() {
     const [ending, setEnding] = useState(false);
     const [collectionMissing, setCollectionMissing] = useState(false);
     const [zoomAppConfirmed, setZoomAppConfirmed] = useState(false);
+    const [awaitingAudioConnect, setAwaitingAudioConnect] = useState(false);
 
     // Recording state
     const {
@@ -230,12 +231,28 @@ export default function SessionPage() {
     }, [session]);
 
     // ---------------------------------------------------------------------------
-    // Start session
+    // Start session — step 1: show "Connect Audio" screen
     // ---------------------------------------------------------------------------
-    const startSession = useCallback(async () => {
+    const startSession = useCallback(() => {
+        setAwaitingAudioConnect(true);
+    }, []);
+
+    // ---------------------------------------------------------------------------
+    // Connect audio & create PB session — step 2
+    // ---------------------------------------------------------------------------
+    const handleConnectAudioAndStart = useCallback(async () => {
         if (!user) return;
         try {
             setStarting(true);
+
+            // 1. Start audio session (screen share) first
+            const audioStarted = await startAudioSession();
+            if (!audioStarted) {
+                // User cancelled or failed - stay on Connect Audio screen
+                return;
+            }
+
+            // 2. Create the session in PocketBase only after screen share is secured
             const newSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).create<ColdCallingSession>({
                 user: user.id,
                 started_at: new Date().toISOString(),
@@ -248,6 +265,7 @@ export default function SessionPage() {
                 status: 'active',
             });
             setSession(newSession);
+            setAwaitingAudioConnect(false);
         } catch (err: any) {
             if (err?.status === 404) {
                 setCollectionMissing(true);
@@ -257,7 +275,7 @@ export default function SessionPage() {
         } finally {
             setStarting(false);
         }
-    }, [user, setSession]);
+    }, [user, setSession, startAudioSession]);
 
     // ---------------------------------------------------------------------------
     // End session
@@ -411,6 +429,26 @@ export default function SessionPage() {
                 await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, sessionUpdates);
             }
 
+            // Update company metadata (last_contacted, source, first_contacted)
+            try {
+                const companyUpdates: Record<string, any> = {
+                    last_contacted: new Date().toISOString(),
+                };
+                const existingCompany = await pb.collection(COLLECTIONS.COMPANIES).getOne(data.companyId);
+                if (!existingCompany.source) {
+                    companyUpdates.source = 'Cold Call';
+                }
+                if (!existingCompany.first_contacted) {
+                    companyUpdates.first_contacted = new Date().toISOString();
+                }
+                if (data.ownerReached && data.recipientName && !existingCompany.owner_name) {
+                    companyUpdates.owner_name = data.recipientName;
+                }
+                await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
+            } catch {
+                // Non-critical — don't block call save
+            }
+
             // Note: dial count and pickup count are now incremented automatically when calls ring/connect
             // No need to update them here - just refresh the session
             const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getOne<ColdCallingSession>(session.id);
@@ -546,58 +584,147 @@ export default function SessionPage() {
                 }
                 return <StandaloneCallInterface onExit={exitStandalone} />;
             }
+
+            // Show "Connect Audio" screen after user clicked "Start Session"
+            if (awaitingAudioConnect) {
+                return (
+                    <div className="flex items-center justify-center min-h-[60vh]">
+                        <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
+                            <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
+                                <Headphones size={32} className="text-[var(--error)]" />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold mb-2">Connect Audio to Start</h2>
+                                <p className="text-[var(--muted)] text-sm mb-4">
+                                    Screen share with system audio is required to record calls.
+                                </p>
+                            </div>
+                            <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
+                                <p className="font-medium text-[var(--foreground)]">Instructions:</p>
+                                <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
+                                    <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio & Start</span> below</li>
+                                    <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
+                                    <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
+                                    <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
+                                    <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
+                                </ol>
+                            </div>
+                            <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
+                                <input
+                                    type="checkbox"
+                                    checked={zoomAppConfirmed}
+                                    onChange={(e) => {
+                                        setZoomAppConfirmed(e.target.checked);
+                                        if (e.target.checked) refreshDialer();
+                                    }}
+                                    className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
+                                />
+                                <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
+                                    <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
+                                </span>
+                            </label>
+                            {recorderError && (
+                                <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
+                                    {recorderError}
+                                </div>
+                            )}
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setAwaitingAudioConnect(false)}
+                                    className="flex-1 py-3 rounded-xl bg-[var(--sidebar-bg)] text-[var(--foreground)] font-semibold text-sm border border-[var(--card-border)] hover:bg-[var(--card-hover)] active:scale-[0.98] transition-all"
+                                >
+                                    Back
+                                </button>
+                                <button
+                                    onClick={handleConnectAudioAndStart}
+                                    disabled={!zoomAppConfirmed || starting}
+                                    className="flex-[2] py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                                >
+                                    {starting ? 'Connecting...' : 'Connect Audio & Start'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
             return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} />;
         }
 
         if (!isSessionActive) {
+            // Session exists but audio disconnected (e.g. page reload) - reconnect audio
             return (
-                <div className="flex items-center justify-center min-h-[60vh]">
-                    <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
-                        <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
-                            <Headphones size={32} className="text-[var(--error)]" />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold mb-2">Connect Audio to Start</h2>
-                            <p className="text-[var(--muted)] text-sm mb-4">
-                                Recording must be enabled before you can start calling.
-                            </p>
-                        </div>
-                        <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
-                            <p className="font-medium text-[var(--foreground)]">Instructions:</p>
-                            <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
-                                <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio</span> below</li>
-                                <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
-                                <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
-                                <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
-                                <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
-                            </ol>
-                        </div>
-                        <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
-                            <input
-                                type="checkbox"
-                                checked={zoomAppConfirmed}
-                                onChange={(e) => {
-                                    setZoomAppConfirmed(e.target.checked);
-                                    if (e.target.checked) refreshDialer();
-                                }}
-                                className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                            />
-                            <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
-                                <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
+                <div className="space-y-6">
+                    {/* Active Session Banner */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-2xl font-bold">Call Session</h1>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+                                Active
                             </span>
-                        </label>
-                        {recorderError && (
-                            <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
-                                {recorderError}
-                            </div>
-                        )}
+                            <span className="text-lg font-mono font-semibold tabular-nums text-[var(--muted)]">
+                                {formatDuration(elapsedSec)}
+                            </span>
+                        </div>
+
                         <button
-                            onClick={startAudioSession}
-                            disabled={!zoomAppConfirmed}
-                            className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                            onClick={endSession}
+                            disabled={ending}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
                         >
-                            Connect Audio & Start
+                            {ending ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
+                            {ending ? 'Ending...' : 'End Session'}
                         </button>
+                    </div>
+
+                    <div className="flex items-center justify-center min-h-[50vh]">
+                        <div className="text-center space-y-6 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--card-border)] shadow-xl">
+                            <div className="w-16 h-16 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center mx-auto animate-pulse">
+                                <Headphones size={32} className="text-[var(--error)]" />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold mb-2">Reconnect Audio</h2>
+                                <p className="text-[var(--muted)] text-sm mb-4">
+                                    Your session is still active. Reconnect screen share to continue calling.
+                                </p>
+                            </div>
+                            <div className="text-left bg-[var(--sidebar-bg)] p-4 rounded-xl space-y-3 text-sm border border-[var(--card-border)]">
+                                <p className="font-medium text-[var(--foreground)]">Instructions:</p>
+                                <ol className="list-decimal list-inside space-y-2 text-[var(--muted)]">
+                                    <li>Click <span className="font-semibold text-[var(--foreground)]">Connect Audio</span> below</li>
+                                    <li>Select the <span className="font-semibold text-[var(--foreground)]">Window</span> tab</li>
+                                    <li>Choose the <span className="font-semibold text-[var(--foreground)]">Chrome window</span> (this window)</li>
+                                    <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
+                                </ol>
+                            </div>
+                            <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
+                                <input
+                                    type="checkbox"
+                                    checked={zoomAppConfirmed}
+                                    onChange={(e) => {
+                                        setZoomAppConfirmed(e.target.checked);
+                                        if (e.target.checked) refreshDialer();
+                                    }}
+                                    className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
+                                />
+                                <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
+                                    <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
+                                </span>
+                            </label>
+                            {recorderError && (
+                                <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
+                                    {recorderError}
+                                </div>
+                            )}
+                            <button
+                                onClick={startAudioSession}
+                                disabled={!zoomAppConfirmed}
+                                className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                            >
+                                Connect Audio
+                            </button>
+                        </div>
                     </div>
                 </div>
             );

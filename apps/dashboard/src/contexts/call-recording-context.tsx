@@ -9,7 +9,7 @@ interface CallRecordingContextType {
     status: RecorderStatus;
     duration: number;
     error: string | null;
-    startSession: () => Promise<void>;
+    startSession: () => Promise<boolean>;
     endSession: () => void;
     startRecording: () => void;
     stopRecording: () => void;

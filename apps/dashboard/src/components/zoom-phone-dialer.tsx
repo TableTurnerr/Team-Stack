@@ -54,7 +54,7 @@ interface ZoomPhoneDialerProps {
 
 export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = false }: ZoomPhoneDialerProps = {}) {
     const router = useRouter();
-    const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey } = useZoomPhone();
+    const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey, customDialerNumber, activeCallNumber } = useZoomPhone();
     const { session, setSession } = useSession();
 
     const [yPosition, setYPosition] = useState(DEFAULT_Y);
@@ -85,6 +85,11 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
     const showCustomDialer = !forceNativeDialer && !isDialing && (callStatus === 'idle' || callStatus === 'ended');
 
     const isCallActive = callStatus === 'ringing' || callStatus === 'connected';
+    const headerDialNumber = customDialerNumber.trim();
+    const headerDialDigits = headerDialNumber.replace(/\D/g, '');
+    const canHeaderDial = !disabled && !isCallActive && headerDialDigits.length >= 3;
+    const activeDialDigits = activeCallNumber ? activeCallNumber.replace(/\D/g, '') : '';
+    const isHeaderNumberActive = isCallActive && headerDialDigits.length >= 3 && activeDialDigits === headerDialDigits;
 
     // Update elapsed time for session
     useEffect(() => {
@@ -313,10 +318,13 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
 
     // Compute panel dimensions
     const hasSession = session && session.status === 'active';
-    // In docked mode, use hover state; in floating mode, use button-controlled minimized state
+    // In docked mode, auto-hide/minimize when not hovered
     // When disabled, always keep collapsed
-    // In docked mode, expand on hover OR during active call
-    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive && !isInputFocused) : isMinimized);
+    // In docked mode, expand on hover OR during active call OR when a recording is unsubmitted
+    // TODO: wire hasUnsubmittedRecording/unsubmittedDuration to actual state
+    const hasUnsubmittedRecording = false;
+    const unsubmittedDuration = 0;
+    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive && !isInputFocused && !hasUnsubmittedRecording) : isMinimized);
     const currentHeight = docked
         ? (isCollapsed ? '52px' : '550px')
         : (isCollapsed ? '48px' : (showKeypad ? `${height}px` : (hasSession ? 'auto' : `${height}px`)));
@@ -437,23 +445,47 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                         <span className="flex-1 text-xs text-[var(--warning)] font-medium">
                             Submit call log first
                         </span>
-                    ) : isCallActive ? (
-                        <div className="flex-1 flex items-center gap-2">
-                            <span className="text-xs font-semibold text-[var(--success)]">
-                                {callStatus === 'ringing' ? 'Ringing...' : 'Connected'}
-                            </span>
-                            <span className="text-[10px] text-[var(--muted)] italic ml-auto">
-                                Hover for Zoom controls
-                            </span>
-                        </div>
                     ) : (
-                        <>
-                            <div className="flex-1 flex items-center justify-end">
-                                <span className="text-xs font-medium text-[var(--muted)] italic mr-2">
-                                    Hover to Dial
+                        <div className="flex-1 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                                {headerDialDigits.length > 0 ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (canHeaderDial) dialNumber(headerDialNumber);
+                                        }}
+                                        className={cn(
+                                            "flex items-center gap-1.5 text-xs font-semibold truncate",
+                                            canHeaderDial ? "text-[var(--foreground)] hover:text-blue-600" : "text-[var(--muted)]"
+                                        )}
+                                        title={canHeaderDial ? 'Dial this number' : 'Enter at least 3 digits to dial'}
+                                    >
+                                        <PhoneCall size={12} className={cn(
+                                            "shrink-0",
+                                            canHeaderDial ? "text-blue-500" : "text-[var(--muted)]"
+                                        )} />
+                                        <span className="truncate">{headerDialNumber}</span>
+                                    </button>
+                                ) : (
+                                    <span className="text-xs font-semibold text-[var(--muted)]">Dialer</span>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-1">
+                                {isHeaderNumberActive && (
+                                    <span className={cn(
+                                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                                        callStatus === 'ringing'
+                                            ? "bg-amber-100 text-amber-700"
+                                            : "bg-[var(--success-subtle)] text-[var(--success)]"
+                                    )}>
+                                        {callStatus === 'ringing' ? 'Ringing' : 'On Call'}
+                                    </span>
+                                )}
+                                <span className="text-[10px] text-[var(--muted)] italic">
+                                    {isCallActive ? 'Hover for Zoom controls' : 'Hover to Dial'}
                                 </span>
                             </div>
-                        </>
+                        </div>
                     )}
                 </div>
             ) : (
@@ -509,6 +541,13 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                     display: isCollapsed ? 'none' : 'flex'
                 }}
             >
+                {/* Recorded but unsubmitted lead stays visible until submitted */}
+                {hasUnsubmittedRecording && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-yellow-50 border-b border-yellow-200">
+                        <span className="text-xs font-semibold text-yellow-700">Recorded but unsubmitted</span>
+                        <span className="text-xs text-yellow-700">{formatDuration(unsubmittedDuration)}</span>
+                    </div>
+                )}
                 {/* Session Stats Panel - Only show when session is active and NOT docked (stats already on page) */}
                 {hasSession && !showKeypad && !docked && (
                     <div className="flex-1 p-4 space-y-4 overflow-y-auto">
@@ -584,15 +623,7 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                             </div>
                         </div>
 
-                        {/* End Session Button */}
-                        <button
-                            onClick={handleEndSession}
-                            disabled={ending}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
-                        >
-                            {ending ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
-                            {ending ? 'Ending...' : 'End Session'}
-                        </button>
+                        {/* End Session Button removed: Call can only be ended from Zoom dialer iframe */}
                     </div>
                 )}
 

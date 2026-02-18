@@ -8,12 +8,38 @@ import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
-import { CurrentCallForm, type CallFormData } from './current-call-form';
+import { CurrentCallForm, type CallFormData, type CallFormDraft } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 
 interface StandaloneCallInterfaceProps {
     onExit: () => void;
 }
+
+const STANDALONE_UNSAVED_CALL_STORAGE_KEY = 'crm:standalone:unsaved-call:v1';
+
+interface StandaloneUnsavedCallStoragePayload {
+    phoneNumber: string;
+    hasUnsavedCall: boolean;
+    draft: CallFormDraft | null;
+}
+
+const hasDraftContent = (draft: CallFormDraft | null) => {
+    if (!draft) return false;
+
+    return (
+        draft.companySearch.trim().length > 0 ||
+        !!draft.selectedCompany ||
+        draft.recipientName.trim().length > 0 ||
+        !!draft.callOutcome ||
+        draft.interestLevel !== 5 ||
+        draft.postCallNotes.trim().length > 0 ||
+        draft.ownerReached ||
+        draft.pitchCompleted ||
+        draft.appointmentSet ||
+        draft.showFollowUp ||
+        !!draft.followUpData
+    );
+};
 
 export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps) {
     const { user } = useAuth();
@@ -31,6 +57,50 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     const [lastCallLog, setLastCallLog] = useState<CallLog | null>(null);
     const [lastCallCompanyName, setLastCallCompanyName] = useState('');
     const [exiting, setExiting] = useState(false);
+    const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
+    const [callDraft, setCallDraft] = useState<CallFormDraft | null>(null);
+    const [hydratedStorage, setHydratedStorage] = useState(false);
+
+    useEffect(() => {
+        try {
+            const raw = window.localStorage.getItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            if (!raw) {
+                setHydratedStorage(true);
+                return;
+            }
+
+            const parsed = JSON.parse(raw) as StandaloneUnsavedCallStoragePayload;
+            if (parsed && typeof parsed.phoneNumber === 'string') {
+                if (parsed.phoneNumber) {
+                    setCurrentPhoneNumber(parsed.phoneNumber);
+                    setContextPhoneNumber(parsed.phoneNumber);
+                }
+                setHasUnsavedCall(!!parsed.hasUnsavedCall);
+                setCallDraft(parsed.draft ?? null);
+            }
+        } catch {
+            // Ignore malformed local storage payload
+        } finally {
+            setHydratedStorage(true);
+        }
+    }, [setContextPhoneNumber]);
+
+    useEffect(() => {
+        if (!hydratedStorage) return;
+
+        const shouldPersist = hasUnsavedCall || (!!currentPhoneNumber && hasDraftContent(callDraft));
+        if (!shouldPersist) {
+            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            return;
+        }
+
+        const payload: StandaloneUnsavedCallStoragePayload = {
+            phoneNumber: currentPhoneNumber,
+            hasUnsavedCall,
+            draft: callDraft,
+        };
+        window.localStorage.setItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
+    }, [hydratedStorage, hasUnsavedCall, currentPhoneNumber, callDraft]);
 
     // Track active call from Zoom Phone context
     useEffect(() => {
@@ -46,6 +116,12 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             }
         }
     }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, startRecording]);
+
+    useEffect(() => {
+        if (callStatus === 'ended' && currentPhoneNumber) {
+            setHasUnsavedCall(true);
+        }
+    }, [callStatus, currentPhoneNumber]);
 
     // Handle saving standalone call
     const handleSaveCall = useCallback(async (data: CallFormData) => {
@@ -112,12 +188,24 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             setLastCallLog(callLog);
             setLastCallCompanyName(data.companyName);
             setCurrentPhoneNumber('');
+            setHasUnsavedCall(false);
+            setCallDraft(null);
+            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
         } catch (err) {
             console.error('Failed to save standalone call:', err);
         } finally {
             setSavingCall(false);
         }
     }, [user, stopRecording, setContextPhoneNumber]);
+
+    const handleDiscardCall = useCallback(() => {
+        stopRecording();
+        setContextPhoneNumber('');
+        setHasUnsavedCall(false);
+        setCallDraft(null);
+        setCurrentPhoneNumber('');
+        window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+    }, [stopRecording, setContextPhoneNumber]);
 
     // Handle exit
     const handleExit = useCallback(async () => {
@@ -127,15 +215,13 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             if (recorderStatus === 'recording') {
                 stopRecording();
             }
+            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
             // Call parent to exit standalone mode
             onExit();
         } finally {
             setExiting(false);
         }
     }, [recorderStatus, stopRecording, onExit]);
-
-    // Track unsaved call state
-    const hasUnsavedCall = !!(callStatus === 'ended' && currentPhoneNumber);
 
     return (
         <div className="space-y-6">
@@ -233,6 +319,9 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                         onSave={handleSaveCall}
                         saving={savingCall}
                         hasUnsavedCall={hasUnsavedCall}
+                        initialDraft={callDraft}
+                        onDraftChange={setCallDraft}
+                        onDiscard={handleDiscardCall}
                     />
                 </div>
 

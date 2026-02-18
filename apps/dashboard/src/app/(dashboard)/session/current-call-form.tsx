@@ -6,6 +6,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
+import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 
 const OUTCOMES = [
     'Interested',
@@ -40,15 +41,50 @@ export interface CallFormData {
     followUp?: { scheduledTime: string; timezone: string; notes: string } | null;
 }
 
+export interface CallFormDraft {
+    companySearch: string;
+    selectedCompany: Pick<Company, 'id' | 'company_name' | 'owner_name'> | null;
+    recipientName: string;
+    callOutcome: string;
+    interestLevel: number;
+    postCallNotes: string;
+    ownerReached: boolean;
+    pitchCompleted: boolean;
+    appointmentSet: boolean;
+    noneSelected: boolean;
+    isNewCompany: boolean;
+    showFollowUp: boolean;
+    followUpData: { scheduledTime: string; timezone: string; notes: string } | null;
+}
+
+const EMPTY_DRAFT: CallFormDraft = {
+    companySearch: '',
+    selectedCompany: null,
+    recipientName: '',
+    callOutcome: '',
+    interestLevel: 5,
+    postCallNotes: '',
+    ownerReached: false,
+    pitchCompleted: false,
+    appointmentSet: false,
+    noneSelected: true,
+    isNewCompany: false,
+    showFollowUp: false,
+    followUpData: null,
+};
+
 interface CurrentCallFormProps {
     phoneNumber: string;
     onSave: (data: CallFormData) => void;
     saving?: boolean;
     /** Whether a recorded call is waiting to be submitted */
     hasUnsavedCall?: boolean;
+    initialDraft?: CallFormDraft | null;
+    onDraftChange?: (draft: CallFormDraft) => void;
+    onDiscard?: () => void;
 }
 
-export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }: CurrentCallFormProps) {
+export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard }: CurrentCallFormProps) {
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -74,6 +110,74 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
     // Follow-up scheduling
     const [showFollowUp, setShowFollowUp] = useState(false);
     const [followUpData, setFollowUpData] = useState<{ scheduledTime: string; timezone: string; notes: string } | null>(null);
+    const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+    const hydratedFromDraft = useRef(false);
+
+    const resetForm = useCallback(() => {
+        setCompanySearch('');
+        setSelectedCompany(null);
+        setIsNewCompany(false);
+        setRecipientName('');
+        setCallOutcome('');
+        setInterestLevel(5);
+        setPostCallNotes('');
+        setOwnerReached(false);
+        setPitchCompleted(false);
+        setAppointmentSet(false);
+        setNoneSelected(true);
+        setShowFollowUp(false);
+        setFollowUpData(null);
+        setAutoFetchedCompany(null);
+        setPhoneNumberRecord(null);
+        setPhoneExistsForOtherCompany(false);
+        lastLookedUpPhone.current = '';
+    }, []);
+
+    useEffect(() => {
+        if (!initialDraft || hydratedFromDraft.current) return;
+
+        setCompanySearch(initialDraft.companySearch || '');
+        if (initialDraft.selectedCompany) {
+            setSelectedCompany(initialDraft.selectedCompany as Company);
+        }
+        setRecipientName(initialDraft.recipientName || '');
+        setCallOutcome(initialDraft.callOutcome || '');
+        setInterestLevel(initialDraft.interestLevel || 5);
+        setPostCallNotes(initialDraft.postCallNotes || '');
+        setOwnerReached(!!initialDraft.ownerReached);
+        setPitchCompleted(!!initialDraft.pitchCompleted);
+        setAppointmentSet(!!initialDraft.appointmentSet);
+        setNoneSelected(initialDraft.noneSelected ?? true);
+        setIsNewCompany(!!initialDraft.isNewCompany);
+        setShowFollowUp(!!initialDraft.showFollowUp);
+        setFollowUpData(initialDraft.followUpData || null);
+
+        hydratedFromDraft.current = true;
+    }, [initialDraft]);
+
+    useEffect(() => {
+        onDraftChange?.({
+            companySearch,
+            selectedCompany: selectedCompany
+                ? {
+                    id: selectedCompany.id,
+                    company_name: selectedCompany.company_name,
+                    owner_name: selectedCompany.owner_name,
+                }
+                : null,
+            recipientName,
+            callOutcome,
+            interestLevel,
+            postCallNotes,
+            ownerReached,
+            pitchCompleted,
+            appointmentSet,
+            noneSelected,
+            isNewCompany,
+            showFollowUp,
+            followUpData,
+        });
+    }, [companySearch, selectedCompany, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, onDraftChange]);
 
     // Auto-fetch company when phone number changes
     useEffect(() => {
@@ -82,20 +186,43 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
 
         const lookupPhone = async () => {
             try {
-                // Normalize: strip non-digits and match last 10
+                // Try multiple matching strategies since phone formats vary
                 const digits = phoneNumber.replace(/\D/g, '');
-                const last10 = digits.slice(-10);
-                if (last10.length < 7) return;
+                if (digits.length < 7) return;
 
-                const result = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                    filter: `phone_number ~ "${last10}"`,
+                // Strategy 1: Try exact match with the raw phone string
+                // Strategy 2: Try matching with just the digits
+                // Strategy 3: Try matching with last 10 digits (no country code)
+                const last10 = digits.slice(-10);
+                const filterParts = [
+                    `phone_number = "${phoneNumber}"`,
+                    `phone_number ~ "${phoneNumber}"`,
+                ];
+                // Only add digit-based searches if different from the raw string
+                if (digits !== phoneNumber) {
+                    filterParts.push(`phone_number ~ "${digits}"`);
+                }
+                if (last10 !== digits && last10.length >= 7) {
+                    filterParts.push(`phone_number ~ "${last10}"`);
+                }
+
+                const result = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 5, {
+                    filter: filterParts.join(' || '),
                     expand: 'company',
                 });
 
                 if (result.items.length > 0) {
-                    const phoneRec = result.items[0];
-                    setPhoneNumberRecord(phoneRec);
-                    const company = phoneRec.expand?.company as Company | undefined;
+                    // Find the best match: prefer exact match, then longest digit overlap
+                    const bestMatch = result.items.find(
+                        p => p.phone_number === phoneNumber
+                    ) || result.items.find(
+                        p => p.phone_number.replace(/\D/g, '') === digits
+                    ) || result.items.find(
+                        p => p.phone_number.replace(/\D/g, '').slice(-10) === last10
+                    ) || result.items[0];
+
+                    setPhoneNumberRecord(bestMatch);
+                    const company = bestMatch.expand?.company as Company | undefined;
                     if (company) {
                         setAutoFetchedCompany(company);
                         setSelectedCompany(company);
@@ -104,8 +231,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
                         if (company.owner_name) {
                             setRecipientName(company.owner_name);
                         }
-                        if (phoneRec.receptionist_name && !company.owner_name) {
-                            setRecipientName(phoneRec.receptionist_name);
+                        if (bestMatch.receptionist_name && !company.owner_name) {
+                            setRecipientName(bestMatch.receptionist_name);
                         }
                     }
                 } else {
@@ -134,30 +261,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
             return;
         }
 
-        const checkUniqueness = async () => {
-            try {
-                const digits = phoneNumber.replace(/\D/g, '');
-                const last10 = digits.slice(-10);
-                if (last10.length < 7) return;
+        // If we already found a phone record from the auto-fetch, we know it exists
+        if (phoneNumberRecord) {
+            setPhoneExistsForOtherCompany(true);
+            return;
+        }
 
-                const result = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                    filter: `phone_number ~ "${last10}"`,
-                    expand: 'company',
-                });
-
-                if (result.items.length > 0) {
-                    const existingCompany = result.items[0].expand?.company as Company | undefined;
-                    setPhoneExistsForOtherCompany(!!existingCompany);
-                } else {
-                    setPhoneExistsForOtherCompany(false);
-                }
-            } catch {
-                setPhoneExistsForOtherCompany(false);
-            }
-        };
-
-        checkUniqueness();
-    }, [isNewCompany, phoneNumber]);
+        setPhoneExistsForOtherCompany(false);
+    }, [isNewCompany, phoneNumber, phoneNumberRecord]);
 
     // Search companies
     useEffect(() => {
@@ -285,28 +396,31 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
                 followUp: showFollowUp ? followUpData : null,
             });
 
-            // Reset form
-            setCompanySearch('');
-            setSelectedCompany(null);
-            setIsNewCompany(false);
-            setRecipientName('');
-            setCallOutcome('');
-            setInterestLevel(5);
-            setPostCallNotes('');
-            setOwnerReached(false);
-            setPitchCompleted(false);
-            setAppointmentSet(false);
-            setNoneSelected(true);
-            setShowFollowUp(false);
-            setFollowUpData(null);
-            setAutoFetchedCompany(null);
-            setPhoneNumberRecord(null);
-            setPhoneExistsForOtherCompany(false);
-            lastLookedUpPhone.current = '';
+            resetForm();
         } catch (err) {
             console.error('Failed to save call:', err);
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, resetForm]);
+
+    const hasDraftValues =
+        companySearch.trim().length > 0 ||
+        !!selectedCompany ||
+        recipientName.trim().length > 0 ||
+        !!callOutcome ||
+        interestLevel !== 5 ||
+        postCallNotes.trim().length > 0 ||
+        ownerReached ||
+        pitchCompleted ||
+        appointmentSet ||
+        showFollowUp ||
+        !!followUpData;
+
+    const handleConfirmDiscard = useCallback(() => {
+        resetForm();
+        onDraftChange?.(EMPTY_DRAFT);
+        onDiscard?.();
+        setShowDiscardConfirm(false);
+    }, [onDiscard, onDraftChange, resetForm]);
 
     // Required fields: Company, Phone Number (auto-filled), Call Outcome, Interest Level (always has value), Post-call Notes
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
@@ -590,20 +704,42 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
                 )}
             </div>
 
-            {/* Save button */}
-            <button
-                onClick={handleSave}
-                disabled={!canSave}
-                className={cn(
-                    "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]",
-                    hasUnsavedCall
-                        ? "bg-[var(--warning)] text-white hover:opacity-90"
-                        : "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90"
-                )}
-            >
-                <Save size={16} />
-                {saving ? 'Saving...' : hasUnsavedCall ? 'Submit Call Log' : 'Save Call & Next'}
-            </button>
+            {/* Action buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                    type="button"
+                    onClick={() => setShowDiscardConfirm(true)}
+                    disabled={!hasDraftValues && !hasUnsavedCall}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all border border-[var(--card-border)] bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-hover)] hover:text-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                    Discard
+                </button>
+
+                <button
+                    onClick={handleSave}
+                    disabled={!canSave}
+                    className={cn(
+                        "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]",
+                        hasUnsavedCall
+                            ? "bg-[var(--warning)] text-white hover:opacity-90"
+                            : "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90"
+                    )}
+                >
+                    <Save size={16} />
+                    {saving ? 'Saving...' : hasUnsavedCall ? 'Submit Call Log' : 'Save Call & Next'}
+                </button>
+            </div>
+
+            <ConfirmationModal
+                isOpen={showDiscardConfirm}
+                onClose={() => setShowDiscardConfirm(false)}
+                onConfirm={handleConfirmDiscard}
+                title="Discard current call details?"
+                message="This will clear all unsaved fields for the current call. This action cannot be undone."
+                confirmText="Discard"
+                cancelText="Keep Editing"
+                variant="warning"
+            />
         </div>
     );
 }

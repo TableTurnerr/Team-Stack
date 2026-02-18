@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company } from '@/lib/types';
+import { COLLECTIONS, type Company, type PhoneNumber } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 
 const OUTCOMES = [
     'Interested',
@@ -36,6 +37,7 @@ export interface CallFormData {
     ownerReached: boolean;
     pitchCompleted: boolean;
     appointmentSet: boolean;
+    followUp?: { scheduledTime: string; timezone: string; notes: string } | null;
 }
 
 interface CurrentCallFormProps {
@@ -63,12 +65,99 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
+    // Auto-fetch company state
+    const [autoFetchedCompany, setAutoFetchedCompany] = useState<Company | null>(null);
+    const [phoneNumberRecord, setPhoneNumberRecord] = useState<PhoneNumber | null>(null);
+    const [phoneExistsForOtherCompany, setPhoneExistsForOtherCompany] = useState(false);
+    const lastLookedUpPhone = useRef('');
+
+    // Follow-up scheduling
+    const [showFollowUp, setShowFollowUp] = useState(false);
+    const [followUpData, setFollowUpData] = useState<{ scheduledTime: string; timezone: string; notes: string } | null>(null);
+
+    // Auto-fetch company when phone number changes
+    useEffect(() => {
+        if (!phoneNumber || phoneNumber === lastLookedUpPhone.current) return;
+        lastLookedUpPhone.current = phoneNumber;
+
+        const lookupPhone = async () => {
+            try {
+                // Normalize: strip non-digits and match last 10
+                const digits = phoneNumber.replace(/\D/g, '');
+                const last10 = digits.slice(-10);
+                if (last10.length < 7) return;
+
+                const result = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
+                    filter: `phone_number ~ "${last10}"`,
+                    expand: 'company',
+                });
+
+                if (result.items.length > 0) {
+                    const phoneRec = result.items[0];
+                    setPhoneNumberRecord(phoneRec);
+                    const company = phoneRec.expand?.company as Company | undefined;
+                    if (company) {
+                        setAutoFetchedCompany(company);
+                        setSelectedCompany(company);
+                        setCompanySearch(company.company_name);
+                        setIsNewCompany(false);
+                        if (company.owner_name) {
+                            setRecipientName(company.owner_name);
+                        }
+                        if (phoneRec.receptionist_name && !company.owner_name) {
+                            setRecipientName(phoneRec.receptionist_name);
+                        }
+                    }
+                } else {
+                    setPhoneNumberRecord(null);
+                    setAutoFetchedCompany(null);
+                }
+            } catch {
+                // Non-critical lookup
+            }
+        };
+
+        lookupPhone();
+    }, [phoneNumber]);
+
     // Sync "None" with other performance options
     useEffect(() => {
         if (ownerReached || pitchCompleted || appointmentSet) {
             setNoneSelected(false);
         }
     }, [ownerReached, pitchCompleted, appointmentSet]);
+
+    // Check phone uniqueness when company changes (only for new companies)
+    useEffect(() => {
+        if (!isNewCompany || !phoneNumber) {
+            setPhoneExistsForOtherCompany(false);
+            return;
+        }
+
+        const checkUniqueness = async () => {
+            try {
+                const digits = phoneNumber.replace(/\D/g, '');
+                const last10 = digits.slice(-10);
+                if (last10.length < 7) return;
+
+                const result = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
+                    filter: `phone_number ~ "${last10}"`,
+                    expand: 'company',
+                });
+
+                if (result.items.length > 0) {
+                    const existingCompany = result.items[0].expand?.company as Company | undefined;
+                    setPhoneExistsForOtherCompany(!!existingCompany);
+                } else {
+                    setPhoneExistsForOtherCompany(false);
+                }
+            } catch {
+                setPhoneExistsForOtherCompany(false);
+            }
+        };
+
+        checkUniqueness();
+    }, [isNewCompany, phoneNumber]);
 
     // Search companies
     useEffect(() => {
@@ -149,6 +238,13 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
         setAppointmentSet(false);
     };
 
+    // Auto-show follow-up when outcome is "Callback"
+    useEffect(() => {
+        if (callOutcome === 'Callback' && !showFollowUp) {
+            setShowFollowUp(true);
+        }
+    }, [callOutcome, showFollowUp]);
+
     const handleSave = useCallback(async () => {
         if (!selectedCompany && !isNewCompany) return;
         if (!companySearch.trim()) return;
@@ -186,6 +282,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
                 ownerReached,
                 pitchCompleted,
                 appointmentSet,
+                followUp: showFollowUp ? followUpData : null,
             });
 
             // Reset form
@@ -200,10 +297,16 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
             setPitchCompleted(false);
             setAppointmentSet(false);
             setNoneSelected(true);
+            setShowFollowUp(false);
+            setFollowUpData(null);
+            setAutoFetchedCompany(null);
+            setPhoneNumberRecord(null);
+            setPhoneExistsForOtherCompany(false);
+            lastLookedUpPhone.current = '';
         } catch (err) {
             console.error('Failed to save call:', err);
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData]);
 
     // Required fields: Company, Phone Number (auto-filled), Call Outcome, Interest Level (always has value), Post-call Notes
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
@@ -233,6 +336,26 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
                     </div>
                 )}
             </div>
+
+            {/* Auto-fetched company banner */}
+            {autoFetchedCompany && selectedCompany?.id === autoFetchedCompany.id && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--success-subtle)] border border-[var(--success)]/20">
+                    <Building2 size={14} className="text-[var(--success)]" />
+                    <span className="text-xs text-[var(--success)] font-medium">
+                        Auto-matched to {autoFetchedCompany.company_name} from phone number
+                    </span>
+                </div>
+            )}
+
+            {/* Phone uniqueness warning */}
+            {phoneExistsForOtherCompany && isNewCompany && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--warning-subtle)] border border-[var(--warning)]/20">
+                    <AlertTriangle size={14} className="text-[var(--warning)]" />
+                    <span className="text-xs text-[var(--warning)] font-medium">
+                        This phone number is already linked to another company. Consider selecting the existing company instead.
+                    </span>
+                </div>
+            )}
 
             {/* Company autocomplete */}
             <div className="relative" ref={dropdownRef}>
@@ -425,6 +548,46 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall }:
                     rows={3}
                     className="w-full px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors resize-none"
                 />
+            </div>
+
+            {/* Follow-up scheduling toggle */}
+            <div className="border-t border-[var(--card-border)] pt-3">
+                <button
+                    type="button"
+                    onClick={() => setShowFollowUp(!showFollowUp)}
+                    className={cn(
+                        "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                        showFollowUp
+                            ? "bg-[var(--info-subtle)] text-[var(--info)] border border-[var(--info)]/20"
+                            : "bg-[var(--sidebar-bg)] text-[var(--muted)] border border-[var(--card-border)] hover:bg-[var(--card-hover)]"
+                    )}
+                >
+                    <div className="flex items-center gap-2">
+                        <CalendarClock size={14} />
+                        Schedule Follow-up
+                    </div>
+                    {showFollowUp ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+
+                {showFollowUp && selectedCompany && (
+                    <div className="mt-3">
+                        <FollowUpScheduler
+                            companyId={selectedCompany.id}
+                            companyName={selectedCompany.company_name}
+                            phoneNumberRecordId={phoneNumberRecord?.id}
+                            compact
+                            onChange={setFollowUpData}
+                        />
+                    </div>
+                )}
+
+                {showFollowUp && !selectedCompany && (
+                    <div className="mt-3 p-3 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg">
+                        <p className="text-xs text-[var(--muted)] text-center">
+                            Select a company first to schedule a follow-up
+                        </p>
+                    </div>
+                )}
             </div>
 
             {/* Save button */}

@@ -22,6 +22,7 @@ import { LastCallPreview } from './last-call-preview';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
+import { useFollowUps } from '@/contexts/follow-up-context';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
@@ -40,6 +41,7 @@ export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
     const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode } = useSession();
+    const { createFollowUp } = useFollowUps();
 
     // Loading combined
     const loading = sessionLoading;
@@ -449,6 +451,22 @@ export default function SessionPage() {
                 // Non-critical — don't block call save
             }
 
+            // Create follow-up if scheduled
+            if (data.followUp) {
+                try {
+                    await createFollowUp({
+                        company: data.companyId,
+                        phone_number_record: phoneNumberRecordId || undefined,
+                        call_log: callLog.id,
+                        scheduled_time: data.followUp.scheduledTime,
+                        client_timezone: data.followUp.timezone,
+                        notes: data.followUp.notes || undefined,
+                    });
+                } catch (err) {
+                    console.error('Failed to create follow-up:', err);
+                }
+            }
+
             // Note: dial count and pickup count are now incremented automatically when calls ring/connect
             // No need to update them here - just refresh the session
             const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getOne<ColdCallingSession>(session.id);
@@ -473,7 +491,7 @@ export default function SessionPage() {
         } finally {
             setSavingCall(false);
         }
-    }, [session, user, stopRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime]);
+    }, [session, user, stopRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, createFollowUp]);
 
     // ---------------------------------------------------------------------------
     // Update performance counters

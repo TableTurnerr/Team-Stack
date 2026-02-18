@@ -135,7 +135,7 @@ export interface Rule extends RecordModel {
 export interface Alert extends RecordModel {
   created_by: string;
   target_user: string;
-  entity_type: 'cold_call' | 'company' | 'goal';
+  entity_type: 'cold_call' | 'company' | 'goal' | 'follow_up';
   entity_id?: string;
   entity_label?: string;
   alert_time?: string;
@@ -169,6 +169,7 @@ export interface PhoneNumber extends RecordModel {
   location_address?: string;
   receptionist_name?: string;
   last_called?: string;
+  total_calls?: number;
   expand?: {
     company?: Company;
   };
@@ -190,6 +191,7 @@ export interface CallLog extends RecordModel {
   status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
   has_recording?: boolean;
   session?: string; // Optional - null for standalone calls, populated for session-based calls
+  cold_call?: string; // Optional link to AI transcript (cold_calls record)
   // Per-call performance tracking (tied to specific calls, aggregated to session level)
   owner_reached?: boolean;
   pitch_completed?: boolean;
@@ -199,6 +201,7 @@ export interface CallLog extends RecordModel {
     phone_number_record?: PhoneNumber;
     caller?: User;
     session?: ColdCallingSession;
+    cold_call?: ColdCall;
   };
 }
 
@@ -222,6 +225,8 @@ export interface ColdCallingSession extends RecordModel {
 export interface FollowUp extends RecordModel {
   call_log?: string;
   company: string;
+  phone_number_record?: string;
+  created_by?: string;
   scheduled_time: string;
   client_timezone: string;
   assigned_to?: string;
@@ -231,7 +236,9 @@ export interface FollowUp extends RecordModel {
   expand?: {
     call_log?: CallLog;
     company?: Company;
+    phone_number_record?: PhoneNumber;
     assigned_to?: User;
+    created_by?: User;
   };
 }
 
@@ -314,6 +321,7 @@ export interface UserPreferences extends RecordModel {
     show_transcript_panel?: boolean;
     default_status_filters?: string[];
     expanded_view?: boolean;
+    cold_calling_timezone?: string; // IANA timezone string for follow-up scheduling
   };
   privacy_settings?: {
     show_online_status?: boolean;

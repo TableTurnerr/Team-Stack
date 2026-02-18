@@ -861,7 +861,8 @@
                 "values": [
                     "cold_call",
                     "company",
-                    "goal"
+                    "goal",
+                    "follow_up"
                 ]
             },
             {
@@ -1162,6 +1163,19 @@
                 "maxSelect": 1,
                 "minSelect": 0,
                 "name": "session",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "pbc_9658854502",
+                "hidden": false,
+                "id": "relation_cold_call",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "cold_call",
                 "presentable": false,
                 "required": false,
                 "system": false,
@@ -2043,6 +2057,32 @@
                 "type": "relation"
             },
             {
+                "cascadeDelete": false,
+                "collectionId": "pbc_1111111111",
+                "hidden": false,
+                "id": "relation_phone_number_record",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "phone_number_record",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "_pb_users_auth_",
+                "hidden": false,
+                "id": "relation_created_by",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "created_by",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
                 "hidden": false,
                 "id": "date_scheduled_time",
                 "max": "",
@@ -2855,6 +2895,18 @@
                 "required": false,
                 "system": false,
                 "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "number_total_calls",
+                "max": null,
+                "min": 0,
+                "name": "total_calls",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
             },
             {
                 "hidden": false,

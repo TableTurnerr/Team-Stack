@@ -10,6 +10,10 @@ import { DashboardSkeleton } from '@/components/dashboard-skeletons';
 import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
 import { SessionProvider } from '@/contexts/session-context';
 import { CallRecordingProvider } from '@/contexts/call-recording-context';
+import { ToastProvider } from '@/components/ui/toast';
+import { UnsavedChangesProvider } from '@/contexts/unsaved-changes-context';
+import { FollowUpProvider } from '@/contexts/follow-up-context';
+import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 
@@ -51,6 +55,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-[var(--background)]">
       <Sidebar />
       <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
+        <FloatingSaveBar />
         <ActiveSessionBanner />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[var(--background)]">
           <div className="container mx-auto px-4 py-8 lg:px-8 max-w-[1600px]">
@@ -71,13 +76,19 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthGuard>
-      <ZoomPhoneProvider>
-        <SessionProvider>
-          <CallRecordingProvider>
-            <DashboardLayoutContent>{children}</DashboardLayoutContent>
-          </CallRecordingProvider>
-        </SessionProvider>
-      </ZoomPhoneProvider>
+      <ToastProvider>
+        <ZoomPhoneProvider>
+          <SessionProvider>
+            <CallRecordingProvider>
+              <UnsavedChangesProvider>
+                <FollowUpProvider>
+                  <DashboardLayoutContent>{children}</DashboardLayoutContent>
+                </FollowUpProvider>
+              </UnsavedChangesProvider>
+            </CallRecordingProvider>
+          </SessionProvider>
+        </ZoomPhoneProvider>
+      </ToastProvider>
     </AuthGuard>
   );
 }

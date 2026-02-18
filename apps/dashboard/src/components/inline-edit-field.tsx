@@ -1,8 +1,24 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useContext } from 'react';
 import { Check, X, Undo2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Optional context import - inline-edit-field can work without it
+let useUnsavedChangesOptional: (() => { registerChange: (c: any) => void; removeChange: (id: string) => void } | null) | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require('@/contexts/unsaved-changes-context');
+  useUnsavedChangesOptional = () => {
+    try {
+      return mod.useUnsavedChanges();
+    } catch {
+      return null;
+    }
+  };
+} catch {
+  useUnsavedChangesOptional = () => null;
+}
 
 interface InlineEditFieldProps {
   value: string;
@@ -15,6 +31,10 @@ interface InlineEditFieldProps {
   placeholder?: string;
   isEditing?: boolean;
   onEditChange?: (isEditing: boolean) => void;
+  // Optional props for global unsaved changes tracking
+  collection?: string;   // PocketBase collection name
+  recordId?: string;     // PocketBase record ID
+  fieldName?: string;    // Field name on the record
 }
 
 export function InlineEditField({
@@ -28,7 +48,11 @@ export function InlineEditField({
   placeholder,
   isEditing: externalIsEditing,
   onEditChange,
+  collection,
+  recordId,
+  fieldName,
 }: InlineEditFieldProps) {
+  const unsavedCtx = useUnsavedChangesOptional?.() ?? null;
   const [internalIsEditing, setInternalIsEditing] = useState(false);
   
   const isEditing = externalIsEditing !== undefined ? externalIsEditing : internalIsEditing;
@@ -82,6 +106,7 @@ export function InlineEditField({
       setSavedValue(currentValue);
       setHasUnsavedChanges(false);
       localStorage.removeItem(`unsaved_${id}`);
+      if (unsavedCtx) unsavedCtx.removeChange(id);
       setIsEditing(false);
     } catch (error) {
       console.error('Failed to save:', error);
@@ -94,6 +119,7 @@ export function InlineEditField({
     setCurrentValue(savedValue);
     setHasUnsavedChanges(false);
     localStorage.removeItem(`unsaved_${id}`);
+    if (unsavedCtx) unsavedCtx.removeChange(id);
     setIsEditing(false);
   };
 
@@ -102,8 +128,20 @@ export function InlineEditField({
     setHasUnsavedChanges(newValue !== savedValue);
     if (newValue !== savedValue) {
       localStorage.setItem(`unsaved_${id}`, newValue);
+      // Register with global unsaved changes context
+      if (unsavedCtx && collection && recordId && fieldName) {
+        unsavedCtx.registerChange({
+          id,
+          collection,
+          recordId,
+          field: fieldName,
+          originalValue: savedValue,
+          currentValue: newValue,
+        });
+      }
     } else {
       localStorage.removeItem(`unsaved_${id}`);
+      if (unsavedCtx) unsavedCtx.removeChange(id);
     }
 
     // Add to history if different from last

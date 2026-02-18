@@ -1,23 +1,18 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useContext } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Check, X, Undo2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Optional context import - inline-edit-field can work without it
-let useUnsavedChangesOptional: (() => { registerChange: (c: any) => void; removeChange: (id: string) => void } | null) | undefined;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('@/contexts/unsaved-changes-context');
-  useUnsavedChangesOptional = () => {
-    try {
-      return mod.useUnsavedChanges();
-    } catch {
-      return null;
-    }
-  };
-} catch {
-  useUnsavedChangesOptional = () => null;
+import { useUnsavedChanges } from '@/contexts/unsaved-changes-context';
+
+// Optional hook wrapper - returns null if context is not available
+function useUnsavedChangesOptional() {
+  try {
+    return useUnsavedChanges();
+  } catch {
+    return null;
+  }
 }
 
 interface InlineEditFieldProps {
@@ -52,7 +47,7 @@ export function InlineEditField({
   recordId,
   fieldName,
 }: InlineEditFieldProps) {
-  const unsavedCtx = useUnsavedChangesOptional?.() ?? null;
+  const unsavedCtx = useUnsavedChangesOptional();
   const [internalIsEditing, setInternalIsEditing] = useState(false);
   
   const isEditing = externalIsEditing !== undefined ? externalIsEditing : internalIsEditing;

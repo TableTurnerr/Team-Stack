@@ -1,8 +1,9 @@
 'use client';
 
-import { Calendar, Clock, ArrowRight, CheckCircle2, XCircle } from 'lucide-react';
-import { cn, formatDate } from '@/lib/utils';
+import { Calendar, CheckCircle2, XCircle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { FollowUp, Company } from '@/lib/types';
+import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 
 interface FollowUpAlertProps {
   followUp: FollowUp & { expand?: { company?: Company } };
@@ -17,18 +18,8 @@ export function FollowUpAlert({
   onDismiss,
   className
 }: FollowUpAlertProps) {
-  // Convert scheduled_time (client timezone) to local time
   const scheduledDate = new Date(followUp.scheduled_time);
   const isOverdue = scheduledDate < new Date();
-
-  // Get client time string
-  const clientTime = scheduledDate.toLocaleTimeString('en-US', {
-    timeZone: followUp.client_timezone,
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZoneName: 'short'
-  });
 
   return (
     <div className={cn(
@@ -49,16 +40,12 @@ export function FollowUpAlert({
               Follow up with {followUp.expand?.company?.company_name || 'Company'}
             </span>
           </div>
-          
-          <div className="space-y-1.5 mt-2">
-            <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-              <Clock size={12} />
-              <span>Your time: <span className="text-[var(--foreground)] font-medium">{formatDate(followUp.scheduled_time)}</span></span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-              <ArrowRight size={12} />
-              <span>Client time: <span className="text-[var(--foreground)] font-medium">{clientTime}</span></span>
-            </div>
+
+          <div className="mt-2">
+            <FollowUpTimeDisplay
+              scheduledTime={followUp.scheduled_time}
+              clientTimezone={followUp.client_timezone}
+            />
           </div>
 
           {followUp.notes && (

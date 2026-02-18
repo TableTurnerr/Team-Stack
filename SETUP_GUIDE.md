@@ -164,6 +164,7 @@ Access via **Settings → Integrations → Zoom Phone**.
 ### Available Options
 1. **Auto-Dial** (Default: `Off`)
    - When enabled, clicking phone buttons routes calls through the Zoom desktop app.
+   - **Note**: "Active Call Session" requires screen sharing to be started manually.
    - When disabled, numbers populate in the web-based custom dialer.
 2. **Auto-Record Calls** (Default: `On`)
    - Automatically starts/stops recording when calls connect/end.
@@ -179,7 +180,7 @@ Use this checklist to verify system health.
 ### 8.1 Dashboard Pages
 - [ ] **Overview**: Stats cards load without error. Recent activity list is populated.
 - [ ] **Cold Calls**: Table displays seeded calls. Detail view shows transcript and AI summary.
-- [ ] **Companies**: Can add a new company. Inline editing works.
+- [ ] **Companies**: Can add a new company, manage parent/child hierarchy. Inline editing works.
 - [ ] **Leads**: Filters (status, source) function correctly.
 - [ ] **Team**: Team members list loads.
 - [ ] **Notes**: Can create and edit a markdown note.

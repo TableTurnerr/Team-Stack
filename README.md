@@ -15,6 +15,7 @@
 2. **Cold Calling** → Record calls, auto-transcribe with AI, track outcomes
 3. **Instagram Outreach** → Automated DM campaigns via actor accounts
 4. **Pipeline Management** → Track status from Cold → Warm → Booked → Client
+5. **System Audio Recording** → Capture full system audio for desktop app calls
 
 ---
 
@@ -131,8 +132,8 @@ erDiagram
 ### Dashboard (`apps/dashboard`)
 Modern Next.js 15 web application with:
 - **Route Groups**: `(dashboard)/` contains all authenticated routes
-  - `/companies` - Company CRUD with inline editing
-  - `/cold-calls` - Call log with transcript viewer
+  - `/companies` - Company CRUD with inline editing and hierarchy support
+  - `/cold-calls` - Call log with transcript viewer and recording download
   - `/leads` - Legacy leads view
   - `/actors` - Instagram actor management
   - `/recordings` - Bulk audio upload
@@ -151,6 +152,8 @@ Modern Next.js 15 web application with:
 
 - **Zoom Phone Integration**:
   - Embedded Smart Embed dialer with postMessage API
+  - **Refined UI**: Minimized circular button with dynamic call status coloring
+  - **Active Session**: Always-visible session banner
   - Auto-dial setting to route calls through Zoom desktop app
   - Auto-record calls setting for automatic recording
   - Native dialer toggle for switching between custom and Zoom dialers
@@ -160,6 +163,7 @@ Modern Next.js 15 web application with:
 ### Audio Recorder (`tools/audio-recorder`)
 PyQt6 desktop application:
 - **Hotkey**: Alt+R for quick recording
+- **System Audio**: Captures entire screen audio for desktop app calls
 - **Auto-naming**: Timestamps + phone number
 - **Build**: PyInstaller → NSIS installer
 - **Entry Point**: `recorder.py`

@@ -1,15 +1,14 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Building2,
   Phone,
   History,
   StickyNote,
   ChevronLeft,
-  Save,
-  Undo2,
   Plus,
   Loader2,
   MapPin,
@@ -18,7 +17,10 @@ import {
   ExternalLink,
   MessageSquare,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  Zap,
+  CalendarClock,
+  CalendarCheck,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import {
@@ -28,21 +30,26 @@ import {
   type CallLog,
   type CompanyNote,
   type Interaction,
-  type FollowUp
+  type FollowUp,
+  type ColdCall,
 } from '@/lib/types';
 import { cn, formatDate } from '@/lib/utils';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
 import { CallLogForm } from '@/components/call-log-form';
 import { ZoomCallButton } from '@/components/zoom-call-button';
+import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
+import { FollowUpScheduler } from '@/components/follow-up-scheduler';
+import { useFollowUps } from '@/contexts/follow-up-context';
 
-type TabType = 'overview' | 'phones' | 'calls' | 'notes' | 'timeline';
+type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline';
 
 export default function CompanyDetailPage() {
   const { id } = useParams() as { id: string };
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
+  const { completeFollowUp } = useFollowUps();
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
@@ -51,6 +58,7 @@ export default function CompanyDetailPage() {
   const [notes, setNotes] = useState<CompanyNote[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [allFollowUps, setAllFollowUps] = useState<FollowUp[]>([]);
 
   // Modals
   const [isLogCallOpen, setIsLogCallOpen] = useState(false);
@@ -58,6 +66,7 @@ export default function CompanyDetailPage() {
   const [isEditingAll, setIsEditingAll] = useState(false);
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
+  const [showScheduleFollowUp, setShowScheduleFollowUp] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -71,7 +80,8 @@ export default function CompanyDetailPage() {
           callsData,
           notesData,
           interactionsData,
-          followUpsData
+          pendingFollowUpsData,
+          allFollowUpsData
         ] = await Promise.all([
           pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(id),
           pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
@@ -81,7 +91,7 @@ export default function CompanyDetailPage() {
           pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
             filter: `company = "${id}"`,
             sort: '-call_time',
-            expand: 'phone_number_record,caller'
+            expand: 'phone_number_record,caller,cold_call'
           }),
           pb.collection(COLLECTIONS.COMPANY_NOTES).getFullList<CompanyNote>({
             filter: `company = "${id}"`,
@@ -95,7 +105,13 @@ export default function CompanyDetailPage() {
           }),
           pb.collection(COLLECTIONS.FOLLOW_UPS).getFullList<FollowUp>({
             filter: `company = "${id}" && status = "pending"`,
-            sort: 'scheduled_time'
+            sort: 'scheduled_time',
+            expand: 'phone_number_record,assigned_to,created_by,call_log'
+          }),
+          pb.collection(COLLECTIONS.FOLLOW_UPS).getFullList<FollowUp>({
+            filter: `company = "${id}"`,
+            sort: '-scheduled_time',
+            expand: 'phone_number_record,assigned_to,created_by,call_log'
           })
         ]);
 
@@ -104,7 +120,8 @@ export default function CompanyDetailPage() {
         setCallLogs(callsData);
         setNotes(notesData);
         setInteractions(interactionsData);
-        setFollowUps(followUpsData);
+        setFollowUps(pendingFollowUpsData);
+        setAllFollowUps(allFollowUpsData);
       } catch (error) {
         console.error('Failed to fetch company details:', error);
       } finally {
@@ -147,7 +164,7 @@ export default function CompanyDetailPage() {
       // Log interaction
       await pb.collection(COLLECTIONS.INTERACTIONS).create({
         company: company.id,
-        channel: 'email', // Defaulting to email for notes/research
+        channel: 'email',
         direction: 'outbound',
         timestamp: new Date().toISOString(),
         user: pb.authStore.model?.id,
@@ -168,23 +185,19 @@ export default function CompanyDetailPage() {
         caller: pb.authStore.model?.id
       });
 
-      // Update local state
       setCallLogs(prev => [newCall, ...prev]);
 
-      // Also update the phone number's last_called date
       await pb.collection(COLLECTIONS.PHONE_NUMBERS).update(selectedPhoneId, {
         last_called: newCall.call_time,
         receptionist_name: data.receptionist_name
       });
 
-      // Refresh phones to show updated last_called
       const updatedPhones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
         filter: `company = "${id}"`,
         sort: 'created'
       });
       setPhoneNumbers(updatedPhones);
 
-      // Log interaction
       await pb.collection(COLLECTIONS.INTERACTIONS).create({
         company: company.id,
         channel: 'phone',
@@ -194,11 +207,23 @@ export default function CompanyDetailPage() {
         summary: `Call: ${data.call_outcome} - ${data.post_call_notes?.substring(0, 50)}...`,
         call_log: newCall.id
       });
-
     } catch (error) {
       console.error('Failed to log call:', error);
     }
   };
+
+  const handleCompleteFollowUp = async (followUpId: string) => {
+    try {
+      await completeFollowUp(followUpId);
+      setFollowUps(prev => prev.filter(fu => fu.id !== followUpId));
+      setAllFollowUps(prev => prev.map(fu => fu.id === followUpId ? { ...fu, status: 'completed' } : fu));
+    } catch (error) {
+      console.error('Failed to complete follow-up:', error);
+    }
+  };
+
+  // Count AI-analyzed calls
+  const aiAnalyzedCount = callLogs.filter(c => c.cold_call || c.expand?.cold_call).length;
 
   if (loading) {
     return (
@@ -307,7 +332,8 @@ export default function CompanyDetailPage() {
         {[
           { id: 'overview', label: 'Overview', icon: Building2 },
           { id: 'phones', label: 'Locations & Phones', icon: Phone },
-          { id: 'calls', label: 'Call History', icon: History },
+          { id: 'calls', label: 'Call History', icon: History, count: aiAnalyzedCount > 0 ? aiAnalyzedCount : undefined },
+          { id: 'follow_ups', label: 'Follow-Ups', icon: CalendarClock, count: followUps.length > 0 ? followUps.length : undefined },
           { id: 'notes', label: 'Pre-Call Notes', icon: StickyNote },
           { id: 'timeline', label: 'Timeline', icon: MessageSquare },
         ].map((tab) => (
@@ -323,6 +349,11 @@ export default function CompanyDetailPage() {
           >
             <tab.icon size={16} />
             {tab.label}
+            {tab.count && (
+              <span className="ml-1 w-5 h-5 rounded-full bg-[var(--info-subtle)] text-[var(--info)] text-[10px] font-bold flex items-center justify-center">
+                {tab.count}
+              </span>
+            )}
             {activeTab === tab.id && (
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--foreground)]" />
             )}
@@ -391,10 +422,17 @@ export default function CompanyDetailPage() {
                     {followUps.map(fu => (
                       <div key={fu.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-bold">{formatDate(fu.scheduled_time)}</p>
-                          <p className="text-xs text-[var(--muted)] mt-0.5">{fu.notes}</p>
+                          <FollowUpTimeDisplay
+                            scheduledTime={fu.scheduled_time}
+                            clientTimezone={fu.client_timezone}
+                          />
+                          {fu.notes && <p className="text-xs text-[var(--muted)] mt-1">{fu.notes}</p>}
                         </div>
-                        <button className="p-2 rounded-lg bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white transition-all">
+                        <button
+                          onClick={() => handleCompleteFollowUp(fu.id)}
+                          className="p-2 rounded-lg bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white transition-all"
+                          title="Mark as completed"
+                        >
                           <CheckCircle2 size={18} />
                         </button>
                       </div>
@@ -413,8 +451,19 @@ export default function CompanyDetailPage() {
                     <span className="text-sm font-bold">{callLogs.length}</span>
                   </div>
                   <div className="flex justify-between items-center">
+                    <span className="text-sm text-[var(--muted)]">AI Analyzed</span>
+                    <span className="text-sm font-bold flex items-center gap-1">
+                      {aiAnalyzedCount > 0 && <Zap size={12} className="text-[var(--info)]" />}
+                      {aiAnalyzedCount}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <span className="text-sm text-[var(--muted)]">Phone Numbers</span>
                     <span className="text-sm font-bold">{phoneNumbers.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-[var(--muted)]">Pending Follow-Ups</span>
+                    <span className="text-sm font-bold">{followUps.length}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-[var(--muted)]">Last Contact</span>
@@ -499,6 +548,12 @@ export default function CompanyDetailPage() {
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold">Call History</h3>
+              {aiAnalyzedCount > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--info-subtle)] text-[var(--info)] text-xs font-medium">
+                  <Zap size={12} />
+                  {aiAnalyzedCount} AI analyzed
+                </div>
+              )}
             </div>
 
             <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl overflow-hidden">
@@ -509,42 +564,65 @@ export default function CompanyDetailPage() {
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Number</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Outcome</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Summary</th>
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">AI</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--card-border)]">
-                  {callLogs.map(call => (
-                    <tr key={call.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
-                      <td className="px-6 py-4 text-sm font-medium">{formatDate(call.call_time)}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1">
-                          <div>
-                            <div className="text-sm font-mono">{call.expand?.phone_number_record?.phone_number}</div>
-                            <div className="text-[10px] text-[var(--muted)] font-bold">{call.expand?.phone_number_record?.label}</div>
+                  {callLogs.map(call => {
+                    const coldCall = call.expand?.cold_call as ColdCall | undefined;
+                    return (
+                      <tr key={call.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
+                        <td className="px-6 py-4 text-sm font-medium">{formatDate(call.call_time)}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-1">
+                            <div>
+                              <div className="text-sm font-mono">{call.expand?.phone_number_record?.phone_number}</div>
+                              <div className="text-[10px] text-[var(--muted)] font-bold">{call.expand?.phone_number_record?.label}</div>
+                            </div>
+                            {call.expand?.phone_number_record?.phone_number && (
+                              <ZoomCallButton phoneNumber={call.expand.phone_number_record.phone_number} />
+                            )}
                           </div>
-                          {call.expand?.phone_number_record?.phone_number && (
-                            <ZoomCallButton phoneNumber={call.expand.phone_number_record.phone_number} />
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-full text-[10px] font-bold",
+                            call.call_outcome === 'Interested' ? "bg-green-500/10 text-green-400" :
+                              call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
+                                "bg-[var(--card-hover)] text-[var(--muted)]"
+                          )}>
+                            {call.call_outcome}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-[var(--muted)] max-w-xs truncate">
+                          {call.post_call_notes}
+                        </td>
+                        <td className="px-6 py-4">
+                          {coldCall ? (
+                            <Link
+                              href={`/cold-calls/${coldCall.id}`}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--info-subtle)] text-[var(--info)] text-xs font-medium hover:opacity-80 transition-opacity"
+                              title="View AI Transcript"
+                            >
+                              <Zap size={10} />
+                              AI
+                            </Link>
+                          ) : (
+                            <span className="text-xs text-[var(--muted)]">-</span>
                           )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={cn(
-                          "px-2 py-0.5 rounded-full text-[10px] font-bold",
-                          call.call_outcome === 'Interested' ? "bg-green-500/10 text-green-400" :
-                            call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                              "bg-[var(--card-hover)] text-[var(--muted)]"
-                        )}>
-                          {call.call_outcome}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-[var(--muted)] max-w-xs truncate">
-                        {call.post_call_notes}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button className="text-[var(--primary)] text-xs font-bold hover:underline">View Transcript</button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <Link
+                            href={`/cold-calls/${call.id}?type=log`}
+                            className="text-[var(--primary)] text-xs font-bold hover:underline"
+                          >
+                            View Details
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {callLogs.length === 0 && (
@@ -554,6 +632,121 @@ export default function CompanyDetailPage() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'follow_ups' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Follow-Ups</h3>
+              <button
+                onClick={() => setShowScheduleFollowUp(!showScheduleFollowUp)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-xs font-bold hover:opacity-90"
+              >
+                <Plus size={14} />
+                Schedule Follow-Up
+              </button>
+            </div>
+
+            {showScheduleFollowUp && (
+              <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6">
+                <FollowUpScheduler
+                  companyId={company.id}
+                  companyName={company.company_name}
+                  onScheduled={(followUpId) => {
+                    setShowScheduleFollowUp(false);
+                    // Refresh follow-ups
+                    Promise.all([
+                      pb.collection(COLLECTIONS.FOLLOW_UPS).getFullList<FollowUp>({
+                        filter: `company = "${id}" && status = "pending"`,
+                        sort: 'scheduled_time',
+                        expand: 'phone_number_record,assigned_to,created_by,call_log'
+                      }),
+                      pb.collection(COLLECTIONS.FOLLOW_UPS).getFullList<FollowUp>({
+                        filter: `company = "${id}"`,
+                        sort: '-scheduled_time',
+                        expand: 'phone_number_record,assigned_to,created_by,call_log'
+                      })
+                    ]).then(([pending, all]) => {
+                      setFollowUps(pending);
+                      setAllFollowUps(all);
+                    });
+                  }}
+                  onCancel={() => setShowScheduleFollowUp(false)}
+                />
+              </div>
+            )}
+
+            {/* Pending Follow-Ups */}
+            {followUps.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-bold text-[var(--muted)] uppercase tracking-widest flex items-center gap-2">
+                  <Clock size={14} className="text-orange-400" />
+                  Pending ({followUps.length})
+                </h4>
+                {followUps.map(fu => (
+                  <div key={fu.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 flex items-center justify-between">
+                    <div className="space-y-1">
+                      <FollowUpTimeDisplay
+                        scheduledTime={fu.scheduled_time}
+                        clientTimezone={fu.client_timezone}
+                      />
+                      {fu.notes && <p className="text-xs text-[var(--muted)]">{fu.notes}</p>}
+                      <div className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                        {fu.expand?.created_by && (
+                          <span>Created by {(fu.expand.created_by as any).name}</span>
+                        )}
+                        {fu.expand?.phone_number_record && (
+                          <span>• {(fu.expand.phone_number_record as any).phone_number}</span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleCompleteFollowUp(fu.id)}
+                      className="p-2 rounded-lg bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white transition-all"
+                      title="Mark as completed"
+                    >
+                      <CheckCircle2 size={18} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Completed Follow-Ups */}
+            {allFollowUps.filter(fu => fu.status !== 'pending').length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-bold text-[var(--muted)] uppercase tracking-widest flex items-center gap-2">
+                  <CalendarCheck size={14} className="text-[var(--success)]" />
+                  Completed ({allFollowUps.filter(fu => fu.status !== 'pending').length})
+                </h4>
+                {allFollowUps.filter(fu => fu.status !== 'pending').map(fu => (
+                  <div key={fu.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 opacity-60">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={14} className="text-[var(--success)]" />
+                      <span className="text-sm font-medium">{formatDate(fu.scheduled_time)}</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] font-semibold uppercase">
+                        {fu.status}
+                      </span>
+                    </div>
+                    {fu.notes && <p className="text-xs text-[var(--muted)] mt-1 ml-6">{fu.notes}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {allFollowUps.length === 0 && !showScheduleFollowUp && (
+              <div className="py-24 text-center bg-[var(--sidebar-bg)] border-2 border-dashed border-[var(--card-border)] rounded-2xl">
+                <CalendarClock size={48} className="mx-auto text-[var(--card-border)] mb-4" />
+                <p className="text-[var(--muted)] font-medium">No follow-ups scheduled for this company.</p>
+                <button
+                  onClick={() => setShowScheduleFollowUp(true)}
+                  className="mt-3 text-xs text-[var(--primary)] font-bold hover:underline"
+                >
+                  Schedule one now
+                </button>
+              </div>
+            )}
           </div>
         )}
 

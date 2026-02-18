@@ -72,14 +72,14 @@ export default function ColdCallDetailPage() {
 
         if (isCallLog) {
           const log = await pb.collection(COLLECTIONS.CALL_LOGS).getOne<CallLog>(id, {
-            expand: 'company,phone_number_record,caller,session',
+            expand: 'company,phone_number_record,caller,session,cold_call',
           });
           setCallLog(log);
         } else {
           // Try call_log first, fallback to cold_call
           try {
             const log = await pb.collection(COLLECTIONS.CALL_LOGS).getOne<CallLog>(id, {
-              expand: 'company,phone_number_record,caller,session',
+              expand: 'company,phone_number_record,caller,session,cold_call',
             });
             setCallLog(log);
           } catch {
@@ -137,6 +137,7 @@ function CallLogDetail({ log }: { log: CallLog }) {
   const phoneRecord = log.expand?.phone_number_record;
   const caller = log.expand?.caller;
   const session = log.expand?.session;
+  const coldCall = log.expand?.cold_call as ColdCall | undefined;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -147,11 +148,19 @@ function CallLogDetail({ log }: { log: CallLog }) {
 
       {/* Header */}
       <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Call Log Details</h1>
-          <p className="text-[var(--muted)] text-sm mt-1">
-            {log.call_time ? formatDate(log.call_time) : 'Unknown date'}
-          </p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Call Log Details</h1>
+            <p className="text-[var(--muted)] text-sm mt-1">
+              {log.call_time ? formatDate(log.call_time) : 'Unknown date'}
+            </p>
+          </div>
+          {coldCall && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--info-subtle)] text-[var(--info)] text-xs font-semibold">
+              <Zap size={12} />
+              AI Analyzed
+            </span>
+          )}
         </div>
         {log.call_outcome && (
           <span className={cn(
@@ -313,6 +322,72 @@ function CallLogDetail({ log }: { log: CallLog }) {
             </div>
           )}
         </div>
+      )}
+
+      {/* AI Transcript Insights (if linked cold_call exists) */}
+      {coldCall && (
+        <>
+          <div className="border-t border-[var(--card-border)] pt-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Zap size={18} className="text-[var(--info)]" />
+              <h2 className="text-lg font-bold">AI Transcript Insights</h2>
+              {coldCall.model_used && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--sidebar-bg)] text-[var(--muted)]">
+                  {coldCall.model_used}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {coldCall.call_summary && (
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+              <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">AI Call Summary</h2>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{coldCall.call_summary}</p>
+            </div>
+          )}
+
+          {coldCall.objections && coldCall.objections.length > 0 && (
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+              <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Objections</h2>
+              <ul className="space-y-2">
+                {coldCall.objections.map((obj: string, i: number) => (
+                  <li key={i} className="text-sm flex items-start gap-2">
+                    <span className="text-[var(--error)] mt-0.5">&#x2022;</span>
+                    {obj}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {coldCall.pain_points && coldCall.pain_points.length > 0 && (
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+              <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Pain Points</h2>
+              <ul className="space-y-2">
+                {coldCall.pain_points.map((point: string, i: number) => (
+                  <li key={i} className="text-sm flex items-start gap-2">
+                    <span className="text-[var(--warning)] mt-0.5">&#x2022;</span>
+                    {point}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {coldCall.follow_up_actions && coldCall.follow_up_actions.length > 0 && (
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+              <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">AI Suggested Follow-ups</h2>
+              <ul className="space-y-2">
+                {coldCall.follow_up_actions.map((action: string, i: number) => (
+                  <li key={i} className="text-sm flex items-start gap-2">
+                    <span className="text-[var(--success)] mt-0.5">&#x2022;</span>
+                    {action}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

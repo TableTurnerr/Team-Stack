@@ -17,7 +17,7 @@ import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
-import { CurrentCallForm, type CallFormData } from './current-call-form';
+import { CurrentCallForm, type CallFormData, type CallFormDraft } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
@@ -36,6 +36,31 @@ import { useSession } from '@/contexts/session-context';
 // ... other imports
 
 const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
+const UNSAVED_CALL_STORAGE_KEY = 'crm:session:unsaved-call:v1';
+
+interface UnsavedCallStoragePayload {
+    phoneNumber: string;
+    hasUnsavedCall: boolean;
+    draft: CallFormDraft | null;
+}
+
+const hasDraftContent = (draft: CallFormDraft | null) => {
+    if (!draft) return false;
+
+    return (
+        draft.companySearch.trim().length > 0 ||
+        !!draft.selectedCompany ||
+        draft.recipientName.trim().length > 0 ||
+        !!draft.callOutcome ||
+        draft.interestLevel !== 5 ||
+        draft.postCallNotes.trim().length > 0 ||
+        draft.ownerReached ||
+        draft.pitchCompleted ||
+        draft.appointmentSet ||
+        draft.showFollowUp ||
+        !!draft.followUpData
+    );
+};
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -87,6 +112,8 @@ export default function SessionPage() {
 
     // Track unsaved call state — true when call ended but form not yet submitted
     const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
+    const [callDraft, setCallDraft] = useState<CallFormDraft | null>(null);
+    const didHydrateFromStorage = useRef(false);
 
     // ---------------------------------------------------------------------------
     // Check for existing active session on mount
@@ -95,6 +122,51 @@ export default function SessionPage() {
         // ... (checkActiveSession logic is handled by context now, but we might want to sync local state if needed, though context is source of truth)
         // actually, we removed the local check in previous step, so we just rely on session from context.
     }, []);
+
+    // ---------------------------------------------------------------------------
+    // Restore unsaved call + draft from localStorage
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        if (didHydrateFromStorage.current) return;
+        didHydrateFromStorage.current = true;
+
+        try {
+            const raw = window.localStorage.getItem(UNSAVED_CALL_STORAGE_KEY);
+            if (!raw) return;
+
+            const parsed = JSON.parse(raw) as UnsavedCallStoragePayload;
+            if (parsed && typeof parsed.phoneNumber === 'string') {
+                if (parsed.phoneNumber) {
+                    setCurrentPhoneNumber(parsed.phoneNumber);
+                    setContextPhoneNumber(parsed.phoneNumber);
+                }
+                setHasUnsavedCall(!!parsed.hasUnsavedCall);
+                setCallDraft(parsed.draft ?? null);
+            }
+        } catch {
+            // Ignore malformed storage payloads
+        }
+    }, [setContextPhoneNumber]);
+
+    // ---------------------------------------------------------------------------
+    // Persist unsaved call + draft to localStorage
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        const shouldPersist = hasUnsavedCall || (!!currentPhoneNumber && hasDraftContent(callDraft));
+
+        if (!shouldPersist) {
+            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            return;
+        }
+
+        const payload: UnsavedCallStoragePayload = {
+            phoneNumber: currentPhoneNumber,
+            hasUnsavedCall,
+            draft: callDraft,
+        };
+
+        window.localStorage.setItem(UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
+    }, [hasUnsavedCall, currentPhoneNumber, callDraft]);
 
     // ---------------------------------------------------------------------------
     // Timer logic
@@ -295,7 +367,10 @@ export default function SessionPage() {
             setLastCallLog(null);
             setLastCallCompanyName('');
             setCurrentPhoneNumber('');
+            setHasUnsavedCall(false);
+            setCallDraft(null);
             setContextPhoneNumber(''); // Clear phone number in context
+            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
         } catch (err) {
             console.error('Failed to end session:', err);
         } finally {
@@ -357,8 +432,18 @@ export default function SessionPage() {
             // Find or note the phone_number_record
             let phoneNumberRecordId = '';
             try {
+                const digits = data.phoneNumber.replace(/\D/g, '');
+                const last10 = digits.slice(-10);
+                const filterParts = [`phone_number = "${data.phoneNumber}"`];
+                if (digits !== data.phoneNumber) {
+                    filterParts.push(`phone_number ~ "${digits}"`);
+                }
+                if (last10 !== digits && last10.length >= 7) {
+                    filterParts.push(`phone_number ~ "${last10}"`);
+                }
+
                 const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                    filter: `company = "${data.companyId}" && phone_number ~ "${data.phoneNumber.replace(/\D/g, '').slice(-10)}"`,
+                    filter: `company = "${data.companyId}" && (${filterParts.join(' || ')})`,
                 });
                 if (phoneRecords.items.length > 0) {
                     phoneNumberRecordId = phoneRecords.items[0].id;
@@ -479,6 +564,8 @@ export default function SessionPage() {
 
             // Clear unsaved call state
             setHasUnsavedCall(false);
+            setCallDraft(null);
+            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
             // Reset call timing state for next call
             setRingStartTime(null);
@@ -492,6 +579,21 @@ export default function SessionPage() {
             setSavingCall(false);
         }
     }, [session, user, stopRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, createFollowUp]);
+
+    const handleDiscardCall = useCallback(() => {
+        stopRecording();
+        setContextPhoneNumber('');
+
+        setHasUnsavedCall(false);
+        setCallDraft(null);
+        setCurrentPhoneNumber('');
+        setRingStartTime(null);
+        setConnectTime(null);
+        setCurrentCallDuration(0);
+        setDialCountIncremented(false);
+        setPickupCountIncremented(false);
+        window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+    }, [stopRecording, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------
     // Update performance counters
@@ -850,6 +952,9 @@ export default function SessionPage() {
                             onSave={handleSaveCall}
                             saving={savingCall}
                             hasUnsavedCall={hasUnsavedCall}
+                            initialDraft={callDraft}
+                            onDraftChange={setCallDraft}
+                            onDiscard={handleDiscardCall}
                         />
                     </div>
 

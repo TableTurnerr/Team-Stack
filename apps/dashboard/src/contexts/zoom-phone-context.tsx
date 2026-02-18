@@ -75,33 +75,32 @@ function extractPhoneNumber(data: Record<string, unknown>): string | null {
         console.log('[Zoom Phone] 🔍 Callee object structure:', JSON.stringify(callee, null, 2));
     }
 
-    // Try common fields where Zoom puts the phone number
+    // Prefer outbound target fields first (callee/to), then generic fields,
+    // and only then fallback to caller/from.
     const candidates = [
-        data?.phoneNumber,
-        data?.number,
         data?.targetNumber,
         data?.dialNumber,
         data?.inputNumber,
         data?.value, // For input events
-        // Nested in caller object
-        caller?.phoneNumber,
-        caller?.number,
-        caller?.extensionNumber,
-        caller?.phoneCallId,
-        caller?.id,
         // Nested in callee object
         callee?.phoneNumber,
         callee?.number,
         callee?.extensionNumber,
-        callee?.phoneCallId,
-        callee?.id,
+        // Try 'to' field (can be string or object)
+        typeof data?.to === 'string' ? data.to : (data?.to as Record<string, unknown>)?.phoneNumber,
+        // Generic fields
+        data?.phoneNumber,
+        data?.number,
         // Other nested structures
         (data?.contact as Record<string, unknown>)?.phoneNumber,
         (data?.call as Record<string, unknown>)?.phoneNumber,
         (data?.call as Record<string, unknown>)?.number,
         (data?.participant as Record<string, unknown>)?.phoneNumber,
-        // Try 'to' and 'from' fields (might be strings or objects)
-        typeof data?.to === 'string' ? data.to : (data?.to as Record<string, unknown>)?.phoneNumber,
+        // Nested in caller object (lowest priority)
+        caller?.phoneNumber,
+        caller?.number,
+        caller?.extensionNumber,
+        // Finally try from field
         typeof data?.from === 'string' ? data.from : (data?.from as Record<string, unknown>)?.phoneNumber,
     ];
 

@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Globe, X } from 'lucide-react';
+import { Globe, X, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface TimezoneClockProps {
   timezone: string;
   label?: string;
   onRemove?: () => void;
+  isStarred?: boolean;
+  onStar?: () => void;
   className?: string;
 }
 
@@ -15,6 +17,8 @@ export function TimezoneClock({
   timezone,
   label,
   onRemove,
+  isStarred,
+  onStar,
   className
 }: TimezoneClockProps) {
   const [time, setTime] = useState<string>('');
@@ -65,8 +69,24 @@ export function TimezoneClock({
         </div>
       </div>
       
-      <div className="text-right">
-        <p className="text-[10px] text-[var(--muted)]">{date}</p>
+      <div className="flex items-center gap-1.5">
+        {onStar && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onStar(); }}
+            className={cn(
+              "p-0.5 rounded transition-colors",
+              isStarred
+                ? "text-amber-500"
+                : "text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-amber-400"
+            )}
+            title={isStarred ? 'Default cold calling timezone' : 'Set as default cold calling timezone'}
+          >
+            <Star size={12} fill={isStarred ? 'currentColor' : 'none'} />
+          </button>
+        )}
+        <div className="text-right">
+          <p className="text-[10px] text-[var(--muted)]">{date}</p>
+        </div>
         {onRemove && (
           <button
             onClick={onRemove}

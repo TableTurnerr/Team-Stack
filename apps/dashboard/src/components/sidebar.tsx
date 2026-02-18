@@ -58,6 +58,16 @@ export function Sidebar() {
   const [showTzSelector, setShowTzSelector] = useState(false);
 
   const timezones = preferences?.timezones || [];
+  const coldCallingTimezone = preferences?.workflow_preferences?.cold_calling_timezone;
+
+  const setStarTimezone = async (tz: string) => {
+    await updatePreferences({
+      workflow_preferences: {
+        ...preferences?.workflow_preferences,
+        cold_calling_timezone: tz,
+      },
+    });
+  };
 
   const addTimezone = async (tz: { timezone: string; label: string }) => {
     if (timezones.length >= 4) return;
@@ -199,6 +209,8 @@ export function Sidebar() {
                 timezone={tz.timezone}
                 label={tz.label}
                 onRemove={() => removeTimezone(tz.timezone)}
+                isStarred={coldCallingTimezone === tz.timezone}
+                onStar={() => setStarTimezone(tz.timezone)}
               />
             ))}
           </div>

@@ -15,9 +15,10 @@ import {
   Target,
   CalendarCheck,
   Zap,
+  Hash,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type ColdCall, type CallLog, type Company, type User, type ColdCallingSession, type PhoneNumber } from '@/lib/types';
+import { COLLECTIONS, type CallLog } from '@/lib/types';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
@@ -25,6 +26,7 @@ import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { ZoomCallButton } from '@/components/zoom-call-button';
+import { PhoneNumbersTab } from '@/components/phone-numbers-tab';
 
 // ─── Column Definitions ──────────────────────────────────────────────────────
 
@@ -38,19 +40,9 @@ const CALL_LOG_COLUMNS: ColumnDefinition[] = [
   { key: 'duration', label: 'Duration', defaultVisible: true },
   { key: 'performance', label: 'Performance', defaultVisible: true },
   { key: 'session', label: 'Session', defaultVisible: true },
+  { key: 'ai_transcript', label: 'AI', defaultVisible: true },
   { key: 'caller', label: 'Caller', defaultVisible: false },
   { key: 'notes', label: 'Notes', defaultVisible: false },
-  { key: 'actions', label: 'Actions', alwaysVisible: true },
-];
-
-const COLD_CALL_COLUMNS: ColumnDefinition[] = [
-  { key: 'created', label: 'Date', defaultVisible: true },
-  { key: 'company', label: 'Company', defaultVisible: true },
-  { key: 'phone_number', label: 'Phone', defaultVisible: true },
-  { key: 'recipients', label: 'Recipient', defaultVisible: true },
-  { key: 'call_outcome', label: 'Outcome', defaultVisible: true },
-  { key: 'interest_level', label: 'Interest', defaultVisible: true },
-  { key: 'claimed_by', label: 'Claimed By', defaultVisible: true },
   { key: 'actions', label: 'Actions', alwaysVisible: true },
 ];
 
@@ -120,7 +112,7 @@ function formatCallDuration(seconds?: number): string {
 
 // ─── Tab Type ────────────────────────────────────────────────────────────────
 
-type TabType = 'call_logs' | 'ai_transcripts';
+type TabType = 'call_logs' | 'phone_numbers';
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
@@ -135,27 +127,19 @@ export default function ColdCallsPage() {
   const [callLogsPage, setCallLogsPage] = useState(1);
   const [callLogsTotalPages, setCallLogsTotalPages] = useState(1);
 
-  // AI Transcripts (cold_calls) state
-  const [coldCalls, setColdCalls] = useState<ColdCall[]>([]);
-  const [coldCallsLoading, setColdCallsLoading] = useState(true);
-  const [coldCallsError, setColdCallsError] = useState<string | null>(null);
-  const [coldCallsPage, setColdCallsPage] = useState(1);
-  const [coldCallsTotalPages, setColdCallsTotalPages] = useState(1);
-
   // Shared filters
   const [searchTerm, setSearchTerm] = useState('');
   const [outcomeFilter, setOutcomeFilter] = useState<string[]>([]);
   const [minInterest, setMinInterest] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({
-    field: activeTab === 'call_logs' ? 'call_time' : 'created',
+    field: 'call_time',
     dir: 'desc'
   });
   const perPage = 20;
 
-  // Column visibility per tab
+  // Column visibility
   const callLogCols = useColumnVisibility('cold-calls-logs', CALL_LOG_COLUMNS);
-  const coldCallCols = useColumnVisibility('cold-calls-transcripts', COLD_CALL_COLUMNS);
 
   // ─── Fetch Call Logs ─────────────────────────────────────────────────────
 
@@ -179,10 +163,10 @@ export default function ColdCallsPage() {
         filters.push(`interest_level >= ${minInterest}`);
       }
 
-      const sortField = sort.field === 'created' ? 'call_time' : sort.field;
+      const sortField = sort.field;
       const result = await pb.collection(COLLECTIONS.CALL_LOGS).getList<CallLog>(callLogsPage, perPage, {
         sort: `${sort.dir === 'desc' ? '-' : ''}${sortField}`,
-        expand: 'company,phone_number_record,caller,session',
+        expand: 'company,phone_number_record,caller,session,cold_call',
         ...(filters.length > 0 && { filter: filters.join(' && ') }),
       });
 
@@ -198,62 +182,19 @@ export default function ColdCallsPage() {
     }
   }, [callLogsPage, sort, searchTerm, outcomeFilter, minInterest, isAuthenticated]);
 
-  // ─── Fetch Cold Calls (AI Transcripts) ───────────────────────────────────
-
-  const fetchColdCalls = useCallback(async () => {
-    if (!isAuthenticated) return;
-    try {
-      setColdCallsLoading(true);
-      setColdCallsError(null);
-
-      const filters: string[] = [];
-
-      if (searchTerm) {
-        filters.push(`(expand.company.company_name ~ "${searchTerm}" || phone_number ~ "${searchTerm}" || owner_name ~ "${searchTerm}")`);
-      }
-      if (outcomeFilter.length > 0) {
-        const outcomeConditions = outcomeFilter.map(o => `call_outcome = "${o}"`).join(' || ');
-        filters.push(`(${outcomeConditions})`);
-      }
-      if (minInterest > 0) {
-        filters.push(`interest_level >= ${minInterest}`);
-      }
-
-      const result = await pb.collection(COLLECTIONS.COLD_CALLS).getList<ColdCall>(coldCallsPage, perPage, {
-        sort: `${sort.dir === 'desc' ? '-' : ''}${sort.field === 'call_time' ? 'created' : sort.field}`,
-        expand: 'company,claimed_by',
-        ...(filters.length > 0 && { filter: filters.join(' && ') }),
-      });
-
-      setColdCalls(result.items);
-      setColdCallsTotalPages(result.totalPages);
-    } catch (err: any) {
-      if (err.status !== 0) {
-        console.error('Failed to fetch cold calls:', err);
-        setColdCallsError(`Failed to load AI transcripts: ${err.message}`);
-      }
-    } finally {
-      setColdCallsLoading(false);
-    }
-  }, [coldCallsPage, sort, searchTerm, outcomeFilter, minInterest, isAuthenticated]);
-
   // Fetch on mount and when deps change
   useEffect(() => {
     if (!isAuthenticated) return;
     if (activeTab === 'call_logs') {
       fetchCallLogs();
-    } else {
-      fetchColdCalls();
     }
-  }, [isAuthenticated, activeTab, fetchCallLogs, fetchColdCalls]);
+  }, [isAuthenticated, activeTab, fetchCallLogs]);
 
-  // Reset sort default when switching tabs
   const handleTabChange = (tab: TabType) => {
     setActiveTab(tab);
-    setSort({
-      field: tab === 'call_logs' ? 'call_time' : 'created',
-      dir: 'desc',
-    });
+    if (tab === 'call_logs') {
+      setSort({ field: 'call_time', dir: 'desc' });
+    }
   };
 
   const handleSort = (field: string) => {
@@ -280,58 +221,35 @@ export default function ColdCallsPage() {
   // ─── CSV Export ──────────────────────────────────────────────────────────
 
   const exportToCSV = () => {
-    if (activeTab === 'call_logs') {
-      const headers = ['Date', 'Company', 'Phone', 'Recipient', 'Outcome', 'Interest Level', 'Duration (s)', 'Owner Reached', 'Pitch Completed', 'Appointment Set', 'Session', 'Caller', 'Notes'];
-      const rows = callLogs.map(log => [
-        log.call_time ? formatDate(log.call_time) : '',
-        log.expand?.company?.company_name || 'Unknown',
-        log.expand?.phone_number_record?.phone_number || '',
-        log.owner_name_found || '',
-        log.call_outcome || '',
-        log.interest_level?.toString() || '',
-        log.duration?.toString() || '',
-        log.owner_reached ? 'Yes' : 'No',
-        log.pitch_completed ? 'Yes' : 'No',
-        log.appointment_set ? 'Yes' : 'No',
-        log.session ? 'Yes' : '',
-        log.expand?.caller?.name || '',
-        log.post_call_notes || '',
-      ]);
-      const csv = [headers, ...rows].map(row => row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `call-logs-${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      const headers = ['Date', 'Company', 'Phone', 'Recipient', 'Outcome', 'Interest Level', 'Claimed By'];
-      const rows = coldCalls.map(call => [
-        formatDate(call.created),
-        call.expand?.company?.company_name || 'Unknown',
-        call.phone_number || '',
-        call.recipients || '',
-        call.call_outcome || '',
-        call.interest_level?.toString() || '',
-        call.expand?.claimed_by?.name || ''
-      ]);
-      const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `cold-calls-${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
+    const headers = ['Date', 'Company', 'Phone', 'Recipient', 'Outcome', 'Interest Level', 'Duration (s)', 'Owner Reached', 'Pitch Completed', 'Appointment Set', 'AI Transcript', 'Session', 'Caller', 'Notes'];
+    const rows = callLogs.map(log => [
+      log.call_time ? formatDate(log.call_time) : '',
+      log.expand?.company?.company_name || 'Unknown',
+      log.expand?.phone_number_record?.phone_number || '',
+      log.owner_name_found || '',
+      log.call_outcome || '',
+      log.interest_level?.toString() || '',
+      log.duration?.toString() || '',
+      log.owner_reached ? 'Yes' : 'No',
+      log.pitch_completed ? 'Yes' : 'No',
+      log.appointment_set ? 'Yes' : 'No',
+      log.cold_call ? 'Yes' : 'No',
+      log.session ? 'Yes' : '',
+      log.expand?.caller?.name || '',
+      log.post_call_notes || '',
+    ]);
+    const csv = [headers, ...rows].map(row => row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `call-logs-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const hasActiveFilters = !!searchTerm || outcomeFilter.length > 0 || minInterest > 0;
-  const loading = activeTab === 'call_logs' ? callLogsLoading : coldCallsLoading;
-  const error = activeTab === 'call_logs' ? callLogsError : coldCallsError;
-  const currentItems = activeTab === 'call_logs' ? callLogs : coldCalls;
-  const refresh = activeTab === 'call_logs' ? fetchCallLogs : fetchColdCalls;
+  const loading = activeTab === 'call_logs' ? callLogsLoading : false;
 
   if (authLoading) {
     return <ColdCallsTableSkeleton />;
@@ -343,7 +261,7 @@ export default function ColdCallsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Cold Calls</h1>
-          <p className="text-[var(--muted)] mt-1">View all call logs and AI-analyzed transcripts</p>
+          <p className="text-[var(--muted)] mt-1">View all call logs and phone numbers</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -355,46 +273,50 @@ export default function ColdCallsPage() {
             className="w-full sm:w-64"
           />
 
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
-              showFilters || outcomeFilter.length > 0 || minInterest > 0
-                ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
-                : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
-            )}
-          >
-            <Filter size={16} />
-            Filters
-            {(outcomeFilter.length > 0 || minInterest > 0) && (
-              <span className="ml-1 w-5 h-5 rounded-full bg-[var(--background)]/20 text-xs flex items-center justify-center">
-                {outcomeFilter.length + (minInterest > 0 ? 1 : 0)}
-              </span>
-            )}
-          </button>
+          {activeTab === 'call_logs' && (
+            <>
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
+                  showFilters || outcomeFilter.length > 0 || minInterest > 0
+                    ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
+                    : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
+                )}
+              >
+                <Filter size={16} />
+                Filters
+                {(outcomeFilter.length > 0 || minInterest > 0) && (
+                  <span className="ml-1 w-5 h-5 rounded-full bg-[var(--background)]/20 text-xs flex items-center justify-center">
+                    {outcomeFilter.length + (minInterest > 0 ? 1 : 0)}
+                  </span>
+                )}
+              </button>
 
-          <button
-            onClick={exportToCSV}
-            disabled={currentItems.length === 0}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] transition-colors disabled:opacity-50"
-          >
-            <Download size={16} />
-            Export
-          </button>
+              <button
+                onClick={exportToCSV}
+                disabled={callLogs.length === 0}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] transition-colors disabled:opacity-50"
+              >
+                <Download size={16} />
+                Export
+              </button>
 
-          <ColumnSelector
-            columns={activeTab === 'call_logs' ? callLogCols.columns : coldCallCols.columns}
-            visibleColumns={activeTab === 'call_logs' ? callLogCols.visibleColumns : coldCallCols.visibleColumns}
-            onToggle={activeTab === 'call_logs' ? callLogCols.toggleColumn : coldCallCols.toggleColumn}
-          />
+              <ColumnSelector
+                columns={callLogCols.columns}
+                visibleColumns={callLogCols.visibleColumns}
+                onToggle={callLogCols.toggleColumn}
+              />
 
-          <button
-            onClick={refresh}
-            className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          </button>
+              <button
+                onClick={fetchCallLogs}
+                className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -415,23 +337,23 @@ export default function ColdCallsPage() {
           </div>
         </button>
         <button
-          onClick={() => handleTabChange('ai_transcripts')}
+          onClick={() => handleTabChange('phone_numbers')}
           className={cn(
             "px-4 py-2 rounded-md text-sm font-medium transition-all",
-            activeTab === 'ai_transcripts'
+            activeTab === 'phone_numbers'
               ? "bg-[var(--card-bg)] text-[var(--foreground)] shadow-sm"
               : "text-[var(--muted)] hover:text-[var(--foreground)]"
           )}
         >
           <div className="flex items-center gap-2">
-            <Zap size={14} />
-            AI Transcripts
+            <Hash size={14} />
+            Phone Numbers
           </div>
         </button>
       </div>
 
-      {/* Filters Panel */}
-      {showFilters && (
+      {/* Filters Panel (call logs only) */}
+      {activeTab === 'call_logs' && showFilters && (
         <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-medium">Filters</h3>
@@ -479,37 +401,30 @@ export default function ColdCallsPage() {
       )}
 
       {/* Error */}
-      {error && (
+      {activeTab === 'call_logs' && callLogsError && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400">
-          {error}
+          {callLogsError}
         </div>
       )}
 
       {/* Table content */}
-      {loading ? (
-        <ColdCallsTableSkeleton />
-      ) : activeTab === 'call_logs' ? (
-        <CallLogsTable
-          logs={callLogs}
-          sort={sort}
-          onSort={handleSort}
-          isColumnVisible={callLogCols.isColumnVisible}
-          hasActiveFilters={hasActiveFilters}
-          page={callLogsPage}
-          totalPages={callLogsTotalPages}
-          onPageChange={setCallLogsPage}
-        />
+      {activeTab === 'call_logs' ? (
+        callLogsLoading ? (
+          <ColdCallsTableSkeleton />
+        ) : (
+          <CallLogsTable
+            logs={callLogs}
+            sort={sort}
+            onSort={handleSort}
+            isColumnVisible={callLogCols.isColumnVisible}
+            hasActiveFilters={hasActiveFilters}
+            page={callLogsPage}
+            totalPages={callLogsTotalPages}
+            onPageChange={setCallLogsPage}
+          />
+        )
       ) : (
-        <ColdCallsTable
-          calls={coldCalls}
-          sort={sort}
-          onSort={handleSort}
-          isColumnVisible={coldCallCols.isColumnVisible}
-          hasActiveFilters={hasActiveFilters}
-          page={coldCallsPage}
-          totalPages={coldCallsTotalPages}
-          onPageChange={setColdCallsPage}
-        />
+        <PhoneNumbersTab searchTerm={searchTerm} />
       )}
     </div>
   );
@@ -565,6 +480,7 @@ function CallLogsTable({
                   {isColumnVisible('duration') && <SortHeader label="Duration" field="duration" currentSort={sort} onSort={onSort} />}
                   {isColumnVisible('performance') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Performance</th>}
                   {isColumnVisible('session') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Session</th>}
+                  {isColumnVisible('ai_transcript') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">AI</th>}
                   {isColumnVisible('caller') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Caller</th>}
                   {isColumnVisible('notes') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Notes</th>}
                   <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
@@ -574,6 +490,7 @@ function CallLogsTable({
                 {logs.map((log) => {
                   const phoneNum = log.expand?.phone_number_record?.phone_number || '';
                   const session = log.expand?.session;
+                  const coldCall = log.expand?.cold_call;
 
                   return (
                     <tr
@@ -684,6 +601,22 @@ function CallLogsTable({
                           )}
                         </td>
                       )}
+                      {isColumnVisible('ai_transcript') && (
+                        <td className="py-3 px-4">
+                          {coldCall ? (
+                            <Link
+                              href={`/cold-calls/${coldCall.id}`}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--info-subtle)] text-[var(--info)] text-xs font-medium hover:opacity-80 transition-opacity"
+                              title="View AI Transcript"
+                            >
+                              <Zap size={10} />
+                              AI
+                            </Link>
+                          ) : (
+                            <span className="text-xs text-[var(--muted)]">-</span>
+                          )}
+                        </td>
+                      )}
                       {isColumnVisible('caller') && (
                         <td className="py-3 px-4">
                           <span className="text-sm">{log.expand?.caller?.name || '-'}</span>
@@ -708,155 +641,6 @@ function CallLogsTable({
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between p-4 border-t border-[var(--card-border)]">
-              <span className="text-sm text-[var(--muted)]">Page {page} of {totalPages}</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onPageChange(Math.max(1, page - 1))}
-                  disabled={page === 1}
-                  className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)]"
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                  disabled={page === totalPages}
-                  className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)]"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── Cold Calls (AI Transcripts) Table ───────────────────────────────────────
-
-function ColdCallsTable({
-  calls,
-  sort,
-  onSort,
-  isColumnVisible,
-  hasActiveFilters,
-  page,
-  totalPages,
-  onPageChange,
-}: {
-  calls: ColdCall[];
-  sort: { field: string; dir: 'asc' | 'desc' };
-  onSort: (field: string) => void;
-  isColumnVisible: (key: string) => boolean;
-  hasActiveFilters: boolean;
-  page: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
-}) {
-  return (
-    <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
-      {calls.length === 0 ? (
-        <div className="p-16 text-center">
-          <div className="w-12 h-12 rounded-full bg-[var(--info-subtle)] flex items-center justify-center mx-auto mb-4">
-            <Zap size={24} className="text-[var(--info)]" />
-          </div>
-          <p className="text-sm font-medium">No AI transcripts found</p>
-          <p className="text-xs text-[var(--muted)] mt-1">
-            {hasActiveFilters
-              ? 'Try adjusting your filters'
-              : 'Transcribe some call recordings to see them here'}
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
-                <tr>
-                  {isColumnVisible('created') && <SortHeader label="Date" field="created" currentSort={sort} onSort={onSort} />}
-                  {isColumnVisible('company') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Company</th>}
-                  {isColumnVisible('phone_number') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
-                  {isColumnVisible('recipients') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recipient</th>}
-                  {isColumnVisible('call_outcome') && <SortHeader label="Outcome" field="call_outcome" currentSort={sort} onSort={onSort} />}
-                  {isColumnVisible('interest_level') && <SortHeader label="Interest" field="interest_level" currentSort={sort} onSort={onSort} />}
-                  {isColumnVisible('claimed_by') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Claimed By</th>}
-                  <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {calls.map((call) => (
-                  <tr
-                    key={call.id}
-                    className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors"
-                  >
-                    {isColumnVisible('created') && (
-                      <td className="py-3 px-4">
-                        <span className="text-sm">{call.created ? formatDate(call.created) : '-'}</span>
-                      </td>
-                    )}
-                    {isColumnVisible('company') && (
-                      <td className="py-3 px-4">
-                        <span className="font-medium">
-                          {call.expand?.company?.company_name || 'Unknown'}
-                        </span>
-                      </td>
-                    )}
-                    {isColumnVisible('phone_number') && (
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-1">
-                          <span className="text-sm font-mono">{call.phone_number || '-'}</span>
-                          {call.phone_number && <ZoomCallButton phoneNumber={call.phone_number} />}
-                        </div>
-                      </td>
-                    )}
-                    {isColumnVisible('recipients') && (
-                      <td className="py-3 px-4">
-                        <span className="text-sm">{call.recipients || '-'}</span>
-                      </td>
-                    )}
-                    {isColumnVisible('call_outcome') && (
-                      <td className="py-3 px-4">
-                        {call.call_outcome && (
-                          <span className={cn(
-                            "px-2 py-1 rounded-md text-xs font-medium",
-                            OUTCOME_COLORS[call.call_outcome]?.bg || 'bg-gray-500/20',
-                            OUTCOME_COLORS[call.call_outcome]?.text || 'text-gray-400'
-                          )}>
-                            {call.call_outcome}
-                          </span>
-                        )}
-                      </td>
-                    )}
-                    {isColumnVisible('interest_level') && (
-                      <td className="py-3 px-4">
-                        {call.interest_level !== undefined && (
-                          <InterestBar level={call.interest_level} />
-                        )}
-                      </td>
-                    )}
-                    {isColumnVisible('claimed_by') && (
-                      <td className="py-3 px-4">
-                        <span className="text-sm">{call.expand?.claimed_by?.name || '-'}</span>
-                      </td>
-                    )}
-                    <td className="py-3 px-4">
-                      <Link
-                        href={`/cold-calls/${call.id}`}
-                        className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors inline-block"
-                        title="View Details"
-                      >
-                        <Eye size={16} />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
               </tbody>
             </table>
           </div>

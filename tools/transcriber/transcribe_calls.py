@@ -194,7 +194,9 @@ def save_to_pocketbase(analysis: dict, phone_number: str = None, use_legacy: boo
                 phone_number=phone_number or '',
                 receptionist_name=analysis.get('receptionist_name'),
             )
-            print(f"  ✓ Phone Number: {phone_record.get('phone_number', 'Unknown')} (ID: {phone_record['id']})")
+            masked = phone_record.get('phone_number', 'Unknown')
+            masked = f"***{masked[-4:]}" if len(masked) > 4 else '****'
+            print(f"  ✓ Phone Number: {masked} (ID: {phone_record['id']})")
 
             # Create call log with transcript and potential follow-up
             call_log, transcript, follow_up = create_call_log_with_transcript(

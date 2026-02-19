@@ -131,7 +131,7 @@ export default function SessionPage() {
         didHydrateFromStorage.current = true;
 
         try {
-            const raw = window.localStorage.getItem(UNSAVED_CALL_STORAGE_KEY);
+            const raw = window.sessionStorage.getItem(UNSAVED_CALL_STORAGE_KEY);
             if (!raw) return;
 
             const parsed = JSON.parse(raw) as UnsavedCallStoragePayload;
@@ -155,7 +155,7 @@ export default function SessionPage() {
         const shouldPersist = hasUnsavedCall || (!!currentPhoneNumber && hasDraftContent(callDraft));
 
         if (!shouldPersist) {
-            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
             return;
         }
 
@@ -165,7 +165,7 @@ export default function SessionPage() {
             draft: callDraft,
         };
 
-        window.localStorage.setItem(UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
+        window.sessionStorage.setItem(UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
     }, [hasUnsavedCall, currentPhoneNumber, callDraft]);
 
     // ---------------------------------------------------------------------------
@@ -370,7 +370,7 @@ export default function SessionPage() {
             setHasUnsavedCall(false);
             setCallDraft(null);
             setContextPhoneNumber(''); // Clear phone number in context
-            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
         } catch (err) {
             console.error('Failed to end session:', err);
         } finally {
@@ -565,7 +565,7 @@ export default function SessionPage() {
             // Clear unsaved call state
             setHasUnsavedCall(false);
             setCallDraft(null);
-            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
             // Reset call timing state for next call
             setRingStartTime(null);
@@ -592,7 +592,7 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
-        window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+        window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
     }, [stopRecording, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------

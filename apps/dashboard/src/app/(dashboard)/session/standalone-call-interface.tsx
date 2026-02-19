@@ -63,7 +63,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
 
     useEffect(() => {
         try {
-            const raw = window.localStorage.getItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            const raw = window.sessionStorage.getItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
             if (!raw) {
                 setHydratedStorage(true);
                 return;
@@ -90,7 +90,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
 
         const shouldPersist = hasUnsavedCall || (!!currentPhoneNumber && hasDraftContent(callDraft));
         if (!shouldPersist) {
-            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
             return;
         }
 
@@ -99,7 +99,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             hasUnsavedCall,
             draft: callDraft,
         };
-        window.localStorage.setItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
+        window.sessionStorage.setItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
     }, [hydratedStorage, hasUnsavedCall, currentPhoneNumber, callDraft]);
 
     // Track active call from Zoom Phone context
@@ -190,7 +190,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             setCurrentPhoneNumber('');
             setHasUnsavedCall(false);
             setCallDraft(null);
-            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
         } catch (err) {
             console.error('Failed to save standalone call:', err);
         } finally {
@@ -204,7 +204,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         setHasUnsavedCall(false);
         setCallDraft(null);
         setCurrentPhoneNumber('');
-        window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+        window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
     }, [stopRecording, setContextPhoneNumber]);
 
     // Handle exit
@@ -215,7 +215,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             if (recorderStatus === 'recording') {
                 stopRecording();
             }
-            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
             // Call parent to exit standalone mode
             onExit();
         } finally {

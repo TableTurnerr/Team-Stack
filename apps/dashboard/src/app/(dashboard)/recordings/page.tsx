@@ -78,7 +78,7 @@ export default function RecordingsPage() {
 
     // Helper function to check a single file with retry logic
     const checkSingleFile = async (fileName: string, retryCount = 0): Promise<{ fileName: string; existing: Recording } | null> => {
-      const escapedFileName = fileName.replace(/"/g, '\\"');
+      const escapedFileName = fileName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
       try {
         const existing = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(

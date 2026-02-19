@@ -152,7 +152,7 @@ export default function ColdCallsPage() {
       const filters: string[] = [];
 
       if (searchTerm) {
-        const safe = searchTerm.replace(/"/g, '\\"');
+        const safe = searchTerm.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         filters.push(`(expand.company.company_name ~ "${safe}" || expand.phone_number_record.phone_number ~ "${safe}" || owner_name_found ~ "${safe}" || post_call_notes ~ "${safe}")`);
       }
       if (outcomeFilter.length > 0) {

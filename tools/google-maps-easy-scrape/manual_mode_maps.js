@@ -140,6 +140,11 @@
         }
     }
 
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
     function scrapeCurrentPlace() {
         // Implement scraping logic using selectors mentioned above
         // Return item object
@@ -235,13 +240,14 @@
         if (!item.companyUrl) {
             const allLinks = Array.from(container.querySelectorAll('a[href^="http"]'));
             const externalLink = allLinks.find(a => {
-                const href = a.href;
-                // Exclude common Google patterns
-                if (href.includes('google.com/maps')) return false;
-                if (href.includes('google.com/search')) return false;
-                if (href.includes('accounts.google.com')) return false;
-                if (href.includes('support.google.com')) return false;
-                if (href.includes('policies.google.com')) return false;
+                // Use URL API for robust hostname checking
+                try {
+                    const url = new URL(a.href);
+                    const hostname = url.hostname.toLowerCase();
+                    if (hostname === 'google.com' || hostname.endsWith('.google.com')) return false;
+                } catch {
+                    return false;
+                }
                 // It's likely the business website
                 return true;
             });
@@ -443,27 +449,27 @@
       <div class="content">
         <div class="field">
           <div class="field-label">Name</div>
-          <div class="field-value">${item.title || 'N/A'}</div>
+          <div class="field-value">${escapeHtml(item.title) || 'N/A'}</div>
         </div>
         <div class="field">
           <div class="field-label">Rating</div>
-          <div class="field-value">${item.rating} ★ ${item.reviewCount || ''}</div>
+          <div class="field-value">${escapeHtml(item.rating)} ★ ${escapeHtml(item.reviewCount)}</div>
         </div>
         <div class="field">
           <div class="field-label">Category</div>
-          <div class="field-value">${item.industry || 'N/A'} ${item.expensiveness || ''}</div>
+          <div class="field-value">${escapeHtml(item.industry) || 'N/A'} ${escapeHtml(item.expensiveness)}</div>
         </div>
         <div class="field">
           <div class="field-label">Phone</div>
-          <div class="field-value">${item.phone || 'N/A'}</div>
+          <div class="field-value">${escapeHtml(item.phone) || 'N/A'}</div>
         </div>
         <div class="field">
           <div class="field-label">Address</div>
-          <div class="field-value">${item.address || 'N/A'}</div>
+          <div class="field-value">${escapeHtml(item.address) || 'N/A'}</div>
         </div>
         <div class="field">
           <div class="field-label">Website</div>
-          <div class="field-value">${item.companyUrl ? `<a id="gmes-website-link" href="${item.companyUrl}" target="_blank">${new URL(item.companyUrl).hostname}</a>` : '<span id="gmes-website-link" data-search="true">N/A</span>'}</div>
+          <div class="field-value">${item.companyUrl ? `<a id="gmes-website-link" href="${escapeHtml(item.companyUrl)}" target="_blank">${escapeHtml(new URL(item.companyUrl).hostname)}</a>` : '<span id="gmes-website-link" data-search="true">N/A</span>'}</div>
         </div>
         <div class="field">
           <div class="field-label">Note <span style="color: red;">*</span></div>

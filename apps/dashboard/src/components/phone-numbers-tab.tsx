@@ -60,7 +60,7 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
       setLoading(true);
       const filters: string[] = [];
       if (searchTerm) {
-        const safe = searchTerm.replace(/"/g, '\\"');
+        const safe = searchTerm.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         filters.push(`(phone_number ~ "${safe}" || expand.company.company_name ~ "${safe}" || location_name ~ "${safe}" || receptionist_name ~ "${safe}")`);
       }
 

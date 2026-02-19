@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Loader2, CheckCircle2, AlertCircle, Phone } from 'lucide-react';
-import { useCallRecorder } from '@/hooks/use-call-recorder';
+import { Mic, Square, Loader2, CheckCircle2, AlertCircle, Phone, X } from 'lucide-react';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
+import { useCallRecording } from '@/contexts/call-recording-context';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
@@ -18,13 +18,23 @@ function formatTimer(seconds: number): string {
 /**
  * Recording controls for the Zoom Phone Dialer panel.
  *
- * Reads auto/manual mode from localStorage (set in Settings → Integrations).
- * - Auto (default): Recording starts when call connects, stops when call ends.
- * - Manual: User clicks Record / Stop for each call.
+ * Synchronized with the global CallRecordingContext.
  */
 export function CallRecorderControls() {
     const { lastDialedNumber, callStatus, activeCallNumber, customDialerNumber, registerDialCallback } = useZoomPhone();
-    const { user } = useAuth();
+    
+    // Use the global context instead of a local hook instance
+    const {
+        isSessionActive,
+        status,
+        duration,
+        error,
+        startSession,
+        endSession,
+        startRecording,
+        stopRecording,
+        setPhoneNumber
+    } = useCallRecording();
 
     // ── Auto / Manual mode (read from localStorage, set in Settings) ──
     const [isAutoMode, setIsAutoMode] = useState(true);
@@ -36,62 +46,18 @@ export function CallRecorderControls() {
         } catch { /* ignore */ }
     }, []);
 
-    // Listen for changes from Settings page
-    useEffect(() => {
-        const handler = (e: StorageEvent) => {
-            if (e.key === AUTORECORD_KEY) {
-                setIsAutoMode(e.newValue ? JSON.parse(e.newValue) : true);
-            }
-        };
-        window.addEventListener('storage', handler);
-        return () => window.removeEventListener('storage', handler);
-    }, []);
-
-    // ── Phone number — synced from Zoom's events and/or CRM ─────────
-    const [phoneInput, setPhoneInput] = useState('');
-    const phoneRef = useRef<string | null>(null);
-    phoneRef.current = phoneInput || null;
-
-    // Sync from Zoom postMessage events
+    // ── Phone number sync ───────────────────────────────────────────
     useEffect(() => {
         if (activeCallNumber) {
-            setPhoneInput(activeCallNumber.replace(/\D/g, '') || activeCallNumber);
+            setPhoneNumber(activeCallNumber.replace(/\D/g, '') || activeCallNumber);
+        } else if (customDialerNumber) {
+            setPhoneNumber(customDialerNumber);
+        } else if (lastDialedNumber) {
+            setPhoneNumber(lastDialedNumber);
         }
-    }, [activeCallNumber]);
-
-    // Sync from custom dialer as user types
-    useEffect(() => {
-        if (customDialerNumber) {
-            setPhoneInput(customDialerNumber);
-        }
-    }, [customDialerNumber]);
-
-    // Fallback: sync from CRM dialNumber
-    useEffect(() => {
-        if (lastDialedNumber && !activeCallNumber && !customDialerNumber) {
-            setPhoneInput(lastDialedNumber);
-        }
-    }, [lastDialedNumber, activeCallNumber, customDialerNumber]);
-
-    const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setPhoneInput(e.target.value.replace(/\D/g, ''));
-    };
-
-    // ── Recorder hook ───────────────────────────────────────────────
-    const {
-        isSessionActive,
-        status,
-        duration,
-        error,
-        startSession,
-        endSession,
-        startRecording,
-        stopRecording,
-    } = useCallRecorder(phoneRef, user?.id);
+    }, [activeCallNumber, customDialerNumber, lastDialedNumber, setPhoneNumber]);
 
     // ── Auto-start recording session on first dial ─────────────────
-    // Called synchronously from dialNumber() within the user's click gesture,
-    // which allows getDisplayMedia to work without a separate button click.
     useEffect(() => {
         registerDialCallback(() => {
             if (!isSessionActive) {
@@ -108,34 +74,25 @@ export function CallRecorderControls() {
         const prev = prevCallStatusRef.current;
         prevCallStatusRef.current = callStatus;
 
-        if (!isAutoMode || !isSessionActive) return;
+        if (!isSessionActive) return;
 
-        if (callStatus === 'connected' && prev !== 'connected' && status === 'idle') {
+        // Auto-start only if auto-mode is ON
+        if (isAutoMode && callStatus === 'connected' && prev !== 'connected' && status === 'idle') {
             startRecording();
         }
 
-        if (callStatus === 'ended' && prev !== 'ended' && status === 'recording') {
+        // ALWAYS auto-stop when call ends, regardless of auto-mode
+        // This ensures recordings don't run forever if the user forgets
+        if ((callStatus === 'ended' || (callStatus === 'idle' && prev !== 'idle' && prev !== 'ended')) && status === 'recording') {
             stopRecording();
         }
     }, [callStatus, isAutoMode, isSessionActive, status, startRecording, stopRecording]);
 
     // ── Render ──────────────────────────────────────────────────────
 
-    // Session not active — show minimal status, session will auto-start on first dial
+    // Session not active — show nothing, session will auto-start on first dial
     if (!isSessionActive) {
-        return (
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--card-border)] bg-[var(--sidebar-bg)] text-sm shrink-0">
-                <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--muted)]" />
-                </span>
-                <span className="text-[10px] text-[var(--muted)]">
-                    Recording starts on first call
-                </span>
-                {error && (
-                    <span className="text-[10px] text-red-400 truncate ml-auto">{error}</span>
-                )}
-            </div>
-        );
+        return null;
     }
 
     // Session active
@@ -147,15 +104,25 @@ export function CallRecorderControls() {
                 status === 'recording' && 'bg-red-500/10 border-red-500/30'
             )}
         >
-            {/* --- IDLE --- */}
-            {status === 'idle' && (
+            {/* --- IDLE / SUCCESS / ERROR (Session Active but not currently recording) --- */}
+            {(status === 'idle' || status === 'success' || status === 'error') && (
                 <>
                     <span className="relative flex h-2 w-2 shrink-0" title="Recording session active">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
                     </span>
 
-                    {isAutoMode ? (
+                    {status === 'success' ? (
+                        <div className="flex items-center gap-1.5 text-[10px] text-green-400 font-semibold animate-pulse">
+                            <CheckCircle2 size={12} />
+                            UPLOADED
+                        </div>
+                    ) : status === 'error' ? (
+                        <div className="flex items-center gap-1.5 text-[10px] text-red-400 font-semibold max-w-[100px] truncate" title={error || ''}>
+                            <AlertCircle size={12} />
+                            {error || 'FAILED'}
+                        </div>
+                    ) : isAutoMode ? (
                         <span className="text-[10px] text-green-400 font-semibold" title="Recording will start automatically when a call connects">
                             AUTO
                         </span>
@@ -169,19 +136,8 @@ export function CallRecorderControls() {
                         </button>
                     )}
 
-                    <div className="flex items-center gap-1 flex-1 max-w-[140px]">
-                        <Phone size={10} className="text-[var(--muted)] shrink-0" />
-                        <input
-                            type="text"
-                            value={phoneInput}
-                            onChange={handlePhoneChange}
-                            placeholder="Phone #"
-                            className="w-full bg-transparent border-b border-[var(--card-border)] focus:border-[var(--foreground)] outline-none text-xs font-mono py-0.5 placeholder:text-[var(--muted)] transition-colors"
-                        />
-                    </div>
-
                     {callStatus === 'ringing' && (
-                        <span className="text-[10px] text-yellow-400 animate-pulse">Ringing...</span>
+                        <span className="text-[10px] text-yellow-400 animate-pulse ml-2">Ringing...</span>
                     )}
 
                     <button
@@ -204,61 +160,31 @@ export function CallRecorderControls() {
                     <span className="font-mono text-xs font-bold text-red-400 tabular-nums">
                         {formatTimer(duration)}
                     </span>
-                    <div className="flex items-center gap-1 flex-1 max-w-[120px]">
-                        <Phone size={10} className="text-red-400/60 shrink-0" />
-                        <input
-                            type="text"
-                            value={phoneInput}
-                            onChange={handlePhoneChange}
-                            placeholder="Phone #"
-                            className="w-full bg-transparent border-b border-red-500/30 focus:border-red-400 outline-none text-xs font-mono py-0.5 text-red-300 placeholder:text-red-400/40 transition-colors"
-                        />
+                    
+                    <div className="flex items-center gap-2 ml-auto">
+                        <button
+                            onClick={stopRecording}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--foreground)] text-[var(--background)] text-xs font-semibold hover:opacity-90 active:scale-95 transition-all"
+                        >
+                            <Square size={10} fill="currentColor" />
+                            Stop
+                        </button>
+                        <button
+                            onClick={endSession}
+                            className="p-1 rounded text-[var(--muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                            title="Force end entire session"
+                        >
+                            <X size={14} />
+                        </button>
                     </div>
-                    <button
-                        onClick={stopRecording}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--foreground)] text-[var(--background)] text-xs font-semibold hover:opacity-90 active:scale-95 transition-all ml-auto"
-                    >
-                        <Square size={10} fill="currentColor" />
-                        Stop
-                    </button>
                 </>
             )}
 
-            {/* --- STOPPING --- */}
-            {status === 'stopping' && (
-                <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-                    <Loader2 size={14} className="animate-spin" />
-                    Stopping...
-                </div>
-            )}
-
-            {/* --- UPLOADING --- */}
-            {status === 'uploading' && (
-                <div className="flex items-center gap-2 text-xs text-blue-400">
-                    <Loader2 size={14} className="animate-spin" />
-                    Uploading recording...
-                </div>
-            )}
-
-            {/* --- SUCCESS --- */}
-            {status === 'success' && (
-                <div className="flex items-center gap-2 text-xs text-green-400">
-                    <CheckCircle2 size={14} />
-                    Uploaded successfully
-                </div>
-            )}
-
-            {/* --- ERROR --- */}
-            {status === 'error' && (
-                <div className="flex items-center gap-2 text-xs text-red-400 flex-1">
-                    <AlertCircle size={14} className="shrink-0" />
-                    <span className="truncate">{error || 'Recording failed'}</span>
-                    <button
-                        onClick={startRecording}
-                        className="ml-auto shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 hover:bg-red-500/30 transition-colors"
-                    >
-                        Retry
-                    </button>
+            {/* --- STOPPING / UPLOADING --- */}
+            {(status === 'stopping' || status === 'uploading') && (
+                <div className="flex items-center gap-2 text-[10px] text-blue-400 font-semibold italic ml-auto">
+                    <Loader2 size={12} className="animate-spin" />
+                    {status === 'stopping' ? 'STOPPING...' : 'UPLOADING...'}
                 </div>
             )}
         </div>

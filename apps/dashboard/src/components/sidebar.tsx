@@ -20,6 +20,8 @@ import {
   Mic,
   Plus,
   Globe,
+  Headphones,
+  History,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -28,21 +30,13 @@ import { useAuth } from '@/contexts/auth-context';
 import { TimezoneClock } from './timezone-clock';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 
-const POPULAR_TIMEZONES = [
-  { timezone: 'America/New_York', label: 'EST' },
-  { timezone: 'America/Chicago', label: 'CST' },
-  { timezone: 'America/Denver', label: 'MST' },
-  { timezone: 'America/Los_Angeles', label: 'PST' },
-  { timezone: 'UTC', label: 'UTC' },
-  { timezone: 'Europe/London', label: 'GMT' },
-  { timezone: 'Europe/Paris', label: 'CET' },
-  { timezone: 'Asia/Tokyo', label: 'JST' },
-  { timezone: 'Australia/Sydney', label: 'AEST' },
-];
+import { TimezoneSearch } from './timezone-search';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
   { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
+  { href: '/session', label: 'Call Session', icon: Headphones },
+  { href: '/session-logs', label: 'Session Logs', icon: History },
   { href: '/recordings', label: 'Recordings', icon: Mic },
   { href: '/companies', label: 'Companies', icon: Building2 },
   { href: '/actors', label: 'Actors', icon: Instagram },
@@ -64,6 +58,16 @@ export function Sidebar() {
   const [showTzSelector, setShowTzSelector] = useState(false);
 
   const timezones = preferences?.timezones || [];
+  const coldCallingTimezone = preferences?.workflow_preferences?.cold_calling_timezone;
+
+  const setStarTimezone = async (tz: string) => {
+    await updatePreferences({
+      workflow_preferences: {
+        ...preferences?.workflow_preferences,
+        cold_calling_timezone: tz,
+      },
+    });
+  };
 
   const addTimezone = async (tz: { timezone: string; label: string }) => {
     if (timezones.length >= 4) return;
@@ -106,7 +110,7 @@ export function Sidebar() {
       <aside
         className={cn(
           'fixed top-0 left-0 z-40 h-screen w-64 bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)] transition-transform duration-200 flex flex-col',
-          'lg:translate-x-0',
+          'lg:translate-x-0 lg:static',
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -172,7 +176,7 @@ export function Sidebar() {
         </nav>
 
         {/* Timezones */}
-        <div className="px-4 py-4 border-t border-[var(--sidebar-border)] space-y-3">
+        <div className="px-4 py-4 border-t border-[var(--sidebar-border)] space-y-3 relative">
           <div className="flex items-center justify-between px-1">
             <span className="text-[10px] font-bold text-[var(--muted)] uppercase tracking-wider">
               Time Zones
@@ -189,24 +193,12 @@ export function Sidebar() {
           </div>
 
           {showTzSelector && (
-            <div className="p-2 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] shadow-xl animate-in fade-in slide-in-from-top-1 duration-200">
-              <div className="grid grid-cols-3 gap-1">
-                {POPULAR_TIMEZONES.filter(tz => !timezones.find(t => t.timezone === tz.timezone)).map((tz) => (
-                  <button
-                    key={tz.timezone}
-                    onClick={() => addTimezone(tz)}
-                    className="flex flex-col items-center justify-center p-1.5 rounded-md hover:bg-[var(--sidebar-hover)] transition-colors border border-transparent hover:border-[var(--card-border)]"
-                  >
-                    <span className="text-[10px] font-bold">{tz.label}</span>
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => setShowTzSelector(false)}
-                className="w-full mt-2 py-1 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-              >
-                Cancel
-              </button>
+            <div className="absolute bottom-full left-0 mb-2 w-full z-50">
+              <TimezoneSearch
+                onSelect={addTimezone}
+                onCancel={() => setShowTzSelector(false)}
+                existingTimezones={timezones.map(t => t.timezone)}
+              />
             </div>
           )}
 
@@ -217,6 +209,8 @@ export function Sidebar() {
                 timezone={tz.timezone}
                 label={tz.label}
                 onRemove={() => removeTimezone(tz.timezone)}
+                isStarred={coldCallingTimezone === tz.timezone}
+                onStar={() => setStarTimezone(tz.timezone)}
               />
             ))}
           </div>

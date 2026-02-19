@@ -438,3 +438,13 @@ body {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
+
+/* Pulse border animation for unsaved call indicator */
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 0 1px var(--warning), 0 0 8px -2px var(--warning);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--warning), 0 0 20px -2px var(--warning);
+  }
+}

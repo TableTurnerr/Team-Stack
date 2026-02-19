@@ -135,7 +135,7 @@ export interface Rule extends RecordModel {
 export interface Alert extends RecordModel {
   created_by: string;
   target_user: string;
-  entity_type: 'cold_call' | 'company' | 'goal';
+  entity_type: 'cold_call' | 'company' | 'goal' | 'follow_up';
   entity_id?: string;
   entity_label?: string;
   alert_time?: string;
@@ -169,6 +169,7 @@ export interface PhoneNumber extends RecordModel {
   location_address?: string;
   receptionist_name?: string;
   last_called?: string;
+  total_calls?: number;
   expand?: {
     company?: Company;
   };
@@ -179,7 +180,9 @@ export interface CallLog extends RecordModel {
   phone_number_record: string;
   caller?: string;
   call_time: string;
-  duration?: number;
+  duration?: number; // Total duration (ring_duration + call_duration) in seconds
+  ring_duration?: number; // Time spent ringing before pickup (in seconds)
+  call_duration?: number; // Time spent on actual call after pickup (in seconds)
   call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Wrong Number' | 'Other';
   owner_name_found?: string;
   receptionist_name?: string;
@@ -187,16 +190,43 @@ export interface CallLog extends RecordModel {
   interest_level?: number;
   status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
   has_recording?: boolean;
+  session?: string; // Optional - null for standalone calls, populated for session-based calls
+  cold_call?: string; // Optional link to AI transcript (cold_calls record)
+  // Per-call performance tracking (tied to specific calls, aggregated to session level)
+  owner_reached?: boolean;
+  pitch_completed?: boolean;
+  appointment_set?: boolean;
   expand?: {
     company?: Company;
     phone_number_record?: PhoneNumber;
     caller?: User;
+    session?: ColdCallingSession;
+    cold_call?: ColdCall;
+  };
+}
+
+export interface ColdCallingSession extends RecordModel {
+  user: string;
+  started_at: string;
+  ended_at?: string;
+  total_dials: number;
+  total_pickups: number;
+  total_duration_sec: number;
+  owner_reached: number;
+  pitch_completed: number;
+  appointment_set: number;
+  status: 'active' | 'completed';
+  session_notes?: string; // Optional notes about the session (e.g., overall observations, issues)
+  expand?: {
+    user?: User;
   };
 }
 
 export interface FollowUp extends RecordModel {
   call_log?: string;
   company: string;
+  phone_number_record?: string;
+  created_by?: string;
   scheduled_time: string;
   client_timezone: string;
   assigned_to?: string;
@@ -206,7 +236,9 @@ export interface FollowUp extends RecordModel {
   expand?: {
     call_log?: CallLog;
     company?: Company;
+    phone_number_record?: PhoneNumber;
     assigned_to?: User;
+    created_by?: User;
   };
 }
 
@@ -289,6 +321,7 @@ export interface UserPreferences extends RecordModel {
     show_transcript_panel?: boolean;
     default_status_filters?: string[];
     expanded_view?: boolean;
+    cold_calling_timezone?: string; // IANA timezone string for follow-up scheduling
   };
   privacy_settings?: {
     show_online_status?: boolean;
@@ -325,4 +358,5 @@ export const COLLECTIONS = {
   INTERACTIONS: 'interactions',
   RECORDINGS: 'recordings',
   USER_PREFERENCES: 'user_preferences',
+  COLD_CALLING_SESSIONS: 'cold_calling_sessions',
 } as const;

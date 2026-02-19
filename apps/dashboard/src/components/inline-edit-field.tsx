@@ -4,6 +4,17 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Check, X, Undo2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+import { useUnsavedChanges } from '@/contexts/unsaved-changes-context';
+
+// Optional hook wrapper - returns null if context is not available
+function useUnsavedChangesOptional() {
+  try {
+    return useUnsavedChanges();
+  } catch {
+    return null;
+  }
+}
+
 interface InlineEditFieldProps {
   value: string;
   onSave: (newValue: string) => Promise<void>;
@@ -15,6 +26,10 @@ interface InlineEditFieldProps {
   placeholder?: string;
   isEditing?: boolean;
   onEditChange?: (isEditing: boolean) => void;
+  // Optional props for global unsaved changes tracking
+  collection?: string;   // PocketBase collection name
+  recordId?: string;     // PocketBase record ID
+  fieldName?: string;    // Field name on the record
 }
 
 export function InlineEditField({
@@ -28,7 +43,11 @@ export function InlineEditField({
   placeholder,
   isEditing: externalIsEditing,
   onEditChange,
+  collection,
+  recordId,
+  fieldName,
 }: InlineEditFieldProps) {
+  const unsavedCtx = useUnsavedChangesOptional();
   const [internalIsEditing, setInternalIsEditing] = useState(false);
   
   const isEditing = externalIsEditing !== undefined ? externalIsEditing : internalIsEditing;
@@ -82,6 +101,7 @@ export function InlineEditField({
       setSavedValue(currentValue);
       setHasUnsavedChanges(false);
       localStorage.removeItem(`unsaved_${id}`);
+      if (unsavedCtx) unsavedCtx.removeChange(id);
       setIsEditing(false);
     } catch (error) {
       console.error('Failed to save:', error);
@@ -94,6 +114,7 @@ export function InlineEditField({
     setCurrentValue(savedValue);
     setHasUnsavedChanges(false);
     localStorage.removeItem(`unsaved_${id}`);
+    if (unsavedCtx) unsavedCtx.removeChange(id);
     setIsEditing(false);
   };
 
@@ -102,8 +123,20 @@ export function InlineEditField({
     setHasUnsavedChanges(newValue !== savedValue);
     if (newValue !== savedValue) {
       localStorage.setItem(`unsaved_${id}`, newValue);
+      // Register with global unsaved changes context
+      if (unsavedCtx && collection && recordId && fieldName) {
+        unsavedCtx.registerChange({
+          id,
+          collection,
+          recordId,
+          field: fieldName,
+          originalValue: savedValue,
+          currentValue: newValue,
+        });
+      }
     } else {
       localStorage.removeItem(`unsaved_${id}`);
+      if (unsavedCtx) unsavedCtx.removeChange(id);
     }
 
     // Add to history if different from last

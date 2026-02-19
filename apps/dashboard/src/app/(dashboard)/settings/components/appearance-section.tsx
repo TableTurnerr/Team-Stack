@@ -13,18 +13,7 @@ interface AppearanceSectionProps {
     isSaving: boolean;
 }
 
-const POPULAR_TIMEZONES = [
-    { timezone: 'America/New_York', label: 'EST (New York)' },
-    { timezone: 'America/Chicago', label: 'CST (Chicago)' },
-    { timezone: 'America/Denver', label: 'MST (Denver)' },
-    { timezone: 'America/Los_Angeles', label: 'PST (Los Angeles)' },
-    { timezone: 'UTC', label: 'UTC' },
-    { timezone: 'Europe/London', label: 'GMT (London)' },
-    { timezone: 'Europe/Paris', label: 'CET (Paris)' },
-    { timezone: 'Asia/Tokyo', label: 'JST (Tokyo)' },
-    { timezone: 'Asia/Shanghai', label: 'CST (Shanghai)' },
-    { timezone: 'Australia/Sydney', label: 'AEST (Sydney)' },
-];
+import { TimezoneSearch } from '@/components/timezone-search';
 
 export function AppearanceSection({ preferences, updatePreferences, isSaving }: AppearanceSectionProps) {
     const { theme, setTheme } = useTheme();
@@ -160,7 +149,7 @@ export function AppearanceSection({ preferences, updatePreferences, isSaving }: 
 
             {/* Timezone Clocks */}
             <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between relative">
                     <div>
                         <h3 className="text-sm font-medium">Sidebar Timezone Clocks</h3>
                         <p className="text-xs text-[var(--muted)]">Up to 4 timezones shown in sidebar</p>
@@ -203,22 +192,12 @@ export function AppearanceSection({ preferences, updatePreferences, isSaving }: 
 
                 {/* Timezone selector */}
                 {showTimezoneSelector && (
-                    <div className="p-3 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] space-y-2">
-                        <p className="text-xs font-medium text-[var(--muted)] uppercase tracking-wider">
-                            Popular Timezones
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                            {POPULAR_TIMEZONES.filter(tz => !timezones.find(t => t.timezone === tz.timezone))
-                                .map((tz) => (
-                                    <button
-                                        key={tz.timezone}
-                                        onClick={() => addTimezone(tz)}
-                                        className="text-left p-2 text-sm rounded-lg hover:bg-[var(--card-hover)] transition-colors"
-                                    >
-                                        {tz.label}
-                                    </button>
-                                ))}
-                        </div>
+                    <div className="absolute top-10 right-0 z-50 w-[300px]">
+                        <TimezoneSearch
+                            onSelect={addTimezone}
+                            onCancel={() => setShowTimezoneSelector(false)}
+                            existingTimezones={timezones.map(t => t.timezone)}
+                        />
                     </div>
                 )}
             </div>

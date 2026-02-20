@@ -5,6 +5,7 @@ import { History, Download, RefreshCw, Loader2, Filter } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { SessionLogRow } from './session-log-row';
+import { useAdminModeOptional } from '@/contexts/admin-mode-context';
 
 export default function SessionLogsPage() {
     const [sessions, setSessions] = useState<ColdCallingSession[]>([]);
@@ -12,6 +13,9 @@ export default function SessionLogsPage() {
     const [refreshing, setRefreshing] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
     const [showFilters, setShowFilters] = useState(false);
+
+    const adminMode = useAdminModeOptional();
+    const isAdminMode = adminMode?.isAdminMode ?? false;
 
     const fetchSessions = useCallback(async () => {
         try {
@@ -51,6 +55,10 @@ export default function SessionLogsPage() {
         setSessions(prev =>
             prev.map(s => s.id === updatedSession.id ? updatedSession : s)
         );
+    };
+
+    const handleDeleteSession = (id: string) => {
+        setSessions(prev => prev.filter(s => s.id !== id));
     };
 
     const handleExportCSV = () => {
@@ -226,6 +234,9 @@ export default function SessionLogsPage() {
                                     <th className="px-4 py-3 text-center text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Appt</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">User</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Status</th>
+                                    {isAdminMode && (
+                                        <th className="px-4 py-3 w-10"></th>
+                                    )}
                                 </tr>
                             </thead>
                             <tbody>
@@ -234,6 +245,7 @@ export default function SessionLogsPage() {
                                         key={session.id}
                                         session={session}
                                         onUpdate={handleUpdateSession}
+                                        onDelete={handleDeleteSession}
                                     />
                                 ))}
                             </tbody>

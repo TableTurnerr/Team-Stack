@@ -52,13 +52,17 @@ export function FloatingSessionStatus() {
 
     const isCallActive = callStatus === 'ringing' || callStatus === 'connected';
 
-    // Update elapsed time
+    // Update elapsed time — subtracts paused time so only active calling time is shown
     useEffect(() => {
         if (session && session.status === 'active') {
             const started = new Date(session.started_at).getTime();
+            const totalPausedSec = session.total_paused_sec ?? 0;
             const updateElapsed = () => {
                 const now = Date.now();
-                setElapsedSec(Math.floor((now - started) / 1000));
+                const currentPauseSec = session.paused_at
+                    ? Math.floor((now - new Date(session.paused_at).getTime()) / 1000)
+                    : 0;
+                setElapsedSec(Math.floor((now - started) / 1000) - totalPausedSec - currentPauseSec);
             };
             updateElapsed();
             timerRef.current = setInterval(updateElapsed, 1000);
@@ -137,7 +141,8 @@ export function FloatingSessionStatus() {
         setNumber('+' + digits);
     };
 
-    const canDial = number.length === 12 && number.startsWith('+1') && !isCallActive;
+    const isPaused = !!session?.paused_at;
+    const canDial = number.length === 12 && number.startsWith('+1') && !isCallActive && !isPaused;
 
     const handleDial = () => {
         if (canDial) {
@@ -177,10 +182,17 @@ export function FloatingSessionStatus() {
                             <div>
                                 <h3 className="text-sm font-semibold">Call Session</h3>
                                 <div className="flex items-center gap-2 mt-1">
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
-                                        <span className="w-1 h-1 rounded-full bg-[var(--success)] animate-pulse" />
-                                        Active
-                                    </span>
+                                    {isPaused ? (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--warning-subtle)] text-[var(--warning)]">
+                                            <span className="w-1 h-1 rounded-full bg-[var(--warning)]" />
+                                            Paused
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
+                                            <span className="w-1 h-1 rounded-full bg-[var(--success)] animate-pulse" />
+                                            Active
+                                        </span>
+                                    )}
                                     <span className="text-xs font-mono font-semibold tabular-nums text-[var(--muted)]">
                                         {formatDuration(elapsedSec)}
                                     </span>
@@ -233,7 +245,7 @@ export function FloatingSessionStatus() {
                                     value={number}
                                     onChange={handleInputChange}
                                     onKeyDown={handleKeyDown}
-                                    disabled={isCallActive}
+                                    disabled={isCallActive || isPaused}
                                     placeholder="Enter number..."
                                     className="flex-1 text-center text-sm font-semibold bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-2 py-1.5 placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--primary)] transition-colors disabled:opacity-70"
                                     autoComplete="off"
@@ -269,7 +281,7 @@ export function FloatingSessionStatus() {
                                             key={digit}
                                             onClick={() => appendDigit(digit)}
                                             className="flex flex-col items-center justify-center h-10 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] hover:bg-[var(--card-hover)] active:scale-95 transition-all"
-                                            disabled={isCallActive}
+                                            disabled={isCallActive || isPaused}
                                         >
                                             <span className="text-sm font-semibold text-[var(--foreground)]">{digit}</span>
                                             {letters && (
@@ -314,10 +326,21 @@ export function FloatingSessionStatus() {
                 {/* Middle: Session Status */}
                 <div className="flex flex-col items-center gap-3">
                     <div className="flex flex-col items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse shadow-lg shadow-green-500/50" />
-                        <div className="text-[8px] font-semibold text-[var(--success)] uppercase tracking-wider" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-                            Active
-                        </div>
+                        {isPaused ? (
+                            <>
+                                <div className="w-2 h-2 rounded-full bg-[var(--warning)] shadow-lg shadow-yellow-500/50" />
+                                <div className="text-[8px] font-semibold text-[var(--warning)] uppercase tracking-wider" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                                    Paused
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse shadow-lg shadow-green-500/50" />
+                                <div className="text-[8px] font-semibold text-[var(--success)] uppercase tracking-wider" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                                    Active
+                                </div>
+                            </>
+                        )}
                     </div>
                     <div className="text-[11px] font-mono font-bold tabular-nums text-[var(--foreground)]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
                         {formatDuration(elapsedSec)}

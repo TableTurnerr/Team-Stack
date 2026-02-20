@@ -60,6 +60,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
     const [callDraft, setCallDraft] = useState<CallFormDraft | null>(null);
     const [hydratedStorage, setHydratedStorage] = useState(false);
+    const [ringStartTime, setRingStartTime] = useState<number | null>(null);
+    const [connectTime, setConnectTime] = useState<number | null>(null);
 
     useEffect(() => {
         try {
@@ -118,10 +120,19 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, startRecording]);
 
     useEffect(() => {
-        if (callStatus === 'ended' && currentPhoneNumber) {
+        if (callStatus === 'ringing') {
+            if (!ringStartTime) {
+                setRingStartTime(Date.now());
+                setConnectTime(null);
+            }
+        } else if (callStatus === 'connected') {
+            if (!connectTime) {
+                setConnectTime(Date.now());
+            }
+        } else if (callStatus === 'ended' && currentPhoneNumber) {
             setHasUnsavedCall(true);
         }
-    }, [callStatus, currentPhoneNumber]);
+    }, [callStatus, currentPhoneNumber, ringStartTime, connectTime]);
 
     // Handle saving standalone call
     const handleSaveCall = useCallback(async (data: CallFormData) => {
@@ -131,6 +142,23 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             // Stop recording and upload
             stopRecording();
             setContextPhoneNumber('');
+
+            // Calculate call durations
+            let ringDuration = 0;
+            let callDuration = 0;
+            let totalDuration = 0;
+
+            if (ringStartTime) {
+                const endTime = Date.now();
+                if (connectTime) {
+                    ringDuration = Math.floor((connectTime - ringStartTime) / 1000);
+                    callDuration = Math.floor((endTime - connectTime) / 1000);
+                    totalDuration = ringDuration + callDuration;
+                } else {
+                    ringDuration = Math.floor((endTime - ringStartTime) / 1000);
+                    totalDuration = ringDuration;
+                }
+            }
 
             // Find or create phone number record
             let phoneNumberRecordId: string | null = null;
@@ -161,6 +189,9 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 phone_number_record: phoneNumberRecordId || undefined,
                 caller: user.id,
                 call_time: new Date().toISOString(),
+                duration: totalDuration > 0 ? totalDuration : undefined,
+                ring_duration: ringDuration > 0 ? ringDuration : undefined,
+                call_duration: callDuration > 0 ? callDuration : undefined,
                 call_outcome: data.callOutcome,
                 interest_level: data.interestLevel,
                 post_call_notes: data.postCallNotes,
@@ -191,12 +222,16 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             setHasUnsavedCall(false);
             setCallDraft(null);
             window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+
+            // Reset timing state for next call
+            setRingStartTime(null);
+            setConnectTime(null);
         } catch (err) {
             console.error('Failed to save standalone call:', err);
         } finally {
             setSavingCall(false);
         }
-    }, [user, stopRecording, setContextPhoneNumber]);
+    }, [user, stopRecording, setContextPhoneNumber, ringStartTime, connectTime]);
 
     const handleDiscardCall = useCallback(() => {
         stopRecording();
@@ -204,6 +239,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         setHasUnsavedCall(false);
         setCallDraft(null);
         setCurrentPhoneNumber('');
+        setRingStartTime(null);
+        setConnectTime(null);
         window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
     }, [stopRecording, setContextPhoneNumber]);
 

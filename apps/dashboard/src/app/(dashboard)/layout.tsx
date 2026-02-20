@@ -16,6 +16,8 @@ import { FollowUpProvider } from '@/contexts/follow-up-context';
 import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
+import { AdminModeProvider, useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { AdminModeBanner } from '@/components/admin-mode-banner';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -50,13 +52,19 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isSessionPage = pathname === '/session';
+  const adminMode = useAdminModeOptional();
+  const isAdminMode = adminMode?.isAdminMode ?? false;
 
   return (
-    <div className="flex min-h-screen bg-[var(--background)]">
+    <div className={isAdminMode
+      ? "flex min-h-screen bg-[var(--background)] ring-4 ring-red-500 ring-inset"
+      : "flex min-h-screen bg-[var(--background)]"
+    }>
       <Sidebar />
       <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
         <FloatingSaveBar />
         <ActiveSessionBanner />
+        <AdminModeBanner />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[var(--background)]">
           <div className="container mx-auto px-4 py-8 lg:px-8 max-w-[1600px]">
             {children}
@@ -82,7 +90,9 @@ export default function DashboardLayout({
             <CallRecordingProvider>
               <UnsavedChangesProvider>
                 <FollowUpProvider>
-                  <DashboardLayoutContent>{children}</DashboardLayoutContent>
+                  <AdminModeProvider>
+                    <DashboardLayoutContent>{children}</DashboardLayoutContent>
+                  </AdminModeProvider>
                 </FollowUpProvider>
               </UnsavedChangesProvider>
             </CallRecordingProvider>

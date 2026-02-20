@@ -170,6 +170,8 @@ export interface PhoneNumber extends RecordModel {
   receptionist_name?: string;
   last_called?: string;
   total_calls?: number;
+  /** Soft-delete: set to true to mark as disassociated from the company (requires the field in PocketBase schema) */
+  disassociated?: boolean;
   expand?: {
     company?: Company;
   };

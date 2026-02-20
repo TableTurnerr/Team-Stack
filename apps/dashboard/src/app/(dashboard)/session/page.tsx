@@ -955,6 +955,7 @@ export default function SessionPage() {
                             initialDraft={callDraft}
                             onDraftChange={setCallDraft}
                             onDiscard={handleDiscardCall}
+                            isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
                         />
                     </div>
 

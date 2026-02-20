@@ -359,6 +359,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                         initialDraft={callDraft}
                         onDraftChange={setCallDraft}
                         onDiscard={handleDiscardCall}
+                        isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
                     />
                 </div>
 

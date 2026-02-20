@@ -82,9 +82,11 @@ interface CurrentCallFormProps {
     initialDraft?: CallFormDraft | null;
     onDraftChange?: (draft: CallFormDraft) => void;
     onDiscard?: () => void;
+    /** Whether the call is currently live (ringing or connected) */
+    isCallLive?: boolean;
 }
 
-export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard }: CurrentCallFormProps) {
+export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive }: CurrentCallFormProps) {
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -106,6 +108,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [phoneNumberRecord, setPhoneNumberRecord] = useState<PhoneNumber | null>(null);
     const [phoneExistsForOtherCompany, setPhoneExistsForOtherCompany] = useState(false);
     const lastLookedUpPhone = useRef('');
+
+    // Company lookup animation state: idle → searching → found | not-found
+    const [companyLookupState, setCompanyLookupState] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle');
 
     // Follow-up scheduling
     const [showFollowUp, setShowFollowUp] = useState(false);
@@ -130,6 +135,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setAutoFetchedCompany(null);
         setPhoneNumberRecord(null);
         setPhoneExistsForOtherCompany(false);
+        setCompanyLookupState('idle');
         lastLookedUpPhone.current = '';
     }, []);
 
@@ -181,14 +187,23 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
     // Auto-fetch company when phone number changes
     useEffect(() => {
-        if (!phoneNumber || phoneNumber === lastLookedUpPhone.current) return;
+        if (!phoneNumber) {
+            setCompanyLookupState('idle');
+            return;
+        }
+        if (phoneNumber === lastLookedUpPhone.current) return;
         lastLookedUpPhone.current = phoneNumber;
+
+        setCompanyLookupState('searching');
 
         const lookupPhone = async () => {
             try {
                 // Try multiple matching strategies since phone formats vary
                 const digits = phoneNumber.replace(/\D/g, '');
-                if (digits.length < 7) return;
+                if (digits.length < 7) {
+                    setCompanyLookupState('not-found');
+                    return;
+                }
 
                 // Strategy 1: Try exact match with the raw phone string
                 // Strategy 2: Try matching with just the digits
@@ -234,13 +249,18 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         if (bestMatch.receptionist_name && !company.owner_name) {
                             setRecipientName(bestMatch.receptionist_name);
                         }
+                        setCompanyLookupState('found');
+                    } else {
+                        setCompanyLookupState('not-found');
                     }
                 } else {
                     setPhoneNumberRecord(null);
                     setAutoFetchedCompany(null);
+                    setCompanyLookupState('not-found');
                 }
             } catch {
                 // Non-critical lookup
+                setCompanyLookupState('not-found');
             }
         };
 
@@ -481,21 +501,37 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         </span>
                     )}
                 </label>
-                <div className="relative">
-                    <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-                    <input
-                        type="text"
-                        value={companySearch}
-                        onChange={e => {
-                            setCompanySearch(e.target.value);
-                            setSelectedCompany(null);
-                        }}
-                        placeholder="Search or create company..."
-                        className="w-full pl-8 pr-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
-                    />
-                    {selectedCompany && (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[var(--success)]" />
-                    )}
+                {/* Spinning border wrapper for searching state */}
+                <div className={cn(
+                    "rounded-lg",
+                    companyLookupState === 'searching' && "company-spin-border p-[2px]"
+                )}>
+                    <div className={cn(
+                        "relative",
+                        companyLookupState === 'searching' && "bg-[var(--sidebar-bg)] rounded-[6px]"
+                    )}>
+                        <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                        <input
+                            type="text"
+                            value={companySearch}
+                            onChange={e => {
+                                setCompanySearch(e.target.value);
+                                setSelectedCompany(null);
+                            }}
+                            placeholder="Search or create company..."
+                            className={cn(
+                                "w-full pl-8 pr-3 py-2 text-sm focus:outline-none transition-all",
+                                companyLookupState === 'searching'
+                                    ? "bg-transparent border-0 rounded-[6px]"
+                                    : companyLookupState === 'not-found' && !companySearch.trim()
+                                    ? "bg-[var(--sidebar-bg)] border border-[var(--error)] rounded-lg animate-[pulse-red-border_2s_ease-in-out_infinite]"
+                                    : "bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg focus:border-[var(--primary)]"
+                            )}
+                        />
+                        {selectedCompany && (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[var(--success)]" />
+                        )}
+                    </div>
                 </div>
 
                 {/* Dropdown */}
@@ -519,10 +555,23 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
             {/* Phone number display */}
             <div>
-                <label className="text-xs text-[var(--muted)] mb-1 block">Phone Number <span className="text-[var(--error)]">*</span></label>
-                <div className="flex items-center gap-2 px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm">
-                    <PhoneIcon size={14} className="text-[var(--muted)]" />
-                    <span className="font-mono">{phoneNumber || '—'}</span>
+                <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-2">
+                    <span>Phone Number <span className="text-[var(--error)]">*</span></span>
+                    {isCallLive && (
+                        <span className="flex items-center gap-1 text-[10px] font-semibold text-[var(--success)] uppercase tracking-wider">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+                            Live
+                        </span>
+                    )}
+                </label>
+                <div className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-300",
+                    isCallLive
+                        ? "bg-[var(--success-subtle)] border border-[var(--success)] animate-[pulse-green-border_2s_ease-in-out_infinite]"
+                        : "bg-[var(--sidebar-bg)] border border-[var(--card-border)]"
+                )}>
+                    <PhoneIcon size={14} className={isCallLive ? "text-[var(--success)]" : "text-[var(--muted)]"} />
+                    <span className={cn("font-mono", isCallLive && "text-[var(--success)] font-medium")}>{phoneNumber || '—'}</span>
                 </div>
             </div>
 

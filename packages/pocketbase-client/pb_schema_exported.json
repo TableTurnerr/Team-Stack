@@ -1450,6 +1450,29 @@
             },
             {
                 "hidden": false,
+                "id": "date_paused_at",
+                "max": "",
+                "min": "",
+                "name": "paused_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "number_total_paused_sec",
+                "max": null,
+                "min": 0,
+                "name": "total_paused_sec",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
                 "onCreate": true,

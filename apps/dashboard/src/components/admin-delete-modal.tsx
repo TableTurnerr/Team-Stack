@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertTriangle, X, Trash2, Clock, Mic, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, formatDate } from '@/lib/utils';
 import type { CallLog, PhoneNumber } from '@/lib/types';
@@ -45,7 +45,10 @@ export function AdminDeleteModal({
   // Reset state whenever modal opens/closes
   useEffect(() => {
     if (!isOpen) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       setStep('confirm');
       setCountdown(10);
       setDeleteRecordings(false);
@@ -61,7 +64,7 @@ export function AdminDeleteModal({
     };
   }, []);
 
-  const stageTheDeletion = () => {
+  const stageTheDeletion = useCallback(() => {
     addStagedDeletion({
       type,
       targetId,
@@ -77,7 +80,29 @@ export function AdminDeleteModal({
       onStaged?.();
       onClose();
     }, 1500);
-  };
+  }, [
+    addStagedDeletion, 
+    type, 
+    targetId, 
+    targetLabel, 
+    associatedCallLogs, 
+    deleteRecordings, 
+    hasRecordings, 
+    associatedPhoneNumbers, 
+    onStaged, 
+    onClose
+  ]);
+
+  // Trigger stageTheDeletion when countdown hits zero
+  useEffect(() => {
+    if (step === 'countdown' && countdown === 0) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      stageTheDeletion();
+    }
+  }, [step, countdown, stageTheDeletion]);
 
   const handleFirstConfirm = () => {
     setStep('countdown');
@@ -85,11 +110,7 @@ export function AdminDeleteModal({
     setCountdown(10);
     intervalRef.current = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(intervalRef.current!);
-          stageTheDeletion();
-          return 0;
-        }
+        if (prev <= 1) return 0;
         return prev - 1;
       });
     }, 1000);

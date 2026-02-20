@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -69,7 +69,7 @@ const EMPTY_DRAFT: CallFormDraft = {
     appointmentSet: false,
     noneSelected: true,
     isNewCompany: false,
-    showFollowUp: false,
+    showFollowUp: true,
     followUpData: null,
 };
 
@@ -113,7 +113,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [companyLookupState, setCompanyLookupState] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle');
 
     // Follow-up scheduling
-    const [showFollowUp, setShowFollowUp] = useState(false);
+    const [showFollowUp, setShowFollowUp] = useState(true);
     const [followUpData, setFollowUpData] = useState<{ scheduledTime: string; timezone: string; notes: string } | null>(null);
     const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
     const hydratedFromDraft = useRef(false);
@@ -130,7 +130,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setPitchCompleted(false);
         setAppointmentSet(false);
         setNoneSelected(true);
-        setShowFollowUp(false);
+        setShowFollowUp(true);
         setFollowUpData(null);
         setAutoFetchedCompany(null);
         setPhoneNumberRecord(null);
@@ -368,13 +368,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setPitchCompleted(false);
         setAppointmentSet(false);
     };
-
-    // Auto-show follow-up when outcome is "Callback"
-    useEffect(() => {
-        if (callOutcome === 'Callback' && !showFollowUp) {
-            setShowFollowUp(true);
-        }
-    }, [callOutcome, showFollowUp]);
 
     const handleSave = useCallback(async () => {
         if (!selectedCompany && !isNewCompany) return;
@@ -713,42 +706,50 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 />
             </div>
 
-            {/* Follow-up scheduling toggle */}
+            {/* Follow-up scheduling */}
             <div className="border-t border-[var(--card-border)] pt-3">
-                <button
-                    type="button"
-                    onClick={() => setShowFollowUp(!showFollowUp)}
-                    className={cn(
-                        "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all",
-                        showFollowUp
-                            ? "bg-[var(--info-subtle)] text-[var(--info)] border border-[var(--info)]/20"
-                            : "bg-[var(--sidebar-bg)] text-[var(--muted)] border border-[var(--card-border)] hover:bg-[var(--card-hover)]"
-                    )}
-                >
+                <div className={cn(
+                    "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                    showFollowUp
+                        ? "bg-[var(--info-subtle)] text-[var(--info)] border border-[var(--info)]/20"
+                        : "bg-[var(--error-subtle)] text-[var(--error)] border border-[var(--error)]/20"
+                )}>
                     <div className="flex items-center gap-2">
                         <CalendarClock size={14} />
-                        Schedule Follow-up
+                        <span className={cn("transition-all", !showFollowUp && "line-through opacity-60")}>
+                            Schedule Follow-up
+                        </span>
+                        {!showFollowUp && (
+                            <span className="flex items-center gap-1 text-[var(--error)] font-semibold">
+                                <AlertTriangle size={12} />
+                                No Follow-up Scheduled!
+                            </span>
+                        )}
                     </div>
-                    {showFollowUp ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                </button>
+                    <button
+                        type="button"
+                        onClick={() => setShowFollowUp(!showFollowUp)}
+                        className={cn(
+                            "flex items-center justify-center w-5 h-5 rounded-full transition-all hover:scale-110",
+                            showFollowUp
+                                ? "text-[var(--info)] hover:bg-[var(--info)]/20"
+                                : "text-[var(--error)] hover:bg-[var(--error)]/20"
+                        )}
+                        title={showFollowUp ? "Cancel follow-up" : "Re-enable follow-up"}
+                    >
+                        {showFollowUp ? <X size={13} /> : <AlertTriangle size={13} />}
+                    </button>
+                </div>
 
-                {showFollowUp && selectedCompany && (
+                {showFollowUp && (
                     <div className="mt-3">
                         <FollowUpScheduler
-                            companyId={selectedCompany.id}
-                            companyName={selectedCompany.company_name}
+                            companyId={selectedCompany?.id ?? ''}
+                            companyName={selectedCompany?.company_name ?? (companySearch.trim() || 'this company')}
                             phoneNumberRecordId={phoneNumberRecord?.id}
                             compact
                             onChange={setFollowUpData}
                         />
-                    </div>
-                )}
-
-                {showFollowUp && !selectedCompany && (
-                    <div className="mt-3 p-3 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg">
-                        <p className="text-xs text-[var(--muted)] text-center">
-                            Select a company first to schedule a follow-up
-                        </p>
                     </div>
                 )}
             </div>

@@ -1,16 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Clock, User } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ChevronDown, ChevronRight, Clock, User, Trash2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
+import { COLLECTIONS, type ColdCallingSession, type CallLog } from '@/lib/types';
 import { PerformanceCounterInline } from '@/components/performance-counter-inline';
 import { CallLogsNestedTable } from './call-logs-nested-table';
 import { InlineEditField } from '@/components/inline-edit-field';
+import { useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { AdminDeleteModal } from '@/components/admin-delete-modal';
 
 interface SessionLogRowProps {
     session: ColdCallingSession;
     onUpdate: (session: ColdCallingSession) => void;
+    onDelete?: (id: string) => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -33,8 +37,14 @@ function formatDateTime(dateString: string): string {
     });
 }
 
-export function SessionLogRow({ session, onUpdate }: SessionLogRowProps) {
+export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProps) {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [sessionCallLogs, setSessionCallLogs] = useState<CallLog[]>([]);
+    const [loadingCallLogs, setLoadingCallLogs] = useState(false);
+
+    const adminMode = useAdminModeOptional();
+    const isAdminMode = adminMode?.isAdminMode ?? false;
 
     const pickupRate = session.total_dials > 0
         ? Math.round((session.total_pickups / session.total_dials) * 100)
@@ -68,6 +78,26 @@ export function SessionLogRow({ session, onUpdate }: SessionLogRowProps) {
             throw err;
         }
     };
+
+    const handleOpenDeleteModal = async () => {
+        setLoadingCallLogs(true);
+        try {
+            const logs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                filter: `session = "${session.id}"`,
+                sort: '-call_time',
+                expand: 'phone_number_record',
+            });
+            setSessionCallLogs(logs);
+        } catch (err) {
+            console.error('Failed to load call logs for deletion:', err);
+            setSessionCallLogs([]);
+        } finally {
+            setLoadingCallLogs(false);
+        }
+        setDeleteModalOpen(true);
+    };
+
+    const sessionLabel = formatDateTime(session.started_at);
 
     return (
         <>
@@ -158,12 +188,24 @@ export function SessionLogRow({ session, onUpdate }: SessionLogRowProps) {
                         {session.status === 'active' ? 'Active' : 'Completed'}
                     </span>
                 </td>
+                {isAdminMode && (
+                    <td className="px-4 py-3">
+                        <button
+                            onClick={handleOpenDeleteModal}
+                            disabled={loadingCallLogs}
+                            className="p-1.5 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                            title="Delete session (Admin)"
+                        >
+                            <Trash2 size={15} />
+                        </button>
+                    </td>
+                )}
             </tr>
 
             {/* Expanded row showing call logs and notes */}
             {isExpanded && (
                 <tr>
-                    <td colSpan={11} className="p-0">
+                    <td colSpan={isAdminMode ? 12 : 11} className="p-0">
                         <div className="bg-[var(--card-bg)] border-t border-b border-[var(--card-border)]">
                             {/* Session Notes */}
                             <div className="px-6 py-4 border-b border-[var(--card-border)]">
@@ -186,6 +228,19 @@ export function SessionLogRow({ session, onUpdate }: SessionLogRowProps) {
                         </div>
                     </td>
                 </tr>
+            )}
+
+            {deleteModalOpen && createPortal(
+                <AdminDeleteModal
+                    isOpen={deleteModalOpen}
+                    onClose={() => setDeleteModalOpen(false)}
+                    type="session"
+                    targetId={session.id}
+                    targetLabel={sessionLabel}
+                    associatedCallLogs={sessionCallLogs}
+                    onStaged={() => onDelete?.(session.id)}
+                />,
+                document.body
             )}
         </>
     );

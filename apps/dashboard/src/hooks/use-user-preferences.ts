@@ -5,6 +5,18 @@ import { useAuth } from '@/contexts/auth-context';
 import { pb } from '@/lib/pocketbase';
 import { UserPreferences, COLLECTIONS } from '@/lib/types';
 
+// ---------------------------------------------------------------------------
+// Module-level pub/sub — every mounted instance of useUserPreferences shares
+// the same preferences state. When any instance calls updatePreferences, all
+// other instances are notified synchronously so UI updates instantly without
+// a page refresh.
+// ---------------------------------------------------------------------------
+type PrefListener = (prefs: UserPreferences) => void;
+const prefListeners = new Set<PrefListener>();
+function notifyPrefListeners(prefs: UserPreferences) {
+  prefListeners.forEach(fn => fn(prefs));
+}
+
 const DEFAULT_PREFERENCES: Partial<UserPreferences> = {
   theme: 'system',
   display_density: 'comfortable',
@@ -103,6 +115,13 @@ export function useUserPreferences() {
     fetchPreferences();
   }, [fetchPreferences]);
 
+  // Subscribe to updates from other hook instances so this instance stays in sync
+  useEffect(() => {
+    const listener: PrefListener = (prefs) => setPreferences(prefs);
+    prefListeners.add(listener);
+    return () => { prefListeners.delete(listener); };
+  }, []);
+
   const updatePreferences = async (updates: Partial<UserPreferences>) => {
     const currentPrefs = preferences || loadFromLocalStorage();
     
@@ -115,12 +134,14 @@ export function useUserPreferences() {
           localStorage.setItem('sidebar_timezones', JSON.stringify(updates.timezones));
         }
         setPreferences(updated);
+        notifyPrefListeners(updated as UserPreferences);
       } else {
         const updated = await pb.collection(COLLECTIONS.USER_PREFERENCES).update<UserPreferences>(
           currentPrefs.id,
           updates
         );
         setPreferences(updated);
+        notifyPrefListeners(updated);
         localStorage.setItem('user_preferences', JSON.stringify(updated));
         if (updates.timezones) {
           localStorage.setItem('sidebar_timezones', JSON.stringify(updates.timezones));

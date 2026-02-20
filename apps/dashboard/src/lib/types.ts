@@ -170,6 +170,8 @@ export interface PhoneNumber extends RecordModel {
   receptionist_name?: string;
   last_called?: string;
   total_calls?: number;
+  /** Soft-delete: set to true to mark as disassociated from the company (requires the field in PocketBase schema) */
+  disassociated?: boolean;
   expand?: {
     company?: Company;
   };
@@ -217,6 +219,8 @@ export interface ColdCallingSession extends RecordModel {
   appointment_set: number;
   status: 'active' | 'completed';
   session_notes?: string; // Optional notes about the session (e.g., overall observations, issues)
+  paused_at?: string; // ISO timestamp set when session is paused, null when resumed
+  total_paused_sec: number; // Accumulated pause duration across all pauses (default 0)
   expand?: {
     user?: User;
   };

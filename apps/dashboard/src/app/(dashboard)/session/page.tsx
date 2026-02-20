@@ -9,6 +9,8 @@ import {
     AlertTriangle,
     Phone,
     Square,
+    Pause,
+    Play,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber } from '@/lib/types';
@@ -74,6 +76,7 @@ export default function SessionPage() {
     // Local UI state
     const [starting, setStarting] = useState(false);
     const [ending, setEnding] = useState(false);
+    const [pausing, setPausing] = useState(false);
     const [collectionMissing, setCollectionMissing] = useState(false);
     const [zoomAppConfirmed, setZoomAppConfirmed] = useState(false);
     const [awaitingAudioConnect, setAwaitingAudioConnect] = useState(false);
@@ -173,11 +176,18 @@ export default function SessionPage() {
     // ---------------------------------------------------------------------------
     useEffect(() => {
         if (session && session.status === 'active') {
-            // Calculate elapsed from started_at
             const started = new Date(session.started_at).getTime();
+            const totalPausedSec = session.total_paused_sec ?? 0;
             const updateElapsed = () => {
                 const now = Date.now();
-                setElapsedSec(Math.floor((now - started) / 1000));
+                // Subtract accumulated pause time and current pause duration so
+                // the timer only counts active calling time.
+                // When paused, (now - started) - totalPausedSec - (now - paused_at)
+                // simplifies to a constant, naturally freezing the display.
+                const currentPauseSec = session.paused_at
+                    ? Math.floor((now - new Date(session.paused_at).getTime()) / 1000)
+                    : 0;
+                setElapsedSec(Math.floor((now - started) / 1000) - totalPausedSec - currentPauseSec);
             };
             updateElapsed();
             timerRef.current = setInterval(updateElapsed, 1000);
@@ -337,6 +347,8 @@ export default function SessionPage() {
                 pitch_completed: 0,
                 appointment_set: 0,
                 status: 'active',
+                paused_at: null,
+                total_paused_sec: 0,
             });
             setSession(newSession);
             setAwaitingAudioConnect(false);
@@ -379,6 +391,44 @@ export default function SessionPage() {
     }, [session, elapsedSec, setSession, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------
+    // Pause session
+    // ---------------------------------------------------------------------------
+    const pauseSession = useCallback(async () => {
+        if (!session || session.paused_at) return;
+        try {
+            setPausing(true);
+            const updated = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
+                paused_at: new Date().toISOString(),
+            });
+            setSession(updated);
+        } catch (err) {
+            console.error('Failed to pause session:', err);
+        } finally {
+            setPausing(false);
+        }
+    }, [session, setSession]);
+
+    // ---------------------------------------------------------------------------
+    // Resume session
+    // ---------------------------------------------------------------------------
+    const resumeSession = useCallback(async () => {
+        if (!session || !session.paused_at) return;
+        try {
+            setPausing(true);
+            const pausedDuration = Math.floor((Date.now() - new Date(session.paused_at).getTime()) / 1000);
+            const updated = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
+                paused_at: null,
+                total_paused_sec: (session.total_paused_sec ?? 0) + pausedDuration,
+            });
+            setSession(updated);
+        } catch (err) {
+            console.error('Failed to resume session:', err);
+        } finally {
+            setPausing(false);
+        }
+    }, [session, setSession]);
+
+    // ---------------------------------------------------------------------------
     // Start standalone mode
     // ---------------------------------------------------------------------------
     const startStandalone = useCallback(() => {
@@ -402,6 +452,12 @@ export default function SessionPage() {
         // Prevent double dialing
         if (isDialing || callStatus === 'ringing' || callStatus === 'connected') {
             console.log('Call already in progress, ignoring dial request');
+            return;
+        }
+
+        // Prevent dialing while session is paused
+        if (session?.paused_at) {
+            console.log('Session is paused, ignoring dial request');
             return;
         }
 
@@ -856,23 +912,51 @@ export default function SessionPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="flex items-center gap-3">
                         <h1 className="text-2xl font-bold">Call Session</h1>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
-                            Active
-                        </span>
+                        {session.paused_at ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--warning-subtle)] text-[var(--warning)]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[var(--warning)]" />
+                                Paused
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--success-subtle)] text-[var(--success)]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+                                Active
+                            </span>
+                        )}
                         <span className="text-lg font-mono font-semibold tabular-nums text-[var(--muted)]">
                             {formatDuration(elapsedSec)}
                         </span>
                     </div>
 
-                    <button
-                        onClick={endSession}
-                        disabled={ending}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
-                    >
-                        {ending ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
-                        {ending ? 'Ending...' : 'End Session'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {session.paused_at ? (
+                            <button
+                                onClick={resumeSession}
+                                disabled={pausing}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--success-subtle)] text-[var(--success)] font-medium text-sm border border-[var(--success)]/30 hover:bg-[var(--success)] hover:text-white transition-all disabled:opacity-50"
+                            >
+                                {pausing ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+                                {pausing ? 'Resuming...' : 'Resume Session'}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={pauseSession}
+                                disabled={pausing}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--warning-subtle)] text-[var(--warning)] font-medium text-sm border border-[var(--warning)]/30 hover:bg-[var(--warning)] hover:text-white transition-all disabled:opacity-50"
+                            >
+                                {pausing ? <Loader2 size={16} className="animate-spin" /> : <Pause size={16} />}
+                                {pausing ? 'Pausing...' : 'Pause Session'}
+                            </button>
+                        )}
+                        <button
+                            onClick={endSession}
+                            disabled={ending}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
+                        >
+                            {ending ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
+                            {ending ? 'Ending...' : 'End Session'}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Current Call Timer - shown when call is active */}
@@ -941,7 +1025,14 @@ export default function SessionPage() {
                 )}
 
                 {/* Docked Zoom Phone Dialer - Above Current Call section */}
-                <ZoomPhoneDialer docked disabled={hasUnsavedCall} />
+                <div className="relative">
+                    <ZoomPhoneDialer docked disabled={hasUnsavedCall || !!session.paused_at} />
+                    {session.paused_at && (
+                        <div className="absolute inset-0 bg-[var(--background)]/60 backdrop-blur-[1px] flex items-center justify-center rounded-xl z-10 pointer-events-none">
+                            <p className="text-sm font-medium text-[var(--muted)]">Resume session to make calls</p>
+                        </div>
+                    )}
+                </div>
 
                 {/* Main layout */}
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -955,6 +1046,7 @@ export default function SessionPage() {
                             initialDraft={callDraft}
                             onDraftChange={setCallDraft}
                             onDiscard={handleDiscardCall}
+                            isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
                         />
                     </div>
 

@@ -1290,6 +1290,212 @@
         "system": false
     },
     {
+        "id": "pbc_cc_sessions",
+        "listRule": "@request.auth.id != ''",
+        "viewRule": "@request.auth.id != ''",
+        "createRule": "@request.auth.id != ''",
+        "updateRule": "@request.auth.id != ''",
+        "deleteRule": "@request.auth.role = 'admin'",
+        "name": "cold_calling_sessions",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "_pb_users_auth_",
+                "hidden": false,
+                "id": "relation_session_user",
+                "maxSelect": 1,
+                "minSelect": 1,
+                "name": "user",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "hidden": false,
+                "id": "date_started_at",
+                "max": "",
+                "min": "",
+                "name": "started_at",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date_ended_at",
+                "max": "",
+                "min": "",
+                "name": "ended_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "number_total_dials",
+                "max": null,
+                "min": 0,
+                "name": "total_dials",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_total_pickups",
+                "max": null,
+                "min": 0,
+                "name": "total_pickups",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_total_duration_sec",
+                "max": null,
+                "min": 0,
+                "name": "total_duration_sec",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_owner_reached",
+                "max": null,
+                "min": 0,
+                "name": "owner_reached",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_pitch_completed",
+                "max": null,
+                "min": 0,
+                "name": "pitch_completed",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_appointment_set",
+                "max": null,
+                "min": 0,
+                "name": "appointment_set",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "select_session_status",
+                "maxSelect": 1,
+                "name": "status",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "active",
+                    "completed"
+                ]
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_session_notes",
+                "max": 5000,
+                "min": 0,
+                "name": "session_notes",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "date_paused_at",
+                "max": "",
+                "min": "",
+                "name": "paused_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "number_total_paused_sec",
+                "max": null,
+                "min": 0,
+                "name": "total_paused_sec",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [],
+        "system": false
+    },
+    {
         "id": "pbc_9658854502",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
@@ -2910,6 +3116,15 @@
             },
             {
                 "hidden": false,
+                "id": "bool_disassociated",
+                "name": "disassociated",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
+            },
+            {
+                "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
                 "onCreate": true,
@@ -3393,188 +3608,6 @@
         "indexes": [
             "CREATE UNIQUE INDEX `idx_user_preferences_user` ON `user_preferences` (`user`)"
         ],
-        "system": false
-    },
-    {
-        "id": "pbc_cc_sessions",
-        "listRule": "@request.auth.id != ''",
-        "viewRule": "@request.auth.id != ''",
-        "createRule": "@request.auth.id != ''",
-        "updateRule": "@request.auth.id != ''",
-        "deleteRule": "@request.auth.role = 'admin'",
-        "name": "cold_calling_sessions",
-        "type": "base",
-        "fields": [
-            {
-                "autogeneratePattern": "[a-z0-9]{15}",
-                "hidden": false,
-                "id": "text3208210256",
-                "max": 15,
-                "min": 15,
-                "name": "id",
-                "pattern": "^[a-z0-9]+$",
-                "presentable": false,
-                "primaryKey": true,
-                "required": true,
-                "system": true,
-                "type": "text"
-            },
-            {
-                "cascadeDelete": false,
-                "collectionId": "_pb_users_auth_",
-                "hidden": false,
-                "id": "relation_session_user",
-                "maxSelect": 1,
-                "minSelect": 1,
-                "name": "user",
-                "presentable": false,
-                "required": true,
-                "system": false,
-                "type": "relation"
-            },
-            {
-                "hidden": false,
-                "id": "date_started_at",
-                "max": "",
-                "min": "",
-                "name": "started_at",
-                "presentable": false,
-                "required": true,
-                "system": false,
-                "type": "date"
-            },
-            {
-                "hidden": false,
-                "id": "date_ended_at",
-                "max": "",
-                "min": "",
-                "name": "ended_at",
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "date"
-            },
-            {
-                "hidden": false,
-                "id": "number_total_dials",
-                "max": null,
-                "min": 0,
-                "name": "total_dials",
-                "onlyInt": true,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
-            },
-            {
-                "hidden": false,
-                "id": "number_total_pickups",
-                "max": null,
-                "min": 0,
-                "name": "total_pickups",
-                "onlyInt": true,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
-            },
-            {
-                "hidden": false,
-                "id": "number_total_duration_sec",
-                "max": null,
-                "min": 0,
-                "name": "total_duration_sec",
-                "onlyInt": true,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
-            },
-            {
-                "hidden": false,
-                "id": "number_owner_reached",
-                "max": null,
-                "min": 0,
-                "name": "owner_reached",
-                "onlyInt": true,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
-            },
-            {
-                "hidden": false,
-                "id": "number_pitch_completed",
-                "max": null,
-                "min": 0,
-                "name": "pitch_completed",
-                "onlyInt": true,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
-            },
-            {
-                "hidden": false,
-                "id": "number_appointment_set",
-                "max": null,
-                "min": 0,
-                "name": "appointment_set",
-                "onlyInt": true,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
-            },
-            {
-                "hidden": false,
-                "id": "select_session_status",
-                "maxSelect": 1,
-                "name": "status",
-                "presentable": false,
-                "required": true,
-                "system": false,
-                "type": "select",
-                "values": [
-                    "active",
-                    "completed"
-                ]
-            },
-            {
-                "hidden": false,
-                "id": "text_session_notes",
-                "max": 5000,
-                "min": 0,
-                "name": "session_notes",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": false,
-                "system": false,
-                "type": "text"
-            },
-            {
-                "hidden": false,
-                "id": "autodate2990389176",
-                "name": "created",
-                "onCreate": true,
-                "onUpdate": false,
-                "presentable": false,
-                "system": false,
-                "type": "autodate"
-            },
-            {
-                "hidden": false,
-                "id": "autodate3332085495",
-                "name": "updated",
-                "onCreate": true,
-                "onUpdate": true,
-                "presentable": false,
-                "system": false,
-                "type": "autodate"
-            }
-        ],
-        "indexes": [],
         "system": false
     }
 ]

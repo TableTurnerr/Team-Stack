@@ -11,14 +11,18 @@ export function ActiveSessionBanner() {
     const { session, isLoading, isStandaloneMode } = useSession();
     const [elapsed, setElapsed] = useState('');
 
-    // Timer logic for banner
+    // Timer logic for banner — subtracts paused time so only active calling time is shown
     useEffect(() => {
         if (!session) return;
 
         const updateTimer = () => {
             const start = new Date(session.started_at).getTime();
             const now = Date.now();
-            const diff = Math.floor((now - start) / 1000);
+            const totalPausedSec = session.total_paused_sec ?? 0;
+            const currentPauseSec = session.paused_at
+                ? Math.floor((now - new Date(session.paused_at).getTime()) / 1000)
+                : 0;
+            const diff = Math.floor((now - start) / 1000) - totalPausedSec - currentPauseSec;
 
             const h = Math.floor(diff / 3600);
             const m = Math.floor((diff % 3600) / 60);
@@ -61,14 +65,15 @@ export function ActiveSessionBanner() {
 
     // Session mode banner
     if (session) {
+        const isPaused = !!session.paused_at;
         return (
             <div className="bg-[var(--foreground)] text-[var(--background)] px-4 py-3 shadow-lg flex items-center justify-between animate-in slide-in-from-top duration-300 relative z-[1001]">
                 <div className="flex items-center gap-3">
-                    <div className="p-1.5 rounded-full bg-[var(--background)]/20 animate-pulse">
+                    <div className={`p-1.5 rounded-full bg-[var(--background)]/20 ${!isPaused ? 'animate-pulse' : ''}`}>
                         <Headphones size={16} className="text-[var(--background)]" />
                     </div>
                     <div>
-                        <p className="text-sm font-semibold">Active Call Session</p>
+                        <p className="text-sm font-semibold">{isPaused ? 'Session Paused' : 'Active Call Session'}</p>
                         <p className="text-xs opacity-90 font-mono tracking-wide">{elapsed}</p>
                     </div>
                 </div>

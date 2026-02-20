@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Zap,
   CalendarClock,
+  ShieldAlert,
   CalendarCheck,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
@@ -41,6 +42,10 @@ import { ZoomCallButton } from '@/components/zoom-call-button';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { useFollowUps } from '@/contexts/follow-up-context';
+import { useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
+import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
+import { AdminDeleteModal } from '@/components/admin-delete-modal';
 
 type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline';
 
@@ -50,6 +55,8 @@ export default function CompanyDetailPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
   const { completeFollowUp } = useFollowUps();
+  const adminMode = useAdminModeOptional();
+  const isAdminMode = adminMode?.isAdminMode ?? false;
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
@@ -67,6 +74,12 @@ export default function CompanyDetailPage() {
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
   const [showScheduleFollowUp, setShowScheduleFollowUp] = useState(false);
+
+  // Phone number modals
+  const [editingPhone, setEditingPhone] = useState<PhoneNumber | null>(null);
+  const [softDeletingPhone, setSoftDeletingPhone] = useState<PhoneNumber | null>(null);
+  const [adminDeletingPhone, setAdminDeletingPhone] = useState<PhoneNumber | null>(null);
+  const [adminDeletingCompany, setAdminDeletingCompany] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -222,6 +235,15 @@ export default function CompanyDetailPage() {
     }
   };
 
+  // Phone number handlers
+  const handlePhoneUpdated = (updated: PhoneNumber) => {
+    setPhoneNumbers(prev => prev.map(p => p.id === updated.id ? updated : p));
+  };
+
+  const handlePhoneDisassociated = (phoneId: string) => {
+    setPhoneNumbers(prev => prev.map(p => p.id === phoneId ? { ...p, disassociated: true } : p));
+  };
+
   // Count AI-analyzed calls
   const aiAnalyzedCount = callLogs.filter(c => c.cold_call || c.expand?.cold_call).length;
 
@@ -302,7 +324,17 @@ export default function CompanyDetailPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Admin mode: delete company button */}
+            {isAdminMode && (
+              <button
+                onClick={() => setAdminDeletingCompany(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/5 text-red-400 text-sm font-bold hover:bg-red-500/10 transition-all"
+              >
+                <ShieldAlert size={14} />
+                Delete Company
+              </button>
+            )}
             <button
               onClick={() => {
                 setActiveTab('overview');
@@ -526,10 +558,20 @@ export default function CompanyDetailPage() {
                   key={phone.id}
                   phoneNumber={phone}
                   recentCalls={callLogs.filter(c => c.phone_number_record === phone.id).slice(0, 3)}
-                  onEdit={(id) => console.log('Edit', id)}
-                  onDelete={(id) => console.log('Delete', id)}
-                  onLogCall={(id) => {
-                    setSelectedPhoneId(id);
+                  onEdit={(phoneId) => {
+                    const p = phoneNumbers.find(ph => ph.id === phoneId);
+                    if (p) setEditingPhone(p);
+                  }}
+                  onDelete={(phoneId) => {
+                    const p = phoneNumbers.find(ph => ph.id === phoneId);
+                    if (p) setSoftDeletingPhone(p);
+                  }}
+                  onAdminDelete={(phoneId) => {
+                    const p = phoneNumbers.find(ph => ph.id === phoneId);
+                    if (p) setAdminDeletingPhone(p);
+                  }}
+                  onLogCall={(phoneId) => {
+                    setSelectedPhoneId(phoneId);
                     setIsLogCallOpen(true);
                   }}
                 />
@@ -882,6 +924,53 @@ export default function CompanyDetailPage() {
         companyName={company.company_name}
         phoneNumber={phoneNumbers.find(p => p.id === selectedPhoneId)?.phone_number || ''}
       />
+
+      {/* Edit phone number */}
+      {editingPhone && (
+        <PhoneNumberEditModal
+          isOpen={!!editingPhone}
+          onClose={() => setEditingPhone(null)}
+          phoneNumber={editingPhone}
+          onUpdated={handlePhoneUpdated}
+        />
+      )}
+
+      {/* Soft delete (disassociate) phone number */}
+      {softDeletingPhone && (
+        <SoftDeleteConfirmModal
+          isOpen={!!softDeletingPhone}
+          onClose={() => setSoftDeletingPhone(null)}
+          phoneNumber={softDeletingPhone}
+          onDisassociated={handlePhoneDisassociated}
+        />
+      )}
+
+      {/* Admin: permanently delete phone number */}
+      {adminDeletingPhone && (
+        <AdminDeleteModal
+          isOpen={!!adminDeletingPhone}
+          onClose={() => setAdminDeletingPhone(null)}
+          type="phone_number"
+          targetId={adminDeletingPhone.id}
+          targetLabel={adminDeletingPhone.phone_number}
+          associatedCallLogs={callLogs.filter(c => c.phone_number_record === adminDeletingPhone.id)}
+          onStaged={() => setAdminDeletingPhone(null)}
+        />
+      )}
+
+      {/* Admin: permanently delete company */}
+      {adminDeletingCompany && company && (
+        <AdminDeleteModal
+          isOpen={adminDeletingCompany}
+          onClose={() => setAdminDeletingCompany(false)}
+          type="company"
+          targetId={company.id}
+          targetLabel={company.company_name}
+          associatedCallLogs={callLogs}
+          associatedPhoneNumbers={phoneNumbers.filter(p => !p.disassociated)}
+          onStaged={() => setAdminDeletingCompany(false)}
+        />
+      )}
     </div>
   );
 }

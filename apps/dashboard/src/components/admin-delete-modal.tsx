@@ -9,7 +9,7 @@ import { useAdminMode } from '@/contexts/admin-mode-context';
 interface AdminDeleteModalProps {
   isOpen: boolean;
   onClose: () => void;
-  type: 'phone_number' | 'company';
+  type: 'phone_number' | 'company' | 'session';
   targetId: string;
   targetLabel: string;
   associatedCallLogs: CallLog[];
@@ -158,7 +158,7 @@ export function AdminDeleteModal({
           {/* Target record */}
           <div>
             <p className="text-[10px] font-bold text-[var(--muted)] uppercase tracking-widest mb-2">
-              {type === 'phone_number' ? 'Phone Number to Delete' : 'Company to Delete'}
+              {type === 'phone_number' ? 'Phone Number to Delete' : type === 'company' ? 'Company to Delete' : 'Session to Delete'}
             </p>
             <div className="px-4 py-3 rounded-xl bg-red-500/5 border border-red-500/20">
               <p className="font-mono font-bold text-red-400">{targetLabel}</p>
@@ -283,7 +283,7 @@ export function AdminDeleteModal({
             <>
               <p className="text-xs text-[var(--muted)] text-center">
                 This stages a permanent deletion of{' '}
-                {type === 'phone_number' ? 'this phone number' : 'this company'} and{' '}
+                {type === 'phone_number' ? 'this phone number' : type === 'company' ? 'this company' : 'this session'} and{' '}
                 {associatedCallLogs.length} call log{associatedCallLogs.length !== 1 ? 's' : ''}.{' '}
                 After clicking confirm, you have <strong>10 seconds</strong> to cancel.
               </p>

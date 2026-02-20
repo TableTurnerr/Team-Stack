@@ -6,7 +6,7 @@ import { COLLECTIONS } from '@/lib/types';
 
 export interface StagedDeletion {
   stagingId: string;
-  type: 'phone_number' | 'company';
+  type: 'phone_number' | 'company' | 'session';
   targetId: string;
   targetLabel: string;
   associatedCallLogIds: string[];
@@ -122,6 +122,8 @@ export function AdminModeProvider({ children }: { children: React.ReactNode }) {
           await pb.collection(COLLECTIONS.PHONE_NUMBERS).delete(deletion.targetId);
         } else if (deletion.type === 'company') {
           await pb.collection(COLLECTIONS.COMPANIES).delete(deletion.targetId);
+        } else if (deletion.type === 'session') {
+          await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).delete(deletion.targetId);
         }
       }
 

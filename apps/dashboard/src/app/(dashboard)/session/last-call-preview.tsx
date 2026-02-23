@@ -11,7 +11,7 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
     'Not Interested': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]' },
     'Callback': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]' },
     'No Answer': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' },
-    'Wrong Number': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]' },
+    'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500' },
     'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
 };
 

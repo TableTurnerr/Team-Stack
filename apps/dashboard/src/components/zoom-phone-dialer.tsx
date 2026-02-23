@@ -71,8 +71,47 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
     const [isInputFocused, setIsInputFocused] = useState(false);
     const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // Zoom dialer 30-second preview state
+    const [zoomPreviewActive, setZoomPreviewActive] = useState(false);
+    const [zoomPreviewSecondsLeft, setZoomPreviewSecondsLeft] = useState(0);
+    const zoomPreviewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const positionBeforeExpand = useRef<number | null>(null);
+
+    // Cleanup zoom preview timer on unmount
+    useEffect(() => {
+        return () => {
+            if (zoomPreviewTimerRef.current) clearInterval(zoomPreviewTimerRef.current);
+        };
+    }, []);
+
+    const handleZoomPreview = useCallback(() => {
+        if (zoomPreviewActive) {
+            // Cancel preview early
+            if (zoomPreviewTimerRef.current) clearInterval(zoomPreviewTimerRef.current);
+            zoomPreviewTimerRef.current = null;
+            setForceNativeDialer(false);
+            setZoomPreviewActive(false);
+            setZoomPreviewSecondsLeft(0);
+            return;
+        }
+        setForceNativeDialer(true);
+        setZoomPreviewActive(true);
+        setZoomPreviewSecondsLeft(30);
+        let remaining = 30;
+        zoomPreviewTimerRef.current = setInterval(() => {
+            remaining--;
+            setZoomPreviewSecondsLeft(remaining);
+            if (remaining <= 0) {
+                clearInterval(zoomPreviewTimerRef.current!);
+                zoomPreviewTimerRef.current = null;
+                setForceNativeDialer(false);
+                setZoomPreviewActive(false);
+                setZoomPreviewSecondsLeft(0);
+            }
+        }, 1000);
+    }, [zoomPreviewActive]);
     const dragStartPos = useRef<{ x: number, y: number } | null>(null);
 
 
@@ -324,7 +363,7 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
     // TODO: wire hasUnsubmittedRecording/unsubmittedDuration to actual state
     const hasUnsubmittedRecording = false;
     const unsubmittedDuration = 0;
-    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive && !isInputFocused && !hasUnsubmittedRecording) : isMinimized);
+    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive && !isInputFocused && !hasUnsubmittedRecording && !zoomPreviewActive) : isMinimized);
     const currentHeight = docked
         ? (isCollapsed ? '52px' : '550px')
         : (isCollapsed ? '48px' : (showKeypad ? `${height}px` : (hasSession ? 'auto' : `${height}px`)));
@@ -470,7 +509,7 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                                     <span className="text-xs font-semibold text-[var(--muted)]">Dialer</span>
                                 )}
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1.5">
                                 {isHeaderNumberActive && (
                                     <span className={cn(
                                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
@@ -484,6 +523,21 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                                 <span className="text-[10px] text-[var(--muted)] italic">
                                     {isCallActive ? 'Hover for Zoom controls' : 'Hover to Dial'}
                                 </span>
+                                {!isCallActive && (
+                                    <button
+                                        type="button"
+                                        onClick={handleZoomPreview}
+                                        className={cn(
+                                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border transition-all",
+                                            zoomPreviewActive
+                                                ? "bg-blue-50 border-blue-300 text-blue-600 hover:bg-red-50 hover:border-red-300 hover:text-red-600"
+                                                : "bg-[var(--sidebar-bg)] border-[var(--card-border)] text-[var(--muted)] hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50"
+                                        )}
+                                        title={zoomPreviewActive ? 'Click to cancel preview' : 'Preview Zoom dialer for 30 seconds'}
+                                    >
+                                        {zoomPreviewActive ? `Zoom (${zoomPreviewSecondsLeft}s)` : 'Zoom dialer 30sec'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}

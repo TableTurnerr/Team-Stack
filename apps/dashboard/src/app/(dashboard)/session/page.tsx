@@ -19,7 +19,7 @@ import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
-import { CurrentCallForm, type CallFormData, type CallFormDraft } from './current-call-form';
+import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
@@ -89,6 +89,10 @@ export default function SessionPage() {
         startSession: startAudioSession,
         startRecording,
         stopRecording,
+        discardRecording,
+        enterDeferredMode,
+        submitDeferredRecording,
+        discardDeferredRecording,
         error: recorderError,
         setPhoneNumber: setContextPhoneNumber
     } = useCallRecording();
@@ -117,6 +121,9 @@ export default function SessionPage() {
     const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
     const [callDraft, setCallDraft] = useState<CallFormDraft | null>(null);
     const didHydrateFromStorage = useRef(false);
+
+    // Callback tracking for the current call
+    const [callbackEvents, setCallbackEvents] = useState<Array<{ reason: string; timestamp: string }>>([]);
 
     // ---------------------------------------------------------------------------
     // Check for existing active session on mount
@@ -291,14 +298,15 @@ export default function SessionPage() {
                 setCurrentPhoneNumber(activeCallNumber);
                 setContextPhoneNumber(activeCallNumber);
 
-                // Start recording if session is active
+                // Enter deferred mode + start recording if session is active
                 if (isSessionActive) {
                     console.log('[Session Page] Starting recording for call:', activeCallNumber);
+                    enterDeferredMode();
                     startRecording();
                 }
             }
         }
-    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, isSessionActive, startRecording]);
+    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, isSessionActive, startRecording, enterDeferredMode]);
 
     // Warn user before closing tab if session is active
     useEffect(() => {
@@ -381,6 +389,7 @@ export default function SessionPage() {
             setCurrentPhoneNumber('');
             setHasUnsavedCall(false);
             setCallDraft(null);
+            setCallbackEvents([]);
             setContextPhoneNumber(''); // Clear phone number in context
             window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
         } catch (err) {
@@ -464,23 +473,57 @@ export default function SessionPage() {
         setCurrentPhoneNumber(phoneNumber);
         setContextPhoneNumber(phoneNumber); // Update phone number in context
 
-        // Start recording immediately when dialing IF session is active
+        // Enter deferred mode so recordings accumulate in memory (enables callback merging)
+        // and start recording immediately when dialing IF session is active
         if (isSessionActive) {
+            enterDeferredMode();
             startRecording();
         }
 
         dialNumber(phoneNumber);
-    }, [dialNumber, isSessionActive, startRecording, setContextPhoneNumber, isDialing, callStatus]);
+    }, [dialNumber, isSessionActive, startRecording, enterDeferredMode, setContextPhoneNumber, isDialing, callStatus]);
+
+    // ---------------------------------------------------------------------------
+    // Handle callback — dial same number, accumulate recording, log reason
+    // ---------------------------------------------------------------------------
+    const handleCallback = useCallback((reason: string) => {
+        if (!currentPhoneNumber) return;
+
+        // Log this callback event
+        const event = { reason, timestamp: new Date().toISOString() };
+        setCallbackEvents(prev => [...prev, event]);
+
+        // Reset timing for the new call leg
+        setRingStartTime(null);
+        setConnectTime(null);
+        setCurrentCallDuration(0);
+        setDialCountIncremented(false);
+        setPickupCountIncremented(false);
+
+        // Deferred mode should already be active from the initial dial.
+        // The current recording segment is saved automatically when the
+        // call ends. Now just dial again — startRecording will be triggered
+        // by the ringing→connected transition via call-recorder-controls or
+        // the session page's sync effect.
+        dialNumber(currentPhoneNumber);
+    }, [currentPhoneNumber, dialNumber]);
 
     // ---------------------------------------------------------------------------
     // Save call
     // ---------------------------------------------------------------------------
     const handleSaveCall = useCallback(async (data: CallFormData) => {
-        // Stop recording when saving the call
-        stopRecording();
         setContextPhoneNumber(''); // Clear phone number in context
 
         if (!session || !user) return;
+
+        // Handle recording based on outcome
+        if (data.callOutcome === 'No Answer') {
+            // Discard recording — No Answer calls should not be saved
+            discardDeferredRecording();
+        } else {
+            // Submit the (potentially merged) deferred recording
+            submitDeferredRecording().catch(err => console.error('Failed to submit recording:', err));
+        }
 
         try {
             setSavingCall(true);
@@ -546,13 +589,16 @@ export default function SessionPage() {
                 ring_duration: ringDuration > 0 ? ringDuration : undefined,
                 call_duration: callDuration > 0 ? callDuration : undefined,
                 call_outcome: data.callOutcome,
-                interest_level: data.interestLevel,
-                post_call_notes: data.postCallNotes,
+                interest_level: data.interestLevel || undefined,
+                post_call_notes: data.postCallNotes || undefined,
                 owner_name_found: data.recipientName || undefined,
                 session: session.id,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
                 appointment_set: data.appointmentSet,
+                callback_events: data.callbackEvents && data.callbackEvents.length > 0
+                    ? data.callbackEvents
+                    : undefined,
             });
 
             // Update session performance totals based on this call
@@ -565,6 +611,11 @@ export default function SessionPage() {
             }
             if (data.appointmentSet) {
                 sessionUpdates.appointment_set = (session.appointment_set || 0) + 1;
+            }
+            // No Answer: undo the pickup count if it was already incremented
+            // (pickup is incremented when call connects, but No Answer means no human pickup)
+            if (data.callOutcome === 'No Answer' && pickupCountIncremented && (session.total_pickups || 0) > 0) {
+                sessionUpdates.total_pickups = Math.max(0, (session.total_pickups || 0) - 1);
             }
 
             // Update session if there are any performance updates
@@ -621,6 +672,7 @@ export default function SessionPage() {
             // Clear unsaved call state
             setHasUnsavedCall(false);
             setCallDraft(null);
+            setCallbackEvents([]);
             window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
             // Reset call timing state for next call
@@ -634,14 +686,15 @@ export default function SessionPage() {
         } finally {
             setSavingCall(false);
         }
-    }, [session, user, stopRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, createFollowUp]);
+    }, [session, user, discardDeferredRecording, submitDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp]);
 
     const handleDiscardCall = useCallback(() => {
-        stopRecording();
+        discardDeferredRecording();
         setContextPhoneNumber('');
 
         setHasUnsavedCall(false);
         setCallDraft(null);
+        setCallbackEvents([]);
         setCurrentPhoneNumber('');
         setRingStartTime(null);
         setConnectTime(null);
@@ -649,7 +702,7 @@ export default function SessionPage() {
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
         window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
-    }, [stopRecording, setContextPhoneNumber]);
+    }, [discardDeferredRecording, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------
     // Update performance counters
@@ -1047,6 +1100,8 @@ export default function SessionPage() {
                             onDraftChange={setCallDraft}
                             onDiscard={handleDiscardCall}
                             isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
+                            onCallback={handleCallback}
+                            callbackEvents={callbackEvents}
                         />
                     </div>
 

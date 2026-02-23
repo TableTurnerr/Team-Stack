@@ -21,6 +21,7 @@ import {
   Zap,
   CalendarClock,
   ShieldAlert,
+  CheckSquare,
   CalendarCheck,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
@@ -45,7 +46,6 @@ import { useFollowUps } from '@/contexts/follow-up-context';
 import { useAdminModeOptional } from '@/contexts/admin-mode-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
 import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
-import { AdminDeleteModal } from '@/components/admin-delete-modal';
 
 type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline';
 
@@ -78,8 +78,7 @@ export default function CompanyDetailPage() {
   // Phone number modals
   const [editingPhone, setEditingPhone] = useState<PhoneNumber | null>(null);
   const [softDeletingPhone, setSoftDeletingPhone] = useState<PhoneNumber | null>(null);
-  const [adminDeletingPhone, setAdminDeletingPhone] = useState<PhoneNumber | null>(null);
-  const [adminDeletingCompany, setAdminDeletingCompany] = useState(false);
+  const [isCompanyDeleteHovered, setIsCompanyDeleteHovered] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -326,15 +325,37 @@ export default function CompanyDetailPage() {
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Admin mode: delete company button */}
-            {isAdminMode && (
-              <button
-                onClick={() => setAdminDeletingCompany(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/5 text-red-400 text-sm font-bold hover:bg-red-500/10 transition-all"
-              >
-                <ShieldAlert size={14} />
-                Delete Company
-              </button>
-            )}
+            {isAdminMode && (() => {
+              const isCompanyStagedForDeletion = adminMode?.pendingDeletions.some(
+                d => d.targetId === company.id && d.type === 'company'
+              );
+              return isCompanyStagedForDeletion ? (
+                <div className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/10 text-red-400/60 text-sm font-bold">
+                  <CheckSquare size={14} />
+                  Staged for Deletion
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    adminMode?.addStagedDeletion({
+                      type: 'company',
+                      targetId: company.id,
+                      targetLabel: company.company_name,
+                      associatedCallLogIds: callLogs.map(l => l.id),
+                      deleteRecordings: false,
+                      hasRecordings: callLogs.some(l => l.has_recording),
+                      associatedPhoneNumberIds: phoneNumbers.filter(p => !p.disassociated).map(p => p.id),
+                    });
+                  }}
+                  onMouseEnter={() => setIsCompanyDeleteHovered(true)}
+                  onMouseLeave={() => setIsCompanyDeleteHovered(false)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/5 text-red-400 text-sm font-bold hover:bg-red-500/10 transition-all"
+                >
+                  {isCompanyDeleteHovered ? <CheckSquare size={14} /> : <ShieldAlert size={14} />}
+                  Delete Company
+                </button>
+              );
+            })()}
             <button
               onClick={() => {
                 setActiveTab('overview');
@@ -558,6 +579,7 @@ export default function CompanyDetailPage() {
                   key={phone.id}
                   phoneNumber={phone}
                   recentCalls={callLogs.filter(c => c.phone_number_record === phone.id).slice(0, 3)}
+                  adminCallLogs={callLogs.filter(c => c.phone_number_record === phone.id)}
                   onEdit={(phoneId) => {
                     const p = phoneNumbers.find(ph => ph.id === phoneId);
                     if (p) setEditingPhone(p);
@@ -565,10 +587,6 @@ export default function CompanyDetailPage() {
                   onDelete={(phoneId) => {
                     const p = phoneNumbers.find(ph => ph.id === phoneId);
                     if (p) setSoftDeletingPhone(p);
-                  }}
-                  onAdminDelete={(phoneId) => {
-                    const p = phoneNumbers.find(ph => ph.id === phoneId);
-                    if (p) setAdminDeletingPhone(p);
                   }}
                   onLogCall={(phoneId) => {
                     setSelectedPhoneId(phoneId);
@@ -945,32 +963,6 @@ export default function CompanyDetailPage() {
         />
       )}
 
-      {/* Admin: permanently delete phone number */}
-      {adminDeletingPhone && (
-        <AdminDeleteModal
-          isOpen={!!adminDeletingPhone}
-          onClose={() => setAdminDeletingPhone(null)}
-          type="phone_number"
-          targetId={adminDeletingPhone.id}
-          targetLabel={adminDeletingPhone.phone_number}
-          associatedCallLogs={callLogs.filter(c => c.phone_number_record === adminDeletingPhone.id)}
-          onStaged={() => setAdminDeletingPhone(null)}
-        />
-      )}
-
-      {/* Admin: permanently delete company */}
-      {adminDeletingCompany && company && (
-        <AdminDeleteModal
-          isOpen={adminDeletingCompany}
-          onClose={() => setAdminDeletingCompany(false)}
-          type="company"
-          targetId={company.id}
-          targetLabel={company.company_name}
-          associatedCallLogs={callLogs}
-          associatedPhoneNumbers={phoneNumbers.filter(p => !p.disassociated)}
-          onStaged={() => setAdminDeletingCompany(false)}
-        />
-      )}
     </div>
   );
 }

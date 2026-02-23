@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Phone, MapPin, User, Calendar, Edit2, Trash2, History, Plus, ShieldAlert } from 'lucide-react';
+import { Phone, MapPin, User, Calendar, Edit2, Trash2, History, Plus, ShieldAlert, CheckSquare } from 'lucide-react';
 import { cn, formatDate } from '@/lib/utils';
 import type { PhoneNumber, CallLog } from '@/lib/types';
 import { ZoomCallButton } from '@/components/zoom-call-button';
@@ -14,6 +14,8 @@ import { useAdminModeOptional } from '@/contexts/admin-mode-context';
 interface PhoneNumberCardProps {
   phoneNumber: PhoneNumber;
   recentCalls: CallLog[];
+  /** All call logs for this phone number — enables direct staging without modal */
+  adminCallLogs?: CallLog[];
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onAdminDelete?: (id: string) => void;
@@ -31,6 +33,7 @@ const LABEL_COLORS: Record<string, string> = {
 export function PhoneNumberCard({
   phoneNumber,
   recentCalls,
+  adminCallLogs,
   onEdit,
   onDelete,
   onAdminDelete,
@@ -39,6 +42,7 @@ export function PhoneNumberCard({
 }: PhoneNumberCardProps) {
   const router = useRouter();
   const [showHistory, setShowHistory] = useState(false);
+  const [isTrashHovered, setIsTrashHovered] = useState(false);
   const zoomPhone = useZoomPhoneOptional();
   const { isSessionActive } = useCallRecording();
   const { session, setStandaloneMode } = useSession();
@@ -49,6 +53,22 @@ export function PhoneNumberCard({
   const isStagedForDeletion = isAdminMode && adminMode?.pendingDeletions.some(
     d => d.targetId === phoneNumber.id && d.type === 'phone_number'
   );
+
+  const handleAdminStage = () => {
+    if (!adminMode) return;
+    if (adminCallLogs !== undefined) {
+      adminMode.addStagedDeletion({
+        type: 'phone_number',
+        targetId: phoneNumber.id,
+        targetLabel: phoneNumber.phone_number,
+        associatedCallLogIds: adminCallLogs.map(l => l.id),
+        deleteRecordings: false,
+        hasRecordings: adminCallLogs.some(l => l.has_recording),
+      });
+    } else {
+      onAdminDelete?.(phoneNumber.id);
+    }
+  };
 
   return (
     <div className={cn(
@@ -123,22 +143,28 @@ export function PhoneNumberCard({
               </button>
             )}
 
-            {/* Delete button: in admin mode → permanent delete; normal mode → soft delete */}
+            {/* Delete button: in admin mode → stage for deletion; normal mode → soft delete */}
             {!isStagedForDeletion && (
               <button
-                onClick={() => isAdminMode
-                  ? onAdminDelete?.(phoneNumber.id)
-                  : onDelete(phoneNumber.id)
-                }
+                onClick={() => isAdminMode ? handleAdminStage() : onDelete(phoneNumber.id)}
+                onMouseEnter={() => { if (isAdminMode) setIsTrashHovered(true); }}
+                onMouseLeave={() => setIsTrashHovered(false)}
                 className={cn(
-                  "p-1.5 rounded-lg transition-colors",
+                  "p-1.5 rounded-lg transition-all duration-150",
                   isAdminMode
-                    ? "text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    ? isTrashHovered
+                      ? "text-red-400 bg-red-500/15 scale-110"
+                      : "text-red-400/60 hover:bg-red-500/10 hover:text-red-400"
                     : "text-[var(--muted)] hover:bg-[var(--error-subtle)] hover:text-[var(--error)]"
                 )}
-                title={isAdminMode ? "Permanently delete (Admin)" : "Disassociate"}
+                title={isAdminMode ? "Stage for permanent deletion" : "Disassociate"}
               >
-                {isAdminMode ? <ShieldAlert size={14} /> : <Trash2 size={14} />}
+                {isAdminMode
+                  ? isTrashHovered
+                    ? <CheckSquare size={14} />
+                    : <ShieldAlert size={14} />
+                  : <Trash2 size={14} />
+                }
               </button>
             )}
           </div>

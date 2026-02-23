@@ -102,7 +102,9 @@ interface CurrentCallFormProps {
     callbackEvents?: Array<{ reason: string; timestamp: string }>;
 }
 
-export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = [] }: CurrentCallFormProps) {
+const EMPTY_CALLBACK_EVENTS: Array<{ reason: string; timestamp: string }> = [];
+
+export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS }: CurrentCallFormProps) {
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);

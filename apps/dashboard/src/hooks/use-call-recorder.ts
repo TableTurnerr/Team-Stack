@@ -23,6 +23,30 @@ interface UseCallRecorderReturn {
     startRecording: () => void;
     /** Stop the current recording and auto-upload */
     stopRecording: () => void;
+    /**
+     * Discard the current recording without uploading.
+     * Use for "No Answer" calls where we don't want to save the recording.
+     * Also clears any accumulated deferred segments.
+     */
+    discardRecording: () => void;
+    /**
+     * Enter deferred-upload mode. Subsequent stopRecording() calls will
+     * accumulate the blob in memory instead of uploading immediately.
+     * Call submitDeferredRecording() to merge and upload all segments.
+     * Used for callback flows where multiple recordings belong to one call.
+     */
+    enterDeferredMode: () => void;
+    /**
+     * Stop the active recording (if any), merge all deferred segments,
+     * and upload the result as a single file.
+     */
+    submitDeferredRecording: () => Promise<void>;
+    /**
+     * Discard all deferred segments without uploading and exit deferred mode.
+     */
+    discardDeferredRecording: () => void;
+    /** Whether deferred mode is currently active */
+    isDeferredMode: boolean;
 }
 
 /**
@@ -31,9 +55,14 @@ interface UseCallRecorderReturn {
  * Uses a "persistent session" model:
  * 1. `startSession()` — calls getDisplayMedia once, keeps the stream alive.
  * 2. `startRecording()` — creates a MediaRecorder on the existing stream (no prompt).
- * 3. `stopRecording()` — stops the recorder, uploads to PocketBase.
+ * 3. `stopRecording()` — stops the recorder, uploads to PocketBase (or defers in deferred mode).
  * 4. Repeat 2-3 for each call without needing to re-share.
  * 5. `endSession()` — tears down the stream when done.
+ *
+ * Deferred mode: When `enterDeferredMode()` is called, all recording segments are
+ * held in memory. `submitDeferredRecording()` merges all segments and uploads them
+ * as a single file. This enables callback recording where multiple call legs are
+ * joined into one recording.
  */
 export function useCallRecorder(
     phoneNumberRef: React.RefObject<string | null>,
@@ -43,6 +72,7 @@ export function useCallRecorder(
     const [status, setStatus] = useState<RecorderStatus>('idle');
     const [duration, setDuration] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [isDeferredMode, setIsDeferredMode] = useState(false);
 
     const streamRef = useRef<MediaStream | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -53,23 +83,31 @@ export function useCallRecorder(
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const startTimeRef = useRef<Date | null>(null);
 
+    // Deferred mode state
+    const isDeferredRef = useRef(false);
+    const deferredSegmentsRef = useRef<Blob[]>([]);
+    const deferredTotalDurationRef = useRef<number>(0);
+    const deferredMimeTypeRef = useRef<string>('audio/webm');
+
+    // Discard flag: when true, onstop skips upload/defer and just clears
+    const shouldDiscardRef = useRef(false);
+
+    // Promise resolver for waiting on onstop after stop() call
+    const onStopResolveRef = useRef<(() => void) | null>(null);
+
     // Clean up on unmount
     useEffect(() => {
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
-            // Stop output stream
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach((t) => t.stop());
             }
-            // Stop source stream (screen share)
             if (sourceStreamRef.current) {
                 sourceStreamRef.current.getTracks().forEach((t) => t.stop());
             }
-            // Stop mic stream
             if (micStreamRef.current) {
                 micStreamRef.current.getTracks().forEach((t) => t.stop());
             }
-            // Close audio context
             if (audioCtxRef.current) {
                 audioCtxRef.current.close().catch(console.error);
             }
@@ -124,7 +162,6 @@ export function useCallRecorder(
             if (phone) {
                 formData.append('phone_number', phone);
 
-                // Try to match to a phone_number record for company linking
                 try {
                     const phoneRecord = await pb
                         .collection('phone_numbers')
@@ -145,17 +182,10 @@ export function useCallRecorder(
 
     // ── Persistent Session ──────────────────────────────────────────────
 
-    /**
-     * Start a persistent audio capture session.
-     * 1. getDisplayMedia → system audio (other party's voice)
-     * 2. getUserMedia → microphone (user's own voice)
-     * 3. Mix both via Web Audio API into one stream for MediaRecorder
-     */
     const startSession = useCallback(async (): Promise<boolean> => {
         try {
             setError(null);
 
-            // 1. Capture system audio (User preference: Window + System Audio)
             const displayStream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
                 audio: {
@@ -166,11 +196,8 @@ export function useCallRecorder(
                 systemAudio: 'include',
                 selfBrowserSurface: 'include',
                 surfaceSwitching: 'include',
-                monitorTypeSurfaces: 'exclude', // Hint to exclude entire screens if possible (browser dependent)
-            } as any); // Cast to any because some constraints are newer/experimental
-
-            // We keep the video track alive to maintain the browser's "Sharing" session,
-            // but we won't use it for recording (createMediaStreamSource ignores video).
+                monitorTypeSurfaces: 'exclude',
+            } as any);
 
             if (displayStream.getAudioTracks().length === 0) {
                 displayStream.getTracks().forEach((t) => t.stop());
@@ -178,7 +205,6 @@ export function useCallRecorder(
                 return false;
             }
 
-            // 2. Capture microphone
             let micStream: MediaStream | null = null;
             try {
                 micStream = await navigator.mediaDevices.getUserMedia({
@@ -193,22 +219,17 @@ export function useCallRecorder(
                 setError('Microphone not captured — only system audio will be recorded. Check mic permissions or close other apps using the mic.');
             }
 
-            // 3. Mix both streams via Web Audio API
             const audioCtx = new AudioContext();
-            // Ensure AudioContext is running (browsers may start it suspended)
             if (audioCtx.state === 'suspended') {
                 await audioCtx.resume();
             }
             const destination = audioCtx.createMediaStreamDestination();
 
-            // Add system audio
             const systemSource = audioCtx.createMediaStreamSource(displayStream);
             systemSource.connect(destination);
 
-            // Add mic audio (if available)
             if (micStream) {
                 const micSource = audioCtx.createMediaStreamSource(micStream);
-                // Boost mic volume so it's audible alongside system audio
                 const micGain = audioCtx.createGain();
                 micGain.gain.value = 1.5;
                 micSource.connect(micGain);
@@ -218,15 +239,12 @@ export function useCallRecorder(
 
             audioCtxRef.current = audioCtx;
 
-            // The mixed stream is what we'll record
             const mixedStream = destination.stream;
 
-            // Clean up when the browser's "Stop sharing" button is clicked
             const handleStreamEnded = () => {
                 if (mediaRecorderRef.current?.state === 'recording') {
                     mediaRecorderRef.current.stop();
                 }
-                // Clean up mic + audio context
                 if (micStreamRef.current) {
                     micStreamRef.current.getTracks().forEach(t => t.stop());
                     micStreamRef.current = null;
@@ -235,7 +253,6 @@ export function useCallRecorder(
                     audioCtxRef.current.close().catch(console.error);
                     audioCtxRef.current = null;
                 }
-                // Clean up source stream
                 if (sourceStreamRef.current) {
                     sourceStreamRef.current.getTracks().forEach((t) => t.stop());
                     sourceStreamRef.current = null;
@@ -254,7 +271,6 @@ export function useCallRecorder(
             return true;
         } catch (err: unknown) {
             if (err instanceof DOMException && err.name === 'NotAllowedError') {
-                // User cancelled — not an error
                 return false;
             }
             console.error('Failed to start session:', err);
@@ -263,11 +279,7 @@ export function useCallRecorder(
         }
     }, []);
 
-    /**
-     * End the persistent session and release the shared stream.
-     */
     const endSession = useCallback(() => {
-        // Stop any active recording first
         if (mediaRecorderRef.current?.state === 'recording') {
             mediaRecorderRef.current.stop();
         }
@@ -292,6 +304,13 @@ export function useCallRecorder(
             audioCtxRef.current = null;
         }
 
+        // Clear deferred state on session end
+        isDeferredRef.current = false;
+        deferredSegmentsRef.current = [];
+        deferredTotalDurationRef.current = 0;
+        shouldDiscardRef.current = false;
+        setIsDeferredMode(false);
+
         setIsSessionActive(false);
         setStatus('idle');
         resetTimer();
@@ -299,17 +318,12 @@ export function useCallRecorder(
 
     // ── Per-Call Recording ──────────────────────────────────────────────
 
-    /**
-     * Start recording on the existing session stream.
-     * No browser prompt — the stream is already active.
-     */
     const startRecording = useCallback(() => {
         if (!streamRef.current || streamRef.current.getAudioTracks().length === 0) {
             setError('No active audio session. Enable recording session first.');
             return;
         }
 
-        // If already recording, stop the current one first
         if (mediaRecorderRef.current?.state === 'recording') {
             mediaRecorderRef.current.stop();
         }
@@ -335,7 +349,33 @@ export function useCallRecorder(
                 : 0;
 
             resetTimer();
+            chunksRef.current = [];
 
+            // Resolve any waiting promise first
+            const resolve = onStopResolveRef.current;
+            onStopResolveRef.current = null;
+
+            // Discard mode: clear everything, no upload
+            if (shouldDiscardRef.current) {
+                shouldDiscardRef.current = false;
+                setStatus('idle');
+                resolve?.();
+                return;
+            }
+
+            // Deferred mode: accumulate segment, don't upload yet
+            if (isDeferredRef.current) {
+                if (blob.size > 0) {
+                    deferredSegmentsRef.current.push(blob);
+                    deferredTotalDurationRef.current += durationSec;
+                    deferredMimeTypeRef.current = mimeType;
+                }
+                setStatus('idle');
+                resolve?.();
+                return;
+            }
+
+            // Normal mode: upload immediately
             const finalPhone = phoneNumberRef.current;
 
             if (blob.size > 0 && durationSec > 1) {
@@ -352,6 +392,8 @@ export function useCallRecorder(
             } else {
                 setStatus('idle');
             }
+
+            resolve?.();
         };
 
         mediaRecorderRef.current = recorder;
@@ -361,15 +403,108 @@ export function useCallRecorder(
         setError(null);
     }, [resetTimer, startTimer, uploadRecording, phoneNumberRef]);
 
-    /**
-     * Stop the current recording.
-     */
     const stopRecording = useCallback(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
             setStatus('stopping');
             mediaRecorderRef.current.stop();
         }
     }, []);
+
+    // ── Discard recording ───────────────────────────────────────────────
+
+    /**
+     * Stop the current recording without uploading and clear any deferred segments.
+     * Use for "No Answer" calls.
+     */
+    const discardRecording = useCallback(() => {
+        shouldDiscardRef.current = true;
+        deferredSegmentsRef.current = [];
+        deferredTotalDurationRef.current = 0;
+        isDeferredRef.current = false;
+        setIsDeferredMode(false);
+
+        if (mediaRecorderRef.current?.state === 'recording') {
+            setStatus('stopping');
+            mediaRecorderRef.current.stop();
+        } else {
+            resetTimer();
+            setStatus('idle');
+        }
+    }, [resetTimer]);
+
+    // ── Deferred mode ───────────────────────────────────────────────────
+
+    /** Enter deferred mode: future stopRecording() calls accumulate blobs in memory */
+    const enterDeferredMode = useCallback(() => {
+        isDeferredRef.current = true;
+        deferredSegmentsRef.current = [];
+        deferredTotalDurationRef.current = 0;
+        setIsDeferredMode(true);
+    }, []);
+
+    /**
+     * Stop active recording (if any), merge all accumulated segments, and upload as one file.
+     * Exits deferred mode after uploading.
+     */
+    const submitDeferredRecording = useCallback(async () => {
+        // If currently recording, stop and wait for onstop to accumulate the final segment
+        if (mediaRecorderRef.current?.state === 'recording') {
+            await new Promise<void>(resolve => {
+                onStopResolveRef.current = resolve;
+                setStatus('stopping');
+                mediaRecorderRef.current!.stop();
+            });
+        }
+
+        // Exit deferred mode before uploading
+        isDeferredRef.current = false;
+        setIsDeferredMode(false);
+
+        const segments = deferredSegmentsRef.current;
+        const totalDuration = deferredTotalDurationRef.current;
+        const mimeType = deferredMimeTypeRef.current;
+
+        deferredSegmentsRef.current = [];
+        deferredTotalDurationRef.current = 0;
+
+        if (segments.length === 0) return;
+
+        // Merge all segments into one blob
+        const merged = new Blob(segments, { type: mimeType });
+        const finalPhone = phoneNumberRef.current;
+
+        if (merged.size > 0 && totalDuration > 1) {
+            try {
+                setStatus('uploading');
+                await uploadRecording(merged, totalDuration, finalPhone);
+                setStatus('success');
+                setTimeout(() => setStatus('idle'), 3000);
+            } catch (err: unknown) {
+                console.error('Deferred upload failed:', err);
+                setStatus('error');
+                setError(err instanceof Error ? err.message : 'Upload failed');
+            }
+        } else {
+            setStatus('idle');
+        }
+    }, [uploadRecording, phoneNumberRef]);
+
+    /** Discard all deferred segments without uploading and exit deferred mode */
+    const discardDeferredRecording = useCallback(() => {
+        shouldDiscardRef.current = true;
+        deferredSegmentsRef.current = [];
+        deferredTotalDurationRef.current = 0;
+        isDeferredRef.current = false;
+        setIsDeferredMode(false);
+
+        if (mediaRecorderRef.current?.state === 'recording') {
+            setStatus('stopping');
+            mediaRecorderRef.current.stop();
+        } else {
+            resetTimer();
+            setStatus('idle');
+        }
+    }, [resetTimer]);
 
     return {
         isSessionActive,
@@ -380,5 +515,10 @@ export function useCallRecorder(
         endSession,
         startRecording,
         stopRecording,
+        discardRecording,
+        enterDeferredMode,
+        submitDeferredRecording,
+        discardDeferredRecording,
+        isDeferredMode,
     };
 }

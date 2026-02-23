@@ -14,6 +14,16 @@ interface CallRecordingContextType {
     startRecording: () => void;
     stopRecording: () => void;
     setPhoneNumber: (phone: string) => void;
+    /** Discard the current recording without uploading (e.g. for "No Answer" calls) */
+    discardRecording: () => void;
+    /** Enter deferred mode — recordings accumulate in memory instead of auto-uploading */
+    enterDeferredMode: () => void;
+    /** Merge all deferred segments and upload as a single file */
+    submitDeferredRecording: () => Promise<void>;
+    /** Discard all deferred segments without uploading */
+    discardDeferredRecording: () => void;
+    /** Whether deferred mode is currently active */
+    isDeferredMode: boolean;
 }
 
 const CallRecordingContext = createContext<CallRecordingContextType | undefined>(undefined);

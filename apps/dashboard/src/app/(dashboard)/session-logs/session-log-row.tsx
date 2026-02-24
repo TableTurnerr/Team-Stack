@@ -1,15 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, Clock, User, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, User, Trash2, CheckSquare, Loader2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog } from '@/lib/types';
 import { PerformanceCounterInline } from '@/components/performance-counter-inline';
 import { CallLogsNestedTable } from './call-logs-nested-table';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { useAdminModeOptional } from '@/contexts/admin-mode-context';
-import { AdminDeleteModal } from '@/components/admin-delete-modal';
+import { cn } from '@/lib/utils';
 
 interface SessionLogRowProps {
     session: ColdCallingSession;
@@ -39,12 +38,15 @@ function formatDateTime(dateString: string): string {
 
 export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProps) {
     const [isExpanded, setIsExpanded] = useState(false);
-    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-    const [sessionCallLogs, setSessionCallLogs] = useState<CallLog[]>([]);
-    const [loadingCallLogs, setLoadingCallLogs] = useState(false);
+    const [isTrashHovered, setIsTrashHovered] = useState(false);
+    const [isStagingSession, setIsStagingSession] = useState(false);
 
     const adminMode = useAdminModeOptional();
     const isAdminMode = adminMode?.isAdminMode ?? false;
+
+    const isStagedForDeletion = isAdminMode && adminMode?.pendingDeletions.some(
+        d => d.targetId === session.id && d.type === 'session'
+    );
 
     const pickupRate = session.total_dials > 0
         ? Math.round((session.total_pickups / session.total_dials) * 100)
@@ -79,22 +81,28 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
         }
     };
 
-    const handleOpenDeleteModal = async () => {
-        setLoadingCallLogs(true);
+    const handleDirectStage = async () => {
+        if (!adminMode || isStagedForDeletion) return;
+        setIsStagingSession(true);
         try {
             const logs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
                 filter: `session = "${session.id}"`,
                 sort: '-call_time',
-                expand: 'phone_number_record',
             });
-            setSessionCallLogs(logs);
+            adminMode.addStagedDeletion({
+                type: 'session',
+                targetId: session.id,
+                targetLabel: sessionLabel,
+                associatedCallLogIds: logs.map(l => l.id),
+                deleteRecordings: false,
+                hasRecordings: logs.some(l => l.has_recording),
+            });
+            onDelete?.(session.id);
         } catch (err) {
-            console.error('Failed to load call logs for deletion:', err);
-            setSessionCallLogs([]);
+            console.error('Failed to stage session deletion:', err);
         } finally {
-            setLoadingCallLogs(false);
+            setIsStagingSession(false);
         }
-        setDeleteModalOpen(true);
     };
 
     const sessionLabel = formatDateTime(session.started_at);
@@ -190,14 +198,34 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                 </td>
                 {isAdminMode && (
                     <td className="px-4 py-3">
-                        <button
-                            onClick={handleOpenDeleteModal}
-                            disabled={loadingCallLogs}
-                            className="p-1.5 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
-                            title="Delete session (Admin)"
-                        >
-                            <Trash2 size={15} />
-                        </button>
+                        {isStagedForDeletion ? (
+                            <div className="p-1.5 rounded-lg text-green-400" title="Staged for deletion">
+                                <CheckSquare size={15} />
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleDirectStage}
+                                disabled={isStagingSession}
+                                onMouseEnter={() => setIsTrashHovered(true)}
+                                onMouseLeave={() => setIsTrashHovered(false)}
+                                className={cn(
+                                    "p-1.5 rounded-lg transition-all duration-150",
+                                    isStagingSession
+                                        ? "text-red-400 opacity-60"
+                                        : isTrashHovered
+                                            ? "text-red-400 bg-red-500/15 scale-110"
+                                            : "text-red-400/60 hover:bg-red-500/10 hover:text-red-400"
+                                )}
+                                title="Stage for permanent deletion"
+                            >
+                                {isStagingSession
+                                    ? <Loader2 size={15} className="animate-spin" />
+                                    : isTrashHovered
+                                        ? <CheckSquare size={15} />
+                                        : <Trash2 size={15} />
+                                }
+                            </button>
+                        )}
                     </td>
                 )}
             </tr>
@@ -230,18 +258,6 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                 </tr>
             )}
 
-            {deleteModalOpen && createPortal(
-                <AdminDeleteModal
-                    isOpen={deleteModalOpen}
-                    onClose={() => setDeleteModalOpen(false)}
-                    type="session"
-                    targetId={session.id}
-                    targetLabel={sessionLabel}
-                    associatedCallLogs={sessionCallLogs}
-                    onStaged={() => onDelete?.(session.id)}
-                />,
-                document.body
-            )}
         </>
     );
 }

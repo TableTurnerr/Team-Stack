@@ -1069,9 +1069,19 @@
                     "Not Interested",
                     "Callback",
                     "No Answer",
-                    "Wrong Number",
+                    "Fumbled",
                     "Other"
                 ]
+            },
+            {
+                "hidden": false,
+                "id": "json_callback_events",
+                "maxSize": 0,
+                "name": "callback_events",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
             },
             {
                 "autogeneratePattern": "",
@@ -1574,7 +1584,7 @@
                     "Not Interested",
                     "Callback",
                     "No Answer",
-                    "Wrong Number",
+                    "Fumbled",
                     "Other"
                 ]
             },

@@ -185,6 +185,11 @@ Use this checklist to verify system health.
 - [ ] **Team**: Team members list loads.
 - [ ] **Notes**: Can create and edit a markdown note.
 - [ ] **Zoom Phone**: Verify settings toggle correctly and persist in localStorage.
+- [ ] **Power Dialer**:
+    - [ ] Paste a list of phone numbers into the Power Dialer panel.
+    - [ ] Start the dialer and verify it dials numbers sequentially.
+    - [ ] Test pause, resume, and stop functionality.
+    - [ ] Experiment with different "Call Gap" settings (negative, zero, positive) and observe behavior.
 
 ### 8.2 Transcriber Integration
 1. Place a test `.mp3` or `.wav` file in `tools/audio-recorder/recordings/`.

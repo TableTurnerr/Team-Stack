@@ -46,7 +46,7 @@ export interface ColdCall extends RecordModel {
   company?: string;
   caller_name?: string;
   recipients?: string;
-  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Wrong Number' | 'Other';
+  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other';
   interest_level?: number;
   objections?: string[];
   pain_points?: string[];
@@ -185,7 +185,7 @@ export interface CallLog extends RecordModel {
   duration?: number; // Total duration (ring_duration + call_duration) in seconds
   ring_duration?: number; // Time spent ringing before pickup (in seconds)
   call_duration?: number; // Time spent on actual call after pickup (in seconds)
-  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Wrong Number' | 'Other';
+  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other';
   owner_name_found?: string;
   receptionist_name?: string;
   post_call_notes?: string;
@@ -198,6 +198,8 @@ export interface CallLog extends RecordModel {
   owner_reached?: boolean;
   pitch_completed?: boolean;
   appointment_set?: boolean;
+  // Callback tracking: array of {reason, timestamp} for each callback made during this call
+  callback_events?: Array<{ reason: string; timestamp: string }>;
   expand?: {
     company?: Company;
     phone_number_record?: PhoneNumber;

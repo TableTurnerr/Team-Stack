@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -13,16 +13,25 @@ const OUTCOMES = [
     'Not Interested',
     'Callback',
     'No Answer',
-    'Wrong Number',
+    'Fumbled',
     'Other',
 ] as const;
+
+const CALLBACK_REASONS = [
+    'Callback (Recep hung up)',
+    'Callback (Owner hung up)',
+    'Callback (Audio Issue)',
+    'Callback (Other)',
+] as const;
+
+export type CallbackReason = typeof CALLBACK_REASONS[number];
 
 const OUTCOME_COLORS: Record<string, { bg: string; text: string; border: string }> = {
     'Interested': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]', border: 'border-[var(--success)]' },
     'Not Interested': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]', border: 'border-[var(--error)]' },
     'Callback': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]', border: 'border-[var(--warning)]' },
     'No Answer': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]', border: 'border-[var(--muted)]' },
-    'Wrong Number': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]', border: 'border-[var(--warning)]' },
+    'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500', border: 'border-orange-500' },
     'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]', border: 'border-[var(--info)]' },
 };
 
@@ -39,6 +48,7 @@ export interface CallFormData {
     pitchCompleted: boolean;
     appointmentSet: boolean;
     followUp?: { scheduledTime: string; timezone: string; notes: string } | null;
+    callbackEvents?: Array<{ reason: string; timestamp: string }>;
 }
 
 export interface CallFormDraft {
@@ -55,6 +65,7 @@ export interface CallFormDraft {
     isNewCompany: boolean;
     showFollowUp: boolean;
     followUpData: { scheduledTime: string; timezone: string; notes: string } | null;
+    callbackEvents: Array<{ reason: string; timestamp: string }>;
 }
 
 const EMPTY_DRAFT: CallFormDraft = {
@@ -71,6 +82,7 @@ const EMPTY_DRAFT: CallFormDraft = {
     isNewCompany: false,
     showFollowUp: true,
     followUpData: null,
+    callbackEvents: [],
 };
 
 interface CurrentCallFormProps {
@@ -84,9 +96,15 @@ interface CurrentCallFormProps {
     onDiscard?: () => void;
     /** Whether the call is currently live (ringing or connected) */
     isCallLive?: boolean;
+    /** Called when user initiates a callback from the dropdown */
+    onCallback?: (reason: CallbackReason) => void;
+    /** Accumulated callback events for this call */
+    callbackEvents?: Array<{ reason: string; timestamp: string }>;
 }
 
-export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive }: CurrentCallFormProps) {
+const EMPTY_CALLBACK_EVENTS: Array<{ reason: string; timestamp: string }> = [];
+
+export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS }: CurrentCallFormProps) {
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -100,8 +118,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [appointmentSet, setAppointmentSet] = useState(false);
     const [noneSelected, setNoneSelected] = useState(true);
     const [isNewCompany, setIsNewCompany] = useState(false);
+    const [showCallbackDropdown, setShowCallbackDropdown] = useState(false);
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const callbackDropdownRef = useRef<HTMLDivElement>(null);
 
     // Auto-fetch company state
     const [autoFetchedCompany, setAutoFetchedCompany] = useState<Company | null>(null);
@@ -109,7 +129,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [phoneExistsForOtherCompany, setPhoneExistsForOtherCompany] = useState(false);
     const lastLookedUpPhone = useRef('');
 
-    // Company lookup animation state: idle → searching → found | not-found
     const [companyLookupState, setCompanyLookupState] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle');
 
     // Follow-up scheduling
@@ -182,8 +201,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             isNewCompany,
             showFollowUp,
             followUpData,
+            callbackEvents,
         });
-    }, [companySearch, selectedCompany, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, onDraftChange]);
+    }, [companySearch, selectedCompany, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, onDraftChange]);
 
     // Auto-fetch company when phone number changes
     useEffect(() => {
@@ -198,22 +218,17 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
         const lookupPhone = async () => {
             try {
-                // Try multiple matching strategies since phone formats vary
                 const digits = phoneNumber.replace(/\D/g, '');
                 if (digits.length < 7) {
                     setCompanyLookupState('not-found');
                     return;
                 }
 
-                // Strategy 1: Try exact match with the raw phone string
-                // Strategy 2: Try matching with just the digits
-                // Strategy 3: Try matching with last 10 digits (no country code)
                 const last10 = digits.slice(-10);
                 const filterParts = [
                     `phone_number = "${phoneNumber}"`,
                     `phone_number ~ "${phoneNumber}"`,
                 ];
-                // Only add digit-based searches if different from the raw string
                 if (digits !== phoneNumber) {
                     filterParts.push(`phone_number ~ "${digits}"`);
                 }
@@ -227,7 +242,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 });
 
                 if (result.items.length > 0) {
-                    // Find the best match: prefer exact match, then longest digit overlap
                     const bestMatch = result.items.find(
                         p => p.phone_number === phoneNumber
                     ) || result.items.find(
@@ -259,7 +273,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     setCompanyLookupState('not-found');
                 }
             } catch {
-                // Non-critical lookup
                 setCompanyLookupState('not-found');
             }
         };
@@ -280,13 +293,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             setPhoneExistsForOtherCompany(false);
             return;
         }
-
-        // If we already found a phone record from the auto-fetch, we know it exists
         if (phoneNumberRecord) {
             setPhoneExistsForOtherCompany(true);
             return;
         }
-
         setPhoneExistsForOtherCompany(false);
     }, [isNewCompany, phoneNumber, phoneNumberRecord]);
 
@@ -331,11 +341,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         };
     }, [companySearch]);
 
-    // Close dropdown on outside click
+    // Close dropdowns on outside click
     useEffect(() => {
         const handleClick = (e: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
                 setShowCompanyDropdown(false);
+            }
+            if (callbackDropdownRef.current && !callbackDropdownRef.current.contains(e.target as Node)) {
+                setShowCallbackDropdown(false);
             }
         };
         document.addEventListener('mousedown', handleClick);
@@ -352,7 +365,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         }
     };
 
-    // Toggle recipient tag between Receptionist and Owner
     const handleTagClick = () => {
         const newOwnerState = !ownerReached;
         setOwnerReached(newOwnerState);
@@ -361,7 +373,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         }
     };
 
-    // Handle "None" toggle
     const handleNoneToggle = () => {
         setNoneSelected(true);
         setOwnerReached(false);
@@ -372,6 +383,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const handleSave = useCallback(async () => {
         if (!selectedCompany && !isNewCompany) return;
         if (!companySearch.trim()) return;
+        if (!callOutcome) return;
 
         try {
             let companyId: string;
@@ -402,18 +414,19 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 callOutcome,
                 interestLevel,
                 postCallNotes,
-                wasPickedUp: callOutcome !== 'No Answer' && callOutcome !== 'Wrong Number' && callOutcome !== '',
+                wasPickedUp: callOutcome !== 'No Answer' && callOutcome !== '',
                 ownerReached,
                 pitchCompleted,
                 appointmentSet,
                 followUp: showFollowUp ? followUpData : null,
+                callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
             });
 
             resetForm();
         } catch (err) {
             console.error('Failed to save call:', err);
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, resetForm]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, resetForm]);
 
     const hasDraftValues =
         companySearch.trim().length > 0 ||
@@ -435,12 +448,17 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setShowDiscardConfirm(false);
     }, [onDiscard, onDraftChange, resetForm]);
 
-    // Required fields: Company, Phone Number (auto-filled), Call Outcome, Interest Level (always has value), Post-call Notes
+    // Required: Company, Phone Number (auto-filled), Call Outcome
+    // Notes and interest level are optional (N/A by default)
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
     const hasPhoneNumber = !!phoneNumber;
     const hasOutcome = !!callOutcome;
-    const hasNotes = postCallNotes.trim().length > 0;
-    const canSave = hasCompany && hasPhoneNumber && hasOutcome && hasNotes && !saving;
+    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving;
+
+    const handleCallbackSelect = (reason: CallbackReason) => {
+        setShowCallbackDropdown(false);
+        onCallback?.(reason);
+    };
 
     return (
         <div className={cn(
@@ -450,19 +468,68 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 : "border-[var(--card-border)]"
         )}>
             {/* Header with unsaved indicator */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
                     Current Call
                 </h3>
                 {hasUnsavedCall && (
-                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--warning-subtle)] border border-[var(--warning)]/30">
-                        <AlertCircle size={12} className="text-[var(--warning)]" />
-                        <span className="text-[10px] font-semibold text-[var(--warning)] uppercase tracking-wider">
-                            Recorded but unsubmitted
-                        </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--warning-subtle)] border border-[var(--warning)]/30">
+                            <AlertCircle size={12} className="text-[var(--warning)]" />
+                            <span className="text-[10px] font-semibold text-[var(--warning)] uppercase tracking-wider">
+                                Recorded but unsubmitted
+                            </span>
+                        </div>
+
+                        {/* Callback dropdown */}
+                        {onCallback && (
+                            <div className="relative" ref={callbackDropdownRef}>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowCallbackDropdown(v => !v)}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border bg-[var(--info-subtle)] border-[var(--info)]/30 text-[var(--info)] hover:bg-[var(--info)]/20 transition-colors"
+                                    title="Initiate a callback to the same number"
+                                >
+                                    Callback
+                                    <ChevronDown size={10} className={cn("transition-transform", showCallbackDropdown && "rotate-180")} />
+                                </button>
+
+                                {showCallbackDropdown && (
+                                    <div className="absolute right-0 top-full mt-1 z-30 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-lg min-w-[200px] overflow-hidden">
+                                        <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider border-b border-[var(--card-border)] bg-[var(--sidebar-bg)]">
+                                            Callback reason
+                                        </div>
+                                        {CALLBACK_REASONS.map(reason => (
+                                            <button
+                                                key={reason}
+                                                type="button"
+                                                onClick={() => handleCallbackSelect(reason)}
+                                                className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-[var(--foreground)]"
+                                            >
+                                                {reason}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
+
+            {/* Callback events log */}
+            {callbackEvents.length > 0 && (
+                <div className="flex flex-col gap-1 px-3 py-2 rounded-lg bg-[var(--info-subtle)] border border-[var(--info)]/20">
+                    <span className="text-[10px] font-semibold text-[var(--info)] uppercase tracking-wider">
+                        {callbackEvents.length} callback{callbackEvents.length > 1 ? 's' : ''} made during this call
+                    </span>
+                    {callbackEvents.map((evt, i) => (
+                        <span key={i} className="text-[10px] text-[var(--info)]/80">
+                            #{i + 1}: {evt.reason} — {new Date(evt.timestamp).toLocaleTimeString()}
+                        </span>
+                    ))}
+                </div>
+            )}
 
             {/* Auto-fetched company banner */}
             {autoFetchedCompany && selectedCompany?.id === autoFetchedCompany.id && (
@@ -494,7 +561,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         </span>
                     )}
                 </label>
-                {/* Spinning border wrapper for searching state */}
                 <div className={cn(
                     "rounded-lg",
                     companyLookupState === 'searching' && "company-spin-border p-[2px]"
@@ -527,7 +593,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     </div>
                 </div>
 
-                {/* Dropdown */}
                 {showCompanyDropdown && companyResults.length > 0 && (
                     <div className="absolute z-20 top-full mt-1 left-0 right-0 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-lg max-h-48 overflow-y-auto">
                         {companyResults.map(company => (
@@ -622,10 +687,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 </div>
             </div>
 
-            {/* Interest Level */}
+            {/* Interest Level — optional */}
             <div>
                 <label className="text-xs text-[var(--muted)] mb-1 flex items-center justify-between">
-                    <span>Interest Level <span className="text-[var(--error)]">*</span></span>
+                    <span>Interest Level <span className="text-[10px] text-[var(--muted)] font-normal">(optional)</span></span>
                     <span className="font-semibold text-[var(--foreground)]">{interestLevel}/10</span>
                 </label>
                 <input
@@ -642,7 +707,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             <div className="space-y-2">
                 <label className="text-xs text-[var(--muted)] mb-1 block">Performance</label>
                 <div className="flex flex-col gap-2">
-                    {/* None option - default */}
                     <label className="flex items-center gap-2 cursor-pointer group">
                         <input
                             type="checkbox"
@@ -691,11 +755,11 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 </div>
             </div>
 
-            {/* Notes */}
+            {/* Notes — optional */}
             <div>
                 <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-1">
                     <StickyNote size={12} />
-                    <span>Post-call Notes <span className="text-[var(--error)]">*</span></span>
+                    <span>Post-call Notes <span className="text-[10px] text-[var(--muted)] font-normal">(optional)</span></span>
                 </label>
                 <textarea
                     value={postCallNotes}

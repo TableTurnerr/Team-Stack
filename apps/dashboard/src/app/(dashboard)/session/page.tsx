@@ -19,11 +19,12 @@ import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
-import { CurrentCallForm, type CallFormData, type CallFormDraft } from './current-call-form';
+import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
+import { PowerDialerPanel } from './power-dialer-panel';
 import { useFollowUps } from '@/contexts/follow-up-context';
 
 function formatDuration(seconds: number): string {
@@ -89,6 +90,10 @@ export default function SessionPage() {
         startSession: startAudioSession,
         startRecording,
         stopRecording,
+        discardRecording,
+        enterDeferredMode,
+        submitDeferredRecording,
+        discardDeferredRecording,
         error: recorderError,
         setPhoneNumber: setContextPhoneNumber
     } = useCallRecording();
@@ -117,6 +122,34 @@ export default function SessionPage() {
     const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
     const [callDraft, setCallDraft] = useState<CallFormDraft | null>(null);
     const didHydrateFromStorage = useRef(false);
+
+    // Callback tracking for the current call
+    const [callbackEvents, setCallbackEvents] = useState<Array<{ reason: string; timestamp: string }>>([]);
+
+    // ---------------------------------------------------------------------------
+    // Power Dialer state
+    // ---------------------------------------------------------------------------
+    const [powerDialerQueue, setPowerDialerQueue] = useState<string[]>([]);
+    const [powerDialerIndex, setPowerDialerIndex] = useState(0);
+    const [powerDialerActive, setPowerDialerActive] = useState(false);
+    const [powerDialerPaused, setPowerDialerPaused] = useState(false);
+    const [powerDialerDelay, setPowerDialerDelay] = useState(2); // seconds; negative = start next call before submit
+    // Pins the old call's phone number in the form during a negative-delay overlap
+    const [pinnedFormPhoneNumber, setPinnedFormPhoneNumber] = useState('');
+    const powerDialerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Refs for reading power dialer state inside effects/timers without stale closures
+    const powerDialerQueueRef = useRef<string[]>(powerDialerQueue);
+    const powerDialerIndexRef = useRef(powerDialerIndex);
+    const powerDialerActiveRef = useRef(powerDialerActive);
+    const powerDialerPausedRef = useRef(powerDialerPaused);
+    const powerDialerDelayRef = useRef(powerDialerDelay);
+    // Keep refs in sync every render
+    powerDialerQueueRef.current = powerDialerQueue;
+    powerDialerIndexRef.current = powerDialerIndex;
+    powerDialerActiveRef.current = powerDialerActive;
+    powerDialerPausedRef.current = powerDialerPaused;
+    powerDialerDelayRef.current = powerDialerDelay;
 
     // ---------------------------------------------------------------------------
     // Check for existing active session on mount
@@ -258,6 +291,9 @@ export default function SessionPage() {
             }
             if (currentPhoneNumber) {
                 setHasUnsavedCall(true);
+                // Pin the phone number so the form keeps showing the old number
+                // even if the power dialer auto-dials a new call (negative-delay overlap)
+                setPinnedFormPhoneNumber(currentPhoneNumber);
             }
         } else if (callStatus === 'idle') {
             // Idle - just clear timers (don't set unsaved here, it's set on 'ended')
@@ -273,6 +309,40 @@ export default function SessionPage() {
             }
         };
     }, [callStatus, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
+
+    // ---------------------------------------------------------------------------
+    // Power dialer — negative delay: auto-dial next number N seconds after call ends
+    // Runs independently of form submission so the user can fill the old form while
+    // the next call is already ringing (overlap mode).
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        if (callStatus !== 'ended') return;
+        if (!powerDialerActiveRef.current || powerDialerPausedRef.current) return;
+        if (powerDialerDelayRef.current >= 0) return; // positive/zero delay is handled in handleSaveCall
+        if (session?.paused_at) return;
+
+        const nextIdx = powerDialerIndexRef.current + 1;
+        if (nextIdx >= powerDialerQueueRef.current.length) {
+            // Queue exhausted after this call; will be marked done when user submits the last form
+            return;
+        }
+
+        if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
+        const delayMs = Math.abs(powerDialerDelayRef.current) * 1000;
+        powerDialerTimerRef.current = setTimeout(() => {
+            if (!powerDialerActiveRef.current || powerDialerPausedRef.current) return;
+            setPowerDialerIndex(nextIdx);
+            // handleDial is captured via ref to always use the latest version
+            handleDialRef.current(powerDialerQueueRef.current[nextIdx]);
+        }, delayMs);
+    }, [callStatus, session?.paused_at]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Cleanup power dialer timer on unmount
+    useEffect(() => {
+        return () => {
+            if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
+        };
+    }, []);
 
     // Reset count incremented flags when current phone number changes (new call)
     useEffect(() => {
@@ -291,14 +361,15 @@ export default function SessionPage() {
                 setCurrentPhoneNumber(activeCallNumber);
                 setContextPhoneNumber(activeCallNumber);
 
-                // Start recording if session is active
+                // Enter deferred mode + start recording if session is active
                 if (isSessionActive) {
                     console.log('[Session Page] Starting recording for call:', activeCallNumber);
+                    enterDeferredMode();
                     startRecording();
                 }
             }
         }
-    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, isSessionActive, startRecording]);
+    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, isSessionActive, startRecording, enterDeferredMode]);
 
     // Warn user before closing tab if session is active
     useEffect(() => {
@@ -381,8 +452,19 @@ export default function SessionPage() {
             setCurrentPhoneNumber('');
             setHasUnsavedCall(false);
             setCallDraft(null);
+            setCallbackEvents([]);
             setContextPhoneNumber(''); // Clear phone number in context
             window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+
+            // Reset power dialer
+            setPowerDialerActive(false);
+            setPowerDialerPaused(false);
+            setPowerDialerIndex(0);
+            setPinnedFormPhoneNumber('');
+            if (powerDialerTimerRef.current) {
+                clearTimeout(powerDialerTimerRef.current);
+                powerDialerTimerRef.current = null;
+            }
         } catch (err) {
             console.error('Failed to end session:', err);
         } finally {
@@ -464,23 +546,61 @@ export default function SessionPage() {
         setCurrentPhoneNumber(phoneNumber);
         setContextPhoneNumber(phoneNumber); // Update phone number in context
 
-        // Start recording immediately when dialing IF session is active
+        // Enter deferred mode so recordings accumulate in memory (enables callback merging)
+        // and start recording immediately when dialing IF session is active
         if (isSessionActive) {
+            enterDeferredMode();
             startRecording();
         }
 
         dialNumber(phoneNumber);
-    }, [dialNumber, isSessionActive, startRecording, setContextPhoneNumber, isDialing, callStatus]);
+    }, [dialNumber, isSessionActive, startRecording, enterDeferredMode, setContextPhoneNumber, isDialing, callStatus]);
+
+    // Ref so power dialer timers always call the latest handleDial (avoids stale closures)
+    const handleDialRef = useRef(handleDial);
+    handleDialRef.current = handleDial;
+
+    // ---------------------------------------------------------------------------
+    // Handle callback — dial same number, accumulate recording, log reason
+    // ---------------------------------------------------------------------------
+    const handleCallback = useCallback((reason: string) => {
+        if (!currentPhoneNumber) return;
+
+        // Log this callback event
+        const event = { reason, timestamp: new Date().toISOString() };
+        setCallbackEvents(prev => [...prev, event]);
+
+        // Reset timing for the new call leg
+        setRingStartTime(null);
+        setConnectTime(null);
+        setCurrentCallDuration(0);
+        setDialCountIncremented(false);
+        setPickupCountIncremented(false);
+
+        // Deferred mode should already be active from the initial dial.
+        // The current recording segment is saved automatically when the
+        // call ends. Now just dial again — startRecording will be triggered
+        // by the ringing→connected transition via call-recorder-controls or
+        // the session page's sync effect.
+        dialNumber(currentPhoneNumber);
+    }, [currentPhoneNumber, dialNumber]);
 
     // ---------------------------------------------------------------------------
     // Save call
     // ---------------------------------------------------------------------------
     const handleSaveCall = useCallback(async (data: CallFormData) => {
-        // Stop recording when saving the call
-        stopRecording();
         setContextPhoneNumber(''); // Clear phone number in context
 
         if (!session || !user) return;
+
+        // Handle recording based on outcome
+        if (data.callOutcome === 'No Answer') {
+            // Discard recording — No Answer calls should not be saved
+            discardDeferredRecording();
+        } else {
+            // Submit the (potentially merged) deferred recording
+            submitDeferredRecording().catch(err => console.error('Failed to submit recording:', err));
+        }
 
         try {
             setSavingCall(true);
@@ -546,13 +666,16 @@ export default function SessionPage() {
                 ring_duration: ringDuration > 0 ? ringDuration : undefined,
                 call_duration: callDuration > 0 ? callDuration : undefined,
                 call_outcome: data.callOutcome,
-                interest_level: data.interestLevel,
-                post_call_notes: data.postCallNotes,
+                interest_level: data.interestLevel || undefined,
+                post_call_notes: data.postCallNotes || undefined,
                 owner_name_found: data.recipientName || undefined,
                 session: session.id,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
                 appointment_set: data.appointmentSet,
+                callback_events: data.callbackEvents && data.callbackEvents.length > 0
+                    ? data.callbackEvents
+                    : undefined,
             });
 
             // Update session performance totals based on this call
@@ -565,6 +688,11 @@ export default function SessionPage() {
             }
             if (data.appointmentSet) {
                 sessionUpdates.appointment_set = (session.appointment_set || 0) + 1;
+            }
+            // No Answer: undo the pickup count if it was already incremented
+            // (pickup is incremented when call connects, but No Answer means no human pickup)
+            if (data.callOutcome === 'No Answer' && pickupCountIncremented && (session.total_pickups || 0) > 0) {
+                sessionUpdates.total_pickups = Math.max(0, (session.total_pickups || 0) - 1);
             }
 
             // Update session if there are any performance updates
@@ -621,6 +749,7 @@ export default function SessionPage() {
             // Clear unsaved call state
             setHasUnsavedCall(false);
             setCallDraft(null);
+            setCallbackEvents([]);
             window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
             // Reset call timing state for next call
@@ -629,27 +758,100 @@ export default function SessionPage() {
             setCurrentCallDuration(0);
             setDialCountIncremented(false);
             setPickupCountIncremented(false);
+
+            // Clear pinned phone number now that the form has been submitted
+            setPinnedFormPhoneNumber('');
+
+            // Power dialer — positive / zero delay: schedule next dial after form submit
+            // Negative delay is handled by the callStatus 'ended' effect (no action needed here)
+            if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current >= 0) {
+                const nextIdx = powerDialerIndexRef.current + 1;
+                if (nextIdx >= powerDialerQueueRef.current.length) {
+                    setPowerDialerActive(false);
+                } else {
+                    setPowerDialerIndex(nextIdx);
+                    if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
+                    const delayMs = powerDialerDelayRef.current * 1000;
+                    const nextNumber = powerDialerQueueRef.current[nextIdx];
+                    powerDialerTimerRef.current = setTimeout(() => {
+                        handleDialRef.current(nextNumber);
+                    }, delayMs);
+                }
+            }
         } catch (err) {
             console.error('Failed to save call:', err);
         } finally {
             setSavingCall(false);
         }
-    }, [session, user, stopRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, createFollowUp]);
+    }, [session, user, discardDeferredRecording, submitDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp]);
 
     const handleDiscardCall = useCallback(() => {
-        stopRecording();
+        discardDeferredRecording();
         setContextPhoneNumber('');
 
         setHasUnsavedCall(false);
         setCallDraft(null);
+        setCallbackEvents([]);
         setCurrentPhoneNumber('');
+        setPinnedFormPhoneNumber('');
         setRingStartTime(null);
         setConnectTime(null);
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
         window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
-    }, [stopRecording, setContextPhoneNumber]);
+
+        // Cancel any pending power dialer auto-dial
+        if (powerDialerTimerRef.current) {
+            clearTimeout(powerDialerTimerRef.current);
+            powerDialerTimerRef.current = null;
+        }
+    }, [discardDeferredRecording, setContextPhoneNumber]);
+
+    // ---------------------------------------------------------------------------
+    // Power dialer handlers
+    // ---------------------------------------------------------------------------
+    const handlePowerDialerStart = useCallback(() => {
+        if (powerDialerQueue.length === 0 || hasUnsavedCall) return;
+        if (callStatus === 'ringing' || callStatus === 'connected') return;
+        setPowerDialerActive(true);
+        setPowerDialerPaused(false);
+        handleDial(powerDialerQueue[powerDialerIndex]);
+    }, [powerDialerQueue, powerDialerIndex, hasUnsavedCall, callStatus, handleDial]);
+
+    const handlePowerDialerPause = useCallback(() => {
+        setPowerDialerPaused(true);
+        if (powerDialerTimerRef.current) {
+            clearTimeout(powerDialerTimerRef.current);
+            powerDialerTimerRef.current = null;
+        }
+    }, []);
+
+    const handlePowerDialerResume = useCallback(() => {
+        setPowerDialerPaused(false);
+        // Next dial fires naturally on the next form-submit (positive delay) or call-end (negative delay)
+    }, []);
+
+    const handlePowerDialerStop = useCallback(() => {
+        setPowerDialerActive(false);
+        setPowerDialerPaused(false);
+        setPowerDialerIndex(0);
+        if (powerDialerTimerRef.current) {
+            clearTimeout(powerDialerTimerRef.current);
+            powerDialerTimerRef.current = null;
+        }
+    }, []);
+
+    const handlePowerDialerQueueLoad = useCallback((numbers: string[]) => {
+        setPowerDialerQueue(numbers);
+        setPowerDialerIndex(0);
+        setPowerDialerActive(false);
+        setPowerDialerPaused(false);
+        if (powerDialerTimerRef.current) {
+            clearTimeout(powerDialerTimerRef.current);
+            powerDialerTimerRef.current = null;
+        }
+    }, []);
 
     // ---------------------------------------------------------------------------
     // Update performance counters
@@ -1034,12 +1236,29 @@ export default function SessionPage() {
                     )}
                 </div>
 
+                {/* Power Dialer — between Zoom dialer and main grid */}
+                <PowerDialerPanel
+                    queue={powerDialerQueue}
+                    currentIndex={powerDialerIndex}
+                    active={powerDialerActive}
+                    paused={powerDialerPaused}
+                    delay={powerDialerDelay}
+                    onStart={handlePowerDialerStart}
+                    onPause={handlePowerDialerPause}
+                    onResume={handlePowerDialerResume}
+                    onStop={handlePowerDialerStop}
+                    onDelayChange={setPowerDialerDelay}
+                    onQueueLoad={handlePowerDialerQueueLoad}
+                    disabled={!!session.paused_at}
+                    canStart={!hasUnsavedCall && callStatus !== 'ringing' && callStatus !== 'connected'}
+                />
+
                 {/* Main layout */}
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                     {/* Left column — 60% */}
                     <div className="lg:col-span-3 space-y-6">
                         <CurrentCallForm
-                            phoneNumber={currentPhoneNumber}
+                            phoneNumber={hasUnsavedCall ? (pinnedFormPhoneNumber || currentPhoneNumber) : currentPhoneNumber}
                             onSave={handleSaveCall}
                             saving={savingCall}
                             hasUnsavedCall={hasUnsavedCall}
@@ -1047,6 +1266,8 @@ export default function SessionPage() {
                             onDraftChange={setCallDraft}
                             onDiscard={handleDiscardCall}
                             isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
+                            onCallback={handleCallback}
+                            callbackEvents={callbackEvents}
                         />
                     </div>
 

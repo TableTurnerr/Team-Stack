@@ -18,7 +18,7 @@ const OUTCOME_OPTIONS = [
   'Not Interested',
   'Callback',
   'No Answer',
-  'Wrong Number',
+  'Fumbled',
   'Other'
 ] as const;
 
@@ -99,7 +99,7 @@ export function CallLogForm({
           </div>
 
           {/* Conditional Fields based on Outcome */}
-          {formData.call_outcome !== 'No Answer' && formData.call_outcome !== 'Wrong Number' && (
+          {formData.call_outcome !== 'No Answer' && (
             <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
               <div className="grid grid-cols-2 gap-4">
                 <div>

@@ -210,6 +210,13 @@ erDiagram
 - Explicit "Save" button syncs to database
 - Visual indicator for unsaved changes
 
+### Power Dialer
+
+- Automated dialing of phone numbers from a pre-defined queue.
+- Configurable "Call Gap" to control delay between calls (immediate, delayed, or overlapping).
+- Pause, resume, and stop functionality.
+- Real-time display of queue progress and numbers remaining.
+
 ---
 
 ## System-Wide Changes by Component
@@ -221,7 +228,7 @@ erDiagram
 | **Database types** | Add `PhoneNumber`, `CallLog`, `FollowUp`, `CompanyNote`, `Interaction` interfaces |
 | **Companies page** | Complete redesign with phone number management, call history per number |
 | **Recordings page** | Link recordings to call_logs, remove standalone notes field |
-| **New components** | `PhoneNumberCard`, `CallLogForm`, `FollowUpAlert`, `TimezoneClock`, `InlineEdit` |
+| **New components** | `PhoneNumberCard`, `CallLogForm`, `FollowUpAlert`, `TimezoneClock`, `InlineEdit`, `PowerDialerPanel` |
 | **Sidebar** | Add timezone clocks section at bottom |
 | **Tables** | Standardize all tables with consistent columns, pagination, search |
 | **State management** | Implement localStorage persistence for unsaved edits |

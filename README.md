@@ -149,6 +149,7 @@ Modern Next.js 15 web application with:
   - `column-selector.tsx` - Table column visibility
   - `zoom-call-button.tsx` - Click-to-call via Zoom Phone
   - `zoom-phone-context.tsx` - Zoom Phone state management
+  - `power-dialer-panel.tsx` - Automated sequential dialing from a queue
 
 - **Zoom Phone Integration**:
   - Embedded Smart Embed dialer with postMessage API

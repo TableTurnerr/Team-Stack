@@ -13,7 +13,7 @@
 5. [Dashboard Setup](#5-dashboard-setup)
 6. [Transcriber Setup](#6-transcriber-setup)
 7. [Zoom Phone Configuration](#7-zoom-phone-configuration)
-8. [Testing Checklist](#8-testing-checklist)
+8. [Automated Testing (Playwright)](#8-automated-testing-playwright)
 9. [Production Deployment](#9-production-deployment)
 10. [Troubleshooting](#10-troubleshooting)
 
@@ -173,28 +173,97 @@ Access via **Settings → Integrations → Zoom Phone**.
 
 ---
 
-## 8. Testing Checklist
+## 8. Automated Testing (Playwright)
 
-Use this checklist to verify system health.
+The dashboard ships with a full E2E test suite — **127 tests across 12 files**. Run these whenever you make significant changes to verify nothing is broken.
 
-### 8.1 Dashboard Pages
-- [ ] **Overview**: Stats cards load without error. Recent activity list is populated.
-- [ ] **Cold Calls**: Table displays seeded calls. Detail view shows transcript and AI summary.
-- [ ] **Companies**: Can add a new company, manage parent/child hierarchy. Inline editing works.
-- [ ] **Leads**: Filters (status, source) function correctly.
-- [ ] **Team**: Team members list loads.
-- [ ] **Notes**: Can create and edit a markdown note.
-- [ ] **Zoom Phone**: Verify settings toggle correctly and persist in localStorage.
-- [ ] **Power Dialer**:
-    - [ ] Paste a list of phone numbers into the Power Dialer panel.
-    - [ ] Start the dialer and verify it dials numbers sequentially.
-    - [ ] Test pause, resume, and stop functionality.
-    - [ ] Experiment with different "Call Gap" settings (negative, zero, positive) and observe behavior.
+### 8.1 First-Time Setup
 
-### 8.2 Transcriber Integration
-1. Place a test `.mp3` or `.wav` file in `tools/audio-recorder/recordings/`.
-2. Run the transcriber: `python tools/transcriber/transcribe_calls.py`
-3. Verify a new `Cold Call` record appears in the Dashboard with the transcript.
+```bash
+cd apps/dashboard
+
+# Copy and fill in test credentials
+cp .env.test.example .env.test
+
+# Install Playwright browser (first time only)
+npx playwright install chromium
+```
+
+Required values in `.env.test`:
+
+| Variable | Description |
+|----------|-------------|
+| `TEST_USER_EMAIL` | Dashboard login email |
+| `TEST_USER_PASSWORD` | Dashboard login password |
+| `TEST_PB_ADMIN_EMAIL` | PocketBase superadmin email |
+| `TEST_PB_ADMIN_PASSWORD` | PocketBase superadmin password |
+| `TEST_LIVE_CALLS` | Set `true` to enable real call tests (default: `false`) |
+
+### 8.2 Running Tests
+
+Make sure **Next.js** (`pnpm dev`) and **PocketBase** are running, then:
+
+```bash
+# Full suite
+pnpm test
+
+# Smoke tests only — fastest check (~2 min)
+pnpm test -- --grep @smoke
+
+# Individual suites
+pnpm test:auth        # Login / logout / auth guards
+pnpm test:companies   # Companies CRUD + inline edit
+pnpm test:calls       # Cold calls + phone numbers tab
+pnpm test:notes       # Notes full lifecycle
+pnpm test:settings    # All 8 settings sections
+
+# Visual / interactive modes
+pnpm test:ui          # Browser UI with live test runner
+pnpm test:headed      # Run with visible browser
+pnpm test:report      # View last HTML report
+```
+
+### 8.3 Test Coverage
+
+| Suite | What's verified |
+|-------|----------------|
+| Auth | Login, logout, session persistence, invalid credentials, route guards |
+| Overview | Stats cards, sidebar nav, all pages load without crash |
+| Companies | Search, filter, sort, inline edit, column toggle, detail page |
+| Cold Calls | Call log table, tabs, search, outcome filter, phone numbers tab |
+| Session | Start/pause/resume/end, metrics, power dialer, recording controls |
+| Session Logs | History, status filter, CSV export, admin mode |
+| Notes | Create, edit, search, archive, restore, soft-delete |
+| Actors / Team / Goals | Table display, column toggle, coming-soon state |
+| Recordings | Upload modal, file input, drag-drop zone |
+| Settings | Theme, density, timezone, notifications, Zoom integration, admin mode |
+| **Integration** | Session→CallLog, CallLog→Recording, Company→CallHistory, Follow-Up linkage |
+| **Live Calls** | Real Zoom Phone calls to public test lines (disabled by default) |
+
+### 8.4 Live Call Testing
+
+When `TEST_LIVE_CALLS=true`, the suite dials **5 public telecom test lines** to verify the full Zoom Phone → recording → call log pipeline:
+
+| Number | Location | Purpose |
+|--------|----------|---------|
+| 1 (804) 222-1111 | Richmond, VA | All-in-One: echo, DTMF, tone menu |
+| 1 (909) 390-0003 | Ontario, CA | Instant audio echo (latency test) |
+| 1 (800) 444-4444 | Toll-Free | Reads back your outbound Caller ID |
+| 1 (631) 791-8378 | New York, NY | Audio clarity test (CallCentric) |
+| 1 (206) 456-0649 | Seattle, WA | Echo + hold music (IPKall) |
+
+Run with `--headed` to monitor calls visually:
+```bash
+pnpm test:headed tests/12-live-call-flow.spec.ts
+```
+
+> **Full test documentation**: `apps/dashboard/tests/README.md`
+
+### 8.5 Manual Checklist (supplement to automated tests)
+
+- [ ] **Power Dialer**: Paste phone numbers → start → verify sequential dialing → test pause/resume/stop → try negative delay mode
+- [ ] **Transcriber**: Place an `.mp3` in `tools/audio-recorder/recordings/` → run `python tools/transcriber/transcribe_calls.py` → verify transcript appears in Dashboard
+- [ ] **Google Maps Scraper**: Open extension → scrape a restaurant page → verify company appears in `/companies`
 
 ---
 
@@ -242,4 +311,4 @@ Recommended architecture:
 - **Fix**: Run the seeder script (Step 4).
 
 ---
-*Last updated: January 2026*
+*Last updated: February 2026*

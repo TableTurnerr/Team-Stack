@@ -268,6 +268,37 @@ pnpm dev  # http://localhost:3000
 
 ---
 
+## 🧪 Automated Testing
+
+The dashboard has a full **Playwright E2E test suite** (127 tests across 12 files).
+
+```bash
+cd apps/dashboard
+
+# First-time setup
+cp .env.test.example .env.test   # fill in credentials
+npx playwright install chromium
+
+# Run all tests
+pnpm test
+
+# Smoke tests only (~2 min)
+pnpm test -- --grep @smoke
+
+# Interactive UI mode
+pnpm test:ui
+
+# Live call tests (real Zoom Phone calls to public test lines)
+# Set TEST_LIVE_CALLS=true in .env.test first
+pnpm test:headed tests/12-live-call-flow.spec.ts
+```
+
+Test coverage: auth, overview, companies, cold calls, session lifecycle, session logs, notes, actors, recordings, settings, and cross-component integration flows.
+
+> **Full test docs**: [`apps/dashboard/tests/README.md`](apps/dashboard/tests/README.md)
+
+---
+
 ## 📘 Related Documentation
 
 | Document | Purpose |

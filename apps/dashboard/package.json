@@ -1,13 +1,23 @@
 {
   "name": "dashboard",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "dev:https": "next dev --experimental-https",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:report": "playwright show-report",
+    "test:auth": "playwright test tests/01-auth.spec.ts",
+    "test:companies": "playwright test tests/03-companies.spec.ts",
+    "test:calls": "playwright test tests/04-cold-calls.spec.ts",
+    "test:notes": "playwright test tests/07-notes.spec.ts",
+    "test:settings": "playwright test tests/10-settings.spec.ts",
+    "test:smoke": "playwright test --grep @smoke"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -29,11 +39,13 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.0.0",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.182.0",
+    "dotenv": "^16.3.1",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.1.0",
     "tailwindcss": "^4.0.0",

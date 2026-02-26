@@ -3,31 +3,44 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { SignInPage } from '@/components/ui/sign-in';
+import { SignUpPage } from '@/components/ui/sign-up';
 
-export default function LoginPage() {
+export default function RegisterPage() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const { login, loginWithGoogle } = useAuth();
+    const { register, loginWithGoogle } = useAuth();
     const router = useRouter();
 
-    const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
+    const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setError('');
-        setIsLoading(true);
 
         const formData = new FormData(event.currentTarget);
+        const name = formData.get('name') as string;
         const email = formData.get('email') as string;
         const password = formData.get('password') as string;
+        const passwordConfirm = formData.get('passwordConfirm') as string;
+
+        if (password !== passwordConfirm) {
+            setError('Passwords do not match');
+            return;
+        }
+
+        if (password.length < 8) {
+            setError('Password must be at least 8 characters');
+            return;
+        }
+
+        setIsLoading(true);
 
         try {
-            await login(email, password);
+            await register(name, email, password, passwordConfirm);
             router.push('/');
         } catch (err: unknown) {
             if (err instanceof Error) {
-                setError(err.message || 'Invalid email or password');
+                setError(err.message || 'Failed to create account');
             } else {
-                setError('Invalid email or password');
+                setError('Failed to create account');
             }
         } finally {
             setIsLoading(false);
@@ -42,7 +55,6 @@ export default function LoginPage() {
             await loginWithGoogle();
             router.push('/');
         } catch (err: unknown) {
-            console.error('Google Sign In Error Page Log:', err);
             if (err instanceof Error) {
                 setError(err.message || 'Failed to sign in with Google');
             } else {
@@ -53,23 +65,17 @@ export default function LoginPage() {
         }
     };
 
-    const handleResetPassword = () => {
-        // TODO: Implement password reset flow
-        alert('Password reset functionality coming soon!');
-    };
-
-    const handleCreateAccount = () => {
-        router.push('/register');
+    const handleSignIn = () => {
+        router.push('/login');
     };
 
     return (
-        <SignInPage
+        <SignUpPage
             title={<span className="font-light tracking-tighter">Tableturnerr <span className="font-semibold">CRM</span></span>}
-            description="Sign in to access your dashboard and manage your business"
-            onSignIn={handleSignIn}
+            description="Create your account to get started"
+            onSignUp={handleSignUp}
             onGoogleSignIn={handleGoogleSignIn}
-            onResetPassword={handleResetPassword}
-            onCreateAccount={handleCreateAccount}
+            onSignIn={handleSignIn}
             isLoading={isLoading}
             error={error}
         />

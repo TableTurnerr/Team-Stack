@@ -31,6 +31,8 @@ import { TimezoneClock } from './timezone-clock';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 
 import { TimezoneSearch } from './timezone-search';
+import dashboardPkg from '../../package.json';
+import rootPkg from '../../../../package.json';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -122,6 +124,9 @@ export function Sidebar() {
           <div>
             <span className="font-semibold text-base tracking-tight">Tableturnerr</span>
             <p className="text-[10px] text-[var(--muted)] uppercase tracking-wider">CRM Platform</p>
+            <p className="text-[9px] text-[var(--muted)] mt-0.5 font-mono">
+              app v{dashboardPkg.version} · root v{rootPkg.version}
+            </p>
           </div>
         </div>
 

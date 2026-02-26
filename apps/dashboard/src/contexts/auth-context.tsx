@@ -19,6 +19,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     login: (email: string, password: string) => Promise<void>;
     loginWithGoogle: () => Promise<void>;
+    register: (name: string, email: string, password: string, passwordConfirm: string) => Promise<void>;
     logout: () => void;
 }
 
@@ -115,6 +116,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     };
 
+    const register = async (name: string, email: string, password: string, passwordConfirm: string) => {
+        try {
+            await pb.collection('users').create({
+                name,
+                email,
+                password,
+                passwordConfirm,
+                role: 'member',
+                status: 'offline',
+            });
+            // Auto-login after registration
+            await login(email, password);
+        } catch (error) {
+            console.error('Registration failed:', error);
+            throw error;
+        }
+    };
+
     const loginWithGoogle = async () => {
         try {
             const authData = await pb.collection('users').authWithOAuth2({ provider: 'google' });
@@ -173,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 isAuthenticated: !!user,
                 login,
                 loginWithGoogle,
+                register,
                 logout,
             }}
         >

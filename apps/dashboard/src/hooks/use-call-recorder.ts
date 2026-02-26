@@ -330,6 +330,10 @@ export function useCallRecorder(
 
         chunksRef.current = [];
 
+        // Capture the phone number now so the onstop handler uses the value at
+        // recording-start time, even if the caller clears the ref before the call ends.
+        const capturedPhone = phoneNumberRef.current;
+
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
             ? 'audio/webm;codecs=opus'
             : 'audio/webm';
@@ -376,7 +380,9 @@ export function useCallRecorder(
             }
 
             // Normal mode: upload immediately
-            const finalPhone = phoneNumberRef.current;
+            // Use the phone number captured when recording started (not the ref, which may
+            // have been cleared by the caller between startRecording and onstop firing).
+            const finalPhone = capturedPhone;
 
             if (blob.size > 0 && durationSec > 1) {
                 try {
@@ -447,6 +453,10 @@ export function useCallRecorder(
      * Exits deferred mode after uploading.
      */
     const submitDeferredRecording = useCallback(async () => {
+        // Capture phone number immediately (synchronously) before any async operations
+        // that might allow callers to clear the ref (e.g. setContextPhoneNumber(''))
+        const finalPhone = phoneNumberRef.current;
+
         // If currently recording, stop and wait for onstop to accumulate the final segment
         if (mediaRecorderRef.current?.state === 'recording') {
             await new Promise<void>(resolve => {
@@ -471,7 +481,6 @@ export function useCallRecorder(
 
         // Merge all segments into one blob
         const merged = new Blob(segments, { type: mimeType });
-        const finalPhone = phoneNumberRef.current;
 
         if (merged.size > 0 && totalDuration > 1) {
             try {

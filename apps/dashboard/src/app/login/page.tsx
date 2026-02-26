@@ -59,8 +59,7 @@ export default function LoginPage() {
     };
 
     const handleCreateAccount = () => {
-        // TODO: Implement account creation flow
-        alert('Account creation functionality coming soon!');
+        router.push('/register');
     };
 
     return (

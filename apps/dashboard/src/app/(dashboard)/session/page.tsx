@@ -589,11 +589,11 @@ export default function SessionPage() {
     // Save call
     // ---------------------------------------------------------------------------
     const handleSaveCall = useCallback(async (data: CallFormData) => {
-        setContextPhoneNumber(''); // Clear phone number in context
-
         if (!session || !user) return;
 
-        // Handle recording based on outcome
+        // Handle recording based on outcome.
+        // IMPORTANT: submit/discard the recording BEFORE clearing the phone number
+        // context ref, so the upload captures the correct phone number.
         if (data.callOutcome === 'No Answer') {
             // Discard recording — No Answer calls should not be saved
             discardDeferredRecording();
@@ -601,6 +601,9 @@ export default function SessionPage() {
             // Submit the (potentially merged) deferred recording
             submitDeferredRecording().catch(err => console.error('Failed to submit recording:', err));
         }
+
+        // Clear phone number in context only after the recording upload has been initiated
+        setContextPhoneNumber('');
 
         try {
             setSavingCall(true);

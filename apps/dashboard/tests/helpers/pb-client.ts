@@ -37,7 +37,9 @@ export async function cleanupByPrefix(
   prefix: string
 ): Promise<number> {
   const pb = await getAdminPb();
-  const escapedPrefix = prefix.replace(/'/g, "\\'");
+  const escapedPrefix = prefix
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, '\\\'');
   try {
     const records = await pb.collection(collection).getFullList({
       filter: `${field} ~ '${escapedPrefix}'`,

@@ -1,10 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Zap, ChevronDown, ChevronUp, Play, Pause, Square, Check, RotateCcw } from 'lucide-react';
 
+export interface DialerEntry {
+    number: string;
+    company?: string;
+}
+
 interface PowerDialerPanelProps {
-    queue: string[];
+    queue: DialerEntry[];
     currentIndex: number;
     active: boolean;
     paused: boolean;
@@ -14,16 +19,32 @@ interface PowerDialerPanelProps {
     onResume: () => void;
     onStop: () => void;
     onDelayChange: (delay: number) => void;
-    onQueueLoad: (numbers: string[]) => void;
+    onQueueLoad: (entries: DialerEntry[]) => void;
     disabled?: boolean;
     canStart?: boolean;
 }
 
-function parsePhoneNumbers(input: string): string[] {
-    return input
-        .split(/[\n,;]+/)
-        .map(s => s.trim())
-        .filter(s => s.replace(/\D/g, '').length >= 7);
+function parseDialerEntries(input: string): DialerEntry[] {
+    const lines = input.split(/[\n;]+/);
+    const entries: DialerEntry[] = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const commaIdx = trimmed.indexOf(',');
+        let number: string;
+        let company: string | undefined;
+        if (commaIdx !== -1) {
+            number = trimmed.slice(0, commaIdx).trim();
+            const afterComma = trimmed.slice(commaIdx + 1).trim();
+            if (afterComma) company = afterComma;
+        } else {
+            number = trimmed;
+        }
+        if (number.replace(/\D/g, '').length >= 7) {
+            entries.push({ number, company });
+        }
+    }
+    return entries;
 }
 
 function formatDelay(d: number): string {
@@ -49,24 +70,37 @@ export function PowerDialerPanel({
 }: PowerDialerPanelProps) {
     const [expanded, setExpanded] = useState(true);
     const [inputMode, setInputMode] = useState(queue.length === 0);
-    const [rawInput, setRawInput] = useState('');
-    const [parsedPreview, setParsedPreview] = useState<string[]>([]);
+    const [rawInput, setRawInput] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return localStorage.getItem('power-dialer-raw-input') ?? '';
+    });
+    const [parsedPreview, setParsedPreview] = useState<DialerEntry[]>([]);
+
+    // Persist draft input across page refreshes
+    useEffect(() => {
+        if (rawInput) {
+            localStorage.setItem('power-dialer-raw-input', rawInput);
+        } else {
+            localStorage.removeItem('power-dialer-raw-input');
+        }
+    }, [rawInput]);
 
     const remaining = Math.max(0, queue.length - currentIndex);
     const isComplete = queue.length > 0 && currentIndex >= queue.length;
 
     const handleParseInput = () => {
-        const numbers = parsePhoneNumbers(rawInput);
-        setParsedPreview(numbers);
+        const entries = parseDialerEntries(rawInput);
+        setParsedPreview(entries);
     };
 
     const handleLoadQueue = () => {
-        const numbers = parsePhoneNumbers(rawInput);
-        if (numbers.length > 0) {
-            onQueueLoad(numbers);
+        const entries = parseDialerEntries(rawInput);
+        if (entries.length > 0) {
+            onQueueLoad(entries);
             setInputMode(false);
             setRawInput('');
             setParsedPreview([]);
+            localStorage.removeItem('power-dialer-raw-input');
         }
     };
 
@@ -173,7 +207,7 @@ export function PowerDialerPanel({
                                 <textarea
                                     value={rawInput}
                                     onChange={e => { setRawInput(e.target.value); setParsedPreview([]); }}
-                                    placeholder={`One per line:\n+1 (555) 123-4567\n+1 (555) 987-6543\n5551112222`}
+                                    placeholder={`One per line (company name optional):\n+1 (555) 123-4567, Acme Corp\n+1 (555) 987-6543, McDonalds\n5551112222`}
                                     rows={5}
                                     className="w-full p-3 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30 placeholder:text-[var(--muted)]/40"
                                 />
@@ -185,9 +219,15 @@ export function PowerDialerPanel({
                                         {parsedPreview.length} number{parsedPreview.length !== 1 ? 's' : ''} found:
                                     </p>
                                     <div className="max-h-28 overflow-y-auto space-y-0.5">
-                                        {parsedPreview.map((num, i) => (
+                                        {parsedPreview.map((entry, i) => (
                                             <p key={i} className="text-xs font-mono text-[var(--foreground)]">
-                                                <span className="text-[var(--muted)] mr-1.5">{i + 1}.</span>{num}
+                                                <span className="text-[var(--muted)] mr-1.5">{i + 1}.</span>
+                                                {entry.number}
+                                                {entry.company && (
+                                                    <span className="text-[var(--muted)] ml-1.5 not-italic font-sans text-[11px]">
+                                                        · {entry.company}
+                                                    </span>
+                                                )}
                                             </p>
                                         ))}
                                     </div>
@@ -215,7 +255,7 @@ export function PowerDialerPanel({
                                             onClick={handleLoadQueue}
                                             className="flex-1 py-2.5 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all"
                                         >
-                                            Load {parsedPreview.length} Numbers →
+                                            Load {parsedPreview.length} {parsedPreview.length !== 1 ? 'Numbers' : 'Number'} →
                                         </button>
                                     </>
                                 )}
@@ -241,7 +281,7 @@ export function PowerDialerPanel({
                                     )}
                                 </div>
                                 <div className="max-h-44 overflow-y-auto rounded-xl border border-[var(--card-border)] divide-y divide-[var(--card-border)]">
-                                    {queue.map((num, i) => {
+                                    {queue.map((entry, i) => {
                                         const isDone = i < currentIndex;
                                         const isCurrent = i === currentIndex;
                                         return (
@@ -254,8 +294,13 @@ export function PowerDialerPanel({
                                                 }`}
                                             >
                                                 <span className="w-5 text-right text-[var(--muted)]/60 shrink-0 text-[10px]">{i + 1}.</span>
-                                                <span className={`flex-1 ${isDone ? 'line-through text-[var(--muted)]' : isCurrent ? 'font-semibold text-[var(--foreground)]' : 'text-[var(--muted)]'}`}>
-                                                    {num}
+                                                <span className={`flex-1 min-w-0 ${isDone ? 'line-through text-[var(--muted)]' : isCurrent ? 'font-semibold text-[var(--foreground)]' : 'text-[var(--muted)]'}`}>
+                                                    {entry.number}
+                                                    {entry.company && (
+                                                        <span className={`ml-1.5 font-sans text-[10px] not-italic ${isDone ? '' : 'text-[var(--muted)]'}`}>
+                                                            · {entry.company}
+                                                        </span>
+                                                    )}
                                                 </span>
                                                 {isDone && <Check size={10} className="text-[var(--success)] shrink-0" />}
                                                 {isCurrent && (

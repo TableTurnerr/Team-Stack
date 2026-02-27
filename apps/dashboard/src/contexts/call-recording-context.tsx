@@ -18,8 +18,12 @@ interface CallRecordingContextType {
     discardRecording: () => void;
     /** Enter deferred mode — recordings accumulate in memory instead of auto-uploading */
     enterDeferredMode: () => void;
-    /** Merge all deferred segments and upload as a single file */
-    submitDeferredRecording: () => Promise<void>;
+    /**
+     * Merge all deferred segments and upload as a single file.
+     * @param callLogId Optional call log ID to link the recording to.
+     * @returns The created recording ID, or null if nothing was uploaded.
+     */
+    submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
     /** Discard all deferred segments without uploading */
     discardDeferredRecording: () => void;
     /** Whether deferred mode is currently active */

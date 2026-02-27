@@ -24,7 +24,7 @@ import { LastCallPreview } from './last-call-preview';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
-import { PowerDialerPanel } from './power-dialer-panel';
+import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { useFollowUps } from '@/contexts/follow-up-context';
 
 function formatDuration(seconds: number): string {
@@ -129,7 +129,7 @@ export default function SessionPage() {
     // ---------------------------------------------------------------------------
     // Power Dialer state
     // ---------------------------------------------------------------------------
-    const [powerDialerQueue, setPowerDialerQueue] = useState<string[]>([]);
+    const [powerDialerQueue, setPowerDialerQueue] = useState<DialerEntry[]>([]);
     const [powerDialerIndex, setPowerDialerIndex] = useState(0);
     const [powerDialerActive, setPowerDialerActive] = useState(false);
     const [powerDialerPaused, setPowerDialerPaused] = useState(false);
@@ -139,7 +139,7 @@ export default function SessionPage() {
     const powerDialerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Refs for reading power dialer state inside effects/timers without stale closures
-    const powerDialerQueueRef = useRef<string[]>(powerDialerQueue);
+    const powerDialerQueueRef = useRef<DialerEntry[]>(powerDialerQueue);
     const powerDialerIndexRef = useRef(powerDialerIndex);
     const powerDialerActiveRef = useRef(powerDialerActive);
     const powerDialerPausedRef = useRef(powerDialerPaused);
@@ -333,7 +333,7 @@ export default function SessionPage() {
             if (!powerDialerActiveRef.current || powerDialerPausedRef.current) return;
             setPowerDialerIndex(nextIdx);
             // handleDial is captured via ref to always use the latest version
-            handleDialRef.current(powerDialerQueueRef.current[nextIdx]);
+            handleDialRef.current(powerDialerQueueRef.current[nextIdx].number);
         }, delayMs);
     }, [callStatus, session?.paused_at]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -591,18 +591,14 @@ export default function SessionPage() {
     const handleSaveCall = useCallback(async (data: CallFormData) => {
         if (!session || !user) return;
 
-        // Handle recording based on outcome.
-        // IMPORTANT: submit/discard the recording BEFORE clearing the phone number
-        // context ref, so the upload captures the correct phone number.
+        // For No Answer, discard immediately (no recording to save).
+        // For other outcomes, we capture the phone now and submit after call log creation.
         if (data.callOutcome === 'No Answer') {
-            // Discard recording — No Answer calls should not be saved
             discardDeferredRecording();
-        } else {
-            // Submit the (potentially merged) deferred recording
-            submitDeferredRecording().catch(err => console.error('Failed to submit recording:', err));
         }
 
-        // Clear phone number in context only after the recording upload has been initiated
+        // Clear phone number in context now that we've captured it inside submitDeferredRecording
+        // (it captures phoneNumberRef.current synchronously at call start, so clearing here is safe).
         setContextPhoneNumber('');
 
         try {
@@ -680,6 +676,19 @@ export default function SessionPage() {
                     ? data.callbackEvents
                     : undefined,
             });
+
+            // Submit deferred recording NOW that we have the call log ID, so the recording
+            // is linked to this specific call log and has_recording is set correctly.
+            if (data.callOutcome !== 'No Answer') {
+                submitDeferredRecording(callLog.id).then(recordingId => {
+                    if (recordingId) {
+                        // Mark the call log as having a recording
+                        pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
+                            has_recording: true,
+                        }).catch(err => console.error('Failed to mark has_recording:', err));
+                    }
+                }).catch(err => console.error('Failed to submit recording:', err));
+            }
 
             // Update session performance totals based on this call
             const sessionUpdates: Partial<ColdCallingSession> = {};
@@ -775,7 +784,7 @@ export default function SessionPage() {
                     setPowerDialerIndex(nextIdx);
                     if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
                     const delayMs = powerDialerDelayRef.current * 1000;
-                    const nextNumber = powerDialerQueueRef.current[nextIdx];
+                    const nextNumber = powerDialerQueueRef.current[nextIdx].number;
                     powerDialerTimerRef.current = setTimeout(() => {
                         handleDialRef.current(nextNumber);
                     }, delayMs);
@@ -819,7 +828,7 @@ export default function SessionPage() {
         if (callStatus === 'ringing' || callStatus === 'connected') return;
         setPowerDialerActive(true);
         setPowerDialerPaused(false);
-        handleDial(powerDialerQueue[powerDialerIndex]);
+        handleDial(powerDialerQueue[powerDialerIndex].number);
     }, [powerDialerQueue, powerDialerIndex, hasUnsavedCall, callStatus, handleDial]);
 
     const handlePowerDialerPause = useCallback(() => {
@@ -845,7 +854,7 @@ export default function SessionPage() {
         }
     }, []);
 
-    const handlePowerDialerQueueLoad = useCallback((numbers: string[]) => {
+    const handlePowerDialerQueueLoad = useCallback((numbers: DialerEntry[]) => {
         setPowerDialerQueue(numbers);
         setPowerDialerIndex(0);
         setPowerDialerActive(false);

@@ -201,6 +201,19 @@ Required values in `.env.test`:
 
 ### 8.2 Running Tests
 
+#### Interactive CLI Menu (recommended)
+
+The easiest way to run tests is the built-in menu — no need to remember any commands:
+
+```bash
+cd apps/dashboard
+pnpm test:menu
+```
+
+This opens an interactive terminal UI where you can pick test suites, toggle headed mode, view the HTML report, clean up test data, and manage configuration — all from one place.
+
+#### Direct Commands
+
 Make sure **Next.js** (`pnpm dev`) and **PocketBase** are running, then:
 
 ```bash

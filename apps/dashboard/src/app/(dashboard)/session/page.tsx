@@ -390,7 +390,7 @@ export default function SessionPage() {
             // handleDial is captured via ref to always use the latest version
             handleDialRef.current(entry.number, entry.company);
         }, delayMs);
-    }, [callStatus, session?.paused_at]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [callStatus, session?.paused_at]);
 
     // Cleanup power dialer timer on unmount
     useEffect(() => {
@@ -611,7 +611,7 @@ export default function SessionPage() {
         }
 
         dialNumber(phoneNumber);
-    }, [dialNumber, isSessionActive, startRecording, enterDeferredMode, setContextPhoneNumber, isDialing, callStatus]);
+    }, [dialNumber, isSessionActive, startRecording, enterDeferredMode, setContextPhoneNumber, isDialing, callStatus, session?.paused_at]);
 
     // Ref so power dialer timers always call the latest handleDial (avoids stale closures)
     const handleDialRef = useRef(handleDial);

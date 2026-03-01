@@ -7,38 +7,38 @@
  */
 
 import { createInterface } from 'readline';
-import { spawn }           from 'child_process';
+import { spawn } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
-import { fileURLToPath }   from 'url';
+import { fileURLToPath } from 'url';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const ROOT  = resolve(__dir, '..'); // apps/dashboard/
+const ROOT = resolve(__dir, '..'); // apps/dashboard/
 
 // ─── ANSI colours ─────────────────────────────────────────────────────────────
 const C = {
-  reset:   '\x1b[0m',
-  bold:    '\x1b[1m',
-  dim:     '\x1b[2m',
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
   // text
-  white:   '\x1b[97m',
-  gray:    '\x1b[90m',
-  cyan:    '\x1b[96m',
-  green:   '\x1b[92m',
-  yellow:  '\x1b[93m',
-  red:     '\x1b[91m',
-  blue:    '\x1b[94m',
+  white: '\x1b[97m',
+  gray: '\x1b[90m',
+  cyan: '\x1b[96m',
+  green: '\x1b[92m',
+  yellow: '\x1b[93m',
+  red: '\x1b[91m',
+  blue: '\x1b[94m',
   magenta: '\x1b[95m',
   // bg
-  bgDark:  '\x1b[48;5;235m',
-  bgBlue:  '\x1b[48;5;17m',
+  bgDark: '\x1b[48;5;235m',
+  bgBlue: '\x1b[48;5;17m',
 };
 
 const W = 62; // box width
 
 // ─── Drawing helpers ──────────────────────────────────────────────────────────
 
-const pad  = (s, n) => s + ' '.repeat(Math.max(0, n - stripAnsi(s).length));
+const pad = (s, n) => s + ' '.repeat(Math.max(0, n - stripAnsi(s).length));
 const line = (char = '─', w = W) => char.repeat(w);
 
 function stripAnsi(str) {
@@ -52,7 +52,7 @@ function box(title, rows, footer) {
   lines.push(`${C.blue}╔${line('═', inner)}╗${C.reset}`);
 
   if (title) {
-    const t    = `${C.bold}${C.white} ${title} ${C.reset}`;
+    const t = `${C.bold}${C.white} ${title} ${C.reset}`;
     const tLen = stripAnsi(t);
     const pad1 = Math.floor((inner - tLen.length + 2) / 2); // +2 for the spaces
     const pad2 = inner - tLen.length + 2 - pad1;
@@ -65,7 +65,7 @@ function box(title, rows, footer) {
       lines.push(`${C.blue}╠${line('─', inner)}╣${C.reset}`);
     } else {
       const content = ` ${row} `;
-      const bare    = stripAnsi(content);
+      const bare = stripAnsi(content);
       const padding = inner - bare.length;
       lines.push(`${C.blue}║${C.reset}${content}${' '.repeat(Math.max(0, padding))}${C.blue}║${C.reset}`);
     }
@@ -73,7 +73,7 @@ function box(title, rows, footer) {
 
   if (footer) {
     lines.push(`${C.blue}╠${line('─', inner)}╣${C.reset}`);
-    const f    = ` ${footer} `;
+    const f = ` ${footer} `;
     const fLen = stripAnsi(f);
     lines.push(`${C.blue}║${C.reset}${f}${' '.repeat(Math.max(0, inner - fLen.length))}${C.blue}║${C.reset}`);
   }
@@ -83,9 +83,9 @@ function box(title, rows, footer) {
 }
 
 function label(key, text, hint = '') {
-  const k    = `${C.bgBlue}${C.white}${C.bold} ${key} ${C.reset}`;
-  const t    = `${C.white}${text}${C.reset}`;
-  const h    = hint ? `  ${C.dim}${hint}${C.reset}` : '';
+  const k = `${C.bgBlue}${C.white}${C.bold} ${key} ${C.reset}`;
+  const t = `${C.white}${text}${C.reset}`;
+  const h = hint ? `  ${C.dim}${hint}${C.reset}` : '';
   return `${k} ${t}${h}`;
 }
 
@@ -115,7 +115,7 @@ function readEnvTest() {
 }
 
 function envStatus() {
-  const env     = readEnvTest();
+  const env = readEnvTest();
   const envPath = resolve(ROOT, '.env.test');
   const hasFile = existsSync(envPath);
 
@@ -125,13 +125,14 @@ function envStatus() {
 
   return {
     hasFile,
-    email:        env.TEST_USER_EMAIL,
-    pbAdmin:      env.TEST_PB_ADMIN_EMAIL,
-    pbUrl:        env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8090',
-    liveCalls:    env.TEST_LIVE_CALLS === 'true',
+    email: env.TEST_USER_EMAIL,
+    pbAdmin: env.TEST_PB_ADMIN_EMAIL,
+    pbUrl: env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8090',
+    liveCalls: env.TEST_LIVE_CALLS === 'true',
     callDuration: env.TEST_CALL_DURATION_SEC || '10',
-    emailOk:      hasFile && check(env.TEST_USER_EMAIL),
-    pbOk:         hasFile && check(env.TEST_PB_ADMIN_EMAIL),
+    workers: env.TEST_WORKERS || 'default (50%)',
+    emailOk: hasFile && check(env.TEST_USER_EMAIL),
+    pbOk: hasFile && check(env.TEST_PB_ADMIN_EMAIL),
   };
 }
 
@@ -165,8 +166,8 @@ async function runCommand(args, { cwd = ROOT, env = {} } = {}) {
   return new Promise((resolve) => {
     const isWin = process.platform === 'win32';
     const shell = isWin ? 'cmd' : '/bin/bash';
-    const flag  = isWin ? '/c' : '-c';
-    const cmd   = `${PW} test ${args}`.trim();
+    const flag = isWin ? '/c' : '-c';
+    const cmd = `${PW} test ${args}`.trim();
 
     console.log(`\n${C.dim}▶ ${cmd}${C.reset}\n`);
 
@@ -187,20 +188,20 @@ async function runCommand(args, { cwd = ROOT, env = {} } = {}) {
 async function openReport() {
   const isWin = process.platform === 'win32';
   const shell = isWin ? 'cmd' : '/bin/bash';
-  const flag  = isWin ? '/c' : '-c';
+  const flag = isWin ? '/c' : '-c';
   const child = spawn(shell, [flag, `${PW} show-report`], {
     cwd: ROOT,
     stdio: 'inherit',
   });
-  child.on('close', () => {});
+  child.on('close', () => { });
 }
 
 // ─── PocketBase cleanup ───────────────────────────────────────────────────────
 
 async function runCleanup() {
-  const env    = readEnvTest();
-  const pbUrl  = env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8090';
-  const email  = env.TEST_PB_ADMIN_EMAIL;
+  const env = readEnvTest();
+  const pbUrl = env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8090';
+  const email = env.TEST_PB_ADMIN_EMAIL;
   const passwd = env.TEST_PB_ADMIN_PASSWORD;
 
   if (!email || !passwd) {
@@ -216,7 +217,7 @@ async function runCleanup() {
 import PocketBase from '${resolve(ROOT, 'node_modules/pocketbase/dist/pocketbase.es.mjs').replace(/\\/g, '/')}';
 
 const pb = new PocketBase('${pbUrl}');
-await pb.admins.authWithPassword('${email}', '${passwd}');
+await pb.collection('_superusers').authWithPassword('${email}', '${passwd}');
 
 const PREFIX = 'TEST_PW_';
 
@@ -282,24 +283,24 @@ async function ask(rl, prompt) {
 // ─── SCREENS ─────────────────────────────────────────────────────────────────
 
 const SUITES = [
-  { key: '1',  file: 'tests/01-auth.spec.ts',            label: 'Authentication',              tag: '@smoke' },
-  { key: '2',  file: 'tests/02-overview.spec.ts',         label: 'Overview / Dashboard',        tag: '@smoke' },
-  { key: '3',  file: 'tests/03-companies.spec.ts',        label: 'Companies (CRUD + inline edit)'             },
-  { key: '4',  file: 'tests/04-cold-calls.spec.ts',       label: 'Cold Calls + Phone Numbers'                 },
-  { key: '5',  file: 'tests/05-session.spec.ts',          label: 'Session (lifecycle + dialer)'               },
-  { key: '6',  file: 'tests/06-session-logs.spec.ts',     label: 'Session Logs'                               },
-  { key: '7',  file: 'tests/07-notes.spec.ts',            label: 'Notes (CRUD + archive/delete)'              },
-  { key: '8',  file: 'tests/08-actors-team-goals.spec.ts',label: 'Actors / Team / Goals'                      },
-  { key: '9',  file: 'tests/09-recordings.spec.ts',       label: 'Recordings'                                 },
-  { key: '10', file: 'tests/10-settings.spec.ts',         label: 'Settings (all 8 sections)'                  },
-  { key: '11', file: 'tests/11-integration.spec.ts',      label: 'Integration (cross-component)'              },
-  { key: '12', file: 'tests/12-live-call-flow.spec.ts',   label: 'Live Call Flow',              live: true    },
+  { key: '1', file: 'tests/01-auth.spec.ts', label: 'Authentication', tag: '@smoke' },
+  { key: '2', file: 'tests/02-overview.spec.ts', label: 'Overview / Dashboard', tag: '@smoke' },
+  { key: '3', file: 'tests/03-companies.spec.ts', label: 'Companies (CRUD + inline edit)' },
+  { key: '4', file: 'tests/04-cold-calls.spec.ts', label: 'Cold Calls + Phone Numbers' },
+  { key: '5', file: 'tests/05-session.spec.ts', label: 'Session (lifecycle + dialer)' },
+  { key: '6', file: 'tests/06-session-logs.spec.ts', label: 'Session Logs' },
+  { key: '7', file: 'tests/07-notes.spec.ts', label: 'Notes (CRUD + archive/delete)' },
+  { key: '8', file: 'tests/08-actors-team-goals.spec.ts', label: 'Actors / Team / Goals' },
+  { key: '9', file: 'tests/09-recordings.spec.ts', label: 'Recordings' },
+  { key: '10', file: 'tests/10-settings.spec.ts', label: 'Settings (all 8 sections)' },
+  { key: '11', file: 'tests/11-integration.spec.ts', label: 'Integration (cross-component)' },
+  { key: '12', file: 'tests/12-live-call-flow.spec.ts', label: 'Live Call Flow', live: true },
 ];
 
 function drawMain() {
-  const st  = envStatus();
+  const st = envStatus();
   const now = new Date().toLocaleTimeString();
-  const envOk   = st.hasFile;
+  const envOk = st.hasFile;
   const envBadge = envOk
     ? `${C.green}✓ .env.test found${C.reset}`
     : `${C.red}✗ .env.test missing — run Setup first${C.reset}`;
@@ -308,21 +309,21 @@ function drawMain() {
     `${C.dim}${now}  ${envBadge}${C.reset}`,
     null,
     sectionHeader('  QUICK RUN'),
-    label('1', 'All Tests',                    '~8–15 min'),
-    label('2', 'Smoke Tests Only',             '~2 min · @smoke tag'),
-    label('3', 'Specific Suite…',              'pick one file'),
+    label('1', 'All Tests', '~8–15 min'),
+    label('2', 'Smoke Tests Only', '~2 min · @smoke tag'),
+    label('3', 'Specific Suite…', 'pick one file'),
     null,
     sectionHeader('  MODES'),
-    label('4', 'Headed Mode',                  'visible browser'),
-    label('5', 'Interactive UI Mode',          'Playwright GUI'),
-    label('6', 'Live Call Tests',              st.liveCalls
+    label('4', 'Headed Mode', 'visible browser'),
+    label('5', 'Interactive UI Mode', 'Playwright GUI'),
+    label('6', 'Live Call Tests', st.liveCalls
       ? `${C.green}enabled${C.reset}` : `${C.gray}disabled — toggle in Config${C.reset}`),
     null,
     sectionHeader('  REPORTS & TOOLS'),
     label('7', 'View Last HTML Report'),
-    label('8', 'Clean Up TEST_PW_ Data',       'removes test entries from DB'),
-    label('9', 'Configuration',                '.env.test values'),
-    label('0', 'First-Time Setup',             'env file + browser install'),
+    label('8', 'Clean Up TEST_PW_ Data', 'removes test entries from DB'),
+    label('9', 'Configuration', '.env.test values'),
+    label('0', 'First-Time Setup', 'env file + browser install'),
     null,
     label('Q', 'Quit'),
   ];
@@ -349,11 +350,9 @@ function drawSuiteMenu() {
 }
 
 function drawConfig() {
-  const st  = envStatus();
+  const st = envStatus();
   const yes = `${C.green}Yes${C.reset}`;
-  const no  = `${C.red}No${C.reset}`;
-
-  const mask = (v) => v ? v.replace(/.(?=.{4})/g, '•') : `${C.red}(not set)${C.reset}`;
+  const no = `${C.red}No${C.reset}`;
 
   const rows = [
     sectionHeader('  .env.test'),
@@ -362,25 +361,65 @@ function drawConfig() {
     ` PB admin email:    ${C.cyan}${st.pbAdmin || `${C.red}(not set)`}${C.reset}`,
     ` PocketBase URL:    ${C.cyan}${st.pbUrl}${C.reset}`,
     null,
+    sectionHeader('  PARALLELISM'),
+    ` Workers:           ${C.cyan}${st.workers}${C.reset}  ${C.dim}(TEST_WORKERS)${C.reset}`,
+    null,
     sectionHeader('  LIVE CALLS'),
     ` Enabled:           ${st.liveCalls ? yes : no}`,
     ` Call duration:     ${C.cyan}${st.callDuration}s${C.reset}`,
     null,
     sectionHeader('  AUTH CACHE'),
     ` Auth state file:   ${existsSync(resolve(__dir, '.auth/user.json'))
-        ? `${C.green}exists (cached)${C.reset}`
-        : `${C.yellow}not yet created${C.reset}`}`,
+      ? `${C.green}exists (cached)${C.reset}`
+      : `${C.yellow}not yet created${C.reset}`}`,
     null,
-    ` Edit: ${C.dim}${resolve(ROOT, '.env.test')}${C.reset}`,
+    sectionHeader('  OPTIONS'),
+    label('W', 'Change Worker Count'),
+    label('B', 'Back'),
   ];
 
   clearScreen();
   console.log(box('  Configuration', rows));
+  process.stdout.write(`\n${C.bold}${C.white}Select: ${C.reset}`);
+}
+
+async function updateEnv(key, value) {
+  const envPath = resolve(ROOT, '.env.test');
+  if (!existsSync(envPath)) return;
+  let content = readFileSync(envPath, 'utf8');
+  const regex = new RegExp(`^${key}=.*`, 'm');
+  if (regex.test(content)) {
+    content = content.replace(regex, `${key}=${value}`);
+  } else {
+    content += `\n${key}=${value}\n`;
+  }
+  const { writeFileSync } = await import('fs');
+  writeFileSync(envPath, content.trim() + '\n');
+}
+
+async function handleConfig(rl) {
+  let inConfig = true;
+  while (inConfig) {
+    drawConfig();
+    const choice = (await ask(rl, '')).trim().toLowerCase();
+
+    if (choice === 'b' || choice === '') {
+      inConfig = false;
+    } else if (choice === 'w') {
+      process.stdout.write(`\nEnter number of workers (e.g. 1, 4, 8) or '50%': `);
+      const val = (await ask(rl, '')).trim();
+      if (val) {
+        await updateEnv('TEST_WORKERS', val);
+        console.log(`${C.green}✓ Updated TEST_WORKERS to ${val}${C.reset}`);
+        await pause(rl);
+      }
+    }
+  }
 }
 
 async function drawSetup(rl) {
   clearScreen();
-  const envSrc  = resolve(ROOT, '.env.test.example');
+  const envSrc = resolve(ROOT, '.env.test.example');
   const envDest = resolve(ROOT, '.env.test');
   const { copyFileSync } = await import('fs');
 
@@ -423,10 +462,15 @@ async function drawSetup(rl) {
 // ─── MAIN LOOP ────────────────────────────────────────────────────────────────
 
 async function main() {
+  // On Windows with pnpm, stdin may not be flagged as a TTY even in an
+  // interactive terminal.  resume() keeps the stream open; terminal:true
+  // tells readline to treat it as interactive regardless of isTTY.
+  process.stdin.resume();
+
   const rl = createInterface({
-    input:  process.stdin,
+    input: process.stdin,
     output: process.stdout,
-    terminal: !!process.stdout.isTTY,
+    terminal: true,
   });
 
   // Ensure clean exit on Ctrl+C
@@ -499,7 +543,7 @@ async function main() {
           clearScreen();
 
           const extraFlags = headed === 'y' ? '--headed' : '';
-          const liveEnv    = suite.live ? { TEST_LIVE_CALLS: 'true' } : {};
+          const liveEnv = suite.live ? { TEST_LIVE_CALLS: 'true' } : {};
           const code = await runCommand(`${suite.file} ${extraFlags}`.trim(), { env: liveEnv });
 
           console.log(code === 0
@@ -607,8 +651,7 @@ async function main() {
 
       // ── Configuration ──────────────────────────────────────────────────────
       case '9': {
-        drawConfig();
-        await pause(rl);
+        await handleConfig(rl);
         break;
       }
 

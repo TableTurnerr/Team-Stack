@@ -233,7 +233,7 @@ export class CRMPocketBase {
      * Authenticate with admin credentials (for server-side operations)
      */
     async authAsAdmin(email: string, password: string): Promise<void> {
-        await this.pb.admins.authWithPassword(email, password);
+        await this.pb.collection('_superusers').authWithPassword(email, password);
     }
 
     /**

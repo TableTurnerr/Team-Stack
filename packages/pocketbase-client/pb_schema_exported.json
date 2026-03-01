@@ -1127,18 +1127,6 @@
             },
             {
                 "hidden": false,
-                "id": "number_interest_level",
-                "max": 10,
-                "min": 1,
-                "name": "interest_level",
-                "onlyInt": true,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
-            },
-            {
-                "hidden": false,
                 "id": "select_status_changed_to",
                 "maxSelect": 1,
                 "name": "status_changed_to",
@@ -1587,18 +1575,6 @@
                     "Fumbled",
                     "Other"
                 ]
-            },
-            {
-                "hidden": false,
-                "id": "number4519511373",
-                "max": 10,
-                "min": 1,
-                "name": "interest_level",
-                "onlyInt": false,
-                "presentable": false,
-                "required": false,
-                "system": false,
-                "type": "number"
             },
             {
                 "hidden": false,

@@ -6,7 +6,7 @@ import { COLLECTIONS } from '@/lib/types';
 
 export interface StagedDeletion {
   stagingId: string;
-  type: 'phone_number' | 'company' | 'session';
+  type: 'phone_number' | 'company' | 'session' | 'call_log';
   targetId: string;
   targetLabel: string;
   associatedCallLogIds: string[];

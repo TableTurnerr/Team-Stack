@@ -1,6 +1,6 @@
 {
   "name": "dashboard",
-  "version": "1.0.6",
+  "version": "1.1.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17,7 +17,8 @@
     "test:calls": "playwright test tests/04-cold-calls.spec.ts",
     "test:notes": "playwright test tests/07-notes.spec.ts",
     "test:settings": "playwright test tests/10-settings.spec.ts",
-    "test:smoke": "playwright test --grep @smoke"
+    "test:smoke": "playwright test --grep @smoke",
+    "test:menu": "node tests/run-tests.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

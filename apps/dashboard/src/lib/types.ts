@@ -46,8 +46,7 @@ export interface ColdCall extends RecordModel {
   company?: string;
   caller_name?: string;
   recipients?: string;
-  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other';
-  interest_level?: number;
+  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other' | 'Hung Up (Rude Recep)' | 'Hung Up (Other)' | 'Bad Lead' | 'Send Email';
   objections?: string[];
   pain_points?: string[];
   follow_up_actions?: string[];
@@ -185,11 +184,10 @@ export interface CallLog extends RecordModel {
   duration?: number; // Total duration (ring_duration + call_duration) in seconds
   ring_duration?: number; // Time spent ringing before pickup (in seconds)
   call_duration?: number; // Time spent on actual call after pickup (in seconds)
-  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other';
+  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other' | 'Hung Up (Rude Recep)' | 'Hung Up (Other)' | 'Bad Lead' | 'Send Email';
   owner_name_found?: string;
   receptionist_name?: string;
   post_call_notes?: string;
-  interest_level?: number;
   status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
   has_recording?: boolean;
   session?: string; // Optional - null for standalone calls, populated for session-based calls

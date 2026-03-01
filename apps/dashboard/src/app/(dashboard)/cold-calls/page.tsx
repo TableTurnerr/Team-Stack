@@ -36,7 +36,6 @@ const CALL_LOG_COLUMNS: ColumnDefinition[] = [
   { key: 'phone', label: 'Phone', defaultVisible: true },
   { key: 'recipient', label: 'Recipient', defaultVisible: true },
   { key: 'call_outcome', label: 'Outcome', defaultVisible: true },
-  { key: 'interest_level', label: 'Interest', defaultVisible: true },
   { key: 'duration', label: 'Duration', defaultVisible: true },
   { key: 'performance', label: 'Performance', defaultVisible: true },
   { key: 'session', label: 'Session', defaultVisible: true },
@@ -56,24 +55,6 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
   'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500' },
   'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
 };
-
-function InterestBar({ level }: { level: number }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-2 bg-[var(--card-border)] rounded-full overflow-hidden max-w-[80px]">
-        <div
-          className={cn(
-            "h-full rounded-full transition-all",
-            level >= 7 ? "bg-[var(--success)]" :
-              level >= 4 ? "bg-[var(--warning)]" : "bg-[var(--error)]"
-          )}
-          style={{ width: `${level * 10}%` }}
-        />
-      </div>
-      <span className="text-sm text-[var(--muted)]">{level}/10</span>
-    </div>
-  );
-}
 
 function SortHeader({
   label,
@@ -130,7 +111,6 @@ export default function ColdCallsPage() {
   // Shared filters
   const [searchTerm, setSearchTerm] = useState('');
   const [outcomeFilter, setOutcomeFilter] = useState<string[]>([]);
-  const [minInterest, setMinInterest] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({
     field: 'call_time',
@@ -159,10 +139,6 @@ export default function ColdCallsPage() {
         const outcomeConditions = outcomeFilter.map(o => `call_outcome = "${o}"`).join(' || ');
         filters.push(`(${outcomeConditions})`);
       }
-      if (minInterest > 0) {
-        filters.push(`interest_level >= ${minInterest}`);
-      }
-
       const sortField = sort.field;
       const result = await pb.collection(COLLECTIONS.CALL_LOGS).getList<CallLog>(callLogsPage, perPage, {
         sort: `${sort.dir === 'desc' ? '-' : ''}${sortField}`,
@@ -180,7 +156,7 @@ export default function ColdCallsPage() {
     } finally {
       setCallLogsLoading(false);
     }
-  }, [callLogsPage, sort, searchTerm, outcomeFilter, minInterest, isAuthenticated]);
+  }, [callLogsPage, sort, searchTerm, outcomeFilter, isAuthenticated]);
 
   // Fetch on mount and when deps change
   useEffect(() => {
@@ -215,20 +191,18 @@ export default function ColdCallsPage() {
   const clearFilters = () => {
     setSearchTerm('');
     setOutcomeFilter([]);
-    setMinInterest(0);
   };
 
   // ─── CSV Export ──────────────────────────────────────────────────────────
 
   const exportToCSV = () => {
-    const headers = ['Date', 'Company', 'Phone', 'Recipient', 'Outcome', 'Interest Level', 'Duration (s)', 'Owner Reached', 'Pitch Completed', 'Appointment Set', 'AI Transcript', 'Session', 'Caller', 'Notes'];
+    const headers = ['Date', 'Company', 'Phone', 'Recipient', 'Outcome', 'Duration (s)', 'Owner Reached', 'Pitch Completed', 'Appointment Set', 'AI Transcript', 'Session', 'Caller', 'Notes'];
     const rows = callLogs.map(log => [
       log.call_time ? formatDate(log.call_time) : '',
       log.expand?.company?.company_name || 'Unknown',
       log.expand?.phone_number_record?.phone_number || '',
       log.owner_name_found || '',
       log.call_outcome || '',
-      log.interest_level?.toString() || '',
       log.duration?.toString() || '',
       log.owner_reached ? 'Yes' : 'No',
       log.pitch_completed ? 'Yes' : 'No',
@@ -248,7 +222,7 @@ export default function ColdCallsPage() {
     URL.revokeObjectURL(url);
   };
 
-  const hasActiveFilters = !!searchTerm || outcomeFilter.length > 0 || minInterest > 0;
+  const hasActiveFilters = !!searchTerm || outcomeFilter.length > 0;
   const loading = activeTab === 'call_logs' ? callLogsLoading : false;
 
   if (authLoading) {
@@ -279,16 +253,16 @@ export default function ColdCallsPage() {
                 onClick={() => setShowFilters(!showFilters)}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
-                  showFilters || outcomeFilter.length > 0 || minInterest > 0
+                  showFilters || outcomeFilter.length > 0
                     ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
                     : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
                 )}
               >
                 <Filter size={16} />
                 Filters
-                {(outcomeFilter.length > 0 || minInterest > 0) && (
+                {outcomeFilter.length > 0 && (
                   <span className="ml-1 w-5 h-5 rounded-full bg-[var(--background)]/20 text-xs flex items-center justify-center">
-                    {outcomeFilter.length + (minInterest > 0 ? 1 : 0)}
+                    {outcomeFilter.length}
                   </span>
                 )}
               </button>
@@ -357,44 +331,29 @@ export default function ColdCallsPage() {
         <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-medium">Filters</h3>
-            {(outcomeFilter.length > 0 || minInterest > 0) && (
+            {outcomeFilter.length > 0 && (
               <button onClick={clearFilters} className="text-sm text-[var(--primary)] hover:underline">
                 Clear all
               </button>
             )}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm text-[var(--muted)] block mb-1">Outcome</label>
-              <div className="flex flex-wrap gap-1">
-                {Object.keys(OUTCOME_COLORS).map(outcome => (
-                  <button
-                    key={outcome}
-                    onClick={() => toggleOutcomeFilter(outcome)}
-                    className={cn(
-                      "px-2 py-1 rounded-md text-xs transition-all",
-                      outcomeFilter.includes(outcome)
-                        ? `${OUTCOME_COLORS[outcome].bg} ${OUTCOME_COLORS[outcome].text}`
-                        : "bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-border)]"
-                    )}
-                  >
-                    {outcome}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-sm text-[var(--muted)] block mb-1">
-                Min Interest Level: {minInterest || 'Any'}
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="10"
-                value={minInterest}
-                onChange={(e) => setMinInterest(parseInt(e.target.value))}
-                className="w-full accent-[var(--foreground)]"
-              />
+          <div>
+            <label className="text-sm text-[var(--muted)] block mb-1">Outcome</label>
+            <div className="flex flex-wrap gap-1">
+              {Object.keys(OUTCOME_COLORS).map(outcome => (
+                <button
+                  key={outcome}
+                  onClick={() => toggleOutcomeFilter(outcome)}
+                  className={cn(
+                    "px-2 py-1 rounded-md text-xs transition-all",
+                    outcomeFilter.includes(outcome)
+                      ? `${OUTCOME_COLORS[outcome].bg} ${OUTCOME_COLORS[outcome].text}`
+                      : "bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-border)]"
+                  )}
+                >
+                  {outcome}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -476,7 +435,6 @@ function CallLogsTable({
                   {isColumnVisible('phone') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
                   {isColumnVisible('recipient') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recipient</th>}
                   {isColumnVisible('call_outcome') && <SortHeader label="Outcome" field="call_outcome" currentSort={sort} onSort={onSort} />}
-                  {isColumnVisible('interest_level') && <SortHeader label="Interest" field="interest_level" currentSort={sort} onSort={onSort} />}
                   {isColumnVisible('duration') && <SortHeader label="Duration" field="duration" currentSort={sort} onSort={onSort} />}
                   {isColumnVisible('performance') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Performance</th>}
                   {isColumnVisible('session') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Session</th>}
@@ -543,13 +501,6 @@ function CallLogsTable({
                             )}>
                               {log.call_outcome}
                             </span>
-                          )}
-                        </td>
-                      )}
-                      {isColumnVisible('interest_level') && (
-                        <td className="py-3 px-4">
-                          {log.interest_level !== undefined && log.interest_level > 0 && (
-                            <InterestBar level={log.interest_level} />
                           )}
                         </td>
                       )}

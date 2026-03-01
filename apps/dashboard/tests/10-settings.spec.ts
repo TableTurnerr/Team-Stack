@@ -200,6 +200,8 @@ test.describe('Settings Page', () => {
         await expect(exportBtn).toBeVisible();
       }
     }
+    // Page should render without errors regardless
+    await expect(page.locator('body')).not.toContainText('Application error');
   });
 
   // ─── Save Changes ─────────────────────────────────────────────────────────────

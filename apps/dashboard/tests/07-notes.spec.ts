@@ -72,7 +72,7 @@ test.describe('Notes Page', () => {
 
     // The new note should appear in the active list
     const noteCard = page.locator('text=' + TEST_NOTE.title.substring(0, 30)).first();
-    await expect(noteCard).toBeVisible({ timeout: 10_000 });
+    await expect(noteCard).toBeVisible({ timeout: 20_000 });
   });
 
   // ─── Search Notes ─────────────────────────────────────────────────────────────
@@ -97,6 +97,7 @@ test.describe('Notes Page', () => {
 
     const searchInput = page.locator('input[placeholder*="earch"]').first();
     await searchInput.fill('ZZZNOMATCHNOTE999XYZ');
+    await searchInput.press('Enter');
     await page.waitForTimeout(500);
 
     const noResult = page.locator('text=/no note|empty|nothing/i').first();

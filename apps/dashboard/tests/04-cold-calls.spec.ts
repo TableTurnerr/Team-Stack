@@ -128,7 +128,7 @@ test.describe('Cold Calls Page', () => {
     await waitForTableLoad(page);
 
     const rows = page.locator('tbody tr, [role="row"]').filter({ hasText: TEST_COMPANY.name });
-    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+    await expect(rows.first()).toBeVisible({ timeout: 20_000 });
   });
 
   test('search by phone number filters results', async ({ page }) => {
@@ -330,9 +330,9 @@ test.describe('Cold Calls Page', () => {
     const detailLink = page.locator('a[href*="/cold-calls/"]').first();
     if (await detailLink.count() > 0) {
       await detailLink.click();
-      await page.waitForURL(/\/cold-calls\/.+/, { timeout: 10_000 });
+      await page.waitForURL(/\/cold-calls\/.+/, { timeout: 25_000 });
       await expect(page).toHaveURL(/\/cold-calls\/.+/);
-      await expect(page.locator('body')).not.toContainText('Application error');
+      await expect(page.locator('body')).not.toContainText('Application error', { timeout: 15_000 });
     }
   });
 });

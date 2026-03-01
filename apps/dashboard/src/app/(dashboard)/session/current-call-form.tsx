@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type PhoneNumber } from '@/lib/types';
+import { COLLECTIONS, type Company, type PhoneNumber, type CallLog } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
@@ -14,8 +14,14 @@ const OUTCOMES = [
     'Callback',
     'No Answer',
     'Fumbled',
+    'Bad Lead',
+    'Send Email',
     'Other',
 ] as const;
+
+// The "Hung Up" group is rendered as a split button
+const HUNG_UP_PRIMARY = 'Hung Up (Rude Recep)' as const;
+const HUNG_UP_OTHER = 'Hung Up (Other)' as const;
 
 const CALLBACK_REASONS = [
     'Callback (Recep hung up)',
@@ -32,16 +38,20 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string; border: string 
     'Callback': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]', border: 'border-[var(--warning)]' },
     'No Answer': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]', border: 'border-[var(--muted)]' },
     'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500', border: 'border-orange-500' },
+    'Bad Lead': { bg: 'bg-red-900/20', text: 'text-red-400', border: 'border-red-400' },
+    'Send Email': { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-400' },
     'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]', border: 'border-[var(--info)]' },
+    'Hung Up (Rude Recep)': { bg: 'bg-red-500/10', text: 'text-red-500', border: 'border-red-500' },
+    'Hung Up (Other)': { bg: 'bg-red-400/10', text: 'text-red-400', border: 'border-red-400' },
 };
 
 export interface CallFormData {
     companyId: string;
     companyName: string;
     phoneNumber: string;
-    recipientName: string;
+    receptionistName: string;
+    ownerName: string;
     callOutcome: string;
-    interestLevel: number;
     postCallNotes: string;
     wasPickedUp: boolean;
     ownerReached: boolean;
@@ -49,14 +59,16 @@ export interface CallFormData {
     appointmentSet: boolean;
     followUp?: { scheduledTime: string; timezone: string; notes: string } | null;
     callbackEvents?: Array<{ reason: string; timestamp: string }>;
+    additionalPhoneNumber?: string;
+    additionalPhoneNote?: string;
 }
 
 export interface CallFormDraft {
     companySearch: string;
     selectedCompany: Pick<Company, 'id' | 'company_name' | 'owner_name'> | null;
-    recipientName: string;
+    receptionistName: string;
+    ownerName: string;
     callOutcome: string;
-    interestLevel: number;
     postCallNotes: string;
     ownerReached: boolean;
     pitchCompleted: boolean;
@@ -66,23 +78,27 @@ export interface CallFormDraft {
     showFollowUp: boolean;
     followUpData: { scheduledTime: string; timezone: string; notes: string } | null;
     callbackEvents: Array<{ reason: string; timestamp: string }>;
+    additionalPhoneNumber: string;
+    additionalPhoneNote: string;
 }
 
 const EMPTY_DRAFT: CallFormDraft = {
     companySearch: '',
     selectedCompany: null,
-    recipientName: '',
+    receptionistName: '',
+    ownerName: '',
     callOutcome: '',
-    interestLevel: 5,
     postCallNotes: '',
     ownerReached: false,
     pitchCompleted: false,
     appointmentSet: false,
     noneSelected: true,
     isNewCompany: false,
-    showFollowUp: true,
+    showFollowUp: false,
     followUpData: null,
     callbackEvents: [],
+    additionalPhoneNumber: '',
+    additionalPhoneNote: '',
 };
 
 interface CurrentCallFormProps {
@@ -100,18 +116,20 @@ interface CurrentCallFormProps {
     onCallback?: (reason: CallbackReason) => void;
     /** Accumulated callback events for this call */
     callbackEvents?: Array<{ reason: string; timestamp: string }>;
+    /** Suggested company name from power dialer queue */
+    suggestedCompanyName?: string;
 }
 
 const EMPTY_CALLBACK_EVENTS: Array<{ reason: string; timestamp: string }> = [];
 
-export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS }: CurrentCallFormProps) {
+export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS, suggestedCompanyName }: CurrentCallFormProps) {
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
     const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-    const [recipientName, setRecipientName] = useState('');
+    const [receptionistName, setReceptionistName] = useState('');
+    const [ownerName, setOwnerName] = useState('');
     const [callOutcome, setCallOutcome] = useState('');
-    const [interestLevel, setInterestLevel] = useState(5);
     const [postCallNotes, setPostCallNotes] = useState('');
     const [ownerReached, setOwnerReached] = useState(false);
     const [pitchCompleted, setPitchCompleted] = useState(false);
@@ -119,20 +137,31 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [noneSelected, setNoneSelected] = useState(true);
     const [isNewCompany, setIsNewCompany] = useState(false);
     const [showCallbackDropdown, setShowCallbackDropdown] = useState(false);
+    const [showHungUpDropdown, setShowHungUpDropdown] = useState(false);
+    const [additionalPhoneNumber, setAdditionalPhoneNumber] = useState('');
+    const [additionalPhoneNote, setAdditionalPhoneNote] = useState('');
+    const [showAdditionalPhone, setShowAdditionalPhone] = useState(false);
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const callbackDropdownRef = useRef<HTMLDivElement>(null);
+    const hungUpDropdownRef = useRef<HTMLDivElement>(null);
 
     // Auto-fetch company state
     const [autoFetchedCompany, setAutoFetchedCompany] = useState<Company | null>(null);
     const [phoneNumberRecord, setPhoneNumberRecord] = useState<PhoneNumber | null>(null);
     const [phoneExistsForOtherCompany, setPhoneExistsForOtherCompany] = useState(false);
     const lastLookedUpPhone = useRef('');
+    const lastAppliedSuggestion = useRef('');
+
+    // Brief call history for known phone numbers
+    const [callHistory, setCallHistory] = useState<CallLog[]>([]);
+    const [callHistoryLoading, setCallHistoryLoading] = useState(false);
+    const lastFetchedHistoryCompanyId = useRef('');
 
     const [companyLookupState, setCompanyLookupState] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle');
 
     // Follow-up scheduling
-    const [showFollowUp, setShowFollowUp] = useState(true);
+    const [showFollowUp, setShowFollowUp] = useState(false);
     const [followUpData, setFollowUpData] = useState<{ scheduledTime: string; timezone: string; notes: string } | null>(null);
     const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
     const hydratedFromDraft = useRef(false);
@@ -141,21 +170,25 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setCompanySearch('');
         setSelectedCompany(null);
         setIsNewCompany(false);
-        setRecipientName('');
+        setReceptionistName('');
+        setOwnerName('');
         setCallOutcome('');
-        setInterestLevel(5);
         setPostCallNotes('');
         setOwnerReached(false);
         setPitchCompleted(false);
         setAppointmentSet(false);
         setNoneSelected(true);
-        setShowFollowUp(true);
+        setShowFollowUp(false);
         setFollowUpData(null);
         setAutoFetchedCompany(null);
         setPhoneNumberRecord(null);
         setPhoneExistsForOtherCompany(false);
         setCompanyLookupState('idle');
+        setAdditionalPhoneNumber('');
+        setAdditionalPhoneNote('');
+        setShowAdditionalPhone(false);
         lastLookedUpPhone.current = '';
+        lastAppliedSuggestion.current = '';
     }, []);
 
     useEffect(() => {
@@ -165,9 +198,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         if (initialDraft.selectedCompany) {
             setSelectedCompany(initialDraft.selectedCompany as Company);
         }
-        setRecipientName(initialDraft.recipientName || '');
+        setReceptionistName(initialDraft.receptionistName || '');
+        setOwnerName(initialDraft.ownerName || '');
         setCallOutcome(initialDraft.callOutcome || '');
-        setInterestLevel(initialDraft.interestLevel || 5);
         setPostCallNotes(initialDraft.postCallNotes || '');
         setOwnerReached(!!initialDraft.ownerReached);
         setPitchCompleted(!!initialDraft.pitchCompleted);
@@ -176,6 +209,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setIsNewCompany(!!initialDraft.isNewCompany);
         setShowFollowUp(!!initialDraft.showFollowUp);
         setFollowUpData(initialDraft.followUpData || null);
+        setAdditionalPhoneNumber(initialDraft.additionalPhoneNumber || '');
+        setAdditionalPhoneNote(initialDraft.additionalPhoneNote || '');
 
         hydratedFromDraft.current = true;
     }, [initialDraft]);
@@ -190,9 +225,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     owner_name: selectedCompany.owner_name,
                 }
                 : null,
-            recipientName,
+            receptionistName,
+            ownerName,
             callOutcome,
-            interestLevel,
             postCallNotes,
             ownerReached,
             pitchCompleted,
@@ -202,8 +237,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             showFollowUp,
             followUpData,
             callbackEvents,
+            additionalPhoneNumber,
+            additionalPhoneNote,
         });
-    }, [companySearch, selectedCompany, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, onDraftChange]);
+    }, [companySearch, selectedCompany, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, onDraftChange]);
 
     // Auto-fetch company when phone number changes
     useEffect(() => {
@@ -257,21 +294,21 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         setSelectedCompany(company);
                         setCompanySearch(company.company_name);
                         setIsNewCompany(false);
-                        if (company.owner_name) {
-                            setRecipientName(company.owner_name);
+                        if (bestMatch.receptionist_name) {
+                            setReceptionistName(bestMatch.receptionist_name);
                         }
-                        if (bestMatch.receptionist_name && !company.owner_name) {
-                            setRecipientName(bestMatch.receptionist_name);
+                        if (company.owner_name) {
+                            setOwnerName(company.owner_name);
                         }
                         setCompanyLookupState('found');
-                    } else {
-                        setCompanyLookupState('not-found');
+                        return;
                     }
-                } else {
-                    setPhoneNumberRecord(null);
-                    setAutoFetchedCompany(null);
-                    setCompanyLookupState('not-found');
                 }
+
+                // Phone not found — apply suggested company from power dialer if available
+                setPhoneNumberRecord(null);
+                setAutoFetchedCompany(null);
+                setCompanyLookupState('not-found');
             } catch {
                 setCompanyLookupState('not-found');
             }
@@ -279,6 +316,44 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
         lookupPhone();
     }, [phoneNumber]);
+
+    // Apply suggestedCompanyName when phone lookup fails to find a company
+    useEffect(() => {
+        if (!suggestedCompanyName) return;
+        if (suggestedCompanyName === lastAppliedSuggestion.current) return;
+        if (companyLookupState !== 'not-found') return;
+        if (selectedCompany) return; // Already have a company
+
+        lastAppliedSuggestion.current = suggestedCompanyName;
+
+        // Search for the suggested company name
+        const applysuggested = async () => {
+            try {
+                const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(1, 5, {
+                    filter: `company_name ~ "${suggestedCompanyName}"`,
+                    sort: 'company_name',
+                });
+                const exactMatch = result.items.find(
+                    c => c.company_name.toLowerCase() === suggestedCompanyName.toLowerCase()
+                );
+                if (exactMatch) {
+                    setSelectedCompany(exactMatch);
+                    setCompanySearch(exactMatch.company_name);
+                    setIsNewCompany(false);
+                    if (exactMatch.owner_name) {
+                        setOwnerName(exactMatch.owner_name);
+                    }
+                } else if (result.items.length === 0) {
+                    // Company doesn't exist yet — pre-fill name for creation
+                    setCompanySearch(suggestedCompanyName);
+                    setIsNewCompany(true);
+                }
+            } catch {
+                // ignore
+            }
+        };
+        applysuggested();
+    }, [suggestedCompanyName, companyLookupState, selectedCompany]);
 
     // Sync "None" with other performance options
     useEffect(() => {
@@ -299,6 +374,28 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         }
         setPhoneExistsForOtherCompany(false);
     }, [isNewCompany, phoneNumber, phoneNumberRecord]);
+
+    // Fetch call history when auto-matched company changes
+    useEffect(() => {
+        if (!autoFetchedCompany) {
+            setCallHistory([]);
+            lastFetchedHistoryCompanyId.current = '';
+            return;
+        }
+        if (autoFetchedCompany.id === lastFetchedHistoryCompanyId.current) return;
+        lastFetchedHistoryCompanyId.current = autoFetchedCompany.id;
+
+        setCallHistoryLoading(true);
+        pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+            filter: `company = "${autoFetchedCompany.id}"`,
+            sort: '-call_time',
+            expand: 'phone_number_record',
+        }).then(logs => {
+            setCallHistory(logs);
+        }).catch(console.error).finally(() => {
+            setCallHistoryLoading(false);
+        });
+    }, [autoFetchedCompany]);
 
     // Search companies
     useEffect(() => {
@@ -350,6 +447,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             if (callbackDropdownRef.current && !callbackDropdownRef.current.contains(e.target as Node)) {
                 setShowCallbackDropdown(false);
             }
+            if (hungUpDropdownRef.current && !hungUpDropdownRef.current.contains(e.target as Node)) {
+                setShowHungUpDropdown(false);
+            }
         };
         document.addEventListener('mousedown', handleClick);
         return () => document.removeEventListener('mousedown', handleClick);
@@ -361,15 +461,20 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setShowCompanyDropdown(false);
         setIsNewCompany(false);
         if (company.owner_name) {
-            setRecipientName(company.owner_name);
+            setOwnerName(company.owner_name);
         }
     };
 
-    const handleTagClick = () => {
+    // Toggle "Owner Reached?" — auto-fills ownerName from receptionistName if recep IS the owner
+    const handleOwnerTagClick = () => {
         const newOwnerState = !ownerReached;
         setOwnerReached(newOwnerState);
         if (newOwnerState) {
             setNoneSelected(false);
+            // If owner name is empty and receptionist name is set, auto-fill (recep = owner)
+            if (!ownerName && receptionistName) {
+                setOwnerName(receptionistName);
+            }
         }
     };
 
@@ -392,7 +497,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             if (isNewCompany) {
                 const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>({
                     company_name: companySearch.trim(),
-                    owner_name: recipientName || undefined,
+                    owner_name: ownerName || undefined,
                     source: 'Cold Call',
                     first_contacted: new Date().toISOString(),
                     last_contacted: new Date().toISOString(),
@@ -410,9 +515,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 companyId,
                 companyName,
                 phoneNumber,
-                recipientName,
+                receptionistName,
+                ownerName,
                 callOutcome,
-                interestLevel,
                 postCallNotes,
                 wasPickedUp: callOutcome !== 'No Answer' && callOutcome !== '',
                 ownerReached,
@@ -420,20 +525,22 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 appointmentSet,
                 followUp: showFollowUp ? followUpData : null,
                 callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
+                additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
+                additionalPhoneNote: additionalPhoneNote.trim() || undefined,
             });
 
             resetForm();
         } catch (err) {
             console.error('Failed to save call:', err);
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, recipientName, callOutcome, interestLevel, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, resetForm]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, resetForm]);
 
     const hasDraftValues =
         companySearch.trim().length > 0 ||
         !!selectedCompany ||
-        recipientName.trim().length > 0 ||
+        receptionistName.trim().length > 0 ||
+        ownerName.trim().length > 0 ||
         !!callOutcome ||
-        interestLevel !== 5 ||
         postCallNotes.trim().length > 0 ||
         ownerReached ||
         pitchCompleted ||
@@ -448,8 +555,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setShowDiscardConfirm(false);
     }, [onDiscard, onDraftChange, resetForm]);
 
-    // Required: Company, Phone Number (auto-filled), Call Outcome
-    // Notes and interest level are optional (N/A by default)
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
     const hasPhoneNumber = !!phoneNumber;
     const hasOutcome = !!callOutcome;
@@ -459,6 +564,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setShowCallbackDropdown(false);
         onCallback?.(reason);
     };
+
+    const isHungUpOutcome = callOutcome === HUNG_UP_PRIMARY || callOutcome === HUNG_UP_OTHER;
 
     return (
         <div className={cn(
@@ -541,6 +648,70 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 </div>
             )}
 
+            {/* Brief call history panel — shown when company is auto-matched */}
+            {autoFetchedCompany && selectedCompany?.id === autoFetchedCompany.id && (callHistoryLoading || callHistory.length > 0) && (() => {
+                // Group logs by phone_number_record (or 'unknown')
+                const byPhone = new Map<string, { phone: string; calls: CallLog[] }>();
+                for (const log of callHistory) {
+                    const key = log.phone_number_record || 'unknown';
+                    const display = log.expand?.phone_number_record?.phone_number || 'Unknown';
+                    if (!byPhone.has(key)) byPhone.set(key, { phone: display, calls: [] });
+                    byPhone.get(key)!.calls.push(log);
+                }
+                const groups = [...byPhone.entries()].sort((a, b) => b[1].calls.length - a[1].calls.length);
+
+                return (
+                    <div className="border border-[var(--card-border)] rounded-lg overflow-hidden text-xs">
+                        <div className="px-3 py-1.5 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] flex items-center justify-between">
+                            <span className="font-semibold uppercase tracking-wider text-[var(--muted)] text-[10px]">
+                                Prior Calls
+                            </span>
+                            {callHistoryLoading ? (
+                                <span className="text-[10px] text-[var(--muted)]">Loading…</span>
+                            ) : (
+                                <span className="text-[10px] text-[var(--muted)]">{callHistory.length} total</span>
+                            )}
+                        </div>
+                        {!callHistoryLoading && (
+                            <div className="divide-y divide-[var(--card-border)] max-h-48 overflow-y-auto">
+                                {groups.map(([key, { phone, calls }]) => {
+                                    const notedCalls = calls.filter(c => c.post_call_notes);
+                                    return (
+                                        <div key={key} className="px-3 py-2">
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                                <span className="font-mono font-medium text-[var(--foreground)]">{phone}</span>
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] font-semibold whitespace-nowrap">
+                                                    {calls.length} call{calls.length !== 1 ? 's' : ''}
+                                                </span>
+                                                {calls[0]?.call_outcome && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] truncate max-w-[80px]">
+                                                        {calls[0].call_outcome}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {notedCalls.length > 0 && (
+                                                <div className="space-y-0.5 ml-1.5 border-l border-[var(--card-border)] pl-2">
+                                                    {notedCalls.slice(0, 3).map(call => (
+                                                        <div key={call.id} className="flex gap-1.5 text-[10px]">
+                                                            <span className="text-[var(--muted)] whitespace-nowrap shrink-0">
+                                                                {new Date(call.call_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                                            </span>
+                                                            <span className="text-[var(--foreground)]/70 line-clamp-1" title={call.post_call_notes}>
+                                                                {call.post_call_notes}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            })()}
+
             {/* Phone uniqueness warning */}
             {phoneExistsForOtherCompany && isNewCompany && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--warning-subtle)] border border-[var(--warning)]/20">
@@ -555,9 +726,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             <div className="relative" ref={dropdownRef}>
                 <label className="text-xs text-[var(--muted)] mb-1 flex items-center justify-between">
                     <span>Company <span className="text-[var(--error)]">*</span></span>
-                    {isNewCompany && companySearch.trim().length >= 2 && (
+                    {isNewCompany && !selectedCompany && companySearch.trim().length >= 2 && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-semibold uppercase tracking-wider">
                             New
+                        </span>
+                    )}
+                    {selectedCompany && companyLookupState !== 'found' && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 font-semibold uppercase tracking-wider">
+                            Other Location
                         </span>
                     )}
                 </label>
@@ -633,13 +809,13 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 </div>
             </div>
 
-            {/* Recipient with Receptionist/Owner tag */}
+            {/* Receptionist Name with "Owner Reached?" tag */}
             <div>
                 <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-2">
-                    <span>Recipient Name</span>
+                    <span>Receptionist Name</span>
                     <button
                         type="button"
-                        onClick={handleTagClick}
+                        onClick={handleOwnerTagClick}
                         className={cn(
                             "text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider border transition-all cursor-pointer",
                             ownerReached
@@ -647,17 +823,45 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                 : "bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]"
                         )}
                     >
-                        {ownerReached ? 'Owner' : 'Receptionist'}
+                        Owner Reached?
                     </button>
                 </label>
                 <div className="relative">
                     <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
                     <input
                         type="text"
-                        value={recipientName}
-                        onChange={e => setRecipientName(e.target.value)}
-                        placeholder="Who did you speak to? (Only write the name)"
+                        value={receptionistName}
+                        onChange={e => setReceptionistName(e.target.value)}
+                        placeholder="Receptionist name(s), e.g. Sarah, Mike"
                         className="w-full pl-8 pr-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+                    />
+                </div>
+            </div>
+
+            {/* Owner's Name — always visible */}
+            <div>
+                <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-2">
+                    <Crown size={11} className={ownerReached ? "text-[var(--success)]" : "text-[var(--muted)]"} />
+                    <span className={ownerReached ? "text-[var(--success)]" : ""}>Owner&apos;s Name</span>
+                    {ownerReached && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] border border-[var(--success)]/30 font-semibold uppercase tracking-wider">
+                            Reached
+                        </span>
+                    )}
+                </label>
+                <div className="relative">
+                    <Crown size={14} className={cn("absolute left-3 top-1/2 -translate-y-1/2", ownerReached ? "text-[var(--success)]" : "text-[var(--muted)]")} />
+                    <input
+                        type="text"
+                        value={ownerName}
+                        onChange={e => setOwnerName(e.target.value)}
+                        placeholder="Owner name(s), e.g. John, Mike"
+                        className={cn(
+                            "w-full pl-8 pr-3 py-2 rounded-lg text-sm focus:outline-none transition-colors",
+                            ownerReached
+                                ? "bg-[var(--success-subtle)] border border-[var(--success)]/40 focus:border-[var(--success)]"
+                                : "bg-[var(--sidebar-bg)] border border-[var(--card-border)] focus:border-[var(--primary)]"
+                        )}
                     />
                 </div>
             </div>
@@ -684,23 +888,52 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             </button>
                         );
                     })}
-                </div>
-            </div>
 
-            {/* Interest Level — optional */}
-            <div>
-                <label className="text-xs text-[var(--muted)] mb-1 flex items-center justify-between">
-                    <span>Interest Level <span className="text-[10px] text-[var(--muted)] font-normal">(optional)</span></span>
-                    <span className="font-semibold text-[var(--foreground)]">{interestLevel}/10</span>
-                </label>
-                <input
-                    type="range"
-                    min={1}
-                    max={10}
-                    value={interestLevel}
-                    onChange={e => setInterestLevel(parseInt(e.target.value))}
-                    className="w-full accent-[var(--foreground)]"
-                />
+                    {/* Hung Up split button */}
+                    <div className="relative flex" ref={hungUpDropdownRef}>
+                        <button
+                            onClick={() => setCallOutcome(callOutcome === HUNG_UP_PRIMARY ? '' : HUNG_UP_PRIMARY)}
+                            className={cn(
+                                'px-2.5 py-1.5 rounded-l-lg text-xs font-medium border-y border-l transition-all',
+                                callOutcome === HUNG_UP_PRIMARY
+                                    ? `${OUTCOME_COLORS[HUNG_UP_PRIMARY].bg} ${OUTCOME_COLORS[HUNG_UP_PRIMARY].text} ${OUTCOME_COLORS[HUNG_UP_PRIMARY].border}`
+                                    : isHungUpOutcome && callOutcome === HUNG_UP_OTHER
+                                    ? `${OUTCOME_COLORS[HUNG_UP_OTHER].bg} ${OUTCOME_COLORS[HUNG_UP_OTHER].text} ${OUTCOME_COLORS[HUNG_UP_OTHER].border}`
+                                    : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+                            )}
+                        >
+                            {isHungUpOutcome ? callOutcome : HUNG_UP_PRIMARY}
+                        </button>
+                        <button
+                            onClick={() => setShowHungUpDropdown(v => !v)}
+                            className={cn(
+                                'px-1.5 py-1.5 rounded-r-lg text-xs font-medium border transition-all border-l-0',
+                                isHungUpOutcome
+                                    ? `${OUTCOME_COLORS[callOutcome as typeof HUNG_UP_PRIMARY].bg} ${OUTCOME_COLORS[callOutcome as typeof HUNG_UP_PRIMARY].text} ${OUTCOME_COLORS[callOutcome as typeof HUNG_UP_PRIMARY].border}`
+                                    : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+                            )}
+                        >
+                            <ChevronDown size={10} className={cn("transition-transform", showHungUpDropdown && "rotate-180")} />
+                        </button>
+                        {showHungUpDropdown && (
+                            <div className="absolute left-0 top-full mt-1 z-30 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-lg min-w-[160px] overflow-hidden">
+                                {[HUNG_UP_PRIMARY, HUNG_UP_OTHER].map(opt => (
+                                    <button
+                                        key={opt}
+                                        type="button"
+                                        onClick={() => { setCallOutcome(opt); setShowHungUpDropdown(false); }}
+                                        className={cn(
+                                            "w-full text-left px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors",
+                                            callOutcome === opt ? "font-semibold text-red-500" : "text-[var(--foreground)]"
+                                        )}
+                                    >
+                                        {opt}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
 
             {/* Performance Tracking with None option */}
@@ -722,7 +955,12 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             checked={ownerReached}
                             onChange={e => {
                                 setOwnerReached(e.target.checked);
-                                if (e.target.checked) setNoneSelected(false);
+                                if (e.target.checked) {
+                                    setNoneSelected(false);
+                                    if (!ownerName && receptionistName) {
+                                        setOwnerName(receptionistName);
+                                    }
+                                }
                             }}
                             className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                         />
@@ -770,43 +1008,68 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 />
             </div>
 
+            {/* Additional Phone Number Found During Call */}
+            <div className="border-t border-[var(--card-border)] pt-3">
+                <button
+                    type="button"
+                    onClick={() => setShowAdditionalPhone(v => !v)}
+                    className="flex items-center gap-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                >
+                    <Plus size={12} />
+                    <span>Phone number found during call?</span>
+                    <ChevronDown size={10} className={cn("transition-transform ml-auto", showAdditionalPhone && "rotate-180")} />
+                </button>
+
+                {showAdditionalPhone && (
+                    <div className="mt-2 space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="relative">
+                            <PhoneIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                            <input
+                                type="text"
+                                value={additionalPhoneNumber}
+                                onChange={e => setAdditionalPhoneNumber(e.target.value)}
+                                placeholder="New phone number found..."
+                                className="w-full pl-8 pr-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+                            />
+                        </div>
+                        <input
+                            type="text"
+                            value={additionalPhoneNote}
+                            onChange={e => setAdditionalPhoneNote(e.target.value)}
+                            placeholder="Label/note (e.g. Owner Direct, Manager Line)"
+                            className="w-full px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+                        />
+                    </div>
+                )}
+            </div>
+
             {/* Follow-up scheduling */}
             <div className="border-t border-[var(--card-border)] pt-3">
-                <div className={cn(
-                    "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all",
-                    showFollowUp
-                        ? "bg-[var(--info-subtle)] text-[var(--info)] border border-[var(--info)]/20"
-                        : "bg-[var(--error-subtle)] text-[var(--error)] border border-[var(--error)]/20"
-                )}>
-                    <div className="flex items-center gap-2">
-                        <CalendarClock size={14} />
-                        <span className={cn("transition-all", !showFollowUp && "line-through opacity-60")}>
-                            Schedule Follow-up
-                        </span>
-                        {!showFollowUp && (
-                            <span className="flex items-center gap-1 text-[var(--error)] font-semibold">
-                                <AlertTriangle size={12} />
-                                No Follow-up Scheduled!
-                            </span>
-                        )}
-                    </div>
+                {!showFollowUp ? (
                     <button
                         type="button"
-                        onClick={() => setShowFollowUp(!showFollowUp)}
-                        className={cn(
-                            "flex items-center justify-center w-5 h-5 rounded-full transition-all hover:scale-110",
-                            showFollowUp
-                                ? "text-[var(--info)] hover:bg-[var(--info)]/20"
-                                : "text-[var(--error)] hover:bg-[var(--error)]/20"
-                        )}
-                        title={showFollowUp ? "Cancel follow-up" : "Re-enable follow-up"}
+                        onClick={() => setShowFollowUp(true)}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-dashed border-[var(--card-border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--info)]/40 hover:bg-[var(--info-subtle)] transition-all"
                     >
-                        {showFollowUp ? <X size={13} /> : <AlertTriangle size={13} />}
+                        <CalendarClock size={14} />
+                        Schedule Follow-up
                     </button>
-                </div>
-
-                {showFollowUp && (
-                    <div className="mt-3">
+                ) : (
+                    <div className="bg-[var(--info-subtle)] text-[var(--info)] border border-[var(--info)]/20 rounded-lg px-3 py-2">
+                        <div className="flex items-center justify-between text-sm font-medium mb-3">
+                            <div className="flex items-center gap-2">
+                                <CalendarClock size={14} />
+                                <span>Schedule Follow-up</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowFollowUp(false)}
+                                className="flex items-center justify-center w-5 h-5 rounded-full text-[var(--info)] hover:bg-[var(--info)]/20 transition-all hover:scale-110"
+                                title="Cancel follow-up"
+                            >
+                                <X size={13} />
+                            </button>
+                        </div>
                         <FollowUpScheduler
                             companyId={selectedCompany?.id ?? ''}
                             companyName={selectedCompany?.company_name ?? (companySearch.trim() || 'this company')}

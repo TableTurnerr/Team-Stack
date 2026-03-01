@@ -24,7 +24,7 @@ async function getAdminPb(): Promise<PocketBase> {
   }
 
   _pb = new PocketBase(url);
-  await _pb.admins.authWithPassword(adminEmail, adminPassword);
+  await _pb.collection('_superusers').authWithPassword(adminEmail, adminPassword);
   return _pb;
 }
 
@@ -72,6 +72,8 @@ export async function createRecord<T extends object>(
   collection: string,
   data: object
 ): Promise<T & { id: string }> {
+  // Add a small delay to avoid PocketBase API rate limit issues (429)
+  await new Promise(resolve => setTimeout(resolve, 500));
   const pb = await getAdminPb();
   return pb.collection(collection).create<T & { id: string }>(data);
 }

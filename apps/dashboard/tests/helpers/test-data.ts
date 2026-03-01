@@ -5,7 +5,10 @@
  * bulk-identified and cleaned up without touching real data.
  */
 
-export const TEST_PREFIX = 'TEST_PW_';
+// Unique prefix per worker allows running tests in parallel safely
+// (otherwise workers delete each other's data during cleanup)
+const workerId = process.env.TEST_WORKER_INDEX || '0';
+export const TEST_PREFIX = `TPW${workerId}_`;
 
 export const TEST_COMPANY = {
   name: `${TEST_PREFIX}Restaurant Alpha`,

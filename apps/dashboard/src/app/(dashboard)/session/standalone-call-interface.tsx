@@ -29,9 +29,8 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
     return (
         draft.companySearch.trim().length > 0 ||
         !!draft.selectedCompany ||
-        draft.recipientName.trim().length > 0 ||
+        draft.receptionistName.trim().length > 0 ||
         !!draft.callOutcome ||
-        draft.interestLevel !== 5 ||
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
         draft.pitchCompleted ||
@@ -65,7 +64,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
 
     useEffect(() => {
         try {
-            const raw = window.sessionStorage.getItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            const raw = window.localStorage.getItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
             if (!raw) {
                 setHydratedStorage(true);
                 return;
@@ -92,7 +91,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
 
         const shouldPersist = hasUnsavedCall || (!!currentPhoneNumber && hasDraftContent(callDraft));
         if (!shouldPersist) {
-            window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
             return;
         }
 
@@ -101,7 +100,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             hasUnsavedCall,
             draft: callDraft,
         };
-        window.sessionStorage.setItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
+        window.localStorage.setItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
     }, [hydratedStorage, hasUnsavedCall, currentPhoneNumber, callDraft]);
 
     // Track active call from Zoom Phone context
@@ -174,7 +173,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                     const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
                         company: data.companyId,
                         phone_number: data.phoneNumber,
-                        receptionist_name: data.recipientName || undefined,
+                        receptionist_name: data.receptionistName || undefined,
                         last_called: new Date().toISOString(),
                     });
                     phoneNumberRecordId = newPhone.id;
@@ -193,9 +192,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 ring_duration: ringDuration > 0 ? ringDuration : undefined,
                 call_duration: callDuration > 0 ? callDuration : undefined,
                 call_outcome: data.callOutcome,
-                interest_level: data.interestLevel,
                 post_call_notes: data.postCallNotes,
-                owner_name_found: data.recipientName || undefined,
+                owner_name_found: data.receptionistName || undefined,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
                 appointment_set: data.appointmentSet,
@@ -207,8 +205,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 const companyUpdates: Record<string, any> = {
                     last_contacted: new Date().toISOString(),
                 };
-                if (data.ownerReached && data.recipientName) {
-                    companyUpdates.owner_name = data.recipientName;
+                if (data.ownerReached && data.receptionistName) {
+                    companyUpdates.owner_name = data.receptionistName;
                 }
                 await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
             } catch (err) {
@@ -221,7 +219,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             setCurrentPhoneNumber('');
             setHasUnsavedCall(false);
             setCallDraft(null);
-            window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
 
             // Reset timing state for next call
             setRingStartTime(null);
@@ -241,7 +239,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         setCurrentPhoneNumber('');
         setRingStartTime(null);
         setConnectTime(null);
-        window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+        window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
     }, [stopRecording, setContextPhoneNumber]);
 
     // Handle exit
@@ -252,7 +250,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             if (recorderStatus === 'recording') {
                 stopRecording();
             }
-            window.sessionStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
+            window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
             // Call parent to exit standalone mode
             onExit();
         } finally {

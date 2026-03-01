@@ -39,8 +39,10 @@ interface UseCallRecorderReturn {
     /**
      * Stop the active recording (if any), merge all deferred segments,
      * and upload the result as a single file.
+     * @param callLogId Optional call log ID to link the recording to.
+     * @returns The created recording ID, or null if nothing was uploaded.
      */
-    submitDeferredRecording: () => Promise<void>;
+    submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
     /**
      * Discard all deferred segments without uploading and exit deferred mode.
      */
@@ -137,7 +139,7 @@ export function useCallRecorder(
     // ── Upload ──────────────────────────────────────────────────────────
 
     const uploadRecording = useCallback(
-        async (blob: Blob, durationSec: number, phone: string | null) => {
+        async (blob: Blob, durationSec: number, phone: string | null, callLogId?: string): Promise<string> => {
             if (!uploaderId) {
                 throw new Error('No authenticated user to upload recording');
             }
@@ -146,7 +148,7 @@ export function useCallRecorder(
             const pad = (n: number) => n.toString().padStart(2, '0');
             const dateStr = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
             const timeStr = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-            const phoneStr = phone || 'unknown';
+            const phoneStr = (phone || 'unknown').replace(/[^\d+]/g, '');
             const fileName = `recording_${dateStr}_${timeStr}_${phoneStr}.webm`;
 
             const file = new File([blob], fileName, { type: blob.type || 'audio/webm' });
@@ -158,6 +160,10 @@ export function useCallRecorder(
             formData.append('duration', Math.round(durationSec).toString());
             formData.append('recording_date', now.toISOString());
             formData.append('note', `Call recorded via browser on ${dateStr} at ${timeStr.replace(/-/g, ':')}`);
+
+            if (callLogId) {
+                formData.append('call_log', callLogId);
+            }
 
             if (phone) {
                 formData.append('phone_number', phone);
@@ -175,7 +181,8 @@ export function useCallRecorder(
                 }
             }
 
-            await pb.collection(COLLECTIONS.RECORDINGS).create(formData);
+            const created = await pb.collection(COLLECTIONS.RECORDINGS).create<{ id: string }>(formData);
+            return created.id;
         },
         [uploaderId]
     );
@@ -451,8 +458,10 @@ export function useCallRecorder(
     /**
      * Stop active recording (if any), merge all accumulated segments, and upload as one file.
      * Exits deferred mode after uploading.
+     * @param callLogId Optional call log ID to link the recording to.
+     * @returns The created recording ID, or null if nothing was uploaded.
      */
-    const submitDeferredRecording = useCallback(async () => {
+    const submitDeferredRecording = useCallback(async (callLogId?: string): Promise<string | null> => {
         // Capture phone number immediately (synchronously) before any async operations
         // that might allow callers to clear the ref (e.g. setContextPhoneNumber(''))
         const finalPhone = phoneNumberRef.current;
@@ -477,7 +486,7 @@ export function useCallRecorder(
         deferredSegmentsRef.current = [];
         deferredTotalDurationRef.current = 0;
 
-        if (segments.length === 0) return;
+        if (segments.length === 0) return null;
 
         // Merge all segments into one blob
         const merged = new Blob(segments, { type: mimeType });
@@ -485,9 +494,10 @@ export function useCallRecorder(
         if (merged.size > 0 && totalDuration > 1) {
             try {
                 setStatus('uploading');
-                await uploadRecording(merged, totalDuration, finalPhone);
+                const recordingId = await uploadRecording(merged, totalDuration, finalPhone, callLogId);
                 setStatus('success');
                 setTimeout(() => setStatus('idle'), 3000);
+                return recordingId;
             } catch (err: unknown) {
                 console.error('Deferred upload failed:', err);
                 setStatus('error');
@@ -496,6 +506,7 @@ export function useCallRecorder(
         } else {
             setStatus('idle');
         }
+        return null;
     }, [uploadRecording, phoneNumberRef]);
 
     /** Discard all deferred segments without uploading and exit deferred mode */

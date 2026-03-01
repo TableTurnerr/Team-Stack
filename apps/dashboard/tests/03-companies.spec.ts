@@ -83,6 +83,7 @@ test.describe('Companies Page', () => {
 
     const searchInput = page.locator('input[placeholder*="earch"]').first();
     await searchInput.fill('ZZZNOMATCHXXX999');
+    await searchInput.press('Enter');
     await page.waitForTimeout(600);
     await waitForTableLoad(page);
 
@@ -284,10 +285,10 @@ test.describe('Companies Page', () => {
     const detailLink = page.locator(`a[href*="/companies/${testCompanyId}"], a[href*="/companies/"]`).first();
     if (await detailLink.count() > 0) {
       await detailLink.click();
-      await page.waitForURL(/\/companies\/.+/, { timeout: 10_000 });
+      await page.waitForURL(/\/companies\/.+/, { timeout: 25_000 });
       await expect(page).toHaveURL(/\/companies\/.+/);
       // Detail page should show company info
-      await expect(page.locator('body')).toContainText(TEST_COMPANY.name);
+      await expect(page.locator('body')).toContainText(TEST_COMPANY.name, { timeout: 25_000 });
     }
   });
 

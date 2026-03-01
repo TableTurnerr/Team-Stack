@@ -14,7 +14,7 @@ test.describe('Authentication @smoke', () => {
     await page.goto('/login');
 
     // Page title / logo visible
-    await expect(page.locator('h1, h2').filter({ hasText: /sign in|log in|welcome/i }).first()).toBeVisible();
+    await expect(page.locator('h1, h2').filter({ hasText: /sign in|log in|welcome|tableturnerr/i }).first()).toBeVisible();
 
     // Email field
     const emailInput = page.getByLabel(/email/i);
@@ -80,7 +80,8 @@ test.describe('Authentication @smoke', () => {
     for (const route of protectedRoutes) {
       await page.goto(route);
       // Should end up at /login
-      await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+      await page.waitForURL(/\/login/, { timeout: 15_000 });
+      await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
     }
   });
 

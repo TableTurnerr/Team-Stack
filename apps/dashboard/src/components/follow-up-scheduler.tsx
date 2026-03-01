@@ -17,6 +17,27 @@ import { format, addDays } from 'date-fns';
 
 type DateMode = 'today' | 'tomorrow' | 'day-after' | 'other';
 
+// Generate time slots in 30-minute intervals
+const TIME_SLOTS = (() => {
+  const slots: { value: string; label: string }[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (const m of [0, 30]) {
+      const value = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+      const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      const ampm = h < 12 ? 'AM' : 'PM';
+      const label = `${hour12}:${m.toString().padStart(2, '0')} ${ampm}`;
+      slots.push({ value, label });
+    }
+  }
+  return slots;
+})();
+
+function roundTo30Min(date: Date): string {
+  const h = date.getHours();
+  const m = date.getMinutes() >= 30 ? 30 : 0;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+}
+
 interface FollowUpSchedulerProps {
   companyId: string;
   companyName: string;
@@ -57,14 +78,14 @@ export function FollowUpScheduler({
   // and reset the time to the current wall-clock time in the new timezone
   useEffect(() => {
     setSelectedTimezone(defaultTz);
-    setTimeValue(format(utcToLocalTime(new Date(), defaultTz), 'HH:mm'));
+    setTimeValue(roundTo30Min(utcToLocalTime(new Date(), defaultTz)));
     setIsCurrentTime(true);
   }, [defaultTz]);
 
-  // Date mode and time value — initialize time to NOW in the selected timezone
+  // Date mode and time value — initialize time to NOW in the selected timezone (rounded to 30 min)
   const [dateMode, setDateMode] = useState<DateMode>('tomorrow');
   const [timeValue, setTimeValue] = useState(() =>
-    format(utcToLocalTime(new Date(), defaultTz), 'HH:mm')
+    roundTo30Min(utcToLocalTime(new Date(), defaultTz))
   );
   const [isCurrentTime, setIsCurrentTime] = useState(true);
   const [otherDateValue, setOtherDateValue] = useState(
@@ -230,7 +251,12 @@ export function FollowUpScheduler({
               onClick={() => {
                 const next = !isCurrentTime;
                 setIsCurrentTime(next);
-                if (next) setTimeValue(format(utcToLocalTime(new Date(), selectedTimezone), 'HH:mm'));
+                if (next) {
+                  const now = utcToLocalTime(new Date(), selectedTimezone);
+                  const h = now.getHours();
+                  const m = now.getMinutes() >= 30 ? 30 : 0;
+                  setTimeValue(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+                }
               }}
               className={cn(
                 'text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider border transition-all cursor-pointer',
@@ -242,12 +268,15 @@ export function FollowUpScheduler({
               Current Time
             </button>
           </label>
-          <input
-            type="time"
+          <select
             value={timeValue}
             onChange={(e) => { setTimeValue(e.target.value); setIsCurrentTime(false); }}
-            className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
-          />
+            className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] cursor-pointer"
+          >
+            {TIME_SLOTS.map(slot => (
+              <option key={slot.value} value={slot.value}>{slot.label}</option>
+            ))}
+          </select>
         </div>
       )}
 
@@ -278,7 +307,12 @@ export function FollowUpScheduler({
                 onClick={() => {
                   const next = !isCurrentTime;
                   setIsCurrentTime(next);
-                  if (next) setTimeValue(format(utcToLocalTime(new Date(), selectedTimezone), 'HH:mm'));
+                  if (next) {
+                    const now = utcToLocalTime(new Date(), selectedTimezone);
+                    const h = now.getHours();
+                    const m = now.getMinutes() >= 30 ? 30 : 0;
+                    setTimeValue(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+                  }
                 }}
                 className={cn(
                   'text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider border transition-all cursor-pointer',
@@ -290,12 +324,15 @@ export function FollowUpScheduler({
                 Current Time
               </button>
             </label>
-            <input
-              type="time"
+            <select
               value={timeValue}
               onChange={(e) => { setTimeValue(e.target.value); setIsCurrentTime(false); }}
-              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
-            />
+              className="w-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] cursor-pointer"
+            >
+              {TIME_SLOTS.map(slot => (
+                <option key={slot.value} value={slot.value}>{slot.label}</option>
+              ))}
+            </select>
           </div>
         </div>
       )}

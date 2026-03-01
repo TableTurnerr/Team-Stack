@@ -23,6 +23,7 @@ import {
   ShieldAlert,
   CheckSquare,
   CalendarCheck,
+  Trash2,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import {
@@ -232,6 +233,19 @@ export default function CompanyDetailPage() {
     } catch (error) {
       console.error('Failed to complete follow-up:', error);
     }
+  };
+
+  const handleStageCallLog = (log: CallLog) => {
+    if (!adminMode) return;
+    adminMode.addStagedDeletion({
+      type: 'call_log',
+      targetId: log.id,
+      targetLabel: `Call log – ${log.call_outcome || 'Unknown'} – ${company?.company_name ?? ''}`,
+      associatedCallLogIds: [log.id],
+      deleteRecordings: false,
+      hasRecordings: log.has_recording || false,
+    });
+    setCallLogs(prev => prev.filter(l => l.id !== log.id));
   };
 
   // Phone number handlers
@@ -622,15 +636,22 @@ export default function CompanyDetailPage() {
                   <tr>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Date & Time</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Number</th>
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Duration</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Outcome</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Summary</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">AI</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-right">Actions</th>
+                    {isAdminMode && (
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-center">Del</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--card-border)]">
                   {callLogs.map(call => {
                     const coldCall = call.expand?.cold_call as ColdCall | undefined;
+                    const isCallStaged = isAdminMode && adminMode?.pendingDeletions.some(
+                      d => d.targetId === call.id && d.type === 'call_log'
+                    );
                     return (
                       <tr key={call.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
                         <td className="px-6 py-4 text-sm font-medium">{formatDate(call.call_time)}</td>
@@ -644,6 +665,17 @@ export default function CompanyDetailPage() {
                               <ZoomCallButton phoneNumber={call.expand.phone_number_record.phone_number} />
                             )}
                           </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm tabular-nums text-[var(--muted)]">
+                          {(() => {
+                            const secs = call.call_duration ?? call.duration;
+                            if (!secs) return <span className="text-xs">-</span>;
+                            const m = Math.floor(secs / 60);
+                            const s = secs % 60;
+                            return m > 0
+                              ? `${m}m ${s}s`
+                              : `${s}s`;
+                          })()}
                         </td>
                         <td className="px-6 py-4">
                           <span className={cn(
@@ -680,6 +712,23 @@ export default function CompanyDetailPage() {
                             View Details
                           </Link>
                         </td>
+                        {isAdminMode && (
+                          <td className="px-6 py-4 text-center">
+                            {isCallStaged ? (
+                              <div className="p-1.5 rounded-lg text-green-400 inline-flex" title="Staged for deletion">
+                                <CheckSquare size={14} />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handleStageCallLog(call)}
+                                className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 hover:scale-110 transition-all duration-150 inline-flex"
+                                title="Stage for deletion"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

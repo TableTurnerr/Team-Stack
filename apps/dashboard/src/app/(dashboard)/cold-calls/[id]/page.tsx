@@ -208,25 +208,6 @@ function CallLogDetail({ log }: { log: CallLog }) {
           icon={User}
           value={caller?.name || '-'}
         />
-        <InfoRow
-          label="Interest Level"
-          icon={Target}
-          value={log.interest_level ? (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-2 bg-[var(--card-border)] rounded-full overflow-hidden max-w-[120px]">
-                <div
-                  className={cn(
-                    "h-full rounded-full",
-                    log.interest_level >= 7 ? "bg-[var(--success)]" :
-                      log.interest_level >= 4 ? "bg-[var(--warning)]" : "bg-[var(--error)]"
-                  )}
-                  style={{ width: `${log.interest_level * 10}%` }}
-                />
-              </div>
-              <span>{log.interest_level}/10</span>
-            </div>
-          ) : '-'}
-        />
       </div>
 
       {/* Timing card */}
@@ -430,11 +411,6 @@ function ColdCallDetail({ call }: { call: ColdCall }) {
         <InfoRow label="Owner Name" icon={User} value={call.owner_name || '-'} />
         <InfoRow label="Caller" icon={User} value={call.caller_name || '-'} />
         <InfoRow label="Duration Estimate" icon={Clock} value={call.call_duration_estimate || '-'} />
-        <InfoRow
-          label="Interest Level"
-          icon={Target}
-          value={call.interest_level ? `${call.interest_level}/10` : '-'}
-        />
         <InfoRow label="Model Used" icon={Zap} value={call.model_used || '-'} />
       </div>
 

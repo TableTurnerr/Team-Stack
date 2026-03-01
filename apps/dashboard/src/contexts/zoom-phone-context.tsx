@@ -38,6 +38,12 @@ interface ZoomPhoneContextType {
     refreshDialer: () => void;
     /** Key used to force-refresh the Zoom iframe */
     refreshKey: number;
+    /** Auto-hangup after N seconds of ringing (false = disabled) */
+    autoHangupEnabled: boolean;
+    /** Seconds before auto-hangup fires (default 15) */
+    autoHangupSeconds: number;
+    /** Configure auto-hangup */
+    setAutoHangup: (enabled: boolean, seconds?: number) => void;
 }
 
 const ZoomPhoneContext = createContext<ZoomPhoneContextType | null>(null);
@@ -128,6 +134,11 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     const [isDialing, setIsDialing] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
     const dialCallbackRef = useRef<(() => void) | null>(null);
+    const [autoHangupEnabled, setAutoHangupEnabledState] = useState(false);
+    const [autoHangupSeconds, setAutoHangupSecondsState] = useState(15);
+    const autoHangupEnabledRef = useRef(false);
+    const autoHangupSecondsRef = useRef(15);
+    const autoHangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Sync ref with state
     useEffect(() => {
@@ -157,6 +168,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         const handleMessage = (event: MessageEvent) => {
             // Only accept messages from Zoom's origin
             if (event.origin !== 'https://applications.zoom.us') return;
+
 
             const { type, data } = event.data || {};
             if (!type || typeof type !== 'string') return;
@@ -233,7 +245,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     const sendDialMessage = useCallback((phoneNumber: string) => {
         // Try ref first, then fallback to DOM ID
         const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
-        
+
         if (!iframe?.contentWindow) {
             console.error('[Zoom Phone] Iframe or contentWindow not found');
             return false;
@@ -308,6 +320,40 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             }
         }, 1000);
     }, []);
+
+    const setAutoHangup = useCallback((enabled: boolean, seconds?: number) => {
+        autoHangupEnabledRef.current = enabled;
+        setAutoHangupEnabledState(enabled);
+        if (seconds !== undefined) {
+            autoHangupSecondsRef.current = seconds;
+            setAutoHangupSecondsState(seconds);
+        }
+    }, []);
+
+    // Keep endCall ref updated so the auto-hangup timer always calls the latest version
+    const endCallRef = useRef(endCall);
+    endCallRef.current = endCall;
+
+    // Auto-hangup after N seconds of ringing
+    useEffect(() => {
+        if (callStatus === 'ringing' && autoHangupEnabledRef.current) {
+            if (autoHangupTimerRef.current) clearTimeout(autoHangupTimerRef.current);
+            autoHangupTimerRef.current = setTimeout(() => {
+                if (callStatusRef.current === 'ringing') {
+                    console.log('[Zoom Phone] Auto-hangup after', autoHangupSecondsRef.current, 's ringing');
+                    endCallRef.current();
+                }
+            }, autoHangupSecondsRef.current * 1000);
+        } else {
+            if (autoHangupTimerRef.current) {
+                clearTimeout(autoHangupTimerRef.current);
+                autoHangupTimerRef.current = null;
+            }
+        }
+        return () => {
+            if (autoHangupTimerRef.current) clearTimeout(autoHangupTimerRef.current);
+        };
+    }, [callStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Retry sending pending call with increasing delays
     // The Zoom app inside the iframe needs time to initialize its message listeners
@@ -397,7 +443,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             iframeReady, iframeRef, setIframeReady, endCall,
             customDialerNumber, setCustomDialerNumber,
             isDialing, registerDialCallback, refreshDialer,
-            refreshKey
+            refreshKey,
+            autoHangupEnabled, autoHangupSeconds, setAutoHangup,
         }}>
             {children}
         </ZoomPhoneContext.Provider>

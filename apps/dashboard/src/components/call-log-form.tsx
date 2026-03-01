@@ -35,7 +35,6 @@ export function CallLogForm({
     owner_name_found: '',
     receptionist_name: '',
     post_call_notes: '',
-    interest_level: 0,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -50,7 +49,6 @@ export function CallLogForm({
       owner_name_found: '',
       receptionist_name: '',
       post_call_notes: '',
-      interest_level: 0,
     });
     onClose();
   };
@@ -130,22 +128,6 @@ export function CallLogForm({
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs text-[var(--muted)] block mb-1">Interest Level (1-10)</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="10"
-                  value={formData.interest_level}
-                  onChange={(e) => setFormData(p => ({ ...p, interest_level: parseInt(e.target.value) }))}
-                  className="w-full h-2 bg-[var(--card-border)] rounded-lg appearance-none cursor-pointer accent-[var(--foreground)]"
-                />
-                <div className="flex justify-between text-[10px] text-[var(--muted)] mt-1">
-                  <span>Not Interested</span>
-                  <span className="font-medium text-[var(--foreground)]">{formData.interest_level}</span>
-                  <span>Very Interested</span>
-                </div>
-              </div>
             </div>
           )}
 

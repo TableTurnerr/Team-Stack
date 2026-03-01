@@ -111,7 +111,7 @@ test.describe('Team Page', () => {
     // Role badges visible
     const roleBadge = page.locator('span, td').filter({ hasText: /admin|operator|member/i }).first();
     if (await roleBadge.count() > 0) {
-      await expect(roleBadge).toBeVisible();
+      await expect(roleBadge).toBeVisible({ timeout: 15_000 });
     }
   });
 

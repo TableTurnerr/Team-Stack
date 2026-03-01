@@ -353,7 +353,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         return () => {
             if (autoHangupTimerRef.current) clearTimeout(autoHangupTimerRef.current);
         };
-    }, [callStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [callStatus]);
 
     // Retry sending pending call with increasing delays
     // The Zoom app inside the iframe needs time to initialize its message listeners

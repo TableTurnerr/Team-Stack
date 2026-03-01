@@ -29,7 +29,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
     return (
         draft.companySearch.trim().length > 0 ||
         !!draft.selectedCompany ||
-        draft.recipientName.trim().length > 0 ||
+        draft.receptionistName.trim().length > 0 ||
         !!draft.callOutcome ||
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
@@ -173,7 +173,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                     const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
                         company: data.companyId,
                         phone_number: data.phoneNumber,
-                        receptionist_name: data.recipientName || undefined,
+                        receptionist_name: data.receptionistName || undefined,
                         last_called: new Date().toISOString(),
                     });
                     phoneNumberRecordId = newPhone.id;
@@ -193,7 +193,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 call_duration: callDuration > 0 ? callDuration : undefined,
                 call_outcome: data.callOutcome,
                 post_call_notes: data.postCallNotes,
-                owner_name_found: data.recipientName || undefined,
+                owner_name_found: data.receptionistName || undefined,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
                 appointment_set: data.appointmentSet,
@@ -205,8 +205,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 const companyUpdates: Record<string, any> = {
                     last_contacted: new Date().toISOString(),
                 };
-                if (data.ownerReached && data.recipientName) {
-                    companyUpdates.owner_name = data.recipientName;
+                if (data.ownerReached && data.receptionistName) {
+                    companyUpdates.owner_name = data.receptionistName;
                 }
                 await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
             } catch (err) {

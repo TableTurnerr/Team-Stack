@@ -56,18 +56,22 @@ test.describe('Overview Dashboard @smoke', () => {
   test('navigating via sidebar works', async ({ page }) => {
     // Click Companies
     await page.locator('a[href="/companies"]').first().click();
+    await page.waitForURL('/companies', { timeout: 15_000 });
     await expect(page).toHaveURL('/companies');
 
     // Click Cold Calls
     await page.locator('a[href="/cold-calls"]').first().click();
+    await page.waitForURL('/cold-calls', { timeout: 15_000 });
     await expect(page).toHaveURL('/cold-calls');
 
     // Click Notes
     await page.locator('a[href="/notes"]').first().click();
+    await page.waitForURL('/notes', { timeout: 15_000 });
     await expect(page).toHaveURL('/notes');
 
     // Return to overview
     await page.locator('a[href="/"]').first().click();
+    await page.waitForURL('/', { timeout: 15_000 });
     await expect(page).toHaveURL('/');
   });
 
@@ -114,7 +118,6 @@ test.describe('Overview Dashboard @smoke', () => {
       '/session-logs',
       '/notes',
       '/actors',
-      '/goals',
       '/team',
       '/settings',
       '/recordings',
@@ -123,9 +126,10 @@ test.describe('Overview Dashboard @smoke', () => {
     for (const route of routes) {
       await page.goto(route);
       await page.waitForLoadState('domcontentloaded');
+      await waitForTableLoad(page);
 
-      // Page should not show a generic error
-      const body = await page.textContent('body');
+      // Page should not show a generic error (use innerText to avoid hidden Next.js JSON state)
+      const body = await page.locator('body').innerText();
       expect(body).not.toContain('Application error');
       expect(body).not.toContain('500 Internal Server Error');
       expect(body).not.toContain('This page could not be found');

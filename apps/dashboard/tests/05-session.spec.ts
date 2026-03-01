@@ -35,7 +35,7 @@ test.describe('Session Page', () => {
 
   test('session page has no render errors', async ({ page }) => {
     await page.goto('/session');
-    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => { });
 
     await expect(page.locator('body')).not.toContainText('Application error');
     await expect(page.locator('body')).not.toContainText('Unhandled Runtime Error');
@@ -247,12 +247,20 @@ test.describe('Session Page', () => {
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(1500);
 
-    // Zoom dialer circle button or iframe should be present
+    // Zoom dialer is only visible during an active session — if we're on the mode
+    // selector screen (Start Session / Make Quick Call), just verify no crash.
+    const modeSelector = page.locator('button').filter({ hasText: /start session|make quick call/i }).first();
+    if (await modeSelector.count() > 0) {
+      // We're on the mode selection screen — dialer not expected here
+      await expect(page.locator('body')).not.toContainText('Application error');
+      return;
+    }
+
+    // If a session IS active, check for Zoom dialer elements
     const zoomEl = page.locator('[class*="zoom"], iframe[src*="zoom"], [aria-label*="dial"]').first();
     if (await zoomEl.count() > 0) {
       await expect(zoomEl).toBeVisible();
     }
-    // Dial button (the circle)
     const dialCircle = page.locator('button[aria-label*="call"], button[aria-label*="dial"]').first();
     if (await dialCircle.count() > 0) {
       await expect(dialCircle).toBeVisible();

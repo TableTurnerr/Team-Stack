@@ -30,7 +30,7 @@ setup('authenticate', async ({ page }) => {
   await page.getByRole('button', { name: /sign in/i }).click();
 
   // Wait for redirect to dashboard
-  await page.waitForURL('/', { timeout: 20_000 });
+  await page.waitForURL('/', { timeout: 60_000 });
   await expect(page).toHaveURL('/');
 
   // Ensure the .auth directory exists

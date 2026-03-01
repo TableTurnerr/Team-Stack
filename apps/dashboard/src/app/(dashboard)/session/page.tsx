@@ -40,6 +40,9 @@ import { useSession } from '@/contexts/session-context';
 
 const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
 const UNSAVED_CALL_STORAGE_KEY = 'crm:session:unsaved-call:v1';
+const SESSION_TAB_LOCK_KEY = 'crm:session:tab-lock';
+const SESSION_TAB_LOCK_TTL = 8000; // ms — another tab is considered active if heartbeat is this fresh
+const SESSION_TAB_LOCK_HEARTBEAT = 4000; // ms — heartbeat interval
 
 interface UnsavedCallStoragePayload {
     phoneNumber: string;
@@ -53,9 +56,9 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
     return (
         draft.companySearch.trim().length > 0 ||
         !!draft.selectedCompany ||
-        draft.recipientName.trim().length > 0 ||
+        draft.receptionistName.trim().length > 0 ||
+        draft.ownerName.trim().length > 0 ||
         !!draft.callOutcome ||
-        draft.interestLevel !== 5 ||
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
         draft.pitchCompleted ||
@@ -67,8 +70,8 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber } = useZoomPhone();
-    const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode } = useSession();
+    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup } = useZoomPhone();
+    const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp } = useFollowUps();
 
     // Loading combined
@@ -123,6 +126,10 @@ export default function SessionPage() {
     const [callDraft, setCallDraft] = useState<CallFormDraft | null>(null);
     const didHydrateFromStorage = useRef(false);
 
+    // Multi-tab prevention
+    const [otherTabActive, setOtherTabActive] = useState(false);
+    const tabId = useRef(Math.random().toString(36).slice(2));
+
     // Callback tracking for the current call
     const [callbackEvents, setCallbackEvents] = useState<Array<{ reason: string; timestamp: string }>>([]);
 
@@ -136,6 +143,11 @@ export default function SessionPage() {
     const [powerDialerDelay, setPowerDialerDelay] = useState(2); // seconds; negative = start next call before submit
     // Pins the old call's phone number in the form during a negative-delay overlap
     const [pinnedFormPhoneNumber, setPinnedFormPhoneNumber] = useState('');
+    // Company name suggested from power dialer queue for the current call
+    const [suggestedCompanyName, setSuggestedCompanyName] = useState('');
+    // Auto-hangup: ON by default when power dialer is active
+    const [autoHangupEnabled, setAutoHangupEnabled] = useState(false);
+    const [autoHangupSeconds, setAutoHangupSeconds] = useState(15);
     const powerDialerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Refs for reading power dialer state inside effects/timers without stale closures
@@ -151,12 +163,54 @@ export default function SessionPage() {
     powerDialerPausedRef.current = powerDialerPaused;
     powerDialerDelayRef.current = powerDialerDelay;
 
+    // Auto-enable hangup when power dialer activates; disable when it stops
+    useEffect(() => {
+        if (powerDialerActive) {
+            setAutoHangupEnabled(true);
+            setAutoHangup(true, autoHangupSeconds);
+        } else {
+            setAutoHangup(false);
+        }
+    }, [powerDialerActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ---------------------------------------------------------------------------
-    // Check for existing active session on mount
+    // Multi-tab prevention — claim a tab lock and warn if another tab owns it
     // ---------------------------------------------------------------------------
     useEffect(() => {
-        // ... (checkActiveSession logic is handled by context now, but we might want to sync local state if needed, though context is source of truth)
-        // actually, we removed the local check in previous step, so we just rely on session from context.
+        const myTabId = tabId.current;
+
+        const checkAndClaim = () => {
+            try {
+                const raw = localStorage.getItem(SESSION_TAB_LOCK_KEY);
+                if (raw) {
+                    const lock = JSON.parse(raw) as { tabId: string; ts: number };
+                    if (lock.tabId !== myTabId && Date.now() - lock.ts < SESSION_TAB_LOCK_TTL) {
+                        setOtherTabActive(true);
+                        return false; // Another tab owns the lock
+                    }
+                }
+            } catch { /* ignore */ }
+            setOtherTabActive(false);
+            localStorage.setItem(SESSION_TAB_LOCK_KEY, JSON.stringify({ tabId: myTabId, ts: Date.now() }));
+            return true;
+        };
+
+        checkAndClaim();
+
+        const heartbeat = setInterval(checkAndClaim, SESSION_TAB_LOCK_HEARTBEAT);
+
+        return () => {
+            clearInterval(heartbeat);
+            try {
+                const raw = localStorage.getItem(SESSION_TAB_LOCK_KEY);
+                if (raw) {
+                    const lock = JSON.parse(raw) as { tabId: string; ts: number };
+                    if (lock.tabId === myTabId) {
+                        localStorage.removeItem(SESSION_TAB_LOCK_KEY);
+                    }
+                }
+            } catch { /* ignore */ }
+        };
     }, []);
 
     // ---------------------------------------------------------------------------
@@ -167,7 +221,7 @@ export default function SessionPage() {
         didHydrateFromStorage.current = true;
 
         try {
-            const raw = window.sessionStorage.getItem(UNSAVED_CALL_STORAGE_KEY);
+            const raw = window.localStorage.getItem(UNSAVED_CALL_STORAGE_KEY);
             if (!raw) return;
 
             const parsed = JSON.parse(raw) as UnsavedCallStoragePayload;
@@ -191,7 +245,7 @@ export default function SessionPage() {
         const shouldPersist = hasUnsavedCall || (!!currentPhoneNumber && hasDraftContent(callDraft));
 
         if (!shouldPersist) {
-            window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
             return;
         }
 
@@ -201,7 +255,7 @@ export default function SessionPage() {
             draft: callDraft,
         };
 
-        window.sessionStorage.setItem(UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
+        window.localStorage.setItem(UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
     }, [hasUnsavedCall, currentPhoneNumber, callDraft]);
 
     // ---------------------------------------------------------------------------
@@ -332,8 +386,9 @@ export default function SessionPage() {
         powerDialerTimerRef.current = setTimeout(() => {
             if (!powerDialerActiveRef.current || powerDialerPausedRef.current) return;
             setPowerDialerIndex(nextIdx);
+            const entry = powerDialerQueueRef.current[nextIdx];
             // handleDial is captured via ref to always use the latest version
-            handleDialRef.current(powerDialerQueueRef.current[nextIdx].number);
+            handleDialRef.current(entry.number, entry.company);
         }, delayMs);
     }, [callStatus, session?.paused_at]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -454,7 +509,7 @@ export default function SessionPage() {
             setCallDraft(null);
             setCallbackEvents([]);
             setContextPhoneNumber(''); // Clear phone number in context
-            window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
             // Reset power dialer
             setPowerDialerActive(false);
@@ -530,7 +585,7 @@ export default function SessionPage() {
     // ---------------------------------------------------------------------------
     // Handle dial
     // ---------------------------------------------------------------------------
-    const handleDial = useCallback((phoneNumber: string) => {
+    const handleDial = useCallback((phoneNumber: string, companyName?: string) => {
         // Prevent double dialing
         if (isDialing || callStatus === 'ringing' || callStatus === 'connected') {
             console.log('Call already in progress, ignoring dial request');
@@ -545,6 +600,8 @@ export default function SessionPage() {
 
         setCurrentPhoneNumber(phoneNumber);
         setContextPhoneNumber(phoneNumber); // Update phone number in context
+        // Pass company suggestion from power dialer to the form
+        setSuggestedCompanyName(companyName || '');
 
         // Enter deferred mode so recordings accumulate in memory (enables callback merging)
         // and start recording immediately when dialing IF session is active
@@ -588,213 +645,190 @@ export default function SessionPage() {
     // ---------------------------------------------------------------------------
     // Save call
     // ---------------------------------------------------------------------------
-    const handleSaveCall = useCallback(async (data: CallFormData) => {
+    const handleSaveCall = useCallback((data: CallFormData) => {
         if (!session || !user) return;
 
-        // For No Answer, discard immediately (no recording to save).
-        // For other outcomes, we capture the phone now and submit after call log creation.
+        // Capture timing values before clearing state
+        const capturedRingStart = ringStartTime;
+        const capturedConnectTime = connectTime;
+        const capturedPickupIncremented = pickupCountIncremented;
+
+        // For No Answer, discard recording immediately
         if (data.callOutcome === 'No Answer') {
             discardDeferredRecording();
+            setContextPhoneNumber('');
         }
 
-        // Clear phone number in context now that we've captured it inside submitDeferredRecording
-        // (it captures phoneNumberRef.current synchronously at call start, so clearing here is safe).
-        setContextPhoneNumber('');
+        // ── INSTANT UI RESET ── user can start the next call right away
+        setLastCallCompanyName(data.companyName);
+        setCurrentPhoneNumber('');
+        setHasUnsavedCall(false);
+        setCallDraft(null);
+        setCallbackEvents([]);
+        setPinnedFormPhoneNumber('');
+        setRingStartTime(null);
+        setConnectTime(null);
+        setCurrentCallDuration(0);
+        setDialCountIncremented(false);
+        setPickupCountIncremented(false);
+        window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
-        try {
-            setSavingCall(true);
+        // Advance power dialer immediately (before background API calls)
+        if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current >= 0) {
+            const nextIdx = powerDialerIndexRef.current + 1;
+            if (nextIdx >= powerDialerQueueRef.current.length) {
+                setPowerDialerIndex(nextIdx);
+                setPowerDialerActive(false);
+            } else {
+                setPowerDialerIndex(nextIdx);
+                if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
+                const delayMs = powerDialerDelayRef.current * 1000;
+                const nextEntry = powerDialerQueueRef.current[nextIdx];
+                powerDialerTimerRef.current = setTimeout(() => {
+                    handleDialRef.current(nextEntry.number, nextEntry.company);
+                }, delayMs);
+            }
+        }
+        if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current < 0) {
+            const nextIdx = powerDialerIndexRef.current + 1;
+            if (nextIdx >= powerDialerQueueRef.current.length) {
+                setPowerDialerIndex(nextIdx);
+                setPowerDialerActive(false);
+            }
+        }
 
-            // Find or note the phone_number_record
-            let phoneNumberRecordId = '';
+        // ── BACKGROUND SAVE ── fire-and-forget API work
+        void (async () => {
             try {
-                const digits = data.phoneNumber.replace(/\D/g, '');
-                const last10 = digits.slice(-10);
-                const filterParts = [`phone_number = "${data.phoneNumber}"`];
-                if (digits !== data.phoneNumber) {
-                    filterParts.push(`phone_number ~ "${digits}"`);
-                }
-                if (last10 !== digits && last10.length >= 7) {
-                    filterParts.push(`phone_number ~ "${last10}"`);
-                }
-
-                const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                    filter: `company = "${data.companyId}" && (${filterParts.join(' || ')})`,
-                });
-                if (phoneRecords.items.length > 0) {
-                    phoneNumberRecordId = phoneRecords.items[0].id;
-                } else {
-                    // Create a new phone number record
-                    const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
-                        company: data.companyId,
-                        phone_number: data.phoneNumber,
-                        receptionist_name: data.recipientName || undefined,
-                        last_called: new Date().toISOString(),
-                    });
-                    phoneNumberRecordId = newPhone.id;
-                }
-            } catch {
-                // If phone number lookup/creation fails, still log the call
-            }
-
-            // Calculate call durations
-            let ringDuration = 0;
-            let callDuration = 0;
-            let totalDuration = 0;
-
-            if (ringStartTime) {
-                const endTime = Date.now();
-                if (connectTime) {
-                    // Call was picked up
-                    ringDuration = Math.floor((connectTime - ringStartTime) / 1000);
-                    callDuration = Math.floor((endTime - connectTime) / 1000);
-                    totalDuration = ringDuration + callDuration;
-                } else {
-                    // Call was not picked up (just rang)
-                    ringDuration = Math.floor((endTime - ringStartTime) / 1000);
-                    totalDuration = ringDuration;
-                }
-            }
-
-            // Create call log with performance tracking
-            const callLog = await pb.collection(COLLECTIONS.CALL_LOGS).create<CallLog>({
-                company: data.companyId,
-                phone_number_record: phoneNumberRecordId || undefined,
-                caller: user.id,
-                call_time: new Date().toISOString(),
-                duration: totalDuration > 0 ? totalDuration : undefined,
-                ring_duration: ringDuration > 0 ? ringDuration : undefined,
-                call_duration: callDuration > 0 ? callDuration : undefined,
-                call_outcome: data.callOutcome,
-                interest_level: data.interestLevel || undefined,
-                post_call_notes: data.postCallNotes || undefined,
-                owner_name_found: data.recipientName || undefined,
-                session: session.id,
-                owner_reached: data.ownerReached,
-                pitch_completed: data.pitchCompleted,
-                appointment_set: data.appointmentSet,
-                callback_events: data.callbackEvents && data.callbackEvents.length > 0
-                    ? data.callbackEvents
-                    : undefined,
-            });
-
-            // Submit deferred recording NOW that we have the call log ID, so the recording
-            // is linked to this specific call log and has_recording is set correctly.
-            if (data.callOutcome !== 'No Answer') {
-                submitDeferredRecording(callLog.id).then(recordingId => {
-                    if (recordingId) {
-                        // Mark the call log as having a recording
-                        pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
-                            has_recording: true,
-                        }).catch(err => console.error('Failed to mark has_recording:', err));
-                    }
-                }).catch(err => console.error('Failed to submit recording:', err));
-            }
-
-            // Update session performance totals based on this call
-            const sessionUpdates: Partial<ColdCallingSession> = {};
-            if (data.ownerReached) {
-                sessionUpdates.owner_reached = (session.owner_reached || 0) + 1;
-            }
-            if (data.pitchCompleted) {
-                sessionUpdates.pitch_completed = (session.pitch_completed || 0) + 1;
-            }
-            if (data.appointmentSet) {
-                sessionUpdates.appointment_set = (session.appointment_set || 0) + 1;
-            }
-            // No Answer: undo the pickup count if it was already incremented
-            // (pickup is incremented when call connects, but No Answer means no human pickup)
-            if (data.callOutcome === 'No Answer' && pickupCountIncremented && (session.total_pickups || 0) > 0) {
-                sessionUpdates.total_pickups = Math.max(0, (session.total_pickups || 0) - 1);
-            }
-
-            // Update session if there are any performance updates
-            if (Object.keys(sessionUpdates).length > 0) {
-                await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, sessionUpdates);
-            }
-
-            // Update company metadata (last_contacted, source, first_contacted)
-            try {
-                const companyUpdates: Record<string, any> = {
-                    last_contacted: new Date().toISOString(),
-                };
-                const existingCompany = await pb.collection(COLLECTIONS.COMPANIES).getOne(data.companyId);
-                if (!existingCompany.source) {
-                    companyUpdates.source = 'Cold Call';
-                }
-                if (!existingCompany.first_contacted) {
-                    companyUpdates.first_contacted = new Date().toISOString();
-                }
-                if (data.ownerReached && data.recipientName && !existingCompany.owner_name) {
-                    companyUpdates.owner_name = data.recipientName;
-                }
-                await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
-            } catch {
-                // Non-critical — don't block call save
-            }
-
-            // Create follow-up if scheduled
-            if (data.followUp) {
+                // Find or create phone number record
+                let phoneNumberRecordId = '';
                 try {
-                    await createFollowUp({
-                        company: data.companyId,
-                        phone_number_record: phoneNumberRecordId || undefined,
-                        call_log: callLog.id,
-                        scheduled_time: data.followUp.scheduledTime,
-                        client_timezone: data.followUp.timezone,
-                        notes: data.followUp.notes || undefined,
+                    const digits = data.phoneNumber.replace(/\D/g, '');
+                    const last10 = digits.slice(-10);
+                    const filterParts = [`phone_number = "${data.phoneNumber}"`];
+                    if (digits !== data.phoneNumber) filterParts.push(`phone_number ~ "${digits}"`);
+                    if (last10 !== digits && last10.length >= 7) filterParts.push(`phone_number ~ "${last10}"`);
+
+                    const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
+                        filter: `company = "${data.companyId}" && (${filterParts.join(' || ')})`,
                     });
-                } catch (err) {
-                    console.error('Failed to create follow-up:', err);
+                    if (phoneRecords.items.length > 0) {
+                        phoneNumberRecordId = phoneRecords.items[0].id;
+                    } else {
+                        const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
+                            company: data.companyId,
+                            phone_number: data.phoneNumber,
+                            receptionist_name: data.receptionistName || undefined,
+                            last_called: new Date().toISOString(),
+                        });
+                        phoneNumberRecordId = newPhone.id;
+                    }
+                } catch { /* ignore — still log the call */ }
+
+                // Calculate call durations from captured values
+                let ringDuration = 0, callDuration = 0, totalDuration = 0;
+                if (capturedRingStart) {
+                    const endTime = Date.now();
+                    if (capturedConnectTime) {
+                        ringDuration = Math.floor((capturedConnectTime - capturedRingStart) / 1000);
+                        callDuration = Math.floor((endTime - capturedConnectTime) / 1000);
+                        totalDuration = ringDuration + callDuration;
+                    } else {
+                        ringDuration = Math.floor((endTime - capturedRingStart) / 1000);
+                        totalDuration = ringDuration;
+                    }
                 }
-            }
 
-            // Note: dial count and pickup count are now incremented automatically when calls ring/connect
-            // No need to update them here - just refresh the session
-            const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getOne<ColdCallingSession>(session.id);
-            setSession(updatedSession);
+                // Create call log
+                const callLog = await pb.collection(COLLECTIONS.CALL_LOGS).create<CallLog>({
+                    company: data.companyId,
+                    phone_number_record: phoneNumberRecordId || undefined,
+                    caller: user.id,
+                    call_time: new Date().toISOString(),
+                    duration: totalDuration > 0 ? totalDuration : undefined,
+                    ring_duration: ringDuration > 0 ? ringDuration : undefined,
+                    call_duration: callDuration > 0 ? callDuration : undefined,
+                    call_outcome: data.callOutcome,
+                    post_call_notes: data.postCallNotes || undefined,
+                    receptionist_name: data.receptionistName || undefined,
+                    owner_name_found: data.ownerName || undefined,
+                    session: session.id,
+                    owner_reached: data.ownerReached,
+                    pitch_completed: data.pitchCompleted,
+                    appointment_set: data.appointmentSet,
+                    callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
+                });
 
-            // Shift to last call preview
-            setLastCallLog(callLog);
-            setLastCallCompanyName(data.companyName);
-            setCurrentPhoneNumber('');
-
-            // Clear unsaved call state
-            setHasUnsavedCall(false);
-            setCallDraft(null);
-            setCallbackEvents([]);
-            window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
-
-            // Reset call timing state for next call
-            setRingStartTime(null);
-            setConnectTime(null);
-            setCurrentCallDuration(0);
-            setDialCountIncremented(false);
-            setPickupCountIncremented(false);
-
-            // Clear pinned phone number now that the form has been submitted
-            setPinnedFormPhoneNumber('');
-
-            // Power dialer — positive / zero delay: schedule next dial after form submit
-            // Negative delay is handled by the callStatus 'ended' effect (no action needed here)
-            if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current >= 0) {
-                const nextIdx = powerDialerIndexRef.current + 1;
-                if (nextIdx >= powerDialerQueueRef.current.length) {
-                    setPowerDialerActive(false);
-                } else {
-                    setPowerDialerIndex(nextIdx);
-                    if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
-                    const delayMs = powerDialerDelayRef.current * 1000;
-                    const nextNumber = powerDialerQueueRef.current[nextIdx].number;
-                    powerDialerTimerRef.current = setTimeout(() => {
-                        handleDialRef.current(nextNumber);
-                    }, delayMs);
+                // Submit deferred recording now that we have the call log ID
+                if (data.callOutcome !== 'No Answer') {
+                    submitDeferredRecording(callLog.id).then(recordingId => {
+                        if (recordingId) {
+                            pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
+                                has_recording: true,
+                            }).catch(err => console.error('Failed to mark has_recording:', err));
+                        }
+                    }).catch(err => console.error('Failed to submit recording:', err));
+                    setContextPhoneNumber('');
                 }
+
+                // Save additional phone number found during call
+                if (data.additionalPhoneNumber) {
+                    pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
+                        company: data.companyId,
+                        phone_number: data.additionalPhoneNumber,
+                        receptionist_name: data.additionalPhoneNote || undefined,
+                        last_called: new Date().toISOString(),
+                    }).catch(err => console.error('Failed to save additional phone number:', err));
+                }
+
+                // Show last call preview
+                setLastCallLog(callLog);
+
+                // Background: session perf + company metadata + follow-up + session refresh
+                void Promise.allSettled([
+                    (async () => {
+                        const sessionUpdates: Partial<ColdCallingSession> = {};
+                        if (data.ownerReached) sessionUpdates.owner_reached = (session.owner_reached || 0) + 1;
+                        if (data.pitchCompleted) sessionUpdates.pitch_completed = (session.pitch_completed || 0) + 1;
+                        if (data.appointmentSet) sessionUpdates.appointment_set = (session.appointment_set || 0) + 1;
+                        if (data.callOutcome === 'No Answer' && capturedPickupIncremented && (session.total_pickups || 0) > 0) {
+                            sessionUpdates.total_pickups = Math.max(0, (session.total_pickups || 0) - 1);
+                        }
+                        if (Object.keys(sessionUpdates).length > 0) {
+                            await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, sessionUpdates);
+                        }
+                        const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getOne<ColdCallingSession>(session.id);
+                        setSession(updatedSession);
+                    })(),
+                    (async () => {
+                        try {
+                            const companyUpdates: Record<string, unknown> = { last_contacted: new Date().toISOString() };
+                            const existingCompany = await pb.collection(COLLECTIONS.COMPANIES).getOne(data.companyId);
+                            if (!existingCompany.source) companyUpdates.source = 'Cold Call';
+                            if (!existingCompany.first_contacted) companyUpdates.first_contacted = new Date().toISOString();
+                            if (data.ownerReached && data.ownerName && !existingCompany.owner_name) {
+                                companyUpdates.owner_name = data.ownerName;
+                            }
+                            await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
+                        } catch { /* non-critical */ }
+                    })(),
+                    data.followUp ? (async () => {
+                        try {
+                            await createFollowUp({
+                                company: data.companyId,
+                                phone_number_record: phoneNumberRecordId || undefined,
+                                call_log: callLog.id,
+                                scheduled_time: data.followUp!.scheduledTime,
+                                client_timezone: data.followUp!.timezone,
+                                notes: data.followUp!.notes || undefined,
+                            });
+                        } catch (err) { console.error('Failed to create follow-up:', err); }
+                    })() : Promise.resolve(),
+                ]);
+            } catch (err) {
+                console.error('Failed to save call:', err);
             }
-        } catch (err) {
-            console.error('Failed to save call:', err);
-        } finally {
-            setSavingCall(false);
-        }
+        })();
     }, [session, user, discardDeferredRecording, submitDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp]);
 
     const handleDiscardCall = useCallback(() => {
@@ -811,7 +845,7 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
-        window.sessionStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+        window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
         // Cancel any pending power dialer auto-dial
         if (powerDialerTimerRef.current) {
@@ -828,7 +862,7 @@ export default function SessionPage() {
         if (callStatus === 'ringing' || callStatus === 'connected') return;
         setPowerDialerActive(true);
         setPowerDialerPaused(false);
-        handleDial(powerDialerQueue[powerDialerIndex].number);
+        handleDial(powerDialerQueue[powerDialerIndex].number, powerDialerQueue[powerDialerIndex].company);
     }, [powerDialerQueue, powerDialerIndex, hasUnsavedCall, callStatus, handleDial]);
 
     const handlePowerDialerPause = useCallback(() => {
@@ -904,6 +938,33 @@ export default function SessionPage() {
                             Import <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">pb_schema_exported.json</code> from
                             the <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">packages/pocketbase-client</code> directory.
                         </p>
+                    </div>
+                </div>
+            );
+        }
+
+        if (otherTabActive) {
+            return (
+                <div className="flex items-center justify-center min-h-[60vh]">
+                    <div className="text-center space-y-4 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--warning)]/40 shadow-xl">
+                        <div className="w-16 h-16 rounded-2xl bg-[var(--warning-subtle)] flex items-center justify-center mx-auto">
+                            <AlertTriangle size={28} className="text-[var(--warning)]" />
+                        </div>
+                        <h1 className="text-xl font-bold">Session Open in Another Tab</h1>
+                        <p className="text-sm text-[var(--muted)] leading-relaxed">
+                            The call session is already running in another browser tab.
+                            Please use that tab to make calls. Opening the session in multiple tabs can cause call data conflicts.
+                        </p>
+                        <button
+                            onClick={() => {
+                                // Force-claim this tab (previous tab may have been closed)
+                                localStorage.setItem(SESSION_TAB_LOCK_KEY, JSON.stringify({ tabId: tabId.current, ts: Date.now() }));
+                                setOtherTabActive(false);
+                            }}
+                            className="px-4 py-2 rounded-lg bg-[var(--warning)] text-white text-sm font-medium hover:opacity-90 transition-opacity"
+                        >
+                            Use This Tab Instead
+                        </button>
                     </div>
                 </div>
             );
@@ -1033,6 +1094,43 @@ export default function SessionPage() {
                                     {starting ? 'Connecting...' : 'Connect Audio & Start'}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // ── Blocked by another user's active session ──
+            if (isBlockedByOtherSession && otherActiveSession) {
+                const otherStart = new Date(otherActiveSession.started_at).getTime();
+                const otherPausedSec = otherActiveSession.total_paused_sec ?? 0;
+                const otherCurrentPauseSec = otherActiveSession.paused_at
+                    ? Math.floor((Date.now() - new Date(otherActiveSession.paused_at).getTime()) / 1000)
+                    : 0;
+                const otherElapsed = Math.max(0, Math.floor((Date.now() - otherStart) / 1000) - otherPausedSec - otherCurrentPauseSec);
+                const isPaused = !!otherActiveSession.paused_at;
+
+                return (
+                    <div className="flex items-center justify-center min-h-[60vh]">
+                        <div className="text-center space-y-5 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--warning)]/40 shadow-xl">
+                            <div className="w-16 h-16 rounded-2xl bg-[var(--warning-subtle)] flex items-center justify-center mx-auto">
+                                <Headphones size={28} className="text-[var(--warning)] animate-pulse" />
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-bold mb-2">Session In Progress</h1>
+                                <p className="text-sm text-[var(--muted)] leading-relaxed">
+                                    <span className="font-semibold text-[var(--foreground)]">{activeSessionUserName}</span>{' '}
+                                    is currently in an active call session. Only one session can run at a time.
+                                </p>
+                            </div>
+                            <div className="flex items-center justify-center gap-3 bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)]">
+                                <span className={`w-2 h-2 rounded-full ${isPaused ? 'bg-[var(--warning)]' : 'bg-[var(--success)] animate-pulse'}`} />
+                                <span className="text-sm font-medium">{isPaused ? 'Paused' : 'Active'}</span>
+                                <span className="text-sm font-mono text-[var(--muted)]">{formatDuration(otherElapsed)}</span>
+                            </div>
+                            <p className="text-xs text-[var(--muted)]">
+                                You&apos;ll be able to start your session once {activeSessionUserName?.split(' ')[0] || 'they'} end{activeSessionUserName?.split(' ')[0] ? 's' : ''} theirs.
+                                This page will update automatically.
+                            </p>
                         </div>
                     </div>
                 );
@@ -1240,7 +1338,7 @@ export default function SessionPage() {
 
                 {/* Docked Zoom Phone Dialer - Above Current Call section */}
                 <div className="relative">
-                    <ZoomPhoneDialer docked disabled={hasUnsavedCall || !!session.paused_at} />
+                    <ZoomPhoneDialer docked disabled={(hasUnsavedCall && callStatus !== 'ringing' && callStatus !== 'connected') || !!session.paused_at} />
                     {session.paused_at && (
                         <div className="absolute inset-0 bg-[var(--background)]/60 backdrop-blur-[1px] flex items-center justify-center rounded-xl z-10 pointer-events-none">
                             <p className="text-sm font-medium text-[var(--muted)]">Resume session to make calls</p>

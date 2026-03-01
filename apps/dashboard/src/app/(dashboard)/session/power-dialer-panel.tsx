@@ -22,6 +22,9 @@ interface PowerDialerPanelProps {
     onQueueLoad: (entries: DialerEntry[]) => void;
     disabled?: boolean;
     canStart?: boolean;
+    autoHangupEnabled?: boolean;
+    autoHangupSeconds?: number;
+    onAutoHangupChange?: (enabled: boolean, seconds: number) => void;
 }
 
 function parseDialerEntries(input: string): DialerEntry[] {
@@ -67,6 +70,9 @@ export function PowerDialerPanel({
     onQueueLoad,
     disabled = false,
     canStart = true,
+    autoHangupEnabled = true,
+    autoHangupSeconds = 15,
+    onAutoHangupChange,
 }: PowerDialerPanelProps) {
     const [expanded, setExpanded] = useState(true);
     const [inputMode, setInputMode] = useState(queue.length === 0);
@@ -350,6 +356,42 @@ export function PowerDialerPanel({
                                     {delay > 0 && `Waits ${delay}s after you submit before dialing the next number.`}
                                 </p>
                             </div>
+
+                            {/* Auto-hangup config */}
+                            {onAutoHangupChange && (
+                                <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wider cursor-pointer" htmlFor="auto-hangup-toggle">
+                                            Auto-Hangup if Ringing
+                                        </label>
+                                        {autoHangupEnabled && (
+                                            <span className="text-[10px] text-[var(--muted)]">
+                                                after {autoHangupSeconds}s
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {autoHangupEnabled && (
+                                            <input
+                                                type="number"
+                                                min={5}
+                                                max={60}
+                                                value={autoHangupSeconds}
+                                                onChange={e => onAutoHangupChange(true, Math.max(5, Math.min(60, parseInt(e.target.value) || 15)))}
+                                                className="w-12 px-1 py-0.5 text-xs text-center bg-[var(--card-bg)] border border-[var(--card-border)] rounded-md focus:outline-none"
+                                            />
+                                        )}
+                                        <button
+                                            id="auto-hangup-toggle"
+                                            type="button"
+                                            onClick={() => onAutoHangupChange(!autoHangupEnabled, autoHangupSeconds)}
+                                            className={`relative w-8 h-4 rounded-full transition-colors ${autoHangupEnabled ? 'bg-[var(--success)]' : 'bg-[var(--card-border)]'}`}
+                                        >
+                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${autoHangupEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Controls */}
                             {isComplete ? (

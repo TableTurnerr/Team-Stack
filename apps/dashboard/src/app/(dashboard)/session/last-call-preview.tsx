@@ -195,24 +195,6 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                         </div>
                     )}
 
-                    {/* Interest level */}
-                    {displayCall.interest_level !== undefined && (
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-[var(--muted)]">Interest:</span>
-                            <div className="flex-1 h-1.5 bg-[var(--card-border)] rounded-full overflow-hidden max-w-[100px]">
-                                <div
-                                    className={cn(
-                                        'h-full rounded-full',
-                                        displayCall.interest_level >= 7 ? 'bg-[var(--success)]' :
-                                            displayCall.interest_level >= 4 ? 'bg-[var(--warning)]' : 'bg-[var(--error)]'
-                                    )}
-                                    style={{ width: `${displayCall.interest_level * 10}%` }}
-                                />
-                            </div>
-                            <span className="text-xs text-[var(--muted)]">{displayCall.interest_level}/10</span>
-                        </div>
-                    )}
-
                     {/* Performance tracking checkboxes */}
                     <div className="space-y-2 pt-1">
                         <label className="text-xs text-[var(--muted)] mb-1 block">Performance</label>

@@ -13,7 +13,7 @@ import {
     Play,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber } from '@/lib/types';
+import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
@@ -132,6 +132,13 @@ export default function SessionPage() {
 
     // Callback tracking for the current call
     const [callbackEvents, setCallbackEvents] = useState<Array<{ reason: string; timestamp: string }>>([]);
+
+    // Test session state
+    const [pendingTestSession, setPendingTestSession] = useState(false);
+    const [showTestCleanupModal, setShowTestCleanupModal] = useState(false);
+    const [testSessionCleanupId, setTestSessionCleanupId] = useState<string | null>(null);
+    const [cleaningUp, setCleaningUp] = useState(false);
+    const [cleanupError, setCleanupError] = useState('');
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -444,6 +451,15 @@ export default function SessionPage() {
     // Start session — step 1: show "Connect Audio" screen
     // ---------------------------------------------------------------------------
     const startSession = useCallback(() => {
+        setPendingTestSession(false);
+        setAwaitingAudioConnect(true);
+    }, []);
+
+    // ---------------------------------------------------------------------------
+    // Start test session — same flow but marks session as is_test
+    // ---------------------------------------------------------------------------
+    const startTestSession = useCallback(() => {
+        setPendingTestSession(true);
         setAwaitingAudioConnect(true);
     }, []);
 
@@ -475,7 +491,9 @@ export default function SessionPage() {
                 status: 'active',
                 paused_at: null,
                 total_paused_sec: 0,
+                is_test: pendingTestSession,
             });
+            setPendingTestSession(false);
             setSession(newSession);
             setAwaitingAudioConnect(false);
         } catch (err: any) {
@@ -487,13 +505,15 @@ export default function SessionPage() {
         } finally {
             setStarting(false);
         }
-    }, [user, setSession, startAudioSession]);
+    }, [user, setSession, startAudioSession, pendingTestSession]);
 
     // ---------------------------------------------------------------------------
     // End session
     // ---------------------------------------------------------------------------
     const endSession = useCallback(async () => {
         if (!session) return;
+        const wasTestSession = session.is_test;
+        const sessionId = session.id;
         try {
             setEnding(true);
             await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, {
@@ -520,12 +540,70 @@ export default function SessionPage() {
                 clearTimeout(powerDialerTimerRef.current);
                 powerDialerTimerRef.current = null;
             }
+
+            // For test sessions, offer cleanup
+            if (wasTestSession) {
+                setTestSessionCleanupId(sessionId);
+                setCleanupError('');
+                setShowTestCleanupModal(true);
+            }
         } catch (err) {
             console.error('Failed to end session:', err);
         } finally {
             setEnding(false);
         }
     }, [session, elapsedSec, setSession, setContextPhoneNumber]);
+
+    // ---------------------------------------------------------------------------
+    // Test session cleanup — delete all data created during the test session
+    // ---------------------------------------------------------------------------
+    const handleDeleteTestData = useCallback(async () => {
+        if (!testSessionCleanupId) return;
+        setCleaningUp(true);
+        setCleanupError('');
+        try {
+            // 1. Get all call logs for this session
+            const callLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                filter: `session = "${testSessionCleanupId}"`,
+            });
+            const callLogIds = callLogs.map(l => l.id);
+
+            // 2. Delete recordings linked to those call logs
+            if (callLogIds.length > 0) {
+                const recordings = await pb.collection(COLLECTIONS.RECORDINGS).getFullList<Recording>({
+                    filter: callLogIds.map(id => `call_log = "${id}"`).join(' || '),
+                });
+                await Promise.allSettled(recordings.map(r => pb.collection(COLLECTIONS.RECORDINGS).delete(r.id)));
+            }
+
+            // 3. Delete follow-ups linked to those call logs
+            if (callLogIds.length > 0) {
+                const followUps = await pb.collection(COLLECTIONS.FOLLOW_UPS).getFullList<FollowUp>({
+                    filter: callLogIds.map(id => `call_log = "${id}"`).join(' || '),
+                });
+                await Promise.allSettled(followUps.map(f => pb.collection(COLLECTIONS.FOLLOW_UPS).delete(f.id)));
+            }
+
+            // 4. Delete all call logs
+            await Promise.allSettled(callLogs.map(l => pb.collection(COLLECTIONS.CALL_LOGS).delete(l.id)));
+
+            // 5. Delete the session record
+            await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).delete(testSessionCleanupId);
+
+            setShowTestCleanupModal(false);
+            setTestSessionCleanupId(null);
+        } catch (err) {
+            console.error('Failed to delete test session data:', err);
+            setCleanupError('Some items could not be deleted. You can delete this session from Session Logs later.');
+        } finally {
+            setCleaningUp(false);
+        }
+    }, [testSessionCleanupId]);
+
+    const handleKeepTestData = useCallback(() => {
+        setShowTestCleanupModal(false);
+        setTestSessionCleanupId(null);
+    }, []);
 
     // ---------------------------------------------------------------------------
     // Pause session
@@ -1136,7 +1214,7 @@ export default function SessionPage() {
                 );
             }
 
-            return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} />;
+            return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} onStartTestSession={startTestSession} />;
         }
 
         if (!isSessionActive) {
@@ -1224,6 +1302,11 @@ export default function SessionPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="flex items-center gap-3">
                         <h1 className="text-2xl font-bold">Call Session</h1>
+                        {session.is_test && (
+                            <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                                TEST
+                            </span>
+                        )}
                         {session.paused_at ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--warning-subtle)] text-[var(--warning)]">
                                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--warning)]" />
@@ -1405,5 +1488,59 @@ export default function SessionPage() {
         );
     };
 
-    return renderContent();
+    return (
+        <>
+            {renderContent()}
+
+            {/* Test session cleanup modal */}
+            {showTestCleanupModal && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                        <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+                                <span className="text-amber-500 text-sm font-bold">TEST</span>
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-bold">Test Session Ended</h2>
+                                <p className="text-sm text-[var(--muted)] mt-1">
+                                    Would you like to delete all data created during this test session? This includes call logs, recordings, and follow-ups.
+                                </p>
+                            </div>
+                        </div>
+
+                        {cleanupError && (
+                            <p className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/20 rounded-lg p-2">
+                                {cleanupError}
+                            </p>
+                        )}
+
+                        <div className="flex gap-3 pt-1">
+                            <button
+                                onClick={handleKeepTestData}
+                                disabled={cleaningUp}
+                                className="flex-1 py-2.5 rounded-xl border border-[var(--card-border)] text-sm font-medium hover:bg-[var(--sidebar-bg)] transition-colors disabled:opacity-50"
+                            >
+                                Keep for Now
+                            </button>
+                            <button
+                                onClick={handleDeleteTestData}
+                                disabled={cleaningUp}
+                                className="flex-[1.5] py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                            >
+                                {cleaningUp ? (
+                                    <>
+                                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                        </svg>
+                                        Deleting...
+                                    </>
+                                ) : 'Delete Everything'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
 }

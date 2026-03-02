@@ -21,6 +21,9 @@ test.describe('Recordings Page', () => {
 
   test('recordings page shows upload area or recordings table', async ({ page }) => {
     await page.goto('/recordings');
+    // Wait for the heading to confirm the page has rendered before checking elements.
+    // count() is synchronous (no waiting), so we must ensure the DOM is ready first.
+    await page.waitForSelector('h1', { timeout: 20_000 });
     await waitForTableLoad(page);
 
     // The page should show either an upload UI (admin) or a recordings table (any user).
@@ -32,11 +35,13 @@ test.describe('Recordings Page', () => {
     const emptyState = page.locator('text=/no recording|upload your first/i').first();
     const pageHeading = page.locator('h1').first();
 
-    const hasUploadUI = (await uploadArea.count() > 0)
-      || (await uploadBtn.count() > 0)
-      || (await bulkBtn.count() > 0);
-    const hasTableOrEmpty = (await recordingsTable.count() > 0) || (await emptyState.count() > 0);
-    const hasHeading = (await pageHeading.count() > 0);
+    // Use isVisible() (not count()) so we only count elements the user can actually see.
+    const hasUploadUI = (await uploadArea.isVisible().catch(() => false))
+      || (await uploadBtn.isVisible().catch(() => false))
+      || (await bulkBtn.isVisible().catch(() => false));
+    const hasTableOrEmpty = (await recordingsTable.isVisible().catch(() => false))
+      || (await emptyState.isVisible().catch(() => false));
+    const hasHeading = await pageHeading.isVisible().catch(() => false);
 
     // Page must show either an upload control, a table/empty-state, or at minimum the heading
     expect(hasUploadUI || hasTableOrEmpty || hasHeading).toBeTruthy();

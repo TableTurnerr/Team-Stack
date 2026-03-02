@@ -15,6 +15,7 @@ import {
   StickyNote,
   Zap,
   Loader2,
+  PhoneForwarded,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type ColdCall, type Company, type ColdCallingSession, type PhoneNumber, type User as UserType } from '@/lib/types';
@@ -161,6 +162,12 @@ function CallLogDetail({ log }: { log: CallLog }) {
               AI Analyzed
             </span>
           )}
+          {(log.callback_events?.length ?? 0) > 0 && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--warning-subtle)] text-[var(--warning)] text-xs font-semibold border border-[var(--warning)]/30">
+              <PhoneForwarded size={12} />
+              Callback ({log.callback_events!.length})
+            </span>
+          )}
         </div>
         {log.call_outcome && (
           <span className={cn(
@@ -271,6 +278,31 @@ function CallLogDetail({ log }: { log: CallLog }) {
             Post-call Notes
           </h2>
           <p className="text-sm leading-relaxed whitespace-pre-wrap">{log.post_call_notes}</p>
+        </div>
+      )}
+
+      {/* Callback Events card */}
+      {(log.callback_events?.length ?? 0) > 0 && (
+        <div className="bg-[var(--card-bg)] border border-[var(--warning)]/30 rounded-xl p-6">
+          <h2 className="text-sm font-semibold text-[var(--warning)] uppercase tracking-wider mb-4 flex items-center gap-2">
+            <PhoneForwarded size={14} />
+            Callback Events ({log.callback_events!.length})
+          </h2>
+          <div className="space-y-2">
+            {log.callback_events!.map((evt, i) => (
+              <div key={i} className="flex items-center justify-between p-3 bg-[var(--warning-subtle)] rounded-lg border border-[var(--warning)]/20">
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-[var(--warning)]/20 flex items-center justify-center text-[10px] font-bold text-[var(--warning)]">
+                    {i + 1}
+                  </span>
+                  <span className="text-sm font-medium">{evt.reason}</span>
+                </div>
+                <span className="text-xs text-[var(--muted)]">
+                  {new Date(evt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

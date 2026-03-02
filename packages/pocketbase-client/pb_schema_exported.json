@@ -1070,6 +1070,10 @@
                     "Callback",
                     "No Answer",
                     "Fumbled",
+                    "Bad Lead",
+                    "Send Email",
+                    "Hung Up (Rude Recep)",
+                    "Hung Up (Other)",
                     "Other"
                 ]
             },
@@ -1582,6 +1586,10 @@
                     "Callback",
                     "No Answer",
                     "Fumbled",
+                    "Bad Lead",
+                    "Send Email",
+                    "Hung Up (Rude Recep)",
+                    "Hung Up (Other)",
                     "Other"
                 ]
             },

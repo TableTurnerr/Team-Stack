@@ -1,10 +1,11 @@
 'use client';
 
-import { Phone, PhoneIncoming, Clock, TrendingUp } from 'lucide-react';
+import { Phone, PhoneIncoming, Clock, TrendingUp, PhoneForwarded } from 'lucide-react';
 
 interface SessionMetricsProps {
     totalDials: number;
     totalPickups: number;
+    totalCallbacks: number;
     durationSec: number;
 }
 
@@ -15,7 +16,7 @@ function formatDuration(seconds: number): string {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-export function SessionMetrics({ totalDials, totalPickups, durationSec }: SessionMetricsProps) {
+export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, durationSec }: SessionMetricsProps) {
     const pickupRate = totalDials > 0 ? Math.round((totalPickups / totalDials) * 100) : 0;
 
     const metrics = [
@@ -34,11 +35,18 @@ export function SessionMetrics({ totalDials, totalPickups, durationSec }: Sessio
             bg: 'var(--success-subtle)',
         },
         {
+            label: 'Callbacks',
+            value: totalCallbacks,
+            icon: PhoneForwarded,
+            color: 'var(--warning)',
+            bg: 'var(--warning-subtle)',
+        },
+        {
             label: 'Duration',
             value: formatDuration(durationSec),
             icon: Clock,
-            color: 'var(--warning)',
-            bg: 'var(--warning-subtle)',
+            color: 'var(--muted)',
+            bg: 'var(--card-hover)',
         },
     ];
 

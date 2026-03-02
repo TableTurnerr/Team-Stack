@@ -352,8 +352,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     if (exactMatch.owner_name) {
                         setOwnerName(exactMatch.owner_name);
                     }
-                } else if (result.items.length === 0) {
-                    // Company doesn't exist yet — pre-fill name for creation
+                } else {
+                    // No exact match — pre-fill name for creation (even if partial matches exist)
                     setCompanySearch(suggestedCompanyName);
                     setIsNewCompany(true);
                 }
@@ -567,7 +567,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
     const hasPhoneNumber = !!phoneNumber;
     const hasOutcome = !!callOutcome;
-    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving;
+    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving && !isCallLive;
 
     const handleCallbackSelect = (reason: CallbackReason) => {
         setShowCallbackDropdown(false);
@@ -863,7 +863,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     <input
                         type="text"
                         value={ownerName}
-                        onChange={e => setOwnerName(e.target.value)}
+                        onChange={e => {
+                            const val = e.target.value;
+                            setOwnerName(val);
+                            if (val.trim() && !ownerReached) {
+                                setOwnerReached(true);
+                                setNoneSelected(false);
+                            }
+                        }}
                         placeholder="Owner name(s), e.g. John, Mike"
                         className={cn(
                             "w-full pl-8 pr-3 py-2 rounded-lg text-sm focus:outline-none transition-colors",
@@ -1112,7 +1119,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     )}
                 >
                     <Save size={16} />
-                    {saving ? 'Saving...' : hasUnsavedCall ? 'Submit Call Log' : 'Save Call & Next'}
+                    {saving ? 'Saving...' : isCallLive ? 'Call in Progress...' : hasUnsavedCall ? 'Submit Call Log' : 'Save Call & Next'}
                 </button>
             </div>
 

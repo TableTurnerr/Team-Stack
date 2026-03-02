@@ -91,7 +91,8 @@ export function PowerDialerPanel({
         }
     }, [rawInput]);
 
-    const remaining = Math.max(0, queue.length - currentIndex);
+    // When active, the entry at currentIndex is being called — exclude it from "remaining"
+    const remaining = active ? Math.max(0, queue.length - currentIndex - 1) : Math.max(0, queue.length - currentIndex);
     const isComplete = queue.length > 0 && currentIndex >= queue.length;
 
     const handleParseInput = () => {
@@ -155,18 +156,21 @@ export function PowerDialerPanel({
                                 </span>
                             )}
                             {isComplete && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border border-[var(--card-border)] text-[var(--muted)] uppercase tracking-wider">
-                                    <Check size={9} /> Done
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--success-subtle)] border border-[var(--success)]/30 text-[var(--success)] uppercase tracking-wider">
+                                    <Check size={9} /> All Done
                                 </span>
                             )}
                         </div>
                         {queue.length > 0 && !isComplete && (
                             <p className="text-[11px] text-[var(--muted)] mt-0.5">
-                                {currentIndex} of {queue.length} called &middot; {remaining} remaining
+                                {active
+                                    ? <>Calling <span className="text-[var(--foreground)] font-medium">{currentIndex + 1}</span> of {queue.length}{remaining > 0 ? <> &middot; {remaining} remaining</> : null}</>
+                                    : <>{currentIndex} of {queue.length} called &middot; {remaining} remaining</>
+                                }
                             </p>
                         )}
                         {isComplete && (
-                            <p className="text-[11px] text-[var(--muted)] mt-0.5">All {queue.length} calls completed</p>
+                            <p className="text-[11px] text-[var(--success)] font-medium mt-0.5">All {queue.length} calls completed</p>
                         )}
                     </div>
                 </div>
@@ -311,7 +315,7 @@ export function PowerDialerPanel({
                                                 {isDone && <Check size={10} className="text-[var(--success)] shrink-0" />}
                                                 {isCurrent && (
                                                     <span className="text-[9px] font-bold text-[var(--success)] uppercase tracking-wider shrink-0">
-                                                        {active && !paused ? 'Next' : 'Start here'}
+                                                        {active && !paused ? 'Calling' : 'Start here'}
                                                     </span>
                                                 )}
                                             </div>
@@ -396,9 +400,9 @@ export function PowerDialerPanel({
                             {/* Controls */}
                             {isComplete ? (
                                 <div className="flex gap-2">
-                                    <div className="flex-1 flex items-center justify-center py-2.5 px-3 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-sm text-[var(--muted)]">
-                                        <Check size={14} className="text-[var(--success)] mr-2" />
-                                        All {queue.length} calls done!
+                                    <div className="flex-1 flex items-center justify-center py-2.5 px-3 rounded-xl bg-[var(--success-subtle)] border border-[var(--success)]/30 text-sm font-semibold text-[var(--success)]">
+                                        <Check size={14} className="mr-2 shrink-0" />
+                                        All {queue.length} numbers called!
                                     </div>
                                     <button
                                         onClick={handleNewList}

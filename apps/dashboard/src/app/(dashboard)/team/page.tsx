@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { pb } from '@/lib/pocketbase';
-import { User, COLLECTIONS } from '@/lib/types';
-import { Plus, Phone, MessageSquare, Clock, RefreshCw, Users } from 'lucide-react';
-import { format } from 'date-fns';
+import { useEffect, useState } from 'react';
+import { Plus, Phone, MessageSquare, Clock, RefreshCw, Users, Radio, PhoneCall, Trophy } from 'lucide-react';
+import { format, formatDistanceToNowStrict } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { useTeamPresence } from '@/contexts/team-presence-context';
+import { pb } from '@/lib/pocketbase';
+import { COLLECTIONS, type User } from '@/lib/types';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
 
 interface UserStats {
@@ -18,98 +19,76 @@ interface UserWithStats extends User {
   stats: UserStats;
 }
 
-const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  'online': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
-  'offline': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' },
-  'away': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]' },
-};
+// Elapsed seconds since a given ISO timestamp
+function elapsedSeconds(isoString: string): number {
+  return Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+}
+
+function formatElapsed(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// Clock that ticks every second — only rendered for active sessions
+function LiveClock({ startedAt }: { startedAt: string }) {
+  const [elapsed, setElapsed] = useState(() => elapsedSeconds(startedAt));
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(elapsedSeconds(startedAt)), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+  return <>{formatElapsed(elapsed)}</>;
+}
 
 export default function TeamPage() {
   const { isAuthenticated } = useAuth();
-  const [users, setUsers] = useState<UserWithStats[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { teamMembers, getSessionForUser, isOnline, isLoading, refresh } = useTeamPresence();
+  const [statsMap, setStatsMap] = useState<Record<string, UserStats>>({});
+  const [statsLoading, setStatsLoading] = useState(true);
 
+  // Fetch supplemental stats (all-time calls, DMs) once — these aren't real-time critical
   useEffect(() => {
-    if (isAuthenticated) fetchUsersAndStats();
-  }, [isAuthenticated]);
+    if (!isAuthenticated || teamMembers.length === 0) return;
 
-  async function fetchUsersAndStats() {
-    setLoading(true);
-    try {
-      const usersResult = await pb.collection(COLLECTIONS.USERS).getList<User>(1, 50, { sort: 'name' });
+    const fetchStats = async () => {
+      setStatsLoading(true);
+      const entries = await Promise.all(
+        teamMembers.map(async (user) => {
+          let calls = 0;
+          let dms = 0;
+          try {
+            const [callsRes, dmsRes] = await Promise.all([
+              pb.collection(COLLECTIONS.CALL_LOGS).getList(1, 1, {
+                filter: `caller = "${user.id}"`,
+                fields: 'id',
+              }),
+              pb.collection(COLLECTIONS.EVENT_LOGS).getList(1, 1, {
+                filter: `user = "${user.id}" && event_type = "Outreach"`,
+                fields: 'id',
+              }),
+            ]);
+            calls = callsRes.totalItems;
+            dms = dmsRes.totalItems;
+          } catch { /* ignore */ }
+          return [user.id, { calls, dms }] as const;
+        })
+      );
+      setStatsMap(Object.fromEntries(entries));
+      setStatsLoading(false);
+    };
 
-      const usersWithStats = await Promise.all(usersResult.items.map(async (user) => {
-        let calls = 0;
-        let lastCallTime = null;
-        try {
-          const callsResult = await pb.collection(COLLECTIONS.COLD_CALLS).getList(1, 1, {
-            filter: `claimed_by = "${user.id}"`,
-            sort: '-created',
-            fields: 'id,created'
-          });
-          calls = callsResult.totalItems;
-          if (callsResult.items.length > 0) {
-            lastCallTime = callsResult.items[0].created;
-          }
-        } catch (e) { console.error(e); }
-
-        let dms = 0;
-        let lastDmTime = null;
-        try {
-          const dmsResult = await pb.collection(COLLECTIONS.EVENT_LOGS).getList(1, 1, {
-            filter: `user = "${user.id}" && event_type = "Outreach"`,
-            sort: '-created',
-            fields: 'id,created'
-          });
-          dms = dmsResult.totalItems;
-
-          // Get latest event of ANY type for last active time
-          const latestEventResult = await pb.collection(COLLECTIONS.EVENT_LOGS).getList(1, 1, {
-            filter: `user = "${user.id}"`,
-            sort: '-created',
-            fields: 'created'
-          });
-          if (latestEventResult.items.length > 0) {
-            lastDmTime = latestEventResult.items[0].created;
-          }
-
-        } catch (e) { console.error(e); }
-
-        // Calculate most recent activity
-        const times = [user.updated, user.created, lastCallTime, lastDmTime].filter(Boolean) as string[];
-        // Sort effectively by converting to dates
-        times.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-        const last_activity = times.length > 0 ? times[0] : undefined;
-
-        console.log(`[TeamPage] User ${user.email} activity:`, {
-          updated: user.updated,
-          created: user.created,
-          lastCallTime,
-          lastDmTime,
-          calculated: last_activity
-        });
-
-        return {
-          ...user,
-          last_activity,
-          stats: { calls, dms }
-        };
-      }));
-
-      setUsers(usersWithStats);
-    } catch (error: any) {
-      if (error.status !== 0) console.error("Error fetching team:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
+    fetchStats();
+  }, [isAuthenticated, teamMembers]);
 
   async function handleAddMember() {
-    const email = prompt("Enter email for new member:");
+    const email = prompt('Enter email for new member:');
     if (!email) return;
-    const password = prompt("Enter temporary password:");
+    const password = prompt('Enter temporary password:');
     if (!password) return;
-    const name = prompt("Enter name:");
+    const name = prompt('Enter name:');
 
     try {
       await pb.collection(COLLECTIONS.USERS).create({
@@ -118,22 +97,16 @@ export default function TeamPage() {
         passwordConfirm: password,
         name,
         role: 'member',
-        status: 'offline'
+        status: 'offline',
       });
-      alert("User created!");
-      fetchUsersAndStats();
+      alert('User created!');
+      await refresh();
     } catch (e) {
-      alert("Failed to create user: " + e);
+      alert('Failed to create user: ' + e);
     }
   }
 
-  const getStatusStyle = (status: string) => {
-    return STATUS_STYLES[status] || STATUS_STYLES['offline'];
-  };
-
-  if (loading) {
-    return <CardGridSkeleton />;
-  }
+  if (isLoading) return <CardGridSkeleton />;
 
   return (
     <div className="space-y-6">
@@ -141,16 +114,16 @@ export default function TeamPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Team Members</h1>
-          <p className="text-sm text-[var(--muted)] mt-1">Manage your team and view performance</p>
+          <p className="text-sm text-[var(--muted)] mt-1">Live presence & performance</p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchUsersAndStats}
+            onClick={refresh}
             className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors"
             title="Refresh"
           >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={16} />
           </button>
           <button
             onClick={handleAddMember}
@@ -163,8 +136,8 @@ export default function TeamPage() {
       </div>
 
       {/* Team Grid */}
-      <div className={cn(users.length === 0 && "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden")}>
-        {users.length === 0 ? (
+      <div className={cn(teamMembers.length === 0 && 'bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden')}>
+        {teamMembers.length === 0 ? (
           <div className="p-16 text-center">
             <div className="w-12 h-12 rounded-full bg-[var(--primary-subtle)] flex items-center justify-center mx-auto mb-4">
               <Users size={24} className="text-[var(--primary)]" />
@@ -174,58 +147,127 @@ export default function TeamPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {users.map((user) => {
-              const statusStyle = getStatusStyle(user.status || 'offline');
+            {teamMembers.map((user) => {
+              const online = isOnline(user);
+              const activeSession = getSessionForUser(user.id);
+              const isCalling = !!activeSession;
+              const stats = statsMap[user.id] ?? { calls: 0, dms: 0 };
+
               return (
                 <div
                   key={user.id}
-                  className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5 card-interactive"
+                  className={cn(
+                    'bg-[var(--card-bg)] border rounded-xl p-5 card-interactive transition-colors',
+                    isCalling
+                      ? 'border-[var(--success)] ring-1 ring-[var(--success)]/30'
+                      : 'border-[var(--card-border)]'
+                  )}
                 >
-                  <div className="flex justify-between items-start mb-4">
+                  {/* Card header */}
+                  <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-[var(--primary)] flex items-center justify-center">
-                        <span className="text-white text-sm font-semibold">
-                          {user.name?.charAt(0).toUpperCase() || 'U'}
-                        </span>
+                      {/* Avatar with online dot */}
+                      <div className="relative">
+                        <div className="w-10 h-10 rounded-full bg-[var(--primary)] flex items-center justify-center">
+                          <span className="text-white text-sm font-semibold">
+                            {user.name?.charAt(0).toUpperCase() || 'U'}
+                          </span>
+                        </div>
+                        {/* Presence dot */}
+                        <span
+                          className={cn(
+                            'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[var(--card-bg)]',
+                            isCalling
+                              ? 'bg-[var(--success)] animate-pulse'
+                              : online
+                              ? 'bg-[var(--success)]'
+                              : 'bg-[var(--muted)]'
+                          )}
+                        />
                       </div>
                       <div>
                         <h3 className="font-semibold text-sm">{user.name}</h3>
                         <p className="text-xs text-[var(--muted)]">{user.email}</p>
                       </div>
                     </div>
-                    <span className={cn(
-                      'px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider',
-                      statusStyle.bg,
-                      statusStyle.text
-                    )}>
-                      {user.status}
-                    </span>
+
+                    {/* Status badge */}
+                    {isCalling ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-[var(--success-subtle)] text-[var(--success)]">
+                        <Radio size={9} className="animate-pulse" />
+                        Live
+                      </span>
+                    ) : (
+                      <span className={cn(
+                        'px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider',
+                        online
+                          ? 'bg-[var(--success-subtle)] text-[var(--success)]'
+                          : 'bg-[var(--card-hover)] text-[var(--muted)]'
+                      )}>
+                        {online ? 'Online' : 'Offline'}
+                      </span>
+                    )}
                   </div>
 
-                  <div className="text-xs text-[var(--muted)] mb-4 px-1">
+                  <div className="text-xs text-[var(--muted)] mb-3 px-1">
                     <span className="capitalize">{user.role}</span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-[var(--card-border)]">
+                  {/* Live session panel */}
+                  {activeSession && (
+                    <div className="mb-3 rounded-lg bg-[var(--success-subtle)]/40 border border-[var(--success)]/20 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--success)]">
+                          <PhoneCall size={10} />
+                          Active Session
+                        </span>
+                        <span className="text-xs font-mono text-[var(--success)] tabular-nums">
+                          <LiveClock startedAt={activeSession.started_at} />
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div>
+                          <div className="text-base font-bold">{activeSession.total_dials}</div>
+                          <div className="text-[10px] text-[var(--muted)] uppercase tracking-wider">Dials</div>
+                        </div>
+                        <div>
+                          <div className="text-base font-bold">{activeSession.total_pickups}</div>
+                          <div className="text-[10px] text-[var(--muted)] uppercase tracking-wider">Pickups</div>
+                        </div>
+                        <div>
+                          <div className="text-base font-bold">{activeSession.appointment_set}</div>
+                          <div className="text-[10px] text-[var(--muted)] uppercase tracking-wider flex items-center justify-center gap-0.5">
+                            <Trophy size={8} />
+                            Appts
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* All-time stats */}
+                  <div className="grid grid-cols-2 gap-4 pt-3 border-t border-[var(--card-border)]">
                     <div className="text-center">
                       <div className="flex items-center justify-center gap-1 text-[var(--muted)] mb-1">
                         <Phone size={12} />
                         <span className="text-[10px] uppercase tracking-wider">Calls</span>
                       </div>
-                      <div className="text-xl font-bold">{user.stats.calls}</div>
+                      <div className="text-xl font-bold">{statsLoading ? '—' : stats.calls}</div>
                     </div>
                     <div className="text-center border-l border-[var(--card-border)]">
                       <div className="flex items-center justify-center gap-1 text-[var(--muted)] mb-1">
                         <MessageSquare size={12} />
                         <span className="text-[10px] uppercase tracking-wider">DMs</span>
                       </div>
-                      <div className="text-xl font-bold">{user.stats.dms}</div>
+                      <div className="text-xl font-bold">{statsLoading ? '—' : stats.dms}</div>
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-4 border-t border-[var(--card-border)] flex items-center gap-1.5 text-xs text-[var(--muted)]">
+                  <div className="mt-3 pt-3 border-t border-[var(--card-border)] flex items-center gap-1.5 text-xs text-[var(--muted)]">
                     <Clock size={12} />
-                    Last active: {user.last_activity ? format(new Date(user.last_activity), 'PP p') : 'Never'}
+                    {user.last_activity
+                      ? `Active ${formatDistanceToNowStrict(new Date(user.last_activity), { addSuffix: true })}`
+                      : 'Never active'}
                   </div>
                 </div>
               );

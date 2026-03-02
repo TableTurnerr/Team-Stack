@@ -18,6 +18,7 @@ import { ActiveSessionBanner } from '@/components/active-session-banner';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { AdminModeProvider, useAdminModeOptional } from '@/contexts/admin-mode-context';
 import { AdminModeBanner } from '@/components/admin-mode-banner';
+import { TeamPresenceProvider } from '@/contexts/team-presence-context';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -87,15 +88,17 @@ export default function DashboardLayout({
       <ToastProvider>
         <ZoomPhoneProvider>
           <SessionProvider>
-            <CallRecordingProvider>
-              <UnsavedChangesProvider>
-                <FollowUpProvider>
-                  <AdminModeProvider>
-                    <DashboardLayoutContent>{children}</DashboardLayoutContent>
-                  </AdminModeProvider>
-                </FollowUpProvider>
-              </UnsavedChangesProvider>
-            </CallRecordingProvider>
+            <TeamPresenceProvider>
+              <CallRecordingProvider>
+                <UnsavedChangesProvider>
+                  <FollowUpProvider>
+                    <AdminModeProvider>
+                      <DashboardLayoutContent>{children}</DashboardLayoutContent>
+                    </AdminModeProvider>
+                  </FollowUpProvider>
+                </UnsavedChangesProvider>
+              </CallRecordingProvider>
+            </TeamPresenceProvider>
           </SessionProvider>
         </ZoomPhoneProvider>
       </ToastProvider>

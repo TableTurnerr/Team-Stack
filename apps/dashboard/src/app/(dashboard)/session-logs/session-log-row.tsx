@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Clock, User, Trash2, CheckSquare, Loader2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type ColdCallingSession, type CallLog } from '@/lib/types';
+import { COLLECTIONS, type ColdCallingSession, type CallLog, type Recording, type FollowUp } from '@/lib/types';
 import { PerformanceCounterInline } from '@/components/performance-counter-inline';
 import { CallLogsNestedTable } from './call-logs-nested-table';
 import { InlineEditField } from '@/components/inline-edit-field';
@@ -40,6 +40,11 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
     const [isExpanded, setIsExpanded] = useState(false);
     const [isTrashHovered, setIsTrashHovered] = useState(false);
     const [isStagingSession, setIsStagingSession] = useState(false);
+
+    // Test session deletion state
+    const [confirmTestDelete, setConfirmTestDelete] = useState(false);
+    const [isDeletingTest, setIsDeletingTest] = useState(false);
+    const [testDeleteError, setTestDeleteError] = useState(false);
 
     const adminMode = useAdminModeOptional();
     const isAdminMode = adminMode?.isAdminMode ?? false;
@@ -105,6 +110,47 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
         }
     };
 
+    const handleDeleteTestSession = async () => {
+        setIsDeletingTest(true);
+        setTestDeleteError(false);
+        try {
+            // 1. Get all call logs for this session
+            const callLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                filter: `session = "${session.id}"`,
+            });
+            const callLogIds = callLogs.map(l => l.id);
+
+            // 2. Delete recordings linked to those call logs
+            if (callLogIds.length > 0) {
+                const recordings = await pb.collection(COLLECTIONS.RECORDINGS).getFullList<Recording>({
+                    filter: callLogIds.map(id => `call_log = "${id}"`).join(' || '),
+                });
+                await Promise.allSettled(recordings.map(r => pb.collection(COLLECTIONS.RECORDINGS).delete(r.id)));
+            }
+
+            // 3. Delete follow-ups linked to those call logs
+            if (callLogIds.length > 0) {
+                const followUps = await pb.collection(COLLECTIONS.FOLLOW_UPS).getFullList<FollowUp>({
+                    filter: callLogIds.map(id => `call_log = "${id}"`).join(' || '),
+                });
+                await Promise.allSettled(followUps.map(f => pb.collection(COLLECTIONS.FOLLOW_UPS).delete(f.id)));
+            }
+
+            // 4. Delete all call logs
+            await Promise.allSettled(callLogs.map(l => pb.collection(COLLECTIONS.CALL_LOGS).delete(l.id)));
+
+            // 5. Delete the session record
+            await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).delete(session.id);
+
+            onDelete?.(session.id);
+        } catch (err) {
+            console.error('Failed to delete test session:', err);
+            setTestDeleteError(true);
+            setIsDeletingTest(false);
+            setConfirmTestDelete(false);
+        }
+    };
+
     const sessionLabel = formatDateTime(session.started_at);
 
     return (
@@ -124,11 +170,21 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                     </button>
                 </td>
                 <td className="px-4 py-3">
-                    <div className="flex flex-col">
-                        <span className="text-sm font-medium">{formatDateTime(session.started_at)}</span>
+                    <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">{formatDateTime(session.started_at)}</span>
+                            {session.is_test && (
+                                <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30 tracking-wide">
+                                    TEST
+                                </span>
+                            )}
+                        </div>
                         <span className="text-xs text-[var(--muted)]">
                             {session.ended_at ? `Ended: ${formatDateTime(session.ended_at)}` : 'Active'}
                         </span>
+                        {testDeleteError && (
+                            <span className="text-[10px] text-[var(--error)]">Delete failed — try again</span>
+                        )}
                     </div>
                 </td>
                 <td className="px-4 py-3">
@@ -196,9 +252,41 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                         {session.status === 'active' ? 'Active' : 'Completed'}
                     </span>
                 </td>
-                {isAdminMode && (
-                    <td className="px-4 py-3">
-                        {isStagedForDeletion ? (
+                <td className="px-4 py-3">
+                    {session.is_test ? (
+                        /* Test session delete button — available to all users */
+                        confirmTestDelete ? (
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={handleDeleteTestSession}
+                                    disabled={isDeletingTest}
+                                    className="px-2 py-1 rounded text-[10px] font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60 flex items-center gap-1"
+                                    title="Confirm delete"
+                                >
+                                    {isDeletingTest ? <Loader2 size={10} className="animate-spin" /> : null}
+                                    {isDeletingTest ? 'Deleting...' : 'Confirm'}
+                                </button>
+                                {!isDeletingTest && (
+                                    <button
+                                        onClick={() => setConfirmTestDelete(false)}
+                                        className="px-2 py-1 rounded text-[10px] font-medium text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => setConfirmTestDelete(true)}
+                                className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 transition-all duration-150"
+                                title="Delete all test session data"
+                            >
+                                <Trash2 size={15} />
+                            </button>
+                        )
+                    ) : isAdminMode ? (
+                        /* Admin staging delete for normal sessions */
+                        isStagedForDeletion ? (
                             <div className="p-1.5 rounded-lg text-green-400" title="Staged for deletion">
                                 <CheckSquare size={15} />
                             </div>
@@ -225,15 +313,15 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                                         : <Trash2 size={15} />
                                 }
                             </button>
-                        )}
-                    </td>
-                )}
+                        )
+                    ) : null}
+                </td>
             </tr>
 
             {/* Expanded row showing call logs and notes */}
             {isExpanded && (
                 <tr>
-                    <td colSpan={isAdminMode ? 12 : 11} className="p-0">
+                    <td colSpan={12} className="p-0">
                         <div className="bg-[var(--card-bg)] border-t border-b border-[var(--card-border)]">
                             {/* Session Notes */}
                             <div className="px-6 py-4 border-b border-[var(--card-border)]">

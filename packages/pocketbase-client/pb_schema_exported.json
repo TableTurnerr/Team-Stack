@@ -951,7 +951,7 @@
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
         "updateRule": "@request.auth.id != ''",
-        "deleteRule": "@request.auth.role = 'admin'",
+        "deleteRule": "@request.auth.role = 'admin' || (session.is_test = true && session.user = @request.auth.id)",
         "name": "call_logs",
         "type": "base",
         "fields": [
@@ -1293,7 +1293,7 @@
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
         "updateRule": "@request.auth.id != ''",
-        "deleteRule": "@request.auth.role = 'admin'",
+        "deleteRule": "@request.auth.role = 'admin' || (is_test = true && user = @request.auth.id)",
         "name": "cold_calling_sessions",
         "type": "base",
         "fields": [
@@ -1468,6 +1468,15 @@
                 "required": false,
                 "system": false,
                 "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "bool_is_test",
+                "name": "is_test",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
             },
             {
                 "hidden": false,
@@ -2204,7 +2213,7 @@
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.id != ''",
         "updateRule": "@request.auth.id != ''",
-        "deleteRule": "@request.auth.role = 'admin'",
+        "deleteRule": "@request.auth.role = 'admin' || (call_log.session.is_test = true && call_log.session.user = @request.auth.id)",
         "name": "follow_ups",
         "type": "base",
         "fields": [
@@ -3139,7 +3148,7 @@
         "viewRule": "@request.auth.id != ''",
         "createRule": "@request.auth.role = 'admin'",
         "updateRule": "@request.auth.id != ''",
-        "deleteRule": "@request.auth.role = 'admin'",
+        "deleteRule": "@request.auth.role = 'admin' || call_log.session.is_test = true",
         "name": "recordings",
         "type": "base",
         "fields": [

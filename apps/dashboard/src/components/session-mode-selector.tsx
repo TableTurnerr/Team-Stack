@@ -5,9 +5,10 @@ import { Zap, Phone } from 'lucide-react';
 interface SessionModeSelectorProps {
     onStartSession: () => void;
     onStartStandalone: () => void;
+    onStartTestSession: () => void;
 }
 
-export function SessionModeSelector({ onStartSession, onStartStandalone }: SessionModeSelectorProps) {
+export function SessionModeSelector({ onStartSession, onStartStandalone, onStartTestSession }: SessionModeSelectorProps) {
     return (
         <div className="max-w-4xl mx-auto">
             <div className="mb-8 text-center">
@@ -95,9 +96,18 @@ export function SessionModeSelector({ onStartSession, onStartStandalone }: Sessi
                 </div>
             </div>
 
-            <div className="mt-6 text-center">
+            <div className="mt-6 text-center space-y-1.5">
                 <p className="text-sm text-[var(--muted)]">
                     Both modes require screen share for call recording
+                </p>
+                <p className="text-xs text-[var(--muted)]/60">
+                    Just testing things out?{' '}
+                    <button
+                        onClick={onStartTestSession}
+                        className="underline hover:text-[var(--foreground)] transition-colors"
+                    >
+                        Start a test session
+                    </button>
                 </p>
             </div>
         </div>

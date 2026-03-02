@@ -234,9 +234,7 @@ export default function SessionLogsPage() {
                                     <th className="px-4 py-3 text-center text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Appt</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">User</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Status</th>
-                                    {isAdminMode && (
-                                        <th className="px-4 py-3 w-10"></th>
-                                    )}
+                                    <th className="px-4 py-3 w-10"></th>
                                 </tr>
                             </thead>
                             <tbody>

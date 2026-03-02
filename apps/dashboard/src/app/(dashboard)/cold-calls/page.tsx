@@ -16,6 +16,7 @@ import {
   CalendarCheck,
   Zap,
   Hash,
+  PhoneForwarded,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog } from '@/lib/types';
@@ -493,15 +494,26 @@ function CallLogsTable({
                       )}
                       {isColumnVisible('call_outcome') && (
                         <td className="py-3 px-4">
-                          {log.call_outcome && (
-                            <span className={cn(
-                              "px-2 py-1 rounded-md text-xs font-medium",
-                              OUTCOME_COLORS[log.call_outcome]?.bg || 'bg-gray-500/20',
-                              OUTCOME_COLORS[log.call_outcome]?.text || 'text-gray-400'
-                            )}>
-                              {log.call_outcome}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {log.call_outcome && (
+                              <span className={cn(
+                                "px-2 py-1 rounded-md text-xs font-medium",
+                                OUTCOME_COLORS[log.call_outcome]?.bg || 'bg-gray-500/20',
+                                OUTCOME_COLORS[log.call_outcome]?.text || 'text-gray-400'
+                              )}>
+                                {log.call_outcome}
+                              </span>
+                            )}
+                            {(log.callback_events?.length ?? 0) > 0 && (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/30"
+                                title={`${log.callback_events!.length} callback(s): ${log.callback_events!.map(e => e.reason).join(', ')}`}
+                              >
+                                <PhoneForwarded size={9} />
+                                Callback
+                              </span>
+                            )}
+                          </div>
                         </td>
                       )}
                       {isColumnVisible('duration') && (

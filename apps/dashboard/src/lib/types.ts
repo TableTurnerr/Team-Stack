@@ -221,6 +221,7 @@ export interface ColdCallingSession extends RecordModel {
   session_notes?: string; // Optional notes about the session (e.g., overall observations, issues)
   paused_at?: string; // ISO timestamp set when session is paused, null when resumed
   total_paused_sec: number; // Accumulated pause duration across all pauses (default 0)
+  is_test?: boolean; // True for test sessions — all data can be deleted at end of session
   expand?: {
     user?: User;
   };

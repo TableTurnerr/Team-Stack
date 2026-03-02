@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { pb } from '@/lib/pocketbase';
 import { useRouter } from 'next/navigation';
 
@@ -11,6 +11,7 @@ interface User {
     avatar?: string;
     role: 'admin' | 'member';
     status: 'online' | 'offline' | 'suspended';
+    last_activity?: string;
 }
 
 interface AuthContextType {
@@ -25,10 +26,26 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Returns true if the user has been active within the last 90 seconds */
+export function isUserOnline(user: { status: string; last_activity?: string }): boolean {
+    if (user.status === 'suspended') return false;
+    if (!user.last_activity) return user.status === 'online';
+    return Date.now() - new Date(user.last_activity).getTime() < 90_000;
+}
+
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const router = useRouter();
+    const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const userRef = useRef<User | null>(null);
+
+    // Keep userRef in sync so event handlers always see the latest user
+    useEffect(() => {
+        userRef.current = user;
+    }, [user]);
 
     // Helper to extract user data from PB model
     const mapUser = (model: any): User => ({
@@ -37,8 +54,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: model.name || model.email?.split('@')[0] || 'User',
         avatar: model.avatar ? pb.files.getUrl(model, model.avatar) : undefined,
         role: model.role || 'member',
-        status: model.status || 'offline'
+        status: model.status || 'offline',
+        last_activity: model.last_activity,
     });
+
+    // ── Heartbeat: update last_activity every 30s ──
+    const startHeartbeat = (userId: string) => {
+        stopHeartbeat();
+        heartbeatRef.current = setInterval(async () => {
+            try {
+                await pb.collection('users').update(userId, {
+                    last_activity: new Date().toISOString(),
+                });
+            } catch {
+                // silently ignore — network blip
+            }
+        }, HEARTBEAT_INTERVAL_MS);
+    };
+
+    const stopHeartbeat = () => {
+        if (heartbeatRef.current) {
+            clearInterval(heartbeatRef.current);
+            heartbeatRef.current = null;
+        }
+    };
+
+    // ── beforeunload: mark offline via sendBeacon so it survives tab close ──
+    useEffect(() => {
+        const handleUnload = () => {
+            const currentUser = userRef.current;
+            if (!currentUser?.id) return;
+            const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
+            if (!pbUrl) return;
+
+            // sendBeacon is fire-and-forget and survives page unload
+            const payload = JSON.stringify({
+                status: 'offline',
+                last_activity: new Date().toISOString(),
+            });
+            navigator.sendBeacon(
+                `${pbUrl}/api/collections/users/records/${currentUser.id}`,
+                new Blob([payload], { type: 'application/json' })
+            );
+        };
+
+        window.addEventListener('beforeunload', handleUnload);
+        return () => window.removeEventListener('beforeunload', handleUnload);
+    }, []);
+
+    // ── visibilitychange: update last_activity when tab becomes visible again ──
+    useEffect(() => {
+        const handleVisibility = async () => {
+            const currentUser = userRef.current;
+            if (!currentUser?.id) return;
+            if (document.visibilityState === 'visible') {
+                try {
+                    await pb.collection('users').update(currentUser.id, {
+                        status: 'online',
+                        last_activity: new Date().toISOString(),
+                    });
+                } catch { /* ignore */ }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => document.removeEventListener('visibilitychange', handleVisibility);
+    }, []);
 
     // Initialize auth state from PocketBase's authStore
     useEffect(() => {
@@ -46,11 +127,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (pb.authStore.isValid && pb.authStore.model) {
                 try {
                     // Refresh user data from server to get latest role and status
-                    // This ensures admin features persist across new tabs/page refreshes
                     const freshUser = await pb.collection('users').getOne(pb.authStore.model.id);
-                    setUser(mapUser(freshUser));
+                    const mapped = mapUser(freshUser);
+                    setUser(mapped);
+                    startHeartbeat(mapped.id);
                 } catch (error) {
-                    // If refresh fails (e.g., token expired), clear auth state
                     console.error('Failed to refresh user data:', error);
                     pb.authStore.clear();
                     setUser(null);
@@ -67,21 +148,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const unsubscribe = pb.authStore.onChange(async () => {
             if (pb.authStore.isValid && pb.authStore.model) {
                 try {
-                    // Refresh user data on auth changes to ensure role is current
                     const freshUser = await pb.collection('users').getOne(pb.authStore.model.id);
-                    setUser(mapUser(freshUser));
+                    const mapped = mapUser(freshUser);
+                    setUser(mapped);
+                    startHeartbeat(mapped.id);
                 } catch (error) {
                     console.error('Failed to refresh user on auth change:', error);
-                    setUser(mapUser(pb.authStore.model));
+                    const mapped = mapUser(pb.authStore.model);
+                    setUser(mapped);
+                    startHeartbeat(mapped.id);
                 }
             } else {
                 setUser(null);
+                stopHeartbeat();
             }
         });
 
         return () => {
             unsubscribe();
+            stopHeartbeat();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const login = async (email: string, password: string) => {
@@ -94,22 +181,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 throw new Error('Your account has been suspended.');
             }
 
-            // Update status and role if missing
             const updates: any = {
                 status: 'online',
                 last_activity: new Date().toISOString()
             };
 
-            // Should not happen for password auth if seeded correctly, but good for safety
             if (!model.role) {
                 updates.role = 'member';
             }
 
             await pb.collection('users').update(model.id, updates);
 
-            // Refresh model to get updated role
             const updatedRecord = await pb.collection('users').getOne(model.id);
-            setUser(mapUser(updatedRecord));
+            const mapped = mapUser(updatedRecord);
+            setUser(mapped);
+            startHeartbeat(mapped.id);
         } catch (error) {
             console.error('Login failed:', error);
             throw error;
@@ -126,7 +212,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 role: 'member',
                 status: 'offline',
             });
-            // Auto-login after registration
             await login(email, password);
         } catch (error) {
             console.error('Registration failed:', error);
@@ -144,22 +229,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 throw new Error('Your account has been suspended.');
             }
 
-            // Update status and default role for new users
             const updates: any = {
                 status: 'online',
                 last_activity: new Date().toISOString()
             };
 
-            // Set default role for new OAuth users
             if (!model.role) {
                 updates.role = 'member';
             }
 
             await pb.collection('users').update(model.id, updates);
 
-            // Refresh model to get updated role/status
             const updatedRecord = await pb.collection('users').getOne(model.id);
-            setUser(mapUser(updatedRecord));
+            const mapped = mapUser(updatedRecord);
+            setUser(mapped);
+            startHeartbeat(mapped.id);
         } catch (error) {
             console.error('Google login failed:', error);
             throw error;
@@ -167,9 +251,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const logout = async () => {
+        stopHeartbeat();
         if (user?.id) {
             try {
-                // Update status to offline
                 await pb.collection('users').update(user.id, {
                     status: 'offline',
                     last_activity: new Date().toISOString()

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Check, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CITY_TIMEZONE_MAP } from '@/lib/city-timezone-map';
@@ -15,6 +15,34 @@ interface TimezoneResult {
     timezone: string;
     city: string;
     source: 'iana' | 'city-map';
+}
+
+// Derive a friendly city label from IANA ID
+function getIanaLabel(tz: string): string {
+    const parts = tz.split('/');
+    return parts[parts.length - 1].replace(/_/g, ' ');
+}
+
+// Score a city key against the search query (higher = better match)
+function scoreMatch(cityKey: string, lower: string): number {
+    if (cityKey === lower) return 100;            // exact match
+    if (cityKey.startsWith(lower)) return 90;     // prefix match
+    if (cityKey.includes(lower)) return 80;       // substring match
+    // Word-based: every search word matches a word in the city key
+    const searchWords = lower.split(/\s+/).filter(Boolean);
+    const cityWords = cityKey.split(/[\s,_-]+/).filter(Boolean);
+    if (searchWords.length > 0 && searchWords.every(sw => cityWords.some(cw => cw.startsWith(sw)))) {
+        return 70;
+    }
+    // Any single search word matches a city word
+    if (searchWords.some(sw => sw.length >= 3 && cityWords.some(cw => cw.startsWith(sw)))) {
+        return 60;
+    }
+    // Any search word is a substring of any city word
+    if (searchWords.some(sw => sw.length >= 3 && cityKey.includes(sw))) {
+        return 50;
+    }
+    return 0;
 }
 
 export function TimezoneSearch({ onSelect, onCancel, existingTimezones = [] }: TimezoneSearchProps) {
@@ -32,12 +60,6 @@ export function TimezoneSearch({ onSelect, onCancel, existingTimezones = [] }: T
         }
         return Intl.supportedValuesOf('timeZone');
     }, []);
-
-    // Derive a friendly city label from IANA ID
-    const getIanaLabel = (tz: string) => {
-        const parts = tz.split('/');
-        return parts[parts.length - 1].replace(/_/g, ' ');
-    };
 
     // Build combined results from both IANA search and city-map search
     const filteredResults = useMemo((): TimezoneResult[] => {
@@ -57,32 +79,57 @@ export function TimezoneSearch({ onSelect, onCancel, existingTimezones = [] }: T
         }
 
         const seen = new Set<string>();
-        const results: TimezoneResult[] = [];
+        const scored: Array<{ entry: TimezoneResult; score: number }> = [];
 
-        // 1. City-map matches (city name search — covers small towns too)
+        // 1. City-map matches — supports full city names, aliases, small towns
         for (const [cityKey, tzId] of Object.entries(CITY_TIMEZONE_MAP)) {
-            if (cityKey.includes(lower) || lower.includes(cityKey)) {
-                if (!seen.has(tzId)) {
-                    seen.add(tzId);
-                    // Find the best city label from the map key
-                    const cityLabel = cityKey
-                        .split(' ')
-                        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-                        .join(' ');
-                    results.push({ timezone: tzId, city: cityLabel, source: 'city-map' });
+            const score = scoreMatch(cityKey, lower);
+            if (score > 0) {
+                // Prefer the best-scoring city label for this timezone
+                const existingIdx = scored.findIndex(s => s.entry.timezone === tzId && s.entry.source === 'city-map');
+                const cityLabel = cityKey
+                    .split(' ')
+                    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                    .join(' ');
+                if (existingIdx >= 0) {
+                    if (score > scored[existingIdx].score) {
+                        scored[existingIdx] = { entry: { timezone: tzId, city: cityLabel, source: 'city-map' }, score };
+                    }
+                } else {
+                    seen.add(tzId + '::city');
+                    scored.push({ entry: { timezone: tzId, city: cityLabel, source: 'city-map' }, score });
                 }
             }
         }
 
-        // 2. IANA ID direct matches (e.g. "America/New_York", "Europe/Paris")
+        // 2. IANA ID direct matches (e.g. "America/New_York", "Europe/Paris", "kolkata", "tokyo")
         for (const tz of allTimezones) {
-            if (tz.toLowerCase().includes(lower) && !seen.has(tz)) {
-                seen.add(tz);
-                results.push({ timezone: tz, city: getIanaLabel(tz), source: 'iana' });
+            const tzLower = tz.toLowerCase();
+            const label = getIanaLabel(tz).toLowerCase();
+            const ianaScore = tzLower.includes(lower) ? 75 : label.includes(lower) ? 70 :
+                scoreMatch(label, lower);
+            if (ianaScore > 0 && !seen.has(tz + '::iana')) {
+                // Avoid duplicating a timezone already covered by city-map with a better score
+                const cityMapEntry = scored.find(s => s.entry.timezone === tz && s.entry.source === 'city-map');
+                if (!cityMapEntry || ianaScore > cityMapEntry.score) {
+                    seen.add(tz + '::iana');
+                    scored.push({ entry: { timezone: tz, city: getIanaLabel(tz), source: 'iana' }, score: ianaScore });
+                }
             }
         }
 
-        return results.slice(0, 60);
+        // Sort by score descending, then alphabetically
+        scored.sort((a, b) => b.score - a.score || a.entry.city.localeCompare(b.entry.city));
+
+        // Deduplicate by timezone ID — keep highest-scored entry
+        const deduped = new Map<string, TimezoneResult>();
+        for (const { entry } of scored) {
+            if (!deduped.has(entry.timezone)) {
+                deduped.set(entry.timezone, entry);
+            }
+        }
+
+        return [...deduped.values()].slice(0, 60);
     }, [search, allTimezones]);
 
     if (!mounted) return <div className="p-4 flex justify-center"><Loader2 className="animate-spin" /></div>;

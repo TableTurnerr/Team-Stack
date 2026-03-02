@@ -14,6 +14,10 @@ const TEST_PORT = process.env.TEST_PORT
 const BASE_URL = process.env.TEST_BASE_URL
   || (TEST_PORT ? `http://localhost:${TEST_PORT}` : 'http://localhost:3000');
 
+// When live call tests are enabled we add an extra Zoom auth setup project.
+// This keeps the normal test run unaffected when TEST_LIVE_CALLS is not set.
+const LIVE_CALLS_ENABLED = process.env.TEST_LIVE_CALLS === 'true';
+
 export default defineConfig({
   testDir: './tests',
   testMatch: '**/*.spec.ts',
@@ -51,21 +55,64 @@ export default defineConfig({
   },
 
   projects: [
-    // --- Setup: create auth state file ---
+    // ── Setup: create CRM auth state ────────────────────────────────────────
     {
       name: 'setup',
       testMatch: '**/tests/helpers/global-setup.ts',
     },
 
-    // --- Main test run (depends on setup) ---
+    // ── Zoom auth setup (only when TEST_LIVE_CALLS=true) ────────────────────
+    // Opens a headed Chrome window so the user can log in to Zoom web phone.
+    // Saves cookies to tests/.auth/zoom.json for reuse in subsequent runs.
+    // The project is conditionally included so normal test runs are unaffected.
+    ...(LIVE_CALLS_ENABLED
+      ? [
+          {
+            name: 'zoom-setup',
+            testMatch: '**/tests/helpers/zoom-auth-setup.ts',
+            use: {
+              // Must be headed — user needs to interact with the Zoom login form.
+              // zoom-auth-setup.ts launches its own headed browser internally, so
+              // this setting is just a fallback / documentation signal.
+              headless: false,
+            },
+          },
+        ]
+      : []),
+
+    // ── Main test run (headless) ─────────────────────────────────────────────
     {
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'tests/.auth/user.json',
       },
-      dependencies: ['setup'],
+      // When live calls are enabled, exclude the live-call spec from the
+      // headless run — it requires user interaction via on-screen banners and
+      // runs in a separate headed project below.
+      testIgnore: LIVE_CALLS_ENABLED ? ['**/12-live-call-flow.spec.ts'] : [],
+      // When live calls are enabled, wait for Zoom auth to be set up first.
+      dependencies: LIVE_CALLS_ENABLED ? ['setup', 'zoom-setup'] : ['setup'],
     },
+
+    // ── Live call tests (headed) ─────────────────────────────────────────────
+    // 12-live-call-flow.spec.ts shows "USER ACTION REQUIRED" banners that need
+    // a visible browser window so the tester can click the "Done — Continue"
+    // button.  Only added when TEST_LIVE_CALLS=true.
+    ...(LIVE_CALLS_ENABLED
+      ? [
+          {
+            name: 'live-calls',
+            testMatch: '**/tests/12-live-call-flow.spec.ts',
+            use: {
+              ...devices['Desktop Chrome'],
+              storageState: 'tests/.auth/user.json',
+              headless: false,
+            },
+            dependencies: ['setup', 'zoom-setup'],
+          },
+        ]
+      : []),
   ],
 
   // Start the Next.js dev server (or reuse one that is already running).

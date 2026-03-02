@@ -56,22 +56,22 @@ test.describe('Overview Dashboard @smoke', () => {
   test('navigating via sidebar works', async ({ page }) => {
     // Click Companies
     await page.locator('a[href="/companies"]').first().click();
-    await page.waitForURL('/companies', { timeout: 15_000 });
+    await page.waitForURL('/companies', { timeout: 30_000 });
     await expect(page).toHaveURL('/companies');
 
     // Click Cold Calls
     await page.locator('a[href="/cold-calls"]').first().click();
-    await page.waitForURL('/cold-calls', { timeout: 15_000 });
+    await page.waitForURL('/cold-calls', { timeout: 30_000 });
     await expect(page).toHaveURL('/cold-calls');
 
     // Click Notes
     await page.locator('a[href="/notes"]').first().click();
-    await page.waitForURL('/notes', { timeout: 15_000 });
+    await page.waitForURL('/notes', { timeout: 30_000 });
     await expect(page).toHaveURL('/notes');
 
     // Return to overview
     await page.locator('a[href="/"]').first().click();
-    await page.waitForURL('/', { timeout: 15_000 });
+    await page.waitForURL('/', { timeout: 30_000 });
     await expect(page).toHaveURL('/');
   });
 
@@ -110,6 +110,9 @@ test.describe('Overview Dashboard @smoke', () => {
   });
 
   test('all dashboard pages load without crashing', async ({ page }) => {
+    // Extend timeout: 10 routes × ~15 s each can exceed the default 60 s limit.
+    test.setTimeout(180_000);
+
     const routes = [
       '/',
       '/companies',
@@ -124,9 +127,10 @@ test.describe('Overview Dashboard @smoke', () => {
     ];
 
     for (const route of routes) {
-      await page.goto(route);
-      await page.waitForLoadState('domcontentloaded');
-      await waitForTableLoad(page);
+      // Use domcontentloaded + a short settle instead of networkidle to avoid
+      // long-polling / WebSocket connections keeping the page "busy" indefinitely.
+      await page.goto(route, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2_000);
 
       // Page should not show a generic error (use innerText to avoid hidden Next.js JSON state)
       const body = await page.locator('body').innerText();

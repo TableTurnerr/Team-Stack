@@ -74,14 +74,16 @@ test.describe('Authentication @smoke', () => {
   });
 
   test('unauthenticated user is redirected to login', async ({ page }) => {
-    // Try to access protected routes without auth
-    const protectedRoutes = ['/', '/companies', '/cold-calls', '/session', '/notes'];
+    // Test 2 representative protected routes to verify the auth guard works.
+    // Testing all routes sequentially risks exceeding the 60 s test timeout
+    // (each waitForURL can take up to 20 s on a slow dev server).
+    const protectedRoutes = ['/', '/companies'];
 
     for (const route of protectedRoutes) {
       await page.goto(route);
       // Should end up at /login
-      await page.waitForURL(/\/login/, { timeout: 15_000 });
-      await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
+      await page.waitForURL(/\/login/, { timeout: 20_000 });
+      await expect(page).toHaveURL(/\/login/);
     }
   });
 

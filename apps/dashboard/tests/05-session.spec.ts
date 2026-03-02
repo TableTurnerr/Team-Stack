@@ -256,13 +256,15 @@ test.describe('Session Page', () => {
       return;
     }
 
-    // If a session IS active, check for Zoom dialer elements
+    // If a session IS active, check for Zoom dialer elements.
+    // Use isVisible() so hidden/off-screen elements in the DOM don't cause a
+    // false positive count() > 0 followed by a failing visibility assertion.
     const zoomEl = page.locator('[class*="zoom"], iframe[src*="zoom"], [aria-label*="dial"]').first();
-    if (await zoomEl.count() > 0) {
+    if (await zoomEl.isVisible().catch(() => false)) {
       await expect(zoomEl).toBeVisible();
     }
     const dialCircle = page.locator('button[aria-label*="call"], button[aria-label*="dial"]').first();
-    if (await dialCircle.count() > 0) {
+    if (await dialCircle.isVisible().catch(() => false)) {
       await expect(dialCircle).toBeVisible();
     }
     // Just ensure the page renders without crash

@@ -10,6 +10,28 @@ import PocketBase from 'pocketbase';
 
 let _pb: PocketBase | null = null;
 
+/**
+ * Retry a PocketBase operation with exponential backoff when a 429 is received.
+ */
+async function withRetry<T>(fn: () => Promise<T>, label: string, maxAttempts = 5): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      if (e?.status === 429) {
+        lastErr = e;
+        const delayMs = Math.min(600 * Math.pow(2, attempt), 10_000);
+        console.warn(`[pb-client] 429 on ${label}, retry ${attempt + 1}/${maxAttempts} in ${delayMs}ms`);
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 async function getAdminPb(): Promise<PocketBase> {
   if (_pb && _pb.authStore.isValid) return _pb;
 
@@ -30,7 +52,7 @@ async function getAdminPb(): Promise<PocketBase> {
 
 // ─── Cleanup helpers ──────────────────────────────────────────────────────────
 
-/** Delete all records from a collection whose field matches the given prefix. */
+/** Delete all records from a collection whose field matches the given prefix. Retries on 429. */
 export async function cleanupByPrefix(
   collection: string,
   field: string,
@@ -41,52 +63,60 @@ export async function cleanupByPrefix(
     .replace(/\\/g, '\\\\')
     .replace(/'/g, '\\\'');
   try {
-    const records = await pb.collection(collection).getFullList({
-      filter: `${field} ~ '${escapedPrefix}'`,
-      fields: 'id',
-    });
+    const records = await withRetry(
+      () => pb.collection(collection).getFullList({ filter: `${field} ~ '${escapedPrefix}'`, fields: 'id' }),
+      `list ${collection}`,
+    );
     for (const r of records) {
-      await pb.collection(collection).delete(r.id);
+      await withRetry(() => pb.collection(collection).delete(r.id), `delete ${collection}`).catch((e: any) => {
+        if (e?.status !== 404) console.warn(`cleanupByPrefix delete(${collection}, ${r.id}): ${e?.message}`);
+      });
     }
     return records.length;
   } catch (e: any) {
-    // Collection may not exist or no records — not an error
     if (e?.status === 404) return 0;
     console.warn(`cleanupByPrefix(${collection}, ${field}): ${e?.message}`);
     return 0;
   }
 }
 
-/** Delete a single record by ID, silently ignoring 404. */
+/** Delete a single record by ID, silently ignoring 404. Retries on 429. */
 export async function deleteRecord(collection: string, id: string): Promise<void> {
   const pb = await getAdminPb();
   try {
-    await pb.collection(collection).delete(id);
+    await withRetry(() => pb.collection(collection).delete(id), `delete ${collection}`);
   } catch (e: any) {
     if (e?.status !== 404) console.warn(`deleteRecord(${collection}, ${id}): ${e?.message}`);
   }
 }
 
-/** Create a record and return it. */
+/** Create a record and return it. Retries automatically on HTTP 429. */
 export async function createRecord<T extends object>(
   collection: string,
   data: object
 ): Promise<T & { id: string }> {
-  // Add a small delay to avoid PocketBase API rate limit issues (429)
-  await new Promise(resolve => setTimeout(resolve, 500));
+  // Small base delay to reduce burst pressure on PocketBase
+  await new Promise((resolve) => setTimeout(resolve, 200));
   const pb = await getAdminPb();
-  return pb.collection(collection).create<T & { id: string }>(data);
+  return withRetry(
+    () => pb.collection(collection).create<T & { id: string }>(data),
+    `create ${collection}`,
+  );
 }
 
-/** Fetch records matching a filter, return array. */
+/** Fetch records matching a filter, return array. Retries on HTTP 429. */
 export async function fetchRecords<T extends object>(
   collection: string,
   filter: string,
   fields = ''
 ): Promise<(T & { id: string })[]> {
   const pb = await getAdminPb();
-  return pb.collection(collection).getFullList<T & { id: string }>({
-    filter,
-    ...(fields ? { fields } : {}),
-  });
+  return withRetry(
+    () =>
+      pb.collection(collection).getFullList<T & { id: string }>({
+        filter,
+        ...(fields ? { fields } : {}),
+      }),
+    `fetch ${collection}`,
+  );
 }

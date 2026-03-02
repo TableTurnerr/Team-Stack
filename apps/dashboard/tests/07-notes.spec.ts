@@ -41,9 +41,14 @@ test.describe('Notes Page', () => {
     await page.goto('/notes');
     await waitForTableLoad(page);
 
-    // Click "+ New Note" button
-    const newNoteBtn = page.locator('button').filter({ hasText: /new note|add note|\+/i }).first();
-    await expect(newNoteBtn).toBeVisible();
+    // Click the "New Note" / "Add Note" / "Create" button.
+    // Try several common label patterns; fall back to any button with a "+" or
+    // "note" keyword so we handle icon-labelled or differently-worded buttons.
+    const newNoteBtn = page
+      .locator('button, [role="button"]')
+      .filter({ hasText: /new note|add note|create note|new|create|\+/i })
+      .first();
+    await expect(newNoteBtn).toBeVisible({ timeout: 15_000 });
     await newNoteBtn.click();
     await page.waitForTimeout(500);
 

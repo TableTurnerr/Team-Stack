@@ -62,11 +62,15 @@ test.describe('Session Logs Page', () => {
 
   test('session logs shows table or cards', async ({ page }) => {
     await page.goto('/session-logs');
+    // Wait for the page heading first to ensure the route has fully rendered,
+    // then check for table / card content.  Using a longer timeout because the
+    // session-logs page fetches data from PocketBase before rendering rows.
+    await page.waitForSelector('h1', { timeout: 20_000 });
     await waitForTableLoad(page);
 
     // Page should show content (table, cards, or at minimum the heading)
     const content = page.locator('table, [role="table"], [class*="card"], [class*="session"], h1').first();
-    await expect(content).toBeVisible({ timeout: 10_000 });
+    await expect(content).toBeVisible({ timeout: 15_000 });
   });
 
   // ─── Status Filter ────────────────────────────────────────────────────────────

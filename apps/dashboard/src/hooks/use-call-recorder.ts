@@ -6,6 +6,14 @@ import { COLLECTIONS } from '@/lib/types';
 
 export type RecorderStatus = 'idle' | 'recording' | 'stopping' | 'uploading' | 'success' | 'error';
 
+/** One completed recording segment queued for later submission */
+interface DeferredSegment {
+    blob: Blob;
+    duration: number;
+    phone: string | null;
+    mimeType: string;
+}
+
 interface UseCallRecorderReturn {
     /** Whether a persistent audio session is active (screen/tab shared) */
     isSessionActive: boolean;
@@ -31,20 +39,35 @@ interface UseCallRecorderReturn {
     discardRecording: () => void;
     /**
      * Enter deferred-upload mode. Subsequent stopRecording() calls will
-     * accumulate the blob in memory instead of uploading immediately.
-     * Call submitDeferredRecording() to merge and upload all segments.
-     * Used for callback flows where multiple recordings belong to one call.
+     * queue each completed recording in memory instead of uploading immediately.
+     * Multiple calls may queue up without losing each other.
+     * Use submitOldestDeferredRecording() to pop and upload one at a time,
+     * or submitDeferredRecording() to merge all and upload at once.
      */
     enterDeferredMode: () => void;
     /**
-     * Stop the active recording (if any), merge all deferred segments,
+     * Pop the OLDEST pending recording from the queue and upload it.
+     * Call this once per form submission to link each call's recording to its call log.
+     * If recording is still active, waits for it to complete first.
+     * @param callLogId Optional call log ID to link the recording to.
+     * @returns The created recording ID, or null if nothing was uploaded.
+     */
+    submitOldestDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    /**
+     * Discard the OLDEST pending recording from the queue (e.g. for "No Answer").
+     * If recording is still active, discards it without queuing.
+     */
+    discardOldestDeferredRecording: () => void;
+    /**
+     * Stop the active recording (if any), merge ALL queued segments,
      * and upload the result as a single file.
+     * Exits deferred mode. Used for backward compat / session cleanup.
      * @param callLogId Optional call log ID to link the recording to.
      * @returns The created recording ID, or null if nothing was uploaded.
      */
     submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
     /**
-     * Discard all deferred segments without uploading and exit deferred mode.
+     * Discard ALL queued segments without uploading and exit deferred mode.
      */
     discardDeferredRecording: () => void;
     /** Whether deferred mode is currently active */
@@ -81,21 +104,26 @@ export function useCallRecorder(
     const sourceStreamRef = useRef<MediaStream | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const chunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const startTimeRef = useRef<Date | null>(null);
 
-    // Deferred mode state
+    // Deferred mode state — queue of completed per-call recordings
+    // Each call's completed recording is pushed here; form submissions pop one at a time.
+    // This prevents recordings from being lost when the next call starts before
+    // the previous call's form is submitted.
     const isDeferredRef = useRef(false);
-    const deferredSegmentsRef = useRef<Blob[]>([]);
-    const deferredTotalDurationRef = useRef<number>(0);
-    const deferredMimeTypeRef = useRef<string>('audio/webm');
+    const deferredSegmentsRef = useRef<DeferredSegment[]>([]);
 
     // Discard flag: when true, onstop skips upload/defer and just clears
     const shouldDiscardRef = useRef(false);
 
     // Promise resolver for waiting on onstop after stop() call
     const onStopResolveRef = useRef<(() => void) | null>(null);
+
+    // Generation counter: increments on each startRecording() call.
+    // Old onstop handlers compare their captured gen to the current gen
+    // and skip timer/status resets if a newer recorder has started.
+    const recorderGenRef = useRef(0);
 
     // Clean up on unmount
     useEffect(() => {
@@ -314,7 +342,6 @@ export function useCallRecorder(
         // Clear deferred state on session end
         isDeferredRef.current = false;
         deferredSegmentsRef.current = [];
-        deferredTotalDurationRef.current = 0;
         shouldDiscardRef.current = false;
         setIsDeferredMode(false);
 
@@ -335,7 +362,13 @@ export function useCallRecorder(
             mediaRecorderRef.current.stop();
         }
 
-        chunksRef.current = [];
+        // Bump generation so any in-flight onstop from the previous recorder
+        // knows it is stale and skips timer / status resets.
+        const gen = ++recorderGenRef.current;
+
+        // Each recorder gets its own local chunks array so old onstop handlers
+        // cannot corrupt the new recorder's data.
+        const localChunks: Blob[] = [];
 
         // Capture the phone number now so the onstop handler uses the value at
         // recording-start time, even if the caller clears the ref before the call ends.
@@ -349,46 +382,70 @@ export function useCallRecorder(
 
         recorder.ondataavailable = (e) => {
             if (e.data.size > 0) {
-                chunksRef.current.push(e.data);
+                localChunks.push(e.data);
             }
         };
 
         recorder.onstop = async () => {
-            const blob = new Blob(chunksRef.current, { type: mimeType });
+            const blob = new Blob(localChunks, { type: mimeType });
             const durationSec = startTimeRef.current
                 ? (Date.now() - startTimeRef.current.getTime()) / 1000
                 : 0;
 
-            resetTimer();
-            chunksRef.current = [];
+            // If a newer recorder has already started, this onstop is stale.
+            // We still push deferred segments (don't lose recordings), but we
+            // must NOT reset the timer or status — that would clobber the new recorder.
+            const isStale = gen !== recorderGenRef.current;
+
+            if (!isStale) {
+                resetTimer();
+            }
 
             // Resolve any waiting promise first
             const resolve = onStopResolveRef.current;
-            onStopResolveRef.current = null;
+            if (!isStale) {
+                onStopResolveRef.current = null;
+            }
 
             // Discard mode: clear everything, no upload
             if (shouldDiscardRef.current) {
-                shouldDiscardRef.current = false;
-                setStatus('idle');
-                resolve?.();
-                return;
-            }
-
-            // Deferred mode: accumulate segment, don't upload yet
-            if (isDeferredRef.current) {
-                if (blob.size > 0) {
-                    deferredSegmentsRef.current.push(blob);
-                    deferredTotalDurationRef.current += durationSec;
-                    deferredMimeTypeRef.current = mimeType;
+                if (!isStale) {
+                    shouldDiscardRef.current = false;
+                    setStatus('idle');
                 }
-                setStatus('idle');
                 resolve?.();
                 return;
             }
 
-            // Normal mode: upload immediately
+            // Deferred mode: push this call's completed recording to the queue.
+            // This preserves recordings when the next call starts before the
+            // previous form is submitted.
+            // Always push even if stale — we must not lose completed recordings.
+            if (isDeferredRef.current) {
+                if (blob.size > 0 && durationSec > 1) {
+                    deferredSegmentsRef.current.push({
+                        blob,
+                        duration: durationSec,
+                        phone: capturedPhone,
+                        mimeType,
+                    });
+                }
+                if (!isStale) {
+                    setStatus('idle');
+                }
+                resolve?.();
+                return;
+            }
+
+            // Normal mode: upload immediately (only if this is the active recorder)
             // Use the phone number captured when recording started (not the ref, which may
             // have been cleared by the caller between startRecording and onstop firing).
+            if (isStale) {
+                // Stale recorder in non-deferred mode — discard silently
+                resolve?.();
+                return;
+            }
+
             const finalPhone = capturedPhone;
 
             if (blob.size > 0 && durationSec > 1) {
@@ -432,7 +489,6 @@ export function useCallRecorder(
     const discardRecording = useCallback(() => {
         shouldDiscardRef.current = true;
         deferredSegmentsRef.current = [];
-        deferredTotalDurationRef.current = 0;
         isDeferredRef.current = false;
         setIsDeferredMode(false);
 
@@ -447,23 +503,92 @@ export function useCallRecorder(
 
     // ── Deferred mode ───────────────────────────────────────────────────
 
-    /** Enter deferred mode: future stopRecording() calls accumulate blobs in memory */
+    /** Enter deferred mode: future stopRecording() calls queue blobs in memory instead of uploading */
     const enterDeferredMode = useCallback(() => {
         isDeferredRef.current = true;
-        deferredSegmentsRef.current = [];
-        deferredTotalDurationRef.current = 0;
+        // NOTE: do NOT clear deferredSegmentsRef here.
+        // Previous calls' recordings stay in the queue until their forms are submitted
+        // via submitOldestDeferredRecording().  Clearing here was the root cause of
+        // recordings being lost when a new call started before the previous form was saved.
         setIsDeferredMode(true);
     }, []);
 
     /**
-     * Stop active recording (if any), merge all accumulated segments, and upload as one file.
-     * Exits deferred mode after uploading.
-     * @param callLogId Optional call log ID to link the recording to.
-     * @returns The created recording ID, or null if nothing was uploaded.
+     * Pop the OLDEST pending recording from the queue and upload it.
+     * Call once per form submission so each call's recording is linked to its own call log.
+     * If recording is still active (e.g. session ends mid-call), stops it first.
+     */
+    const submitOldestDeferredRecording = useCallback(async (callLogId?: string): Promise<string | null> => {
+        // Capture phone synchronously before any async gap
+        const phoneForUpload = phoneNumberRef.current;
+
+        // If currently recording, stop and wait for onstop to queue the final segment
+        if (mediaRecorderRef.current?.state === 'recording') {
+            await new Promise<void>(resolve => {
+                onStopResolveRef.current = resolve;
+                setStatus('stopping');
+                mediaRecorderRef.current!.stop();
+            });
+        }
+
+        // Pop the oldest segment from the queue (FIFO)
+        const segment = deferredSegmentsRef.current.shift();
+
+        // Exit deferred mode once the queue is empty
+        if (deferredSegmentsRef.current.length === 0) {
+            isDeferredRef.current = false;
+            setIsDeferredMode(false);
+        }
+
+        if (!segment || segment.blob.size === 0 || segment.duration <= 1) return null;
+
+        try {
+            setStatus('uploading');
+            const recordingId = await uploadRecording(
+                segment.blob,
+                segment.duration,
+                segment.phone ?? phoneForUpload,
+                callLogId,
+            );
+            setStatus('success');
+            setTimeout(() => setStatus('idle'), 3000);
+            return recordingId;
+        } catch (err: unknown) {
+            console.error('Deferred upload failed:', err);
+            setStatus('error');
+            setError(err instanceof Error ? err.message : 'Upload failed');
+            return null;
+        }
+    }, [uploadRecording, phoneNumberRef]);
+
+    /**
+     * Discard the OLDEST pending recording from the queue (e.g. for "No Answer" calls).
+     * If recording is still active, stops and discards it without queuing.
+     */
+    const discardOldestDeferredRecording = useCallback(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+            // Set discard flag so onstop does NOT push to the queue
+            shouldDiscardRef.current = true;
+            setStatus('stopping');
+            mediaRecorderRef.current.stop();
+        } else {
+            // Recording already stopped — just pop and discard the oldest segment
+            deferredSegmentsRef.current.shift();
+            if (deferredSegmentsRef.current.length === 0) {
+                isDeferredRef.current = false;
+                setIsDeferredMode(false);
+            }
+            resetTimer();
+            setStatus('idle');
+        }
+    }, [resetTimer]);
+
+    /**
+     * Stop the active recording (if any), merge ALL queued segments, and upload as one file.
+     * Exits deferred mode. Kept for backward-compat / edge cases where merging is desired.
      */
     const submitDeferredRecording = useCallback(async (callLogId?: string): Promise<string | null> => {
-        // Capture phone number immediately (synchronously) before any async operations
-        // that might allow callers to clear the ref (e.g. setContextPhoneNumber(''))
+        // Capture phone immediately (synchronously) before any async operations
         const finalPhone = phoneNumberRef.current;
 
         // If currently recording, stop and wait for onstop to accumulate the final segment
@@ -480,16 +605,13 @@ export function useCallRecorder(
         setIsDeferredMode(false);
 
         const segments = deferredSegmentsRef.current;
-        const totalDuration = deferredTotalDurationRef.current;
-        const mimeType = deferredMimeTypeRef.current;
-
         deferredSegmentsRef.current = [];
-        deferredTotalDurationRef.current = 0;
 
         if (segments.length === 0) return null;
 
-        // Merge all segments into one blob
-        const merged = new Blob(segments, { type: mimeType });
+        const totalDuration = segments.reduce((sum, s) => sum + s.duration, 0);
+        const mimeType = segments[segments.length - 1]?.mimeType || 'audio/webm';
+        const merged = new Blob(segments.map(s => s.blob), { type: mimeType });
 
         if (merged.size > 0 && totalDuration > 1) {
             try {
@@ -509,11 +631,10 @@ export function useCallRecorder(
         return null;
     }, [uploadRecording, phoneNumberRef]);
 
-    /** Discard all deferred segments without uploading and exit deferred mode */
+    /** Discard ALL queued segments without uploading and exit deferred mode */
     const discardDeferredRecording = useCallback(() => {
         shouldDiscardRef.current = true;
         deferredSegmentsRef.current = [];
-        deferredTotalDurationRef.current = 0;
         isDeferredRef.current = false;
         setIsDeferredMode(false);
 
@@ -537,6 +658,8 @@ export function useCallRecorder(
         stopRecording,
         discardRecording,
         enterDeferredMode,
+        submitOldestDeferredRecording,
+        discardOldestDeferredRecording,
         submitDeferredRecording,
         discardDeferredRecording,
         isDeferredMode,

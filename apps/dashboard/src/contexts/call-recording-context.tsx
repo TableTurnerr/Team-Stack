@@ -16,15 +16,24 @@ interface CallRecordingContextType {
     setPhoneNumber: (phone: string) => void;
     /** Discard the current recording without uploading (e.g. for "No Answer" calls) */
     discardRecording: () => void;
-    /** Enter deferred mode — recordings accumulate in memory instead of auto-uploading */
+    /** Enter deferred mode — recordings queue in memory instead of auto-uploading */
     enterDeferredMode: () => void;
     /**
-     * Merge all deferred segments and upload as a single file.
+     * Pop the OLDEST queued recording and upload it for the given call log.
+     * Call once per form submission. Preserves other calls' recordings in the queue.
+     */
+    submitOldestDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    /**
+     * Discard the OLDEST queued recording without uploading (e.g. for "No Answer").
+     */
+    discardOldestDeferredRecording: () => void;
+    /**
+     * Merge all queued segments and upload as a single file.
      * @param callLogId Optional call log ID to link the recording to.
      * @returns The created recording ID, or null if nothing was uploaded.
      */
     submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
-    /** Discard all deferred segments without uploading */
+    /** Discard all queued segments without uploading */
     discardDeferredRecording: () => void;
     /** Whether deferred mode is currently active */
     isDeferredMode: boolean;

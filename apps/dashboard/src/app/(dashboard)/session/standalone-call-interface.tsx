@@ -1,15 +1,16 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { Power, Loader2, Mic, MicOff, Phone, Square } from 'lucide-react';
+import { Power, Loader2, Mic, MicOff, Phone, Square, ArrowLeft, PhoneCall } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type PhoneNumber } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
-import { CurrentCallForm, type CallFormData, type CallFormDraft } from './current-call-form';
+import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
+import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 
 interface StandaloneCallInterfaceProps {
     onExit: () => void;
@@ -30,6 +31,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
         draft.companySearch.trim().length > 0 ||
         !!draft.selectedCompany ||
         draft.receptionistName.trim().length > 0 ||
+        draft.ownerName.trim().length > 0 ||
         !!draft.callOutcome ||
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
@@ -42,7 +44,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps) {
     const { user } = useAuth();
-    const { callStatus, endCall, activeCallNumber } = useZoomPhone();
+    const { callStatus, endCall, activeCallNumber, dialNumber, setAutoHangup } = useZoomPhone();
     const {
         status: recorderStatus,
         duration: recordingDuration,
@@ -61,6 +63,15 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     const [hydratedStorage, setHydratedStorage] = useState(false);
     const [ringStartTime, setRingStartTime] = useState<number | null>(null);
     const [connectTime, setConnectTime] = useState<number | null>(null);
+    const [callbackEvents, setCallbackEvents] = useState<Array<{ reason: string; timestamp: string }>>([]);
+    const [autoHangupEnabled, setAutoHangupEnabled] = useState(false);
+    const [autoHangupSeconds, setAutoHangupSeconds] = useState(15);
+    const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+    // Sync auto-hangup settings to zoom phone context
+    useEffect(() => {
+        setAutoHangup(autoHangupEnabled, autoHangupSeconds);
+    }, [autoHangupEnabled, autoHangupSeconds, setAutoHangup]);
 
     useEffect(() => {
         try {
@@ -193,10 +204,12 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 call_duration: callDuration > 0 ? callDuration : undefined,
                 call_outcome: data.callOutcome,
                 post_call_notes: data.postCallNotes,
-                owner_name_found: data.receptionistName || undefined,
+                receptionist_name: data.receptionistName || undefined,
+                owner_name_found: data.ownerName || undefined,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
                 appointment_set: data.appointmentSet,
+                callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                 // session field is omitted (will be null) - this marks it as a standalone call
             });
 
@@ -205,8 +218,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 const companyUpdates: Record<string, any> = {
                     last_contacted: new Date().toISOString(),
                 };
-                if (data.ownerReached && data.receptionistName) {
-                    companyUpdates.owner_name = data.receptionistName;
+                if (data.ownerReached && data.ownerName) {
+                    companyUpdates.owner_name = data.ownerName;
                 }
                 await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
             } catch (err) {
@@ -219,6 +232,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             setCurrentPhoneNumber('');
             setHasUnsavedCall(false);
             setCallDraft(null);
+            setCallbackEvents([]);
             window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
 
             // Reset timing state for next call
@@ -236,11 +250,23 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         setContextPhoneNumber('');
         setHasUnsavedCall(false);
         setCallDraft(null);
+        setCallbackEvents([]);
         setCurrentPhoneNumber('');
         setRingStartTime(null);
         setConnectTime(null);
         window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
     }, [stopRecording, setContextPhoneNumber]);
+
+    // Handle callback — re-dial the same number, log the reason
+    const handleCallback = useCallback((reason: CallbackReason) => {
+        if (!currentPhoneNumber) return;
+        const event = { reason, timestamp: new Date().toISOString() };
+        setCallbackEvents(prev => [...prev, event]);
+        // Reset timing for new call leg
+        setRingStartTime(null);
+        setConnectTime(null);
+        dialNumber(currentPhoneNumber);
+    }, [currentPhoneNumber, dialNumber]);
 
     // Handle exit
     const handleExit = useCallback(async () => {
@@ -258,125 +284,121 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         }
     }, [recorderStatus, stopRecording, onExit]);
 
+    const onBackClick = () => {
+        if (hasUnsavedCall || (callDraft && hasDraftContent(callDraft))) {
+            setShowExitConfirm(true);
+        } else {
+            handleExit();
+        }
+    };
+
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold">Standalone Call</h1>
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--info-subtle)] text-[var(--info)]">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--info)] animate-pulse" />
-                        Quick Call Mode
-                    </span>
-                </div>
-
-                <button
-                    onClick={handleExit}
-                    disabled={exiting}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--card-bg)] text-[var(--foreground)] font-medium text-sm border border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-all disabled:opacity-50"
-                >
-                    {exiting ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
-                    {exiting ? 'Exiting...' : 'Exit Standalone Mode'}
-                </button>
-            </div>
-
-            {/* Recording Status Indicator */}
-            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        {recorderStatus === 'recording' ? (
-                            <>
-                                <div className="w-10 h-10 rounded-full bg-[var(--error-subtle)] flex items-center justify-center">
-                                    <Mic className="w-5 h-5 text-[var(--error)] animate-pulse" />
-                                </div>
-                                <div>
-                                    <p className="font-medium">Recording</p>
-                                    <div className="flex items-center gap-2">
-                                        <p className="text-sm text-[var(--muted)]">
-                                            {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
-                                        </p>
-                                        <button
-                                            onClick={() => stopRecording()}
-                                            className="ml-2 p-1 rounded bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all"
-                                            title="Stop Recording"
-                                        >
-                                            <Square size={12} fill="currentColor" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div className="w-10 h-10 rounded-full bg-[var(--muted)]/10 flex items-center justify-center">
-                                    <MicOff className="w-5 h-5 text-[var(--muted)]" />
-                                </div>
-                                <div>
-                                    <p className="font-medium">Not Recording</p>
-                                    <p className="text-sm text-[var(--muted)]">Hover over the dialer bar to make a call</p>
-                                </div>
-                            </>
-                        )}
+        <div className="flex h-full bg-[var(--background)]">
+            <div className="flex-1 flex flex-col min-w-0 h-full">
+                {/* Header */}
+                <div className="h-16 border-b border-[var(--card-border)] bg-[var(--card-bg)] flex items-center justify-between px-6 shrink-0">
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={onBackClick}
+                            className="p-2 hover:bg-[var(--sidebar-bg)] rounded-lg text-[var(--muted)] transition-colors"
+                            title="Exit dialer"
+                        >
+                            <ArrowLeft size={20} />
+                        </button>
+                        <h2 className="text-lg font-semibold flex items-center gap-2">
+                            <PhoneCall size={20} className="text-[var(--primary)]" />
+                            Standalone Dialer
+                        </h2>
                     </div>
 
                     <div className="flex items-center gap-6">
-                        {(callStatus === 'ringing' || callStatus === 'connected') && (
-                            <div className="flex items-center gap-3">
-                                <button
-                                    onClick={endCall}
-                                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white font-semibold text-sm transition-all active:scale-95 shadow-lg shadow-red-500/20"
-                                >
-                                    <Phone size={16} className="rotate-[135deg]" />
-                                    End Call
-                                </button>
-                                <span className="text-xs text-red-400 font-medium animate-pulse">
-                                    {callStatus === 'ringing' ? 'Ringing...' : 'In Progress'}
+                        {recorderStatus === 'recording' && (
+                            <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-[var(--error-subtle)] border border-[var(--error)]/20">
+                                <span className="flex h-2 w-2 rounded-full bg-[var(--error)] animate-pulse" />
+                                <span className="text-xs font-mono font-medium text-[var(--error)]">
+                                    REC: {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
                                 </span>
                             </div>
                         )}
 
-                        <div className="text-right">
-                            <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Status</p>
-                            <p className="text-sm font-medium capitalize">{recorderStatus}</p>
+                        <div className="flex items-center gap-4">
+                            {/* Auto-hangup toggle */}
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
+                                <label className="text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wider whitespace-nowrap cursor-pointer" htmlFor="standalone-auto-hangup">
+                                    Auto-Hangup
+                                </label>
+                                {autoHangupEnabled && (
+                                    <input
+                                        type="number"
+                                        min={5}
+                                        max={60}
+                                        value={autoHangupSeconds}
+                                        onChange={e => setAutoHangupSeconds(Math.max(5, Math.min(60, parseInt(e.target.value) || 15)))}
+                                        className="w-10 px-1 py-0.5 text-xs text-center bg-[var(--card-bg)] border border-[var(--card-border)] rounded focus:outline-none"
+                                    />
+                                )}
+                                {autoHangupEnabled && <span className="text-[10px] text-[var(--muted)]">s</span>}
+                                <button
+                                    id="standalone-auto-hangup"
+                                    type="button"
+                                    onClick={() => setAutoHangupEnabled(v => !v)}
+                                    className={`relative w-8 h-4 rounded-full transition-colors ${autoHangupEnabled ? 'bg-[var(--success)]' : 'bg-[var(--card-border)]'}`}
+                                >
+                                    <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${autoHangupEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Status</p>
+                                <p className="text-sm font-medium capitalize">{recorderStatus}</p>
+                            </div>
                         </div>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+                    <div className="max-w-4xl mx-auto space-y-6">
+                        <CurrentCallForm
+                            phoneNumber={currentPhoneNumber}
+                            onSave={handleSaveCall}
+                            saving={savingCall}
+                            hasUnsavedCall={hasUnsavedCall}
+                            initialDraft={callDraft}
+                            onDraftChange={setCallDraft}
+                            onDiscard={handleDiscardCall}
+                            isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
+                            onCallback={handleCallback}
+                            callbackEvents={callbackEvents}
+                        />
                     </div>
                 </div>
             </div>
 
-            {/* Docked Zoom Phone Dialer */}
-            <ZoomPhoneDialer docked disabled={hasUnsavedCall} />
+            <div className="w-96 border-l border-[var(--card-border)] bg-[var(--card-bg)] flex flex-col h-full shrink-0">
+                <div className="p-6 flex-1 overflow-y-auto">
+                    <div className="space-y-8">
+                        <div>
+                            <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Dialer</h3>
+                            <ZoomPhoneDialer docked disabled={hasUnsavedCall} />
+                        </div>
 
-            {/* Main layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                {/* Left column - Form */}
-                <div className="lg:col-span-3 space-y-6">
-                    <CurrentCallForm
-                        phoneNumber={currentPhoneNumber}
-                        onSave={handleSaveCall}
-                        saving={savingCall}
-                        hasUnsavedCall={hasUnsavedCall}
-                        initialDraft={callDraft}
-                        onDraftChange={setCallDraft}
-                        onDiscard={handleDiscardCall}
-                        isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
-                    />
-                </div>
-
-                {/* Right column - Past Call */}
-                <div className="lg:col-span-2 space-y-6">
-                    <LastCallPreview
-                        callLog={lastCallLog}
-                        companyName={lastCallCompanyName}
-                    />
+                        <LastCallPreview
+                            callLog={lastCallLog}
+                            companyName={lastCallCompanyName}
+                        />
+                    </div>
                 </div>
             </div>
 
-            {/* Info footer */}
-            <div className="bg-[var(--info-subtle)]/30 border border-[var(--info)] rounded-lg p-4">
-                <p className="text-sm text-[var(--info)]">
-                    <span className="font-semibold">Note:</span> Standalone calls are logged separately and not tracked in session metrics.
-                    All calls are automatically recorded for documentation.
-                </p>
-            </div>
+            <ConfirmationModal
+                isOpen={showExitConfirm}
+                onClose={() => setShowExitConfirm(false)}
+                onConfirm={handleExit}
+                title="Exit Standalone Dialer?"
+                message="You have unsaved call details. If you exit now, they will be saved locally and you can finish logging later."
+                confirmText={exiting ? "Exiting..." : "Exit Now"}
+                cancelText="Stay"
+                variant="default"
+            />
         </div>
     );
 }

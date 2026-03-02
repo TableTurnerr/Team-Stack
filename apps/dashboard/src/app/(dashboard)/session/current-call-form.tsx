@@ -242,6 +242,15 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         });
     }, [companySearch, selectedCompany, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, onDraftChange]);
 
+    // Reset suggestion tracking when phone number changes so the same company name
+    // can be re-applied to consecutive calls (e.g. two different numbers for the same company)
+    useEffect(() => {
+        if (!phoneNumber) return;
+        if (phoneNumber !== lastLookedUpPhone.current) {
+            lastAppliedSuggestion.current = '';
+        }
+    }, [phoneNumber]);
+
     // Auto-fetch company when phone number changes
     useEffect(() => {
         if (!phoneNumber) {

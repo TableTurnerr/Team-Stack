@@ -198,6 +198,8 @@ export interface CallLog extends RecordModel {
   appointment_set?: boolean;
   // Callback tracking: array of {reason, timestamp} for each callback made during this call
   callback_events?: Array<{ reason: string; timestamp: string }>;
+  /** True when this call log was created via the callback feature (i.e. it is a re-dial) */
+  is_callback?: boolean;
   expand?: {
     company?: Company;
     phone_number_record?: PhoneNumber;
@@ -222,6 +224,8 @@ export interface ColdCallingSession extends RecordModel {
   paused_at?: string; // ISO timestamp set when session is paused, null when resumed
   total_paused_sec: number; // Accumulated pause duration across all pauses (default 0)
   is_test?: boolean; // True for test sessions — all data can be deleted at end of session
+  /** Count of call logs with callbacks in this session */
+  total_callbacks?: number;
   expand?: {
     user?: User;
   };

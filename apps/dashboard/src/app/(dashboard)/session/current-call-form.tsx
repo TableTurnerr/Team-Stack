@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -61,6 +61,7 @@ export interface CallFormData {
     callbackEvents?: Array<{ reason: string; timestamp: string }>;
     additionalPhoneNumber?: string;
     additionalPhoneNote?: string;
+    email?: string;
 }
 
 export interface CallFormDraft {
@@ -80,6 +81,7 @@ export interface CallFormDraft {
     callbackEvents: Array<{ reason: string; timestamp: string }>;
     additionalPhoneNumber: string;
     additionalPhoneNote: string;
+    email: string;
 }
 
 const EMPTY_DRAFT: CallFormDraft = {
@@ -99,6 +101,7 @@ const EMPTY_DRAFT: CallFormDraft = {
     callbackEvents: [],
     additionalPhoneNumber: '',
     additionalPhoneNote: '',
+    email: '',
 };
 
 interface CurrentCallFormProps {
@@ -141,6 +144,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [additionalPhoneNumber, setAdditionalPhoneNumber] = useState('');
     const [additionalPhoneNote, setAdditionalPhoneNote] = useState('');
     const [showAdditionalPhone, setShowAdditionalPhone] = useState(false);
+    const [email, setEmail] = useState('');
+    const [showEmail, setShowEmail] = useState(false);
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const callbackDropdownRef = useRef<HTMLDivElement>(null);
@@ -187,6 +192,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setAdditionalPhoneNumber('');
         setAdditionalPhoneNote('');
         setShowAdditionalPhone(false);
+        setEmail('');
+        setShowEmail(false);
         lastLookedUpPhone.current = '';
         lastAppliedSuggestion.current = '';
     }, []);
@@ -211,6 +218,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setFollowUpData(initialDraft.followUpData || null);
         setAdditionalPhoneNumber(initialDraft.additionalPhoneNumber || '');
         setAdditionalPhoneNote(initialDraft.additionalPhoneNote || '');
+        setEmail(initialDraft.email || '');
 
         hydratedFromDraft.current = true;
     }, [initialDraft]);
@@ -239,8 +247,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             callbackEvents,
             additionalPhoneNumber,
             additionalPhoneNote,
+            email,
         });
-    }, [companySearch, selectedCompany, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, onDraftChange]);
+    }, [companySearch, selectedCompany, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, onDraftChange]);
 
     // Reset suggestion tracking when phone number changes so the same company name
     // can be re-applied to consecutive calls (e.g. two different numbers for the same company)
@@ -309,6 +318,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         if (company.owner_name) {
                             setOwnerName(company.owner_name);
                         }
+                        if (company.email) { setEmail(company.email); setShowEmail(true); }
                         setCompanyLookupState('found');
                         return;
                     }
@@ -352,6 +362,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     if (exactMatch.owner_name) {
                         setOwnerName(exactMatch.owner_name);
                     }
+                    if (exactMatch.email) { setEmail(exactMatch.email); setShowEmail(true); }
                 } else {
                     // No exact match — pre-fill name for creation (even if partial matches exist)
                     setCompanySearch(suggestedCompanyName);
@@ -472,6 +483,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         if (company.owner_name) {
             setOwnerName(company.owner_name);
         }
+        if (company.email) { setEmail(company.email); setShowEmail(true); }
     };
 
     // Toggle "Owner Reached?" — auto-fills ownerName from receptionistName if recep IS the owner
@@ -536,13 +548,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
                 additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
                 additionalPhoneNote: additionalPhoneNote.trim() || undefined,
+                email: email.trim() || undefined,
             });
 
             resetForm();
         } catch (err) {
             console.error('Failed to save call:', err);
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, resetForm]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, resetForm]);
 
     const hasDraftValues =
         companySearch.trim().length > 0 ||
@@ -1025,11 +1038,11 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             </div>
 
             {/* Additional Phone Number Found During Call */}
-            <div className="border-t border-[var(--card-border)] pt-3">
+            <div className="border-t border-[var(--card-border)] pt-3 space-y-3">
                 <button
                     type="button"
                     onClick={() => setShowAdditionalPhone(v => !v)}
-                    className="flex items-center gap-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                    className="flex items-center gap-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors w-full"
                 >
                     <Plus size={12} />
                     <span>Phone number found during call?</span>
@@ -1055,6 +1068,31 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             placeholder="Label/note (e.g. Owner Direct, Manager Line)"
                             className="w-full px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
                         />
+                    </div>
+                )}
+
+                <button
+                    type="button"
+                    onClick={() => setShowEmail(v => !v)}
+                    className="flex items-center gap-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors w-full"
+                >
+                    <Mail size={12} />
+                    <span>Email found during call?</span>
+                    <ChevronDown size={10} className={cn("transition-transform ml-auto", showEmail && "rotate-180")} />
+                </button>
+
+                {showEmail && (
+                    <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="relative">
+                            <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                placeholder="contact@company.com"
+                                className="w-full pl-8 pr-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+                            />
+                        </div>
                     </div>
                 )}
             </div>

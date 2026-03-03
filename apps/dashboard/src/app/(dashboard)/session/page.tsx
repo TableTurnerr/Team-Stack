@@ -133,6 +133,16 @@ export default function SessionPage() {
     // Callback tracking for the current call
     const [callbackEvents, setCallbackEvents] = useState<Array<{ reason: string; timestamp: string }>>([]);
 
+    // Offline auto-end timer
+    const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const offlineStartRef = useRef<number | null>(null);
+    const endSessionRef = useRef(endSession);
+    useEffect(() => { endSessionRef.current = endSession; }, [endSession]);
+
+    // Last completed session (for resume)
+    const [lastCompletedSession, setLastCompletedSession] = useState<ColdCallingSession | null>(null);
+    const [resuming, setResuming] = useState(false);
+
     // Test session state
     const [pendingTestSession, setPendingTestSession] = useState(false);
     const [showTestCleanupModal, setShowTestCleanupModal] = useState(false);
@@ -466,6 +476,56 @@ export default function SessionPage() {
     }, [session]);
 
     // ---------------------------------------------------------------------------
+    // Auto-end session after 15 minutes offline (network down while tab is open)
+    // ---------------------------------------------------------------------------
+    const OFFLINE_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+    useEffect(() => {
+        if (!session || session.status !== 'active') {
+            if (offlineTimerRef.current) {
+                clearTimeout(offlineTimerRef.current);
+                offlineTimerRef.current = null;
+            }
+            return;
+        }
+
+        const scheduleOfflineEnd = () => {
+            if (offlineTimerRef.current) return; // already scheduled
+            offlineStartRef.current = Date.now();
+            offlineTimerRef.current = setTimeout(() => {
+                offlineTimerRef.current = null;
+                const offlineSec = offlineStartRef.current
+                    ? Math.floor((Date.now() - offlineStartRef.current) / 1000)
+                    : 0;
+                offlineStartRef.current = null;
+                endSessionRef.current(offlineSec);
+            }, OFFLINE_SESSION_TIMEOUT_MS);
+        };
+
+        const cancelOfflineEnd = () => {
+            if (offlineTimerRef.current) {
+                clearTimeout(offlineTimerRef.current);
+                offlineTimerRef.current = null;
+            }
+            offlineStartRef.current = null;
+        };
+
+        window.addEventListener('offline', scheduleOfflineEnd);
+        window.addEventListener('online', cancelOfflineEnd);
+
+        // If already offline when session becomes active, start the timer immediately
+        if (!navigator.onLine) {
+            scheduleOfflineEnd();
+        }
+
+        return () => {
+            window.removeEventListener('offline', scheduleOfflineEnd);
+            window.removeEventListener('online', cancelOfflineEnd);
+            cancelOfflineEnd();
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session]);
+
+    // ---------------------------------------------------------------------------
     // Start session — step 1: show "Connect Audio" screen
     // ---------------------------------------------------------------------------
     const startSession = useCallback(() => {
@@ -527,16 +587,18 @@ export default function SessionPage() {
 
     // ---------------------------------------------------------------------------
     // End session
+    // offlineSubtractSec: seconds to subtract from elapsed (used when auto-ending due to offline)
     // ---------------------------------------------------------------------------
-    const endSession = useCallback(async () => {
+    const endSession = useCallback(async (offlineSubtractSec = 0) => {
         if (!session) return;
         const wasTestSession = session.is_test;
         const sessionId = session.id;
         try {
             setEnding(true);
+            const finalDuration = Math.max(0, elapsedSec - offlineSubtractSec);
             await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, {
                 ended_at: new Date().toISOString(),
-                total_duration_sec: elapsedSec,
+                total_duration_sec: finalDuration,
                 status: 'completed',
             });
             setSession(null);
@@ -571,6 +633,51 @@ export default function SessionPage() {
             setEnding(false);
         }
     }, [session, elapsedSec, setSession, setContextPhoneNumber]);
+
+    // ---------------------------------------------------------------------------
+    // Fetch last completed session (for resume feature)
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        if (!user || session) {
+            setLastCompletedSession(null);
+            return;
+        }
+        pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getList<ColdCallingSession>(1, 1, {
+            filter: `user = "${user.id}" && status = "completed" && is_test = false`,
+            sort: '-ended_at',
+        }).then(result => {
+            setLastCompletedSession(result.items[0] ?? null);
+        }).catch(() => setLastCompletedSession(null));
+    }, [user, session]);
+
+    // ---------------------------------------------------------------------------
+    // Resume last completed session
+    // The gap between ended_at and now is added to total_paused_sec so the
+    // elapsed timer continues from exactly where it stopped.
+    // ---------------------------------------------------------------------------
+    const resumeLastSession = useCallback(async () => {
+        if (!lastCompletedSession?.ended_at) return;
+        try {
+            setResuming(true);
+            const gapSec = Math.floor(
+                (Date.now() - new Date(lastCompletedSession.ended_at).getTime()) / 1000
+            );
+            const updated = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(
+                lastCompletedSession.id,
+                {
+                    status: 'active',
+                    ended_at: null,
+                    total_paused_sec: (lastCompletedSession.total_paused_sec ?? 0) + gapSec,
+                }
+            );
+            setSession(updated);
+            setLastCompletedSession(null);
+        } catch (err) {
+            console.error('Failed to resume session:', err);
+        } finally {
+            setResuming(false);
+        }
+    }, [lastCompletedSession, setSession]);
 
     // ---------------------------------------------------------------------------
     // Test session cleanup — delete all data created during the test session
@@ -912,6 +1019,9 @@ export default function SessionPage() {
                             if (data.ownerReached && data.ownerName && !existingCompany.owner_name) {
                                 companyUpdates.owner_name = data.ownerName;
                             }
+                            if (data.email && !existingCompany.email) {
+                                companyUpdates.email = data.email;
+                            }
                             await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
                         } catch { /* non-critical */ }
                     })(),
@@ -1241,7 +1351,7 @@ export default function SessionPage() {
                 );
             }
 
-            return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} onStartTestSession={startTestSession} />;
+            return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} onStartTestSession={startTestSession} lastCompletedSession={lastCompletedSession} onResumeSession={resumeLastSession} resuming={resuming} />;
         }
 
         if (!isSessionActive) {

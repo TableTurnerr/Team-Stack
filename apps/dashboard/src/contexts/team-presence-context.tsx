@@ -28,6 +28,10 @@ export function TeamPresenceProvider({ children }: { children: React.ReactNode }
 
     const unsubUsersRef = useRef<(() => void) | null>(null);
     const unsubSessionsRef = useRef<(() => void) | null>(null);
+    const watchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Refs so the watchdog interval always reads fresh data
+    const activeSessionsRef = useRef<ColdCallingSession[]>([]);
+    const teamMembersRef = useRef<User[]>([]);
 
     const fetchAll = useCallback(async () => {
         if (!isAuthenticated) return;
@@ -41,7 +45,9 @@ export function TeamPresenceProvider({ children }: { children: React.ReactNode }
                 }),
             ]);
             setTeamMembers(usersResult.items);
+            activeSessionsRef.current = sessionsResult.items;
             setActiveSessions(sessionsResult.items);
+            teamMembersRef.current = usersResult.items;
         } catch (err: any) {
             if (err?.status !== 0) console.error('[TeamPresence] fetch failed:', err);
         } finally {
@@ -58,13 +64,16 @@ export function TeamPresenceProvider({ children }: { children: React.ReactNode }
         // Subscribe to user changes (status, last_activity)
         pb.collection(COLLECTIONS.USERS).subscribe<User>('*', (e) => {
             if (e.action === 'delete') {
-                setTeamMembers(prev => prev.filter(u => u.id !== e.record.id));
+                setTeamMembers(prev => {
+                    const next = prev.filter(u => u.id !== e.record.id);
+                    teamMembersRef.current = next;
+                    return next;
+                });
             } else {
                 setTeamMembers(prev => {
                     const idx = prev.findIndex(u => u.id === e.record.id);
-                    if (idx === -1) return [...prev, e.record];
-                    const next = [...prev];
-                    next[idx] = e.record;
+                    const next = idx === -1 ? [...prev, e.record] : prev.map((u, i) => i === idx ? e.record : u);
+                    teamMembersRef.current = next;
                     return next;
                 });
             }
@@ -80,7 +89,11 @@ export function TeamPresenceProvider({ children }: { children: React.ReactNode }
 
             if (e.action === 'delete' || record.status !== 'active') {
                 // Remove from active list
-                setActiveSessions(prev => prev.filter(s => s.id !== record.id));
+                setActiveSessions(prev => {
+                    const next = prev.filter(s => s.id !== record.id);
+                    activeSessionsRef.current = next;
+                    return next;
+                });
                 return;
             }
 
@@ -90,14 +103,17 @@ export function TeamPresenceProvider({ children }: { children: React.ReactNode }
                     .getOne<ColdCallingSession>(record.id, { expand: 'user' });
                 setActiveSessions(prev => {
                     const idx = prev.findIndex(s => s.id === full.id);
-                    if (idx === -1) return [...prev, full];
-                    const next = [...prev];
-                    next[idx] = full;
+                    const next = idx === -1 ? [...prev, full] : prev.map((s, i) => i === idx ? full : s);
+                    activeSessionsRef.current = next;
                     return next;
                 });
             } catch {
                 // Record may no longer be active — remove it
-                setActiveSessions(prev => prev.filter(s => s.id !== record.id));
+                setActiveSessions(prev => {
+                    const next = prev.filter(s => s.id !== record.id);
+                    activeSessionsRef.current = next;
+                    return next;
+                });
             }
         }).then(unsub => {
             unsubSessionsRef.current = unsub;
@@ -105,11 +121,54 @@ export function TeamPresenceProvider({ children }: { children: React.ReactNode }
             console.error('[TeamPresence] sessions subscribe failed:', err);
         });
 
+        // ── Watchdog: auto-end sessions for users offline for 15+ minutes ──
+        // Handles the case where a user's browser/tab was closed without ending their session.
+        const OFFLINE_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+        const runWatchdog = async () => {
+            const sessions = activeSessionsRef.current;
+            const members = teamMembersRef.current;
+            for (const session of sessions) {
+                const owner = members.find(u => u.id === session.user);
+                if (!owner?.last_activity) continue;
+                const offlineDurationMs = Date.now() - new Date(owner.last_activity).getTime();
+                if (offlineDurationMs < OFFLINE_SESSION_TIMEOUT_MS) continue;
+
+                try {
+                    const started = new Date(session.started_at).getTime();
+                    const totalPausedSec = session.total_paused_sec ?? 0;
+                    const currentPauseSec = session.paused_at
+                        ? Math.floor((Date.now() - new Date(session.paused_at).getTime()) / 1000)
+                        : 0;
+                    // Subtract the time the user has been offline so it doesn't count toward duration
+                    const offlineSec = Math.floor(offlineDurationMs / 1000);
+                    const elapsedSec = Math.max(0,
+                        Math.floor((Date.now() - started) / 1000) - totalPausedSec - currentPauseSec - offlineSec
+                    );
+                    await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, {
+                        ended_at: new Date().toISOString(),
+                        total_duration_sec: elapsedSec,
+                        status: 'completed',
+                    });
+                    console.log('[TeamPresence] Auto-ended stale session for offline user:', owner.id, session.id);
+                } catch (err) {
+                    console.error('[TeamPresence] Failed to auto-end stale session:', err);
+                }
+            }
+        };
+
+        watchdogRef.current = setInterval(runWatchdog, 2 * 60 * 1000); // every 2 minutes
+        // Run once immediately in case there are already stale sessions
+        runWatchdog();
+
         return () => {
             unsubUsersRef.current?.();
             unsubUsersRef.current = null;
             unsubSessionsRef.current?.();
             unsubSessionsRef.current = null;
+            if (watchdogRef.current) {
+                clearInterval(watchdogRef.current);
+                watchdogRef.current = null;
+            }
         };
     }, [isAuthenticated, fetchAll]);
 

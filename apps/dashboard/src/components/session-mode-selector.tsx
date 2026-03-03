@@ -1,14 +1,35 @@
 'use client';
 
-import { Zap, Phone } from 'lucide-react';
+import { Zap, Phone, RotateCcw, Loader2 } from 'lucide-react';
+import type { ColdCallingSession } from '@/lib/types';
 
 interface SessionModeSelectorProps {
     onStartSession: () => void;
     onStartStandalone: () => void;
     onStartTestSession: () => void;
+    lastCompletedSession?: ColdCallingSession | null;
+    onResumeSession?: () => void;
+    resuming?: boolean;
 }
 
-export function SessionModeSelector({ onStartSession, onStartStandalone, onStartTestSession }: SessionModeSelectorProps) {
+function formatDuration(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatRelativeTime(isoDate: string): string {
+    const diffMs = Date.now() - new Date(isoDate).getTime();
+    const diffMin = Math.floor(diffMs / 60_000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return `${Math.floor(diffHr / 24)}d ago`;
+}
+
+export function SessionModeSelector({ onStartSession, onStartStandalone, onStartTestSession, lastCompletedSession, onResumeSession, resuming }: SessionModeSelectorProps) {
     return (
         <div className="max-w-4xl mx-auto">
             <div className="mb-8 text-center">
@@ -95,6 +116,35 @@ export function SessionModeSelector({ onStartSession, onStartStandalone, onStart
                     </div>
                 </div>
             </div>
+
+            {/* Resume Last Session banner */}
+            {lastCompletedSession && onResumeSession && (
+                <div className="mt-6 bg-[var(--card-bg)] border border-[var(--success)]/30 rounded-xl p-4 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-lg bg-[var(--success-subtle)] flex items-center justify-center flex-shrink-0">
+                            <RotateCcw className="w-4 h-4 text-[var(--success)]" />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-tight">Resume Last Session</p>
+                            <p className="text-xs text-[var(--muted)] mt-0.5">
+                                {formatDuration(lastCompletedSession.total_duration_sec ?? 0)} recorded
+                                {' · '}
+                                {lastCompletedSession.total_dials ?? 0} dials
+                                {' · '}
+                                ended {lastCompletedSession.ended_at ? formatRelativeTime(lastCompletedSession.ended_at) : '—'}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={onResumeSession}
+                        disabled={resuming}
+                        className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--success-subtle)] text-[var(--success)] font-medium text-sm border border-[var(--success)]/30 hover:bg-[var(--success)] hover:text-white transition-all disabled:opacity-50"
+                    >
+                        {resuming ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                        {resuming ? 'Resuming…' : 'Resume'}
+                    </button>
+                </div>
+            )}
 
             <div className="mt-6 text-center space-y-1.5">
                 <p className="text-sm text-[var(--muted)]">

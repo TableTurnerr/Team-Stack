@@ -476,6 +476,14 @@ export default function CompanyDetailPage() {
                     placeholder="@username"
                     isEditing={isEditingAll}
                   />
+                  <InlineEditField
+                    id={`company_${id}_email`}
+                    label="Email"
+                    value={company.email || ''}
+                    onSave={(v) => handleUpdateCompany('email', v)}
+                    placeholder="contact@company.com"
+                    isEditing={isEditingAll}
+                  />
                 </div>
               </div>
 

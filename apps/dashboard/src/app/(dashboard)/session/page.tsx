@@ -136,8 +136,7 @@ export default function SessionPage() {
     // Offline auto-end timer
     const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const offlineStartRef = useRef<number | null>(null);
-    const endSessionRef = useRef(endSession);
-    useEffect(() => { endSessionRef.current = endSession; }, [endSession]);
+    const endSessionRef = useRef<((offlineSubtractSec?: number) => Promise<void>) | null>(null);
 
     // Last completed session (for resume)
     const [lastCompletedSession, setLastCompletedSession] = useState<ColdCallingSession | null>(null);
@@ -497,7 +496,7 @@ export default function SessionPage() {
                     ? Math.floor((Date.now() - offlineStartRef.current) / 1000)
                     : 0;
                 offlineStartRef.current = null;
-                endSessionRef.current(offlineSec);
+                endSessionRef.current?.(offlineSec);
             }, OFFLINE_SESSION_TIMEOUT_MS);
         };
 
@@ -633,6 +632,10 @@ export default function SessionPage() {
             setEnding(false);
         }
     }, [session, elapsedSec, setSession, setContextPhoneNumber]);
+
+    // Keep endSessionRef in sync so the offline watchdog can always call the
+    // latest version without a stale closure (declared here, after endSession).
+    useEffect(() => { endSessionRef.current = endSession; }, [endSession]);
 
     // ---------------------------------------------------------------------------
     // Fetch last completed session (for resume feature)
@@ -1372,7 +1375,7 @@ export default function SessionPage() {
                         </div>
 
                         <button
-                            onClick={endSession}
+                            onClick={() => endSession()}
                             disabled={ending}
                             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
                         >
@@ -1481,7 +1484,7 @@ export default function SessionPage() {
                             </button>
                         )}
                         <button
-                            onClick={endSession}
+                            onClick={() => endSession()}
                             disabled={ending}
                             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--error-subtle)] text-[var(--error)] font-medium text-sm border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
                         >

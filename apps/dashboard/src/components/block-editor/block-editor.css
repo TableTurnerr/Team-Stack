@@ -1,0 +1,462 @@
+/* ─── Block Editor Container ─────────────────────────────────────────────── */
+
+.block-editor {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The ProseMirror contenteditable element */
+.block-editor-content {
+  flex: 1;
+  outline: none;
+  padding: 0.25rem 0.125rem;
+  color: var(--foreground);
+  font-size: 0.9375rem;
+  line-height: 1.75;
+  caret-color: var(--foreground);
+  min-height: 200px;
+}
+
+/* ─── Placeholder ────────────────────────────────────────────────────────── */
+
+.block-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  font-style: normal;
+}
+
+/* ─── Typography — block types ───────────────────────────────────────────── */
+
+.block-editor-content > * + * {
+  margin-top: 0.375em;
+}
+
+.block-editor-content h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--foreground);
+  margin-top: 1.5em;
+  margin-bottom: 0.25em;
+  letter-spacing: -0.02em;
+}
+
+.block-editor-content h1:first-child {
+  margin-top: 0;
+}
+
+.block-editor-content h2 {
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--foreground);
+  margin-top: 1.25em;
+  margin-bottom: 0.25em;
+  letter-spacing: -0.01em;
+}
+
+.block-editor-content h2:first-child {
+  margin-top: 0;
+}
+
+.block-editor-content h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--foreground);
+  margin-top: 1em;
+  margin-bottom: 0.25em;
+}
+
+.block-editor-content h3:first-child {
+  margin-top: 0;
+}
+
+.block-editor-content p {
+  color: var(--foreground);
+  margin: 0;
+}
+
+/* ─── Lists ──────────────────────────────────────────────────────────────── */
+
+.block-editor-content ul,
+.block-editor-content ol {
+  padding-left: 1.5rem;
+  margin: 0.25em 0;
+}
+
+.block-editor-content ul {
+  list-style: disc;
+}
+
+.block-editor-content ol {
+  list-style: decimal;
+}
+
+.block-editor-content li {
+  color: var(--foreground);
+  margin: 0.15em 0;
+}
+
+.block-editor-content li > p {
+  margin: 0;
+}
+
+/* Nested lists */
+.block-editor-content ul ul,
+.block-editor-content ol ol,
+.block-editor-content ul ol,
+.block-editor-content ol ul {
+  margin: 0.1em 0;
+}
+
+/* ─── Task list ──────────────────────────────────────────────────────────── */
+
+.block-editor-content ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.25em 0;
+}
+
+.block-editor-content li[data-type="taskItem"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.2em 0;
+}
+
+.block-editor-content li[data-type="taskItem"] > label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-top: 0.15rem;
+  cursor: pointer;
+  /* Checkbox already styled by globals.css input[type="checkbox"] */
+}
+
+.block-editor-content li[data-type="taskItem"] > label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.block-editor-content li[data-type="taskItem"] > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.block-editor-content li[data-type="taskItem"][data-checked="true"] > div {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+/* ─── Horizontal rule ────────────────────────────────────────────────────── */
+
+.block-editor-content hr {
+  border: none;
+  border-top: 1px solid var(--card-border);
+  margin: 1.25em 0;
+}
+
+/* ─── Inline formatting ──────────────────────────────────────────────────── */
+
+.block-editor-content strong {
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.block-editor-content em {
+  font-style: italic;
+}
+
+.block-editor-content s,
+.block-editor-content del {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.block-editor-content u {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Tiptap renders highlights as <mark style="--highlight-color: #…">
+   We apply the CSS variable as the background so multicolour works. */
+.block-editor-content mark {
+  background: var(--highlight-color, rgba(253, 224, 71, 0.35));
+  color: inherit;
+  border-radius: 3px;
+  padding: 0.05em 0.2em;
+}
+
+/* ─── Code ───────────────────────────────────────────────────────────────── */
+
+.block-editor-content code {
+  background: var(--card-hover);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--primary);
+}
+
+.block-editor-content pre {
+  background: var(--card-hover);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 1em 1.25em;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.block-editor-content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+
+/* ─── Links ──────────────────────────────────────────────────────────────── */
+
+.block-editor-content a,
+.block-editor-content .editor-link {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.block-editor-content a:hover {
+  color: var(--primary-hover, var(--primary));
+  opacity: 0.85;
+}
+
+/* ─── Blockquote ─────────────────────────────────────────────────────────── */
+
+.block-editor-content blockquote {
+  border-left: 3px solid var(--primary);
+  margin-left: 0;
+  padding-left: 1rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────── */
+
+.block-editor-content ::selection {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+/* ─── Slash command menu ─────────────────────────────────────────────────── */
+
+.slash-menu {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.3),
+    0 10px 30px -5px rgba(0, 0, 0, 0.4);
+  padding: 6px;
+  min-width: 256px;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.slash-menu-label {
+  padding: 4px 10px 6px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.slash-menu-empty {
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.slash-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--foreground);
+  transition: background 0.1s ease;
+}
+
+.slash-menu-item:hover,
+.slash-menu-item.selected {
+  background: var(--card-hover);
+}
+
+.slash-menu-item-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-hover);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: background 0.1s ease;
+}
+
+.slash-menu-item.selected .slash-menu-item-icon {
+  background: var(--sidebar-border, var(--card-border));
+  color: var(--foreground);
+}
+
+.slash-menu-item-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--foreground);
+}
+
+.slash-menu-item-desc {
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* ─── Floating toolbar (bubble menu) ────────────────────────────────────── */
+
+/* Outer wrapper so the colour row can stack beneath the main row */
+.floating-toolbar-wrap {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.3),
+    0 8px 24px -4px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  animation: toolbar-appear 0.12s ease-out;
+}
+
+/* Main formatting row */
+.floating-toolbar {
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+@keyframes toolbar-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toolbar-btn {
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s ease, color 0.1s ease;
+  min-width: 28px;
+  height: 28px;
+}
+
+.toolbar-btn:hover {
+  background: var(--card-hover);
+  color: var(--foreground);
+}
+
+.toolbar-btn.active {
+  background: var(--card-hover);
+  color: var(--foreground);
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--card-border);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+/* Highlight button — stacks the icon above a thin colour bar */
+.toolbar-btn-highlight {
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 7px;
+}
+
+.highlight-indicator {
+  display: block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  transition: background 0.15s ease;
+}
+
+/* ─── Colour swatch row ──────────────────────────────────────────────────── */
+
+.color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px 6px;
+  border-top: 1px solid var(--card-border);
+  animation: toolbar-appear 0.1s ease-out;
+}
+
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.1s ease, border-color 0.1s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.color-swatch.selected {
+  border-color: var(--foreground);
+  transform: scale(1.1);
+}
+
+/* "No colour" / clear swatch */
+.color-swatch-clear {
+  background: var(--card-hover);
+  border-color: var(--card-border);
+  color: var(--muted);
+}

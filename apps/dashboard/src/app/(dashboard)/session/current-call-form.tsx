@@ -506,10 +506,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setAppointmentSet(false);
     };
 
+    const isSavingRef = useRef(false);
+
     const handleSave = useCallback(async () => {
         if (!selectedCompany && !isNewCompany) return;
         if (!companySearch.trim()) return;
         if (!callOutcome) return;
+        if (isSavingRef.current) return;
+        isSavingRef.current = true;
 
         try {
             let companyId: string;
@@ -554,6 +558,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             resetForm();
         } catch (err) {
             console.error('Failed to save call:', err);
+        } finally {
+            isSavingRef.current = false;
         }
     }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, resetForm]);
 

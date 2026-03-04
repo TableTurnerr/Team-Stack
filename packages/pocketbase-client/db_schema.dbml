@@ -15,6 +15,19 @@ Table users {
   updated date
 }
 
+Table user_preferences {
+  id text [pk]
+  user relation [ref: > users.id]
+  theme text [note: 'light | dark | system']
+  display_density text [note: 'comfortable | compact']
+  timezones json
+  notification_settings json
+  workflow_preferences json
+  privacy_settings json
+  created date
+  updated date
+}
+
 // --- CRM & Leads ---
 
 Table companies {
@@ -23,7 +36,6 @@ Table companies {
   owner_name text
   company_location text
   google_maps_link url
-  phone_numbers text
   source text
   instagram_handle text
   email email
@@ -45,6 +57,8 @@ Table phone_numbers {
   location_address text
   receptionist_name text
   last_called date
+  total_calls number
+  disassociated bool
   created date
   updated date
 }
@@ -92,13 +106,32 @@ Table outreach_logs {
 
 // --- Calling & Recordings ---
 
+Table cold_calling_sessions {
+  id text [pk]
+  user relation [ref: > users.id]
+  started_at date
+  ended_at date
+  total_dials number
+  total_pickups number
+  total_duration_sec number
+  owner_reached number
+  pitch_completed number
+  appointment_set number
+  status text [note: 'active | completed']
+  session_notes text
+  paused_at date
+  total_paused_sec number
+  is_test bool
+  created date
+  updated date
+}
+
 Table cold_calls {
   id text [pk]
   company relation [ref: > companies.id]
   caller_name text
   recipients text
-  call_outcome text [note: 'Interested | Not Interested | Callback | No Answer | Wrong Number | Other']
-  interest_level number
+  call_outcome text [note: 'Interested | Not Interested | Callback | No Answer | Fumbled | Bad Lead | Send Email | Hung Up (Rude Recep) | Hung Up (Other) | Other']
   objections json
   pain_points json
   follow_up_actions json
@@ -125,13 +158,21 @@ Table call_logs {
   caller relation [ref: > users.id]
   call_time date
   duration number
-  call_outcome text [note: 'Interested | Not Interested | Callback | No Answer | Wrong Number | Other']
+  ring_duration number
+  call_duration number
+  call_outcome text [note: 'Interested | Not Interested | Callback | No Answer | Fumbled | Bad Lead | Send Email | Hung Up (Rude Recep) | Hung Up (Other) | Other | Missed Call']
+  direction text [note: 'outbound | inbound']
+  callback_events json
   owner_name_found text
   receptionist_name text
   post_call_notes text
-  interest_level number
   status_changed_to text [note: 'Cold No Reply | Replied | Warm | Booked | Paid | Client | Excluded']
   has_recording bool
+  session relation [ref: > cold_calling_sessions.id]
+  cold_call relation [ref: > cold_calls.id]
+  owner_reached bool
+  pitch_completed bool
+  appointment_set bool
   created date
   updated date
 }
@@ -147,6 +188,7 @@ Table recordings {
   call_log relation [ref: > call_logs.id]
   company relation [ref: > companies.id]
   phone_number_record relation [ref: > phone_numbers.id]
+  original_filename text
   created date
   updated date
 }
@@ -155,6 +197,8 @@ Table follow_ups {
   id text [pk]
   call_log relation [ref: > call_logs.id]
   company relation [ref: > companies.id]
+  phone_number_record relation [ref: > phone_numbers.id]
+  created_by relation [ref: > users.id]
   scheduled_time date
   client_timezone text
   assigned_to relation [ref: > users.id]
@@ -214,7 +258,7 @@ Table alerts {
   id text [pk]
   created_by relation [ref: > users.id]
   target_user relation [ref: > users.id]
-  entity_type text [note: 'cold_call | company | goal']
+  entity_type text [note: 'cold_call | company | goal | follow_up']
   entity_id text
   entity_label text
   alert_time date

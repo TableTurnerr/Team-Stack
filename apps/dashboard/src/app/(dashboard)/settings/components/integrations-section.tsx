@@ -3,13 +3,22 @@
 import { useState, useEffect } from 'react';
 import { UserPreferences } from '@/lib/types';
 import { useToast } from '@/components/ui/toast';
+import { useAuth } from '@/contexts/auth-context';
 import { pb } from '@/lib/pocketbase';
-import { Plug, Instagram, Database, CheckCircle, XCircle, RefreshCw, Loader2, Phone } from 'lucide-react';
+import { Plug, Instagram, Database, CheckCircle, XCircle, RefreshCw, Loader2, Phone, MessageSquare, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
+import { sendDiscordWebhook, buildTeamTestEmbed } from '@/lib/discord';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 
 const ZOOM_AUTODIAL_KEY = 'zoom-phone-autodial';
 const ZOOM_AUTORECORD_KEY = 'call-recorder-auto-mode';
 const ZOOM_SHOW_NATIVE_KEY = 'zoom-show-native-dialer';
+
+// Team-level Discord webhook keys (localStorage, admin-managed)
+const DISCORD_FOLLOWUPS_WEBHOOK_KEY = 'discord-team-followups-webhook';
+const DISCORD_FOLLOWUPS_ENABLED_KEY = 'discord-team-followups-enabled';
+const DISCORD_NEW_COMPANIES_WEBHOOK_KEY = 'discord-team-companies-webhook';
+const DISCORD_NEW_COMPANIES_ENABLED_KEY = 'discord-team-companies-enabled';
 
 interface IntegrationsSectionProps {
     preferences: UserPreferences | null;
@@ -19,11 +28,27 @@ interface IntegrationsSectionProps {
 
 export function IntegrationsSection({ preferences, updatePreferences, isSaving }: IntegrationsSectionProps) {
     const { addToast } = useToast();
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
+
     const [isTesting, setIsTesting] = useState(false);
     const [pbStatus, setPbStatus] = useState<'unknown' | 'connected' | 'error'>('unknown');
     const [autoDial, setAutoDial] = useState(false);
     const [autoRecord, setAutoRecord] = useState(true);
     const [showNativeDialer, setShowNativeDialer] = useState(false);
+
+    // Team Discord webhook state
+    const [followUpsWebhook, setFollowUpsWebhook] = useState('');
+    const [followUpsEnabled, setFollowUpsEnabled] = useState(false);
+    const [showFollowUpsUrl, setShowFollowUpsUrl] = useState(false);
+    const [isTestingFollowUps, setIsTestingFollowUps] = useState(false);
+    const [followUpsTestStatus, setFollowUpsTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+    const [newCompaniesWebhook, setNewCompaniesWebhook] = useState('');
+    const [newCompaniesEnabled, setNewCompaniesEnabled] = useState(false);
+    const [showCompaniesUrl, setShowCompaniesUrl] = useState(false);
+    const [isTestingCompanies, setIsTestingCompanies] = useState(false);
+    const [companiesTestStatus, setCompaniesTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
     // Load settings from localStorage on mount
     useEffect(() => {
@@ -36,10 +61,47 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
 
             const savedNative = localStorage.getItem(ZOOM_SHOW_NATIVE_KEY);
             if (savedNative !== null) setShowNativeDialer(JSON.parse(savedNative));
+
+            // Load team Discord webhook settings
+            setFollowUpsWebhook(localStorage.getItem(DISCORD_FOLLOWUPS_WEBHOOK_KEY) || '');
+            const savedFuEnabled = localStorage.getItem(DISCORD_FOLLOWUPS_ENABLED_KEY);
+            if (savedFuEnabled !== null) setFollowUpsEnabled(JSON.parse(savedFuEnabled));
+
+            setNewCompaniesWebhook(localStorage.getItem(DISCORD_NEW_COMPANIES_WEBHOOK_KEY) || '');
+            const savedCmpEnabled = localStorage.getItem(DISCORD_NEW_COMPANIES_ENABLED_KEY);
+            if (savedCmpEnabled !== null) setNewCompaniesEnabled(JSON.parse(savedCmpEnabled));
         } catch {
             // ignore
         }
     }, []);
+
+    const saveDiscordWebhook = (key: string, value: string) => {
+        try { localStorage.setItem(key, value); } catch { /* ignore */ }
+    };
+
+    const saveDiscordEnabled = (key: string, value: boolean) => {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+    };
+
+    const handleTestTeamWebhook = async (
+        url: string,
+        label: string,
+        setTesting: (v: boolean) => void,
+        setStatus: (v: 'idle' | 'success' | 'error') => void,
+    ) => {
+        if (!url.trim()) { addToast('error', 'Enter a webhook URL first'); return; }
+        setTesting(true);
+        setStatus('idle');
+        const result = await sendDiscordWebhook(url.trim(), buildTeamTestEmbed(label));
+        setTesting(false);
+        if (result.ok) {
+            setStatus('success');
+            addToast('success', 'Test message sent to Discord!');
+        } else {
+            setStatus('error');
+            addToast('error', `Webhook test failed: ${result.error || 'Unknown error'}`);
+        }
+    };
 
     const handleAutoDialToggle = (enabled: boolean) => {
         setAutoDial(enabled);
@@ -236,6 +298,163 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
             </div>
 
             <hr className="border-[var(--card-border)]" />
+
+            {/* Discord Team Webhooks (admin only) */}
+            {isAdmin && (
+                <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                        <MessageSquare size={18} className="text-[#5865F2]" />
+                        <h3 className="font-medium">Discord Team Notifications</h3>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--muted)]/20 text-[var(--muted)] font-medium">Admin</span>
+                    </div>
+
+                    <p className="text-sm text-[var(--muted)]">
+                        Configure team-wide Discord channel webhooks. All team members&apos; activity will fire these.{' '}
+                        <a
+                            href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline hover:text-[var(--foreground)] transition-colors"
+                        >
+                            How to create a webhook →
+                        </a>
+                    </p>
+
+                    {/* Follow-ups channel */}
+                    <div className="p-4 rounded-lg border border-[var(--card-border)] space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-medium">Follow-ups Channel</p>
+                                <p className="text-xs text-[var(--muted)]">Posts when follow-ups are scheduled, completed, or overdue</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    const next = !followUpsEnabled;
+                                    setFollowUpsEnabled(next);
+                                    saveDiscordEnabled(DISCORD_FOLLOWUPS_ENABLED_KEY, next);
+                                    addToast('success', next ? 'Follow-ups channel enabled' : 'Follow-ups channel disabled');
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${followUpsEnabled ? 'bg-[#5865F2]' : 'bg-[var(--card-border)]'}`}
+                                role="switch"
+                                aria-checked={followUpsEnabled}
+                            >
+                                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${followUpsEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <div className="relative flex-1">
+                                <input
+                                    type={showFollowUpsUrl ? 'text' : 'password'}
+                                    value={followUpsWebhook}
+                                    onChange={(e) => { setFollowUpsWebhook(e.target.value); setFollowUpsTestStatus('idle'); }}
+                                    placeholder="https://discord.com/api/webhooks/..."
+                                    className="w-full px-3 py-2 pr-10 text-sm rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:border-[var(--primary)] font-mono"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowFollowUpsUrl((v) => !v)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                                >
+                                    {showFollowUpsUrl ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    saveDiscordWebhook(DISCORD_FOLLOWUPS_WEBHOOK_KEY, followUpsWebhook.trim());
+                                    addToast('success', 'Follow-ups webhook saved');
+                                    setFollowUpsTestStatus('idle');
+                                }}
+                                className="px-3 py-2 text-sm font-medium rounded-lg btn-ghost border border-[var(--card-border)]"
+                            >
+                                Save
+                            </button>
+                            <button
+                                onClick={() => handleTestTeamWebhook(followUpsWebhook, 'Follow-up', setIsTestingFollowUps, setFollowUpsTestStatus)}
+                                disabled={isTestingFollowUps || !followUpsWebhook.trim()}
+                                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg btn-ghost border border-[var(--card-border)] disabled:opacity-50"
+                            >
+                                {isTestingFollowUps ? (
+                                    <Loader2 size={13} className="animate-spin" />
+                                ) : followUpsTestStatus === 'success' ? (
+                                    <CheckCircle size={13} className="text-[var(--success)]" />
+                                ) : followUpsTestStatus === 'error' ? (
+                                    <XCircle size={13} className="text-[var(--error)]" />
+                                ) : null}
+                                Test
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* New companies channel */}
+                    <div className="p-4 rounded-lg border border-[var(--card-border)] space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-medium">New Companies Channel</p>
+                                <p className="text-xs text-[var(--muted)]">Posts when new companies are added to the CRM</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    const next = !newCompaniesEnabled;
+                                    setNewCompaniesEnabled(next);
+                                    saveDiscordEnabled(DISCORD_NEW_COMPANIES_ENABLED_KEY, next);
+                                    addToast('success', next ? 'New companies channel enabled' : 'New companies channel disabled');
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${newCompaniesEnabled ? 'bg-[#5865F2]' : 'bg-[var(--card-border)]'}`}
+                                role="switch"
+                                aria-checked={newCompaniesEnabled}
+                            >
+                                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${newCompaniesEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <div className="relative flex-1">
+                                <input
+                                    type={showCompaniesUrl ? 'text' : 'password'}
+                                    value={newCompaniesWebhook}
+                                    onChange={(e) => { setNewCompaniesWebhook(e.target.value); setCompaniesTestStatus('idle'); }}
+                                    placeholder="https://discord.com/api/webhooks/..."
+                                    className="w-full px-3 py-2 pr-10 text-sm rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:border-[var(--primary)] font-mono"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowCompaniesUrl((v) => !v)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                                >
+                                    {showCompaniesUrl ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    saveDiscordWebhook(DISCORD_NEW_COMPANIES_WEBHOOK_KEY, newCompaniesWebhook.trim());
+                                    addToast('success', 'New companies webhook saved');
+                                    setCompaniesTestStatus('idle');
+                                }}
+                                className="px-3 py-2 text-sm font-medium rounded-lg btn-ghost border border-[var(--card-border)]"
+                            >
+                                Save
+                            </button>
+                            <button
+                                onClick={() => handleTestTeamWebhook(newCompaniesWebhook, 'New Company', setIsTestingCompanies, setCompaniesTestStatus)}
+                                disabled={isTestingCompanies || !newCompaniesWebhook.trim()}
+                                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg btn-ghost border border-[var(--card-border)] disabled:opacity-50"
+                            >
+                                {isTestingCompanies ? (
+                                    <Loader2 size={13} className="animate-spin" />
+                                ) : companiesTestStatus === 'success' ? (
+                                    <CheckCircle size={13} className="text-[var(--success)]" />
+                                ) : companiesTestStatus === 'error' ? (
+                                    <XCircle size={13} className="text-[var(--error)]" />
+                                ) : null}
+                                Test
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isAdmin && <hr className="border-[var(--card-border)]" />}
 
             {/* PocketBase Connection */}
             <div className="space-y-4">

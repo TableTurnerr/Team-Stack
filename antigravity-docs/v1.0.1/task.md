@@ -3,11 +3,11 @@
 ## Agent 1: Backend & Schema (Database, Types, Integrations)
 
 ### 1.1 Database Schema
-- [ ] Update `pb_schema_exported.json` with `phone_numbers` collection
-- [ ] Update `pb_schema_exported.json` with `call_logs` collection
-- [ ] Update `pb_schema_exported.json` with `follow_ups` collection
-- [ ] Update `pb_schema_exported.json` with `company_notes` collection
-- [ ] Update `pb_schema_exported.json` with `interactions` collection
+- [ ] Update `pb_db_schema.json` with `phone_numbers` collection
+- [ ] Update `pb_db_schema.json` with `call_logs` collection
+- [ ] Update `pb_db_schema.json` with `follow_ups` collection
+- [ ] Update `pb_db_schema.json` with `company_notes` collection
+- [ ] Update `pb_db_schema.json` with `interactions` collection
 - [ ] Add `call_log`, `company`, `phone_number_record` fields to `recordings` collection
 - [ ] Upload updated schema to PocketBase
 

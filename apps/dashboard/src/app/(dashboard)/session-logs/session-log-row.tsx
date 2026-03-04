@@ -40,6 +40,7 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
     const [isExpanded, setIsExpanded] = useState(false);
     const [isTrashHovered, setIsTrashHovered] = useState(false);
     const [isStagingSession, setIsStagingSession] = useState(false);
+    const [actualCallCount, setActualCallCount] = useState<number | null>(null);
 
     // Test session deletion state
     const [confirmTestDelete, setConfirmTestDelete] = useState(false);
@@ -338,8 +339,13 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
 
                             {/* Call Logs Table */}
                             <div className="px-6 py-4">
-                                <h4 className="text-sm font-medium mb-3">Call Logs ({session.total_dials || 0} calls)</h4>
-                                <CallLogsNestedTable sessionId={session.id} />
+                                <h4 className="text-sm font-medium mb-3">
+                                    Call Logs ({actualCallCount !== null ? actualCallCount : session.total_dials || 0} logged
+                                    {actualCallCount !== null && actualCallCount !== (session.total_dials || 0) && (
+                                        <span className="text-[var(--muted)] font-normal"> / {session.total_dials || 0} dialed</span>
+                                    )})
+                                </h4>
+                                <CallLogsNestedTable sessionId={session.id} onLogsLoaded={setActualCallCount} />
                             </div>
                         </div>
                     </td>

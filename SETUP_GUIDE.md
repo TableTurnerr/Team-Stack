@@ -55,7 +55,7 @@ The database structure is defined in the shared package.
 2. Go to **Settings** → **Import Collections**.
 3. Click **Load from JSON file**.
 4. Select: `packages/pocketbase-client/pb_schema.json`.
-   *(Note: If this file is missing, check `packages/pocketbase-client/pb_schema_exported.json`)*
+   *(Note: If this file is missing, check `packages/pocketbase-client/pb_db_schema.json`)*
 5. Click **Review** then **Confirm and import**.
 
 ### Verified Collections

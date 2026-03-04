@@ -16,7 +16,7 @@ Tasks are divided between two agents that can work **independently**:
 
 ## Agent 1: Backend & Schema
 
-### 1.1 Update pb_schema_exported.json
+### 1.1 Update pb_db_schema.json
 
 Add 5 new collections to the schema JSON:
 
@@ -155,7 +155,7 @@ Add interfaces for all new collections with proper expand types.
 ### Agent 1 Files
 | Type | Path |
 |------|------|
-| MODIFY | `packages/pocketbase-client/pb_schema_exported.json` |
+| MODIFY | `packages/pocketbase-client/pb_db_schema.json` |
 | MODIFY | `apps/dashboard/src/lib/types.ts` |
 | MODIFY | `tools/transcriber/transcribe_calls.py` |
 

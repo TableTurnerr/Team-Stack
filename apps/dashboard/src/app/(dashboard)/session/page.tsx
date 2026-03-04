@@ -70,7 +70,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup } = useZoomPhone();
+    const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp } = useFollowUps();
 
@@ -309,6 +309,9 @@ export default function SessionPage() {
     // Track call status and timing
     // ---------------------------------------------------------------------------
     useEffect(() => {
+        // Inbound calls are handled exclusively by IncomingCallHandler — skip here
+        if (callDirection === 'inbound') return;
+
         if (callStatus === 'ringing') {
             // Call is ringing - start ring timer
             if (!ringStartTime) {
@@ -380,7 +383,7 @@ export default function SessionPage() {
                 clearInterval(callTimerRef.current);
             }
         };
-    }, [callStatus, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
+    }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
 
     // ---------------------------------------------------------------------------
     // Power dialer — negative delay: auto-dial next number N seconds after call ends
@@ -1153,7 +1156,7 @@ export default function SessionPage() {
                             doesn&apos;t exist in PocketBase yet. Import the updated schema to enable Call Sessions.
                         </p>
                         <p className="text-xs text-[var(--muted)]">
-                            Import <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">pb_schema_exported.json</code> from
+                            Import <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">pb_db_schema.json</code> from
                             the <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">packages/pocketbase-client</code> directory.
                         </p>
                     </div>

@@ -1074,7 +1074,22 @@
                     "Send Email",
                     "Hung Up (Rude Recep)",
                     "Hung Up (Other)",
-                    "Other"
+                    "Other",
+                    "Missed Call"
+                ]
+            },
+            {
+                "hidden": false,
+                "id": "select_direction",
+                "maxSelect": 1,
+                "name": "direction",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "outbound",
+                    "inbound"
                 ]
             },
             {
@@ -1792,20 +1807,6 @@
                 "required": false,
                 "system": false,
                 "type": "url"
-            },
-            {
-                "autogeneratePattern": "",
-                "hidden": false,
-                "id": "text4457439599",
-                "max": 500,
-                "min": 0,
-                "name": "phone_numbers",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": false,
-                "system": false,
-                "type": "text"
             },
             {
                 "autogeneratePattern": "",

@@ -1,0 +1,588 @@
+{
+  "version": "1.0.0",
+  "darkMode": true,
+  "gridEnabling": false,
+  "detailLevel": "All",
+  "tablePositions": [
+    {
+      "name": "users",
+      "schemaName": "public",
+      "x": 0,
+      "y": 50
+    },
+    {
+      "name": "user_preferences",
+      "schemaName": "public",
+      "x": 0,
+      "y": -200
+    },
+    {
+      "name": "companies",
+      "schemaName": "public",
+      "x": 300,
+      "y": 50
+    },
+    {
+      "name": "phone_numbers",
+      "schemaName": "public",
+      "x": 300,
+      "y": 250
+    },
+    {
+      "name": "company_notes",
+      "schemaName": "public",
+      "x": 900,
+      "y": 750
+    },
+    {
+      "name": "insta_actors",
+      "schemaName": "public",
+      "x": 900,
+      "y": 50
+    },
+    {
+      "name": "event_logs",
+      "schemaName": "public",
+      "x": 600,
+      "y": 500
+    },
+    {
+      "name": "outreach_logs",
+      "schemaName": "public",
+      "x": 900,
+      "y": 290
+    },
+    {
+      "name": "cold_calling_sessions",
+      "schemaName": "public",
+      "x": -300,
+      "y": 420
+    },
+    {
+      "name": "cold_calls",
+      "schemaName": "public",
+      "x": 0,
+      "y": 420
+    },
+    {
+      "name": "call_transcripts",
+      "schemaName": "public",
+      "x": 300,
+      "y": 420
+    },
+    {
+      "name": "call_logs",
+      "schemaName": "public",
+      "x": -300,
+      "y": 750
+    },
+    {
+      "name": "recordings",
+      "schemaName": "public",
+      "x": 300,
+      "y": 850
+    },
+    {
+      "name": "follow_ups",
+      "schemaName": "public",
+      "x": 600,
+      "y": 750
+    },
+    {
+      "name": "interactions",
+      "schemaName": "public",
+      "x": 900,
+      "y": 1000
+    },
+    {
+      "name": "goals",
+      "schemaName": "public",
+      "x": 0,
+      "y": 1100
+    },
+    {
+      "name": "rules",
+      "schemaName": "public",
+      "x": 300,
+      "y": 600
+    },
+    {
+      "name": "alerts",
+      "schemaName": "public",
+      "x": 600,
+      "y": 1000
+    },
+    {
+      "name": "notes",
+      "schemaName": "public",
+      "x": 900,
+      "y": 500
+    }
+  ],
+  "tableGroupCollapseStates": [],
+  "stickyNoteLayouts": [],
+  "referencePaths": [
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["user"],
+      "secondTableName": "user_preferences",
+      "secondSchemaName": "public",
+      "secondRelation": "1",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "phone_numbers",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "company_notes",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "phone_numbers",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["phone_number_record"],
+      "secondTableName": "company_notes",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["created_by"],
+      "secondTableName": "company_notes",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["owner"],
+      "secondTableName": "insta_actors",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "insta_actors",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["actor"],
+      "secondTableName": "event_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["user"],
+      "secondTableName": "event_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "event_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "cold_calls",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["cold_call"],
+      "secondTableName": "event_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "event_logs",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["event"],
+      "secondTableName": "outreach_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "1",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["user"],
+      "secondTableName": "cold_calling_sessions",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "cold_calls",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["claimed_by"],
+      "secondTableName": "cold_calls",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "cold_calls",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["call"],
+      "secondTableName": "call_transcripts",
+      "secondSchemaName": "public",
+      "secondRelation": "1",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "call_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "phone_numbers",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["phone_number_record"],
+      "secondTableName": "call_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["caller"],
+      "secondTableName": "call_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "cold_calling_sessions",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["session"],
+      "secondTableName": "call_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "cold_calls",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["cold_call"],
+      "secondTableName": "call_logs",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["uploader"],
+      "secondTableName": "recordings",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "call_logs",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["call_log"],
+      "secondTableName": "recordings",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "recordings",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "phone_numbers",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["phone_number_record"],
+      "secondTableName": "recordings",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "call_logs",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["call_log"],
+      "secondTableName": "follow_ups",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "follow_ups",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "phone_numbers",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["phone_number_record"],
+      "secondTableName": "follow_ups",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["created_by"],
+      "secondTableName": "follow_ups",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["assigned_to"],
+      "secondTableName": "follow_ups",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "companies",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["company"],
+      "secondTableName": "interactions",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["user"],
+      "secondTableName": "interactions",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "call_logs",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["call_log"],
+      "secondTableName": "interactions",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["assigned_to_user"],
+      "secondTableName": "goals",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "insta_actors",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["assigned_to_actor"],
+      "secondTableName": "goals",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["suggested_by"],
+      "secondTableName": "goals",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["assigned_to_user"],
+      "secondTableName": "rules",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "insta_actors",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["assigned_to_actor"],
+      "secondTableName": "rules",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["suggested_by"],
+      "secondTableName": "rules",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["created_by"],
+      "secondTableName": "alerts",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["target_user"],
+      "secondTableName": "alerts",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["created_by"],
+      "secondTableName": "notes",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    },
+    {
+      "firstFieldNames": ["id"],
+      "firstTableName": "users",
+      "firstSchemaName": "public",
+      "firstRelation": "1",
+      "secondFieldNames": ["last_edited_by"],
+      "secondTableName": "notes",
+      "secondSchemaName": "public",
+      "secondRelation": "*",
+      "checkPoints": []
+    }
+  ]
+}

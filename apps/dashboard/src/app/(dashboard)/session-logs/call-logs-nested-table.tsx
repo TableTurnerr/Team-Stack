@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Mic, ExternalLink, Trash2, CheckSquare, Loader2 } from 'lucide-react';
+import { Mic, ExternalLink, Trash2, CheckSquare, Loader2, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog } from '@/lib/types';
 import Link from 'next/link';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 
 interface CallLogsNestedTableProps {
     sessionId: string;
+    onLogsLoaded?: (count: number) => void;
 }
 
 const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
@@ -19,9 +20,10 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
     'No Answer': { bg: 'bg-[var(--muted)]/20', text: 'text-[var(--muted)]' },
     'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500' },
     'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
+    'Missed Call': { bg: 'bg-purple-500/10', text: 'text-purple-400' },
 };
 
-export function CallLogsNestedTable({ sessionId }: CallLogsNestedTableProps) {
+export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedTableProps) {
     const [callLogs, setCallLogs] = useState<CallLog[]>([]);
     const [loading, setLoading] = useState(true);
     const [stagingIds, setStagingIds] = useState<Set<string>>(new Set());
@@ -38,6 +40,7 @@ export function CallLogsNestedTable({ sessionId }: CallLogsNestedTableProps) {
                     expand: 'company,phone_number_record',
                 });
                 setCallLogs(logs);
+                onLogsLoaded?.(logs.length);
             } catch (err) {
                 console.error('Failed to fetch call logs:', err);
             } finally {
@@ -46,7 +49,7 @@ export function CallLogsNestedTable({ sessionId }: CallLogsNestedTableProps) {
         };
 
         fetchCallLogs();
-    }, [sessionId]);
+    }, [sessionId, onLogsLoaded]);
 
     const isStagedForDeletion = (logId: string) =>
         isAdminMode && adminMode?.pendingDeletions.some(
@@ -99,6 +102,7 @@ export function CallLogsNestedTable({ sessionId }: CallLogsNestedTableProps) {
                         <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Time</th>
                         <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Company</th>
                         <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Phone</th>
+                        <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Direction</th>
                         <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Outcome</th>
                         <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Notes</th>
                         <th className="text-center px-4 py-2 font-medium text-[var(--muted)]">Recording</th>
@@ -134,6 +138,19 @@ export function CallLogsNestedTable({ sessionId }: CallLogsNestedTableProps) {
                                 </td>
                                 <td className="px-4 py-3 font-mono text-xs">
                                     {log.expand?.phone_number_record?.phone_number || '-'}
+                                </td>
+                                <td className="px-4 py-3">
+                                    {log.direction === 'inbound' ? (
+                                        <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--primary)]">
+                                            <PhoneIncoming size={11} />
+                                            Inbound
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--muted)]">
+                                            <PhoneOutgoing size={11} />
+                                            Outbound
+                                        </span>
+                                    )}
                                 </td>
                                 <td className="px-4 py-3">
                                     {log.call_outcome ? (

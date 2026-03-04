@@ -17,7 +17,6 @@ export interface Company extends RecordModel {
   owner_name?: string;
   company_location?: string;
   google_maps_link?: string;
-  phone_numbers?: string;
   source?: string;
 
   // NEW fields merged from leads
@@ -28,6 +27,10 @@ export interface Company extends RecordModel {
   last_contacted?: string;
   notes?: string;
   contact_source?: string;
+
+  // Ratings & Reviews
+  google_rating?: string;
+  google_reviews_count?: string;
 }
 
 
@@ -184,7 +187,8 @@ export interface CallLog extends RecordModel {
   duration?: number; // Total duration (ring_duration + call_duration) in seconds
   ring_duration?: number; // Time spent ringing before pickup (in seconds)
   call_duration?: number; // Time spent on actual call after pickup (in seconds)
-  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other' | 'Hung Up (Rude Recep)' | 'Hung Up (Other)' | 'Bad Lead' | 'Send Email';
+  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other' | 'Hung Up (Rude Recep)' | 'Hung Up (Other)' | 'Bad Lead' | 'Send Email' | 'Missed Call';
+  direction?: 'outbound' | 'inbound';
   owner_name_found?: string;
   receptionist_name?: string;
   post_call_notes?: string;
@@ -317,6 +321,11 @@ export interface UserPreferences extends RecordModel {
     dnd_start?: string;
     dnd_end?: string;
     dnd_days?: string[];
+    // Discord personal webhook
+    discord_webhook_url?: string;
+    discord_follow_up_reminders?: boolean;
+    discord_overdue_alerts?: boolean;
+    discord_crm_alerts?: boolean;
   };
   workflow_preferences?: {
     default_page_size?: number;

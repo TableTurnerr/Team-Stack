@@ -49,7 +49,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
         };
 
         fetchCallLogs();
-    }, [sessionId]);
+    }, [sessionId, onLogsLoaded]);
 
     const isStagedForDeletion = (logId: string) =>
         isAdminMode && adminMode?.pendingDeletions.some(

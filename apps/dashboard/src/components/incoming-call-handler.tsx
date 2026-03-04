@@ -136,7 +136,6 @@ export function IncomingCallHandler() {
             if (missedTimerRef.current) clearTimeout(missedTimerRef.current);
             missedTimerRef.current = setTimeout(() => setShowMissedBanner(false), 30000);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callStatus, callDirection]);
 
     // ── Cleanup timer on unmount ──
@@ -144,6 +143,16 @@ export function IncomingCallHandler() {
         return () => {
             if (missedTimerRef.current) clearTimeout(missedTimerRef.current);
         };
+    }, []);
+
+    const dismissForm = useCallback(() => {
+        setShowLogForm(false);
+        // Reset timing refs for next call
+        ringStartTimeRef.current = null;
+        connectTimeRef.current = null;
+        wasConnectedRef.current = false;
+        capturedCallerNumberRef.current = null;
+        capturedSessionRef.current = null;
     }, []);
 
     // ── Save inbound call log ──
@@ -254,17 +263,7 @@ export function IncomingCallHandler() {
         } finally {
             setIsSaving(false);
         }
-    }, [user, session, matchedPhoneRecord, isSaving, setSession]);
-
-    const dismissForm = useCallback(() => {
-        setShowLogForm(false);
-        // Reset timing refs for next call
-        ringStartTimeRef.current = null;
-        connectTimeRef.current = null;
-        wasConnectedRef.current = false;
-        capturedCallerNumberRef.current = null;
-        capturedSessionRef.current = null;
-    }, []);
+    }, [user, session, matchedPhoneRecord, isSaving, setSession, dismissForm]);
 
     const handleOpenLogFromMissed = useCallback(() => {
         setShowMissedBanner(false);

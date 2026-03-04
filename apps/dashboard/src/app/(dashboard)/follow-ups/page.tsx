@@ -18,6 +18,7 @@ import {
   Ban,
   ClipboardCheck,
   Zap,
+  type LucideIcon,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type FollowUp } from '@/lib/types';
@@ -28,7 +29,7 @@ import { formatDateTimeInTimezone } from '@/lib/timezone-utils';
 
 type StatusFilter = 'overdue' | 'upcoming' | 'completed' | 'dismissed';
 
-const STATUS_TABS: { id: StatusFilter; label: string; icon: React.ElementType }[] = [
+const STATUS_TABS: { id: StatusFilter; label: string; icon: LucideIcon }[] = [
   { id: 'overdue',   label: 'Overdue',   icon: AlertCircle },
   { id: 'upcoming',  label: 'Upcoming',  icon: Clock },
   { id: 'completed', label: 'Completed', icon: CheckCheck },

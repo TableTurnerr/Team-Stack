@@ -309,7 +309,7 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
                     </div>
 
                     <p className="text-sm text-[var(--muted)]">
-                        Configure team-wide Discord channel webhooks. All team members' activity will fire these.{' '}
+                        Configure team-wide Discord channel webhooks. All team members&apos; activity will fire these.{' '}
                         <a
                             href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks"
                             target="_blank"

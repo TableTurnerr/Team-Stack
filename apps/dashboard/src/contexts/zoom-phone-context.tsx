@@ -44,6 +44,10 @@ interface ZoomPhoneContextType {
     autoHangupSeconds: number;
     /** Configure auto-hangup */
     setAutoHangup: (enabled: boolean, seconds?: number) => void;
+    /** Whether the current/last call was inbound or outbound (null when idle) */
+    callDirection: 'outbound' | 'inbound' | null;
+    /** Phone number of the incoming caller for inbound calls */
+    incomingCallerNumber: string | null;
 }
 
 const ZoomPhoneContext = createContext<ZoomPhoneContextType | null>(null);
@@ -62,6 +66,31 @@ export function useZoomPhone() {
  */
 export function useZoomPhoneOptional() {
     return useContext(ZoomPhoneContext);
+}
+
+/**
+ * Extract the CALLER's phone number for inbound calls.
+ * Prioritises `caller` / `from` fields (the remote party calling us).
+ */
+function extractIncomingCallerNumber(data: Record<string, unknown>): string | null {
+    const caller = data?.caller as Record<string, unknown> | undefined;
+    const from = data?.from;
+
+    const candidates = [
+        caller?.phoneNumber,
+        caller?.number,
+        caller?.extensionNumber,
+        typeof from === 'string' ? from : (from as Record<string, unknown>)?.phoneNumber,
+        data?.phoneNumber,
+        data?.number,
+    ];
+
+    for (const c of candidates) {
+        if (typeof c === 'string' && c.replace(/\D/g, '').length >= 7) {
+            return c.trim();
+        }
+    }
+    return null;
 }
 
 /**
@@ -140,6 +169,10 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     const autoHangupSecondsRef = useRef(15);
     const autoHangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // Call direction tracking
+    const [callDirection, setCallDirection] = useState<'outbound' | 'inbound' | null>(null);
+    const [incomingCallerNumber, setIncomingCallerNumber] = useState<string | null>(null);
+
     // Sync ref with state
     useEffect(() => {
         callStatusRef.current = callStatus;
@@ -195,13 +228,25 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             if (eventLower.includes('ringing')) {
                 console.log('[Zoom Phone] Call ringing');
                 setCallStatus('ringing');
-                const phone = extractPhoneNumber(data || {});
-                if (phone) {
-                    console.log('[Zoom Phone] Phone number from ringing event:', phone);
-                    setActiveCallNumber(phone);
+                // Detect direction: if we had a pending outbound dial, it's outbound; otherwise inbound
+                const isInbound = pendingCallRef.current === null;
+                setCallDirection(isInbound ? 'inbound' : 'outbound');
+                if (isInbound) {
+                    const callerNum = extractIncomingCallerNumber(data || {});
+                    if (callerNum) {
+                        console.log('[Zoom Phone] 📞 Incoming call from:', callerNum);
+                        setIncomingCallerNumber(callerNum);
+                        setActiveCallNumber(callerNum);
+                    }
+                } else {
+                    const phone = extractPhoneNumber(data || {});
+                    if (phone) {
+                        console.log('[Zoom Phone] Phone number from ringing event:', phone);
+                        setActiveCallNumber(phone);
+                    }
+                    // SUCCESS: Stop retrying immediately
+                    pendingCallRef.current = null;
                 }
-                // SUCCESS: Stop retrying immediately
-                pendingCallRef.current = null;
             } else if (eventLower.includes('connected') || eventLower.includes('answered')) {
                 console.log('[Zoom Phone] Call connected');
                 setCallStatus('connected');
@@ -219,7 +264,11 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                 pendingCallRef.current = null;
                 // We keep activeCallNumber so the recorder can use it for the upload
                 // Reset to idle after a brief delay so consumers can react to 'ended' first
-                setTimeout(() => setCallStatus('idle'), 2000);
+                setTimeout(() => {
+                    setCallStatus('idle');
+                    setCallDirection(null);
+                    setIncomingCallerNumber(null);
+                }, 2000);
             }
 
             // Always try to extract phone number from any Zoom event with data
@@ -445,6 +494,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             isDialing, registerDialCallback, refreshDialer,
             refreshKey,
             autoHangupEnabled, autoHangupSeconds, setAutoHangup,
+            callDirection, incomingCallerNumber,
         }}>
             {children}
         </ZoomPhoneContext.Provider>

@@ -50,13 +50,11 @@ export function InlineEditField({
   const unsavedCtx = useUnsavedChangesOptional();
   const [internalIsEditing, setInternalIsEditing] = useState(false);
   
-  const isEditing = externalIsEditing !== undefined ? externalIsEditing : internalIsEditing;
+  // External true forces edit mode (global "Edit All"); otherwise use internal state
+  const isEditing = externalIsEditing === true || internalIsEditing;
   const setIsEditing = useCallback((val: boolean) => {
-    if (onEditChange) {
-      onEditChange(val);
-    } else {
-      setInternalIsEditing(val);
-    }
+    setInternalIsEditing(val);
+    if (onEditChange) onEditChange(val);
   }, [onEditChange]);
   const [currentValue, setCurrentValue] = useState(value);
   const [savedValue, setSavedValue] = useState(value);
@@ -176,16 +174,18 @@ export function InlineEditField({
 
   if (!isEditing && !hasUnsavedChanges) {
     return (
-      <div
-        onClick={() => setIsEditing(true)}
-        className={cn(
-          "group relative cursor-pointer py-1 px-2 -mx-2 rounded hover:bg-[var(--sidebar-hover)] transition-colors min-h-[1.5rem]",
-          className
+      <div className={cn("space-y-0.5", className)}>
+        {label && (
+          <p className="text-xs font-medium text-[var(--muted)]">{label}</p>
         )}
-      >
-        <span className={cn(!currentValue && "text-[var(--muted)]")}>
-          {currentValue || placeholder || 'Click to edit...'}
-        </span>
+        <div
+          onClick={() => setIsEditing(true)}
+          className="cursor-pointer py-1 px-2 -mx-2 rounded hover:bg-[var(--sidebar-hover)] transition-colors min-h-[1.5rem]"
+        >
+          <span className={cn("text-sm", !currentValue && "text-[var(--muted)] italic text-xs")}>
+            {currentValue || placeholder || 'Click to add...'}
+          </span>
+        </div>
       </div>
     );
   }

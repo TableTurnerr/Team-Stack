@@ -27,6 +27,10 @@ export interface Company extends RecordModel {
   last_contacted?: string;
   notes?: string;
   contact_source?: string;
+
+  // Ratings & Reviews
+  google_rating?: string;
+  google_reviews_count?: string;
 }
 
 

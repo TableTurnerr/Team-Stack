@@ -321,6 +321,11 @@ export interface UserPreferences extends RecordModel {
     dnd_start?: string;
     dnd_end?: string;
     dnd_days?: string[];
+    // Discord personal webhook
+    discord_webhook_url?: string;
+    discord_follow_up_reminders?: boolean;
+    discord_overdue_alerts?: boolean;
+    discord_crm_alerts?: boolean;
   };
   workflow_preferences?: {
     default_page_size?: number;

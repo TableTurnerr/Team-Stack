@@ -35,7 +35,7 @@ CRM-Tableturnerr/
 ├── packages/
 │   ├── pocketbase-client/         # 📦 Shared TypeScript SDK with type definitions
 │   │   ├── src/index.ts           # CRMPocketBase class + all collection types
-│   │   └── pb_schema_exported.json # Full database schema (source of truth)
+│   │   └── pb_db_schema.json # Full database schema (source of truth)
 │   │
 │   ├── google-sheets/             # 📊 Google Sheets API integration utilities
 │   └── hubspot/                   # 🔗 HubSpot CRM migration context & mapping
@@ -123,7 +123,7 @@ erDiagram
 | `notes` | Markdown notes | `title`, `note_text`, `is_archived`, `is_deleted` |
 | `leads` | ⚠️ Deprecated | Merged into `companies` |
 
-> **Schema Location**: `packages/pocketbase-client/pb_schema_exported.json`
+> **Schema Location**: `packages/pocketbase-client/pb_db_schema.json`
 
 ---
 
@@ -188,20 +188,20 @@ Chrome extension (Manifest V3):
 
 ### Key Files to Read First
 1. `packages/pocketbase-client/src/index.ts` - All TypeScript types and SDK methods
-2. `packages/pocketbase-client/pb_schema_exported.json` - Database schema
+2. `packages/pocketbase-client/pb_db_schema.json` - Database schema
 3. `apps/dashboard/src/app/(dashboard)/layout.tsx` - Dashboard structure
 4. `.env.info.example` - All environment variables
 
 ### Common Modification Patterns
 - **Add new page**: Create folder in `apps/dashboard/src/app/(dashboard)/`
-- **Add new collection**: Update `pb_schema_exported.json`, add types to `pocketbase-client/src/index.ts`
+- **Add new collection**: Update `pb_db_schema.json`, add types to `pocketbase-client/src/index.ts`
 - **Add component**: Create in `apps/dashboard/src/components/`
 
 ### Where to Find Things
 | Looking for... | Location |
 |----------------|----------|
 | TypeScript types | `packages/pocketbase-client/src/index.ts` |
-| Database schema | `packages/pocketbase-client/pb_schema_exported.json` |
+| Database schema | `packages/pocketbase-client/pb_db_schema.json` |
 | UI components | `apps/dashboard/src/components/` |
 | Page routes | `apps/dashboard/src/app/(dashboard)/` |
 | API utilities | `apps/dashboard/src/lib/` |
@@ -256,7 +256,7 @@ pnpm install
 pocketbase serve  # http://localhost:8090
 
 # 3. Import schema (Admin UI → Settings → Import Collections)
-# Use: packages/pocketbase-client/pb_schema_exported.json
+# Use: packages/pocketbase-client/pb_db_schema.json
 
 # 4. Start Dashboard
 cd apps/dashboard

@@ -1156,7 +1156,7 @@ export default function SessionPage() {
                             doesn&apos;t exist in PocketBase yet. Import the updated schema to enable Call Sessions.
                         </p>
                         <p className="text-xs text-[var(--muted)]">
-                            Import <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">pb_schema_exported.json</code> from
+                            Import <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">pb_db_schema.json</code> from
                             the <code className="px-1 py-0.5 rounded bg-[var(--sidebar-bg)] font-mono text-[10px]">packages/pocketbase-client</code> directory.
                         </p>
                     </div>

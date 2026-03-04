@@ -272,7 +272,7 @@ erDiagram
 
 | Area | Changes Required |
 |------|------------------|
-| **Schema export** | Update `pb_schema_exported.json` with new collections |
+| **Schema export** | Update `pb_db_schema.json` with new collections |
 | **TypeScript types** | Add types for new collections |
 | **Migrations** | Create migration scripts for schema changes |
 

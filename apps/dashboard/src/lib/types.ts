@@ -17,7 +17,6 @@ export interface Company extends RecordModel {
   owner_name?: string;
   company_location?: string;
   google_maps_link?: string;
-  phone_numbers?: string;
   source?: string;
 
   // NEW fields merged from leads
@@ -184,7 +183,8 @@ export interface CallLog extends RecordModel {
   duration?: number; // Total duration (ring_duration + call_duration) in seconds
   ring_duration?: number; // Time spent ringing before pickup (in seconds)
   call_duration?: number; // Time spent on actual call after pickup (in seconds)
-  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other' | 'Hung Up (Rude Recep)' | 'Hung Up (Other)' | 'Bad Lead' | 'Send Email';
+  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other' | 'Hung Up (Rude Recep)' | 'Hung Up (Other)' | 'Bad Lead' | 'Send Email' | 'Missed Call';
+  direction?: 'outbound' | 'inbound';
   owner_name_found?: string;
   receptionist_name?: string;
   post_call_notes?: string;

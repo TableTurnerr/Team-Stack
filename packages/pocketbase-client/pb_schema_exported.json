@@ -1796,20 +1796,6 @@
             {
                 "autogeneratePattern": "",
                 "hidden": false,
-                "id": "text4457439599",
-                "max": 500,
-                "min": 0,
-                "name": "phone_numbers",
-                "pattern": "",
-                "presentable": false,
-                "primaryKey": false,
-                "required": false,
-                "system": false,
-                "type": "text"
-            },
-            {
-                "autogeneratePattern": "",
-                "hidden": false,
                 "id": "text3748400317",
                 "max": 100,
                 "min": 0,

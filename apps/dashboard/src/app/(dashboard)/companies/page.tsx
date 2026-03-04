@@ -16,7 +16,9 @@ import {
   Instagram,
   Mail,
   MessageSquare,
-  Calendar
+  Calendar,
+  Download,
+  Upload
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
@@ -26,7 +28,8 @@ import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
-import { ZoomCallButton, extractFirstPhone } from '@/components/zoom-call-button';
+import { ExportLeadsModal } from '@/components/export-leads-modal';
+import { ImportLeadsModal } from '@/components/import-leads-modal';
 
 // Column definitions for companies table
 const COMPANY_COLUMNS: ColumnDefinition[] = [
@@ -34,7 +37,6 @@ const COMPANY_COLUMNS: ColumnDefinition[] = [
   { key: 'owner_name', label: 'Owner', defaultVisible: true },
   { key: 'instagram_handle', label: 'Instagram', defaultVisible: true },      // NEW
   { key: 'status', label: 'Status', defaultVisible: true },                   // NEW
-  { key: 'phone_numbers', label: 'Phone', defaultVisible: true },
   { key: 'email', label: 'Email', defaultVisible: false },                    // NEW
   { key: 'company_location', label: 'Location', defaultVisible: false },
   { key: 'source', label: 'Source', defaultVisible: true },
@@ -84,7 +86,6 @@ function CompanyRow({
   const [editData, setEditData] = useState({
     company_name: company.company_name,
     owner_name: company.owner_name || '',
-    phone_numbers: company.phone_numbers || '',
     company_location: company.company_location || '',
     instagram_handle: company.instagram_handle || '',
     status: company.status || 'Cold No Reply',
@@ -100,7 +101,6 @@ function CompanyRow({
     setEditData({
       company_name: company.company_name,
       owner_name: company.owner_name || '',
-      phone_numbers: company.phone_numbers || '',
       company_location: company.company_location || '',
       instagram_handle: company.instagram_handle || '',
       status: company.status || 'Cold No Reply',
@@ -155,17 +155,6 @@ function CompanyRow({
                 <option key={status} value={status}>{status}</option>
               ))}
             </select>
-          </td>
-        )}
-        {isColumnVisible('phone_numbers') && (
-          <td className="py-3 px-4">
-            <input
-              type="text"
-              value={editData.phone_numbers}
-              onChange={(e) => setEditData(p => ({ ...p, phone_numbers: e.target.value }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] font-mono text-sm"
-              placeholder="Phone numbers"
-            />
           </td>
         )}
         {isColumnVisible('email') && (
@@ -272,18 +261,6 @@ function CompanyRow({
           ) : <span className="text-[var(--muted)]">-</span>}
         </td>
       )}
-      {isColumnVisible('phone_numbers') && (
-        <td className="py-3 px-4">
-          <div className="flex items-center gap-1">
-            <span className="text-sm font-mono">
-              {company.phone_numbers || <span className="text-[var(--muted)]">-</span>}
-            </span>
-            {company.phone_numbers && (
-              <ZoomCallButton phoneNumber={extractFirstPhone(company.phone_numbers)} />
-            )}
-          </div>
-        </td>
-      )}
       {isColumnVisible('email') && (
         <td className="py-3 px-4">
           <span className="text-sm">
@@ -361,7 +338,7 @@ function AddCompanyModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (data: Partial<Company>) => void;
+  onAdd: (data: Partial<Company>, phoneEntries: { phone: string; location: string }[]) => void;
 }) {
   const [formData, setFormData] = useState({
     company_name: '',
@@ -400,13 +377,7 @@ function AddCompanyModal({
     e.preventDefault();
     if (!formData.company_name.trim()) return;
 
-    // Combine phone entries into comma-separated string (include location if provided)
-    const phoneNumbers = phoneEntries
-      .filter(entry => entry.phone.trim())
-      .map(entry => entry.location.trim() ? `${entry.phone} (${entry.location})` : entry.phone)
-      .join(', ');
-
-    onAdd({ ...formData, phone_numbers: phoneNumbers } as any);
+    onAdd(formData as Partial<Company>, phoneEntries.filter(entry => entry.phone.trim()));
 
     // Reset form
     setFormData({
@@ -618,10 +589,13 @@ export default function CompaniesPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   // Pagination
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
   const perPage = 25;
 
   // Column visibility
@@ -637,11 +611,12 @@ export default function CompaniesPage() {
       const safeSearch = sanitizeFilterValue(searchTerm);
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
         sort: '-created',
-        ...(safeSearch && { filter: `company_name ~ "${safeSearch}" || phone_numbers ~ "${safeSearch}" || owner_name ~ "${safeSearch}"` }),
+        ...(safeSearch && { filter: `company_name ~ "${safeSearch}" || owner_name ~ "${safeSearch}"` }),
       });
 
       setCompanies(result.items);
       setTotalPages(result.totalPages);
+      setTotalItems(result.totalItems);
     } catch (err: any) {
       if (err.status !== 0) {
         console.error('Failed to fetch companies:', err);
@@ -667,10 +642,20 @@ export default function CompaniesPage() {
     }
   };
 
-  const handleAdd = async (data: Partial<Company>) => {
+  const handleAdd = async (data: Partial<Company>, phoneEntries: { phone: string; location: string }[] = []) => {
     try {
       const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>(data);
       setCompanies(prev => [newCompany, ...prev]);
+      // Create phone_numbers collection records for each entry
+      await Promise.all(
+        phoneEntries.map(entry =>
+          pb.collection(COLLECTIONS.PHONE_NUMBERS).create({
+            company: newCompany.id,
+            phone_number: entry.phone.trim(),
+            location_name: entry.location.trim() || undefined,
+          })
+        )
+      );
     } catch (err) {
       console.error('Failed to create company:', err);
     }
@@ -715,6 +700,24 @@ export default function CompaniesPage() {
           />
 
           <button
+            onClick={() => setShowExportModal(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors text-sm"
+            title="Export to CSV"
+          >
+            <Download size={15} />
+            Export
+          </button>
+
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors text-sm"
+            title="Import from CSV"
+          >
+            <Upload size={15} />
+            Import
+          </button>
+
+          <button
             onClick={fetchCompanies}
             className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors"
             title="Refresh"
@@ -753,7 +756,6 @@ export default function CompaniesPage() {
                     {isColumnVisible('owner_name') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Owner</th>}
                     {isColumnVisible('instagram_handle') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Instagram</th>}
                     {isColumnVisible('status') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Status</th>}
-                    {isColumnVisible('phone_numbers') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
                     {isColumnVisible('email') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Email</th>}
                     {isColumnVisible('company_location') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Location</th>}
                     {isColumnVisible('source') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Source</th>}
@@ -803,15 +805,25 @@ export default function CompaniesPage() {
       </div>
 
       {/* Add Company Modal */}
-
       <AddCompanyModal
-
         isOpen={showAddModal}
-
         onClose={() => setShowAddModal(false)}
-
         onAdd={handleAdd}
+      />
 
+      {/* Export Modal */}
+      <ExportLeadsModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        companiesCount={totalItems}
+        searchFilter={searchTerm}
+      />
+
+      {/* Import Modal */}
+      <ImportLeadsModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={fetchCompanies}
       />
 
     </div>

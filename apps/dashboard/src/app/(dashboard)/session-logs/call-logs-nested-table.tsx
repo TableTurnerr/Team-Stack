@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 
 interface CallLogsNestedTableProps {
     sessionId: string;
+    onLogsLoaded?: (count: number) => void;
 }
 
 const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
@@ -21,7 +22,7 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
     'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
 };
 
-export function CallLogsNestedTable({ sessionId }: CallLogsNestedTableProps) {
+export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedTableProps) {
     const [callLogs, setCallLogs] = useState<CallLog[]>([]);
     const [loading, setLoading] = useState(true);
     const [stagingIds, setStagingIds] = useState<Set<string>>(new Set());
@@ -38,6 +39,7 @@ export function CallLogsNestedTable({ sessionId }: CallLogsNestedTableProps) {
                     expand: 'company,phone_number_record',
                 });
                 setCallLogs(logs);
+                onLogsLoaded?.(logs.length);
             } catch (err) {
                 console.error('Failed to fetch call logs:', err);
             } finally {

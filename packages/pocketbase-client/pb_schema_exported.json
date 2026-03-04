@@ -1074,7 +1074,22 @@
                     "Send Email",
                     "Hung Up (Rude Recep)",
                     "Hung Up (Other)",
-                    "Other"
+                    "Other",
+                    "Missed Call"
+                ]
+            },
+            {
+                "hidden": false,
+                "id": "select_direction",
+                "maxSelect": 1,
+                "name": "direction",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "outbound",
+                    "inbound"
                 ]
             },
             {

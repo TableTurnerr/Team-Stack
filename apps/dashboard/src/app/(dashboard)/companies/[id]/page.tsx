@@ -484,6 +484,22 @@ export default function CompanyDetailPage() {
                     placeholder="contact@company.com"
                     isEditing={isEditingAll}
                   />
+                  <InlineEditField
+                    id={`company_${id}_rating`}
+                    label="Google Rating"
+                    value={company.google_rating || ''}
+                    onSave={(v) => handleUpdateCompany('google_rating', v)}
+                    placeholder="e.g. 4.5"
+                    isEditing={isEditingAll}
+                  />
+                  <InlineEditField
+                    id={`company_${id}_reviews`}
+                    label="Google Reviews"
+                    value={company.google_reviews_count || ''}
+                    onSave={(v) => handleUpdateCompany('google_reviews_count', v)}
+                    placeholder="e.g. 128"
+                    isEditing={isEditingAll}
+                  />
                 </div>
               </div>
 

@@ -121,8 +121,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
         );
     }
 
-    const outcome = displayCall.call_outcome || '';
-    const colors = OUTCOME_COLORS[outcome] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' };
+    const outcomes = Array.isArray(displayCall.call_outcome) ? displayCall.call_outcome : displayCall.call_outcome ? [displayCall.call_outcome] : [];
 
     const hasChanged =
         notes !== (displayCall.post_call_notes || '') ||
@@ -155,10 +154,17 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                     <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
                         {isViewingOlderCall ? 'Previous Call' : 'Last Call'}
                     </h3>
-                    {outcome && (
-                        <span className={cn('px-2 py-0.5 rounded text-xs font-medium', colors.bg, colors.text)}>
-                            {outcome}
-                        </span>
+                    {outcomes.length > 0 && (
+                        <div className="flex gap-1 flex-wrap">
+                            {outcomes.map(oc => {
+                                const c = OUTCOME_COLORS[oc] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' };
+                                return (
+                                    <span key={oc} className={cn('px-2 py-0.5 rounded text-xs font-medium', c.bg, c.text)}>
+                                        {oc}
+                                    </span>
+                                );
+                            })}
+                        </div>
                     )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -289,13 +295,17 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                                     <span className="text-xs font-medium">
                                         {call.expand?.company?.company_name || 'Unknown'}
                                     </span>
-                                    <span className={cn(
-                                        'text-[9px] px-1.5 py-0.5 rounded-full font-medium',
-                                        OUTCOME_COLORS[call.call_outcome || '']?.bg || 'bg-[var(--card-hover)]',
-                                        OUTCOME_COLORS[call.call_outcome || '']?.text || 'text-[var(--muted)]'
-                                    )}>
-                                        {call.call_outcome}
-                                    </span>
+                                    <div className="flex gap-1 flex-wrap">
+                                        {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(oc => (
+                                            <span key={oc} className={cn(
+                                                'text-[9px] px-1.5 py-0.5 rounded-full font-medium',
+                                                OUTCOME_COLORS[oc]?.bg || 'bg-[var(--card-hover)]',
+                                                OUTCOME_COLORS[oc]?.text || 'text-[var(--muted)]'
+                                            )}>
+                                                {oc}
+                                            </span>
+                                        ))}
+                                    </div>
                                 </div>
                                 <div className="text-[10px] text-[var(--muted)]">
                                     {new Date(call.call_time).toLocaleString()}

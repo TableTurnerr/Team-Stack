@@ -266,14 +266,18 @@ export function PhoneNumberCard({
                   <div className="absolute -left-[5px] top-1 w-2 h-2 rounded-full bg-[var(--card-border)]" />
                   <div className="flex justify-between items-start mb-1">
                     <span className="text-xs font-medium">{formatDate(call.call_time)}</span>
-                    <span className={cn(
-                      "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                      call.call_outcome === 'Interested' ? "bg-green-500/10 text-green-400" :
-                        call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                          "bg-[var(--card-hover)] text-[var(--muted)]"
-                    )}>
-                      {call.call_outcome}
-                    </span>
+                    <div className="flex gap-1 flex-wrap">
+                      {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(oc => (
+                        <span key={oc} className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                          oc === 'Interested' ? "bg-green-500/10 text-green-400" :
+                            oc === 'No Answer' ? "bg-red-500/10 text-red-400" :
+                              "bg-[var(--card-hover)] text-[var(--muted)]"
+                        )}>
+                          {oc}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   {call.post_call_notes && (
                     <p className="text-xs text-[var(--muted)] line-clamp-2">{call.post_call_notes}</p>

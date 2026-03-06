@@ -32,7 +32,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
         !!draft.selectedCompany ||
         draft.receptionistName.trim().length > 0 ||
         draft.ownerName.trim().length > 0 ||
-        !!draft.callOutcome ||
+        (draft.callOutcome?.length ?? 0) > 0 ||
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
         draft.pitchCompleted ||

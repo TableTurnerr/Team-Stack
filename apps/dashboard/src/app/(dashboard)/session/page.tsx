@@ -58,7 +58,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
         !!draft.selectedCompany ||
         draft.receptionistName.trim().length > 0 ||
         draft.ownerName.trim().length > 0 ||
-        !!draft.callOutcome ||
+        (draft.callOutcome?.length ?? 0) > 0 ||
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
         draft.pitchCompleted ||
@@ -524,7 +524,7 @@ export default function SessionPage() {
             window.removeEventListener('online', cancelOfflineEnd);
             cancelOfflineEnd();
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [session]);
 
     // ---------------------------------------------------------------------------
@@ -866,7 +866,7 @@ export default function SessionPage() {
         const hasCallbacks = (data.callbackEvents?.length ?? 0) > 0;
 
         // For No Answer, discard this call's recording immediately (pop oldest from queue)
-        if (data.callOutcome === 'No Answer') {
+        if (data.callOutcome.includes('No Answer')) {
             discardOldestDeferredRecording();
             setContextPhoneNumber('');
         }
@@ -975,7 +975,7 @@ export default function SessionPage() {
 
                 // Submit this call's recording (pops oldest segment from queue).
                 // Each call's form submission claims exactly one recording via FIFO ordering.
-                if (data.callOutcome !== 'No Answer') {
+                if (!data.callOutcome.includes('No Answer')) {
                     submitOldestDeferredRecording(callLog.id).then(recordingId => {
                         if (recordingId) {
                             pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
@@ -1007,7 +1007,7 @@ export default function SessionPage() {
                         if (data.pitchCompleted) sessionUpdates.pitch_completed = (session.pitch_completed || 0) + 1;
                         if (data.appointmentSet) sessionUpdates.appointment_set = (session.appointment_set || 0) + 1;
                         if (hasCallbacks) sessionUpdates.total_callbacks = (session.total_callbacks || 0) + 1;
-                        if (data.callOutcome === 'No Answer' && capturedPickupIncremented && (session.total_pickups || 0) > 0) {
+                        if (data.callOutcome.includes('No Answer') && capturedPickupIncremented && (session.total_pickups || 0) > 0) {
                             sessionUpdates.total_pickups = Math.max(0, (session.total_pickups || 0) - 1);
                         }
                         if (Object.keys(sessionUpdates).length > 0) {
@@ -1614,6 +1614,7 @@ export default function SessionPage() {
                             totalDials={session.total_dials || 0}
                             totalPickups={session.total_pickups || 0}
                             totalCallbacks={session.total_callbacks || 0}
+                            totalIncoming={session.total_incoming || 0}
                             durationSec={elapsedSec}
                         />
                         <PerformanceTracker

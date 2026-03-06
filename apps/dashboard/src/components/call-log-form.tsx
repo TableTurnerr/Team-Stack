@@ -30,12 +30,30 @@ export function CallLogForm({
   phoneNumber,
 }: CallLogFormProps) {
   const [formData, setFormData] = useState({
-    call_outcome: 'No Answer' as CallLog['call_outcome'],
+    call_outcome: ['No Answer'] as string[],
     duration: 0,
     owner_name_found: '',
     receptionist_name: '',
     post_call_notes: '',
   });
+
+  const MAX_OUTCOMES = 3;
+  const NO_ANSWER = 'No Answer';
+
+  const toggleOutcome = (outcome: string) => {
+    setFormData(p => {
+      const prev = p.call_outcome;
+      if (prev.includes(outcome)) {
+        return { ...p, call_outcome: prev.filter(o => o !== outcome) };
+      }
+      if (outcome === NO_ANSWER) {
+        return { ...p, call_outcome: [NO_ANSWER] };
+      }
+      const without = prev.filter(o => o !== NO_ANSWER);
+      if (without.length >= MAX_OUTCOMES) return p;
+      return { ...p, call_outcome: [...without, outcome] };
+    });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +62,7 @@ export function CallLogForm({
       call_time: new Date().toISOString(),
     });
     setFormData({
-      call_outcome: 'No Answer',
+      call_outcome: ['No Answer'],
       duration: 0,
       owner_name_found: '',
       receptionist_name: '',
@@ -78,26 +96,34 @@ export function CallLogForm({
           <div>
             <label className="text-sm font-medium text-[var(--muted)] block mb-3">Call Outcome</label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {OUTCOME_OPTIONS.map((outcome) => (
-                <button
-                  key={outcome}
-                  type="button"
-                  onClick={() => setFormData(p => ({ ...p, call_outcome: outcome }))}
-                  className={cn(
-                    "px-3 py-2 rounded-lg text-sm border transition-all",
-                    formData.call_outcome === outcome
-                      ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] font-medium shadow-md"
-                      : "bg-transparent border-[var(--card-border)] text-[var(--muted)] hover:bg-[var(--sidebar-bg)] hover:text-[var(--foreground)]"
-                  )}
-                >
-                  {outcome}
-                </button>
-              ))}
+              {OUTCOME_OPTIONS.map((outcome) => {
+                const isSelected = formData.call_outcome.includes(outcome);
+                const hasNoAnswer = formData.call_outcome.includes(NO_ANSWER);
+                const isDisabled = !isSelected && (hasNoAnswer || (outcome !== NO_ANSWER && formData.call_outcome.length >= MAX_OUTCOMES));
+                return (
+                  <button
+                    key={outcome}
+                    type="button"
+                    onClick={() => toggleOutcome(outcome)}
+                    disabled={isDisabled}
+                    className={cn(
+                      "px-3 py-2 rounded-lg text-sm border transition-all",
+                      isSelected
+                        ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] font-medium shadow-md"
+                        : isDisabled
+                          ? "bg-transparent border-[var(--card-border)] text-[var(--muted)] opacity-40 cursor-not-allowed"
+                          : "bg-transparent border-[var(--card-border)] text-[var(--muted)] hover:bg-[var(--sidebar-bg)] hover:text-[var(--foreground)]"
+                    )}
+                  >
+                    {outcome}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           {/* Conditional Fields based on Outcome */}
-          {formData.call_outcome !== 'No Answer' && (
+          {!formData.call_outcome.includes('No Answer') && formData.call_outcome.length > 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
               <div className="grid grid-cols-2 gap-4">
                 <div>

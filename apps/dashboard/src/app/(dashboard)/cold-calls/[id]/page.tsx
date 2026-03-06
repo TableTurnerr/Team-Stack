@@ -169,14 +169,18 @@ function CallLogDetail({ log }: { log: CallLog }) {
             </span>
           )}
         </div>
-        {log.call_outcome && (
-          <span className={cn(
-            "px-3 py-1.5 rounded-lg text-sm font-semibold",
-            OUTCOME_COLORS[log.call_outcome]?.bg || 'bg-gray-500/20',
-            OUTCOME_COLORS[log.call_outcome]?.text || 'text-gray-400'
-          )}>
-            {log.call_outcome}
-          </span>
+        {log.call_outcome && (Array.isArray(log.call_outcome) ? log.call_outcome : [log.call_outcome]).length > 0 && (
+          <div className="flex gap-1.5 flex-wrap">
+            {(Array.isArray(log.call_outcome) ? log.call_outcome : [log.call_outcome]).map(oc => (
+              <span key={oc} className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-semibold",
+                OUTCOME_COLORS[oc]?.bg || 'bg-gray-500/20',
+                OUTCOME_COLORS[oc]?.text || 'text-gray-400'
+              )}>
+                {oc}
+              </span>
+            ))}
+          </div>
         )}
       </div>
 

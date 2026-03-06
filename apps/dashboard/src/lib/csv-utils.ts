@@ -847,10 +847,10 @@ export async function fetchCallStatsForCompanies(
 
         result.set(companyId, {
           total_calls: logs.length,
-          total_pickups: logs.filter(l => l.call_outcome !== 'No Answer').length,
+          total_pickups: logs.filter(l => !l.call_outcome?.includes('No Answer')).length,
           appointment_set_count: logs.filter(l => l.appointment_set).length,
           last_call_time: mostRecent?.call_time ?? '',
-          last_call_outcome: mostRecent?.call_outcome ?? '',
+          last_call_outcome: Array.isArray(mostRecent?.call_outcome) ? mostRecent.call_outcome.join(', ') : (mostRecent?.call_outcome ?? ''),
           session_ids: sessionIds,
           recording_ids: [], // populated below
           follow_up_ids: [], // populated below

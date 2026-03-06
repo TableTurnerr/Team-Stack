@@ -203,7 +203,7 @@ export default function ColdCallsPage() {
       log.expand?.company?.company_name || 'Unknown',
       log.expand?.phone_number_record?.phone_number || '',
       log.owner_name_found || '',
-      log.call_outcome || '',
+      Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : (log.call_outcome || ''),
       log.duration?.toString() || '',
       log.owner_reached ? 'Yes' : 'No',
       log.pitch_completed ? 'Yes' : 'No',
@@ -213,7 +213,7 @@ export default function ColdCallsPage() {
       log.expand?.caller?.name || '',
       log.post_call_notes || '',
     ]);
-    const csv = [headers, ...rows].map(row => row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -495,15 +495,15 @@ function CallLogsTable({
                       {isColumnVisible('call_outcome') && (
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {log.call_outcome && (
-                              <span className={cn(
+                            {(Array.isArray(log.call_outcome) ? log.call_outcome : log.call_outcome ? [log.call_outcome] : []).map(oc => (
+                              <span key={oc} className={cn(
                                 "px-2 py-1 rounded-md text-xs font-medium",
-                                OUTCOME_COLORS[log.call_outcome]?.bg || 'bg-gray-500/20',
-                                OUTCOME_COLORS[log.call_outcome]?.text || 'text-gray-400'
+                                OUTCOME_COLORS[oc]?.bg || 'bg-gray-500/20',
+                                OUTCOME_COLORS[oc]?.text || 'text-gray-400'
                               )}>
-                                {log.call_outcome}
+                                {oc}
                               </span>
-                            )}
+                            ))}
                             {(log.callback_events?.length ?? 0) > 0 && (
                               <span
                                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/30"

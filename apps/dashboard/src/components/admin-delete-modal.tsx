@@ -81,15 +81,15 @@ export function AdminDeleteModal({
       onClose();
     }, 1500);
   }, [
-    addStagedDeletion, 
-    type, 
-    targetId, 
-    targetLabel, 
-    associatedCallLogs, 
-    deleteRecordings, 
-    hasRecordings, 
-    associatedPhoneNumbers, 
-    onStaged, 
+    addStagedDeletion,
+    type,
+    targetId,
+    targetLabel,
+    associatedCallLogs,
+    deleteRecordings,
+    hasRecordings,
+    associatedPhoneNumbers,
+    onStaged,
     onClose
   ]);
 
@@ -218,14 +218,23 @@ export function AdminDeleteModal({
                           REC
                         </span>
                       )}
-                      <span className={cn(
-                        "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                        log.call_outcome === 'Interested' ? "bg-green-500/10 text-green-400" :
-                          log.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                            "bg-[var(--card-hover)] text-[var(--muted)]"
-                      )}>
-                        {log.call_outcome || 'No outcome'}
-                      </span>
+                      <div className="flex gap-1 flex-wrap">
+                        {(Array.isArray(log.call_outcome) ? log.call_outcome : log.call_outcome ? [log.call_outcome] : []).map(oc => (
+                          <span key={oc} className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                            oc === 'Interested' ? "bg-green-500/10 text-green-400" :
+                              oc === 'No Answer' ? "bg-red-500/10 text-red-400" :
+                                "bg-[var(--card-hover)] text-[var(--muted)]"
+                          )}>
+                            {oc}
+                          </span>
+                        ))}
+                        {(!log.call_outcome || (Array.isArray(log.call_outcome) && log.call_outcome.length === 0)) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-[var(--card-hover)] text-[var(--muted)]">
+                            No outcome
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}

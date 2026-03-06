@@ -63,7 +63,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
             adminMode.addStagedDeletion({
                 type: 'call_log',
                 targetId: log.id,
-                targetLabel: `Call log – ${log.call_outcome || 'Unknown'} at ${new Date(log.call_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+                targetLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} at ${new Date(log.call_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
                 associatedCallLogIds: [log.id],
                 deleteRecordings: false,
                 hasRecordings: log.has_recording || false,
@@ -153,10 +153,14 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                                     )}
                                 </td>
                                 <td className="px-4 py-3">
-                                    {log.call_outcome ? (
-                                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${OUTCOME_COLORS[log.call_outcome]?.bg || 'bg-[var(--muted)]/20'} ${OUTCOME_COLORS[log.call_outcome]?.text || 'text-[var(--muted)]'}`}>
-                                            {log.call_outcome}
-                                        </span>
+                                    {log.call_outcome && (Array.isArray(log.call_outcome) ? log.call_outcome : [log.call_outcome]).length > 0 ? (
+                                        <div className="flex gap-1 flex-wrap">
+                                            {(Array.isArray(log.call_outcome) ? log.call_outcome : [log.call_outcome]).map(oc => (
+                                                <span key={oc} className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${OUTCOME_COLORS[oc]?.bg || 'bg-[var(--muted)]/20'} ${OUTCOME_COLORS[oc]?.text || 'text-[var(--muted)]'}`}>
+                                                    {oc}
+                                                </span>
+                                            ))}
+                                        </div>
                                     ) : (
                                         <span className="text-[var(--muted)] text-xs">-</span>
                                     )}

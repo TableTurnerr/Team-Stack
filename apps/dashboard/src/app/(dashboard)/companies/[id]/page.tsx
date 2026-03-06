@@ -217,7 +217,7 @@ export default function CompanyDetailPage() {
         direction: 'outbound',
         timestamp: newCall.call_time,
         user: pb.authStore.model?.id,
-        summary: `Call: ${data.call_outcome} - ${data.post_call_notes?.substring(0, 50)}...`,
+        summary: `Call: ${Array.isArray(data.call_outcome) ? data.call_outcome.join(', ') : data.call_outcome} - ${data.post_call_notes?.substring(0, 50)}...`,
         call_log: newCall.id
       });
     } catch (error) {
@@ -240,7 +240,7 @@ export default function CompanyDetailPage() {
     adminMode.addStagedDeletion({
       type: 'call_log',
       targetId: log.id,
-      targetLabel: `Call log – ${log.call_outcome || 'Unknown'} – ${company?.company_name ?? ''}`,
+      targetLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} – ${company?.company_name ?? ''}`,
       associatedCallLogIds: [log.id],
       deleteRecordings: false,
       hasRecordings: log.has_recording || false,
@@ -702,14 +702,18 @@ export default function CompanyDetailPage() {
                           })()}
                         </td>
                         <td className="px-6 py-4">
-                          <span className={cn(
-                            "px-2 py-0.5 rounded-full text-[10px] font-bold",
-                            call.call_outcome === 'Interested' ? "bg-green-500/10 text-green-400" :
-                              call.call_outcome === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                                "bg-[var(--card-hover)] text-[var(--muted)]"
-                          )}>
-                            {call.call_outcome}
-                          </span>
+                          <div className="flex gap-1 flex-wrap">
+                            {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(oc => (
+                              <span key={oc} className={cn(
+                                "px-2 py-0.5 rounded-full text-[10px] font-bold",
+                                oc === 'Interested' ? "bg-green-500/10 text-green-400" :
+                                  oc === 'No Answer' ? "bg-red-500/10 text-red-400" :
+                                    "bg-[var(--card-hover)] text-[var(--muted)]"
+                              )}>
+                                {oc}
+                              </span>
+                            ))}
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-[var(--muted)] max-w-xs truncate">
                           {call.post_call_notes}

@@ -1,11 +1,12 @@
 'use client';
 
-import { Phone, PhoneIncoming, Clock, TrendingUp, PhoneForwarded } from 'lucide-react';
+import { Phone, PhoneIncoming, Clock, TrendingUp, PhoneForwarded, PhoneCall } from 'lucide-react';
 
 interface SessionMetricsProps {
     totalDials: number;
     totalPickups: number;
     totalCallbacks: number;
+    totalIncoming: number;
     durationSec: number;
 }
 
@@ -16,7 +17,7 @@ function formatDuration(seconds: number): string {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, durationSec }: SessionMetricsProps) {
+export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, totalIncoming, durationSec }: SessionMetricsProps) {
     const pickupRate = totalDials > 0 ? Math.round((totalPickups / totalDials) * 100) : 0;
 
     const metrics = [
@@ -33,6 +34,13 @@ export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, durat
             icon: PhoneIncoming,
             color: 'var(--success)',
             bg: 'var(--success-subtle)',
+        },
+        {
+            label: 'Received',
+            value: totalIncoming,
+            icon: PhoneCall,
+            color: '#a855f7',
+            bg: 'color-mix(in srgb, #a855f7 10%, transparent)',
         },
         {
             label: 'Callbacks',
@@ -56,7 +64,7 @@ export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, durat
                 Session Metrics
             </h3>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-5 gap-3">
                 {metrics.map(({ label, value, icon: Icon, color, bg }) => (
                     <div
                         key={label}

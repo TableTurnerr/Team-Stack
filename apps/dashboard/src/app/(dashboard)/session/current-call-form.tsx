@@ -51,7 +51,7 @@ export interface CallFormData {
     phoneNumber: string;
     receptionistName: string;
     ownerName: string;
-    callOutcome: string;
+    callOutcome: string[];
     postCallNotes: string;
     wasPickedUp: boolean;
     ownerReached: boolean;
@@ -69,7 +69,7 @@ export interface CallFormDraft {
     selectedCompany: Pick<Company, 'id' | 'company_name' | 'owner_name'> | null;
     receptionistName: string;
     ownerName: string;
-    callOutcome: string;
+    callOutcome: string[];
     postCallNotes: string;
     ownerReached: boolean;
     pitchCompleted: boolean;
@@ -89,7 +89,7 @@ const EMPTY_DRAFT: CallFormDraft = {
     selectedCompany: null,
     receptionistName: '',
     ownerName: '',
-    callOutcome: '',
+    callOutcome: [],
     postCallNotes: '',
     ownerReached: false,
     pitchCompleted: false,
@@ -132,7 +132,29 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
     const [receptionistName, setReceptionistName] = useState('');
     const [ownerName, setOwnerName] = useState('');
-    const [callOutcome, setCallOutcome] = useState('');
+    const [callOutcome, setCallOutcome] = useState<string[]>([]);
+
+    const MAX_OUTCOMES = 3;
+    const NO_ANSWER = 'No Answer';
+
+    /** Toggle an outcome tag respecting No Answer exclusivity and max-3 rules */
+    const toggleOutcome = (outcome: string) => {
+        setCallOutcome(prev => {
+            // Deselect if already selected
+            if (prev.includes(outcome)) {
+                return prev.filter(o => o !== outcome);
+            }
+            // "No Answer" is exclusive
+            if (outcome === NO_ANSWER) {
+                return [NO_ANSWER];
+            }
+            // Selecting a non-No-Answer tag removes No Answer
+            const without = prev.filter(o => o !== NO_ANSWER);
+            // Enforce max
+            if (without.length >= MAX_OUTCOMES) return without;
+            return [...without, outcome];
+        });
+    };
     const [postCallNotes, setPostCallNotes] = useState('');
     const [ownerReached, setOwnerReached] = useState(false);
     const [pitchCompleted, setPitchCompleted] = useState(false);
@@ -177,7 +199,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setIsNewCompany(false);
         setReceptionistName('');
         setOwnerName('');
-        setCallOutcome('');
+        setCallOutcome([]);
         setPostCallNotes('');
         setOwnerReached(false);
         setPitchCompleted(false);
@@ -207,7 +229,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         }
         setReceptionistName(initialDraft.receptionistName || '');
         setOwnerName(initialDraft.ownerName || '');
-        setCallOutcome(initialDraft.callOutcome || '');
+        setCallOutcome(Array.isArray(initialDraft.callOutcome) ? initialDraft.callOutcome : initialDraft.callOutcome ? [initialDraft.callOutcome] : []);
         setPostCallNotes(initialDraft.postCallNotes || '');
         setOwnerReached(!!initialDraft.ownerReached);
         setPitchCompleted(!!initialDraft.pitchCompleted);
@@ -511,7 +533,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const handleSave = useCallback(async () => {
         if (!selectedCompany && !isNewCompany) return;
         if (!companySearch.trim()) return;
-        if (!callOutcome) return;
+        if (callOutcome.length === 0) return;
         if (isSavingRef.current) return;
         isSavingRef.current = true;
 
@@ -544,7 +566,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 ownerName,
                 callOutcome,
                 postCallNotes,
-                wasPickedUp: callOutcome !== 'No Answer' && callOutcome !== '',
+                wasPickedUp: !callOutcome.includes('No Answer') && callOutcome.length > 0,
                 ownerReached,
                 pitchCompleted,
                 appointmentSet,
@@ -568,7 +590,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         !!selectedCompany ||
         receptionistName.trim().length > 0 ||
         ownerName.trim().length > 0 ||
-        !!callOutcome ||
+        callOutcome.length > 0 ||
         postCallNotes.trim().length > 0 ||
         ownerReached ||
         pitchCompleted ||
@@ -585,7 +607,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
     const hasPhoneNumber = !!phoneNumber;
-    const hasOutcome = !!callOutcome;
+    const hasOutcome = callOutcome.length > 0;
     const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving && !isCallLive;
 
     const handleCallbackSelect = (reason: CallbackReason) => {
@@ -593,7 +615,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         onCallback?.(reason);
     };
 
-    const isHungUpOutcome = callOutcome === HUNG_UP_PRIMARY || callOutcome === HUNG_UP_OTHER;
+    const isHungUpOutcome = callOutcome.includes(HUNG_UP_PRIMARY) || callOutcome.includes(HUNG_UP_OTHER);
+    const isAtMaxOutcomes = callOutcome.length >= MAX_OUTCOMES;
+    const hasNoAnswer = callOutcome.includes(NO_ANSWER);
 
     return (
         <div className={cn(
@@ -711,9 +735,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                 <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] font-semibold whitespace-nowrap">
                                                     {calls.length} call{calls.length !== 1 ? 's' : ''}
                                                 </span>
-                                                {calls[0]?.call_outcome && (
-                                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] truncate max-w-[80px]">
-                                                        {calls[0].call_outcome}
+                                                {calls[0]?.call_outcome && (Array.isArray(calls[0].call_outcome) ? calls[0].call_outcome : [calls[0].call_outcome]).length > 0 && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] truncate max-w-[120px]">
+                                                        {(Array.isArray(calls[0].call_outcome) ? calls[0].call_outcome : [calls[0].call_outcome]).join(', ')}
                                                     </span>
                                                 )}
                                             </div>
@@ -787,8 +811,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                 companyLookupState === 'searching'
                                     ? "bg-transparent border-0 rounded-[6px]"
                                     : companyLookupState === 'not-found' && !companySearch.trim()
-                                    ? "bg-[var(--sidebar-bg)] border border-[var(--error)] rounded-lg animate-[pulse-red-border_2s_ease-in-out_infinite]"
-                                    : "bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg focus:border-[var(--primary)]"
+                                        ? "bg-[var(--sidebar-bg)] border border-[var(--error)] rounded-lg animate-[pulse-red-border_2s_ease-in-out_infinite]"
+                                        : "bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg focus:border-[var(--primary)]"
                             )}
                         />
                         {selectedCompany && (
@@ -903,20 +927,31 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
             {/* Call Outcome pills */}
             <div>
-                <label className="text-xs text-[var(--muted)] mb-1.5 block">Call Outcome <span className="text-[var(--error)]">*</span></label>
+                <label className="text-xs text-[var(--muted)] mb-1.5 block">
+                    Call Outcome <span className="text-[var(--error)]">*</span>
+                    {callOutcome.length > 0 && (
+                        <span className="ml-2 text-[10px] font-semibold text-[var(--muted)]">
+                            {callOutcome.length}/{MAX_OUTCOMES}
+                        </span>
+                    )}
+                </label>
                 <div className="flex flex-wrap gap-1.5">
                     {OUTCOMES.map(outcome => {
                         const colors = OUTCOME_COLORS[outcome];
-                        const isSelected = callOutcome === outcome;
+                        const isSelected = callOutcome.includes(outcome);
+                        const isDisabled = !isSelected && (hasNoAnswer || (outcome !== NO_ANSWER && isAtMaxOutcomes));
                         return (
                             <button
                                 key={outcome}
-                                onClick={() => setCallOutcome(isSelected ? '' : outcome)}
+                                onClick={() => toggleOutcome(outcome)}
+                                disabled={isDisabled}
                                 className={cn(
                                     'px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all',
                                     isSelected
                                         ? `${colors.bg} ${colors.text} ${colors.border}`
-                                        : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+                                        : isDisabled
+                                            ? 'bg-[var(--sidebar-bg)] text-[var(--muted)]/40 border-[var(--card-border)] opacity-40 cursor-not-allowed'
+                                            : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
                                 )}
                             >
                                 {outcome}
@@ -926,40 +961,54 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
                     {/* Hung Up split button */}
                     <div className="relative flex" ref={hungUpDropdownRef}>
-                        <button
-                            onClick={() => setCallOutcome(callOutcome === HUNG_UP_PRIMARY ? '' : HUNG_UP_PRIMARY)}
-                            className={cn(
-                                'px-2.5 py-1.5 rounded-l-lg text-xs font-medium border-y border-l transition-all',
-                                callOutcome === HUNG_UP_PRIMARY
-                                    ? `${OUTCOME_COLORS[HUNG_UP_PRIMARY].bg} ${OUTCOME_COLORS[HUNG_UP_PRIMARY].text} ${OUTCOME_COLORS[HUNG_UP_PRIMARY].border}`
-                                    : isHungUpOutcome && callOutcome === HUNG_UP_OTHER
-                                    ? `${OUTCOME_COLORS[HUNG_UP_OTHER].bg} ${OUTCOME_COLORS[HUNG_UP_OTHER].text} ${OUTCOME_COLORS[HUNG_UP_OTHER].border}`
-                                    : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
-                            )}
-                        >
-                            {isHungUpOutcome ? callOutcome : HUNG_UP_PRIMARY}
-                        </button>
-                        <button
-                            onClick={() => setShowHungUpDropdown(v => !v)}
-                            className={cn(
-                                'px-1.5 py-1.5 rounded-r-lg text-xs font-medium border transition-all border-l-0',
-                                isHungUpOutcome
-                                    ? `${OUTCOME_COLORS[callOutcome as typeof HUNG_UP_PRIMARY].bg} ${OUTCOME_COLORS[callOutcome as typeof HUNG_UP_PRIMARY].text} ${OUTCOME_COLORS[callOutcome as typeof HUNG_UP_PRIMARY].border}`
-                                    : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
-                            )}
-                        >
-                            <ChevronDown size={10} className={cn("transition-transform", showHungUpDropdown && "rotate-180")} />
-                        </button>
+                        {(() => {
+                            const activeHungUp = callOutcome.includes(HUNG_UP_PRIMARY) ? HUNG_UP_PRIMARY
+                                : callOutcome.includes(HUNG_UP_OTHER) ? HUNG_UP_OTHER
+                                    : null;
+                            const hungUpDisabled = !activeHungUp && (hasNoAnswer || isAtMaxOutcomes);
+                            return (
+                                <>
+                                    <button
+                                        onClick={() => toggleOutcome(activeHungUp || HUNG_UP_PRIMARY)}
+                                        disabled={hungUpDisabled}
+                                        className={cn(
+                                            'px-2.5 py-1.5 rounded-l-lg text-xs font-medium border-y border-l transition-all',
+                                            activeHungUp
+                                                ? `${OUTCOME_COLORS[activeHungUp].bg} ${OUTCOME_COLORS[activeHungUp].text} ${OUTCOME_COLORS[activeHungUp].border}`
+                                                : hungUpDisabled
+                                                    ? 'bg-[var(--sidebar-bg)] text-[var(--muted)]/40 border-[var(--card-border)] opacity-40 cursor-not-allowed'
+                                                    : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+                                        )}
+                                    >
+                                        {activeHungUp || HUNG_UP_PRIMARY}
+                                    </button>
+                                    <button
+                                        onClick={() => setShowHungUpDropdown(v => !v)}
+                                        disabled={hungUpDisabled}
+                                        className={cn(
+                                            'px-1.5 py-1.5 rounded-r-lg text-xs font-medium border transition-all border-l-0',
+                                            activeHungUp
+                                                ? `${OUTCOME_COLORS[activeHungUp].bg} ${OUTCOME_COLORS[activeHungUp].text} ${OUTCOME_COLORS[activeHungUp].border}`
+                                                : hungUpDisabled
+                                                    ? 'bg-[var(--sidebar-bg)] text-[var(--muted)]/40 border-[var(--card-border)] opacity-40 cursor-not-allowed'
+                                                    : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+                                        )}
+                                    >
+                                        <ChevronDown size={10} className={cn("transition-transform", showHungUpDropdown && "rotate-180")} />
+                                    </button>
+                                </>
+                            );
+                        })()}
                         {showHungUpDropdown && (
                             <div className="absolute left-0 top-full mt-1 z-30 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-lg min-w-[160px] overflow-hidden">
                                 {[HUNG_UP_PRIMARY, HUNG_UP_OTHER].map(opt => (
                                     <button
                                         key={opt}
                                         type="button"
-                                        onClick={() => { setCallOutcome(opt); setShowHungUpDropdown(false); }}
+                                        onClick={() => { toggleOutcome(opt); setShowHungUpDropdown(false); }}
                                         className={cn(
                                             "w-full text-left px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors",
-                                            callOutcome === opt ? "font-semibold text-red-500" : "text-[var(--foreground)]"
+                                            callOutcome.includes(opt) ? "font-semibold text-red-500" : "text-[var(--foreground)]"
                                         )}
                                     >
                                         {opt}

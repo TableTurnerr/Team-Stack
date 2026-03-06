@@ -68,11 +68,30 @@ export function useZoomPhoneOptional() {
     return useContext(ZoomPhoneContext);
 }
 
+// ── Own-number detection ────────────────────────────────────────────────
+// When we make an outbound call, Zoom events include OUR phone number in
+// the `caller` field. We learn and persist this number. Any "incoming call"
+// whose caller matches our own number is a false positive (Zoom echoing our
+// outbound call) and gets suppressed.
+const OWN_PHONE_STORAGE_KEY = 'crm:zoom-own-phone-number';
+
+/** Normalize to last 10 digits for comparison (strips country code, +, formatting) */
+function normalizeDigits(phone: string): string {
+    return phone.replace(/\D/g, '').slice(-10);
+}
+
+function isOwnNumber(phone: string | null, ownNumber: string | null): boolean {
+    if (!ownNumber || !phone) return false;
+    const a = normalizeDigits(phone);
+    const b = normalizeDigits(ownNumber);
+    return a.length >= 7 && a === b;
+}
+
 /**
- * Extract the CALLER's phone number for inbound calls.
- * Prioritises `caller` / `from` fields (the remote party calling us).
+ * Extract the CALLER's phone number (the person who initiated the call).
+ * For outbound calls this is US; for inbound this is the remote party.
  */
-function extractIncomingCallerNumber(data: Record<string, unknown>): string | null {
+function extractCallerNumber(data: Record<string, unknown>): string | null {
     const caller = data?.caller as Record<string, unknown> | undefined;
     const from = data?.from;
 
@@ -95,56 +114,36 @@ function extractIncomingCallerNumber(data: Record<string, unknown>): string | nu
 
 /**
  * Extract a phone number from Zoom embed event data.
- * Zoom events can send the number in different fields depending on the event.
+ * Prefers outbound-target fields (callee/to) over caller/from.
  */
 function extractPhoneNumber(data: Record<string, unknown>): string | null {
-    // First, try to extract from nested caller/callee objects
     const caller = data?.caller as Record<string, unknown> | undefined;
     const callee = data?.callee as Record<string, unknown> | undefined;
 
-    // Log the structure of caller/callee if they exist (for debugging)
-    if (caller && Object.keys(caller).length > 0) {
-        console.log('[Zoom Phone] 🔍 Caller object structure:', JSON.stringify(caller, null, 2));
-    }
-    if (callee && Object.keys(callee).length > 0) {
-        console.log('[Zoom Phone] 🔍 Callee object structure:', JSON.stringify(callee, null, 2));
-    }
-
-    // Prefer outbound target fields first (callee/to), then generic fields,
-    // and only then fallback to caller/from.
     const candidates = [
         data?.targetNumber,
         data?.dialNumber,
         data?.inputNumber,
-        data?.value, // For input events
-        // Nested in callee object
+        data?.value,
         callee?.phoneNumber,
         callee?.number,
         callee?.extensionNumber,
-        // Try 'to' field (can be string or object)
         typeof data?.to === 'string' ? data.to : (data?.to as Record<string, unknown>)?.phoneNumber,
-        // Generic fields
         data?.phoneNumber,
         data?.number,
-        // Other nested structures
         (data?.contact as Record<string, unknown>)?.phoneNumber,
         (data?.call as Record<string, unknown>)?.phoneNumber,
         (data?.call as Record<string, unknown>)?.number,
         (data?.participant as Record<string, unknown>)?.phoneNumber,
-        // Nested in caller object (lowest priority)
         caller?.phoneNumber,
         caller?.number,
         caller?.extensionNumber,
-        // Finally try from field
         typeof data?.from === 'string' ? data.from : (data?.from as Record<string, unknown>)?.phoneNumber,
     ];
 
     for (const c of candidates) {
         if (typeof c === 'string' && c.replace(/\D/g, '').length >= 7) {
-            // Clean and return the phone number
-            const cleaned = c.trim();
-            console.log('[Zoom Phone] ✅ Extracted phone number:', cleaned);
-            return cleaned;
+            return c.trim();
         }
     }
     return null;
@@ -173,10 +172,24 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     const [callDirection, setCallDirection] = useState<'outbound' | 'inbound' | null>(null);
     const [incomingCallerNumber, setIncomingCallerNumber] = useState<string | null>(null);
 
-    // Sync ref with state
+    // Outbound intent — set in dialNumber(), persists until call ends.
+    const outboundIntentRef = useRef(false);
+    const outboundIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Own phone number — auto-learned from outbound calls, persisted in localStorage.
+    // Any "incoming call" from this number is suppressed as a false positive.
+    const ownPhoneNumberRef = useRef<string | null>(null);
+
+    // Load own number from localStorage on mount
     useEffect(() => {
-        callStatusRef.current = callStatus;
-    }, [callStatus]);
+        try {
+            const saved = localStorage.getItem(OWN_PHONE_STORAGE_KEY);
+            if (saved) {
+                ownPhoneNumberRef.current = saved;
+                console.log('[Zoom Phone] Loaded own phone number from storage:', saved);
+            }
+        } catch { /* ignore */ }
+    }, []);
 
     const registerDialCallback = useCallback((cb: (() => void) | null) => {
         dialCallbackRef.current = cb;
@@ -202,87 +215,127 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             // Only accept messages from Zoom's origin
             if (event.origin !== 'https://applications.zoom.us') return;
 
+            // Only process events from our primary iframe (prevents duplicate
+            // events from the hidden layout iframe vs the docked session iframe).
+            const primaryWindow = iframeRef.current?.contentWindow;
+            if (primaryWindow && event.source !== primaryWindow) return;
 
             const { type, data } = event.data || {};
             if (!type || typeof type !== 'string') return;
 
-            // Log all events for debugging
-            console.log('[Zoom Event]', type, data);
+            console.log('[Zoom Event]', type, JSON.stringify(data));
 
-            // Normalize event type — Zoom may use different naming conventions
             const eventLower = type.toLowerCase();
 
-            // Capture phone number early from dialer events (before call is made)
+            // Capture phone number early from dialer events
             if (eventLower.includes('dial') || eventLower.includes('number') || eventLower.includes('input') || eventLower.includes('call')) {
-                console.log('[Zoom Phone] Dial/input/call event detected, extracting number...');
                 const phone = extractPhoneNumber(data || {});
-                if (phone) {
-                    console.log('[Zoom Phone] ✅ Phone number from dialer:', phone);
-                    setActiveCallNumber(phone);
-                } else {
-                    console.log('[Zoom Phone] ⚠️ No phone number found in event data:', data);
-                }
+                if (phone) setActiveCallNumber(phone);
             }
 
-            // Call state events
+            // ── RINGING ──
             if (eventLower.includes('ringing')) {
-                console.log('[Zoom Phone] Call ringing');
-                setCallStatus('ringing');
-                // Detect direction: if we had a pending outbound dial, it's outbound; otherwise inbound
-                const isInbound = pendingCallRef.current === null;
-                setCallDirection(isInbound ? 'inbound' : 'outbound');
-                if (isInbound) {
-                    const callerNum = extractIncomingCallerNumber(data || {});
-                    if (callerNum) {
-                        console.log('[Zoom Phone] 📞 Incoming call from:', callerNum);
-                        setIncomingCallerNumber(callerNum);
-                        setActiveCallNumber(callerNum);
+                // Only process FIRST ringing event per call (ref updated synchronously).
+                if (callStatusRef.current !== 'ringing') {
+                    callStatusRef.current = 'ringing';
+                    setCallStatus('ringing');
+
+                    // --- Direction detection (in priority order) ---
+                    let direction: 'inbound' | 'outbound' = 'outbound'; // safe default
+
+                    if (outboundIntentRef.current) {
+                        // 1. We initiated this call via dialNumber() → definitely outbound
+                        direction = 'outbound';
+                    } else {
+                        // 2. Not our dial — tentatively treat as inbound, but check own-number filter
+                        direction = 'inbound';
                     }
-                } else {
-                    const phone = extractPhoneNumber(data || {});
-                    if (phone) {
-                        console.log('[Zoom Phone] Phone number from ringing event:', phone);
-                        setActiveCallNumber(phone);
+
+                    // 3. OWN-NUMBER FILTER: If the "incoming" caller is our own Zoom number,
+                    //    this is a false positive — Zoom is echoing our outbound call.
+                    if (direction === 'inbound') {
+                        const callerNum = extractCallerNumber(data || {});
+                        if (callerNum && isOwnNumber(callerNum, ownPhoneNumberRef.current)) {
+                            console.log('[Zoom Phone] Suppressed false incoming call from own number:', callerNum);
+                            direction = 'outbound';
+                        }
                     }
-                    // SUCCESS: Stop retrying immediately
-                    pendingCallRef.current = null;
+
+                    // 4. LEARN OWN NUMBER: During outbound calls, the `caller` field is US.
+                    //    Capture it so we can filter future false incoming calls.
+                    if (direction === 'outbound') {
+                        const callerNum = extractCallerNumber(data || {});
+                        if (callerNum && !isOwnNumber(callerNum, activeCallNumber)) {
+                            // callerNum is NOT the number we dialed → it's our own number
+                            if (!isOwnNumber(callerNum, ownPhoneNumberRef.current)) {
+                                ownPhoneNumberRef.current = callerNum;
+                                console.log('[Zoom Phone] Learned own phone number:', callerNum);
+                                try { localStorage.setItem(OWN_PHONE_STORAGE_KEY, callerNum); } catch { /* */ }
+                            }
+                        }
+                    }
+
+                    console.log('[Zoom Phone] Call ringing — direction:', direction, '| outboundIntent:', outboundIntentRef.current, '| ownNumber:', ownPhoneNumberRef.current);
+                    setCallDirection(direction);
+
+                    if (direction === 'inbound') {
+                        const callerNum = extractCallerNumber(data || {});
+                        if (callerNum) {
+                            console.log('[Zoom Phone] 📞 Incoming call from:', callerNum);
+                            setIncomingCallerNumber(callerNum);
+                            setActiveCallNumber(callerNum);
+                        }
+                    } else {
+                        const phone = extractPhoneNumber(data || {});
+                        if (phone) setActiveCallNumber(phone);
+                        pendingCallRef.current = null;
+                    }
                 }
+
+            // ── CONNECTED ──
             } else if (eventLower.includes('connected') || eventLower.includes('answered')) {
                 console.log('[Zoom Phone] Call connected');
+                if (callStatusRef.current !== 'connected' && callStatusRef.current !== 'ringing') {
+                    // Direction not set yet (skipped ringing) — detect now
+                    if (outboundIntentRef.current) {
+                        setCallDirection('outbound');
+                    } else {
+                        const callerNum = extractCallerNumber(data || {});
+                        if (callerNum && isOwnNumber(callerNum, ownPhoneNumberRef.current)) {
+                            setCallDirection('outbound');
+                        } else {
+                            setCallDirection('inbound');
+                        }
+                    }
+                }
+                callStatusRef.current = 'connected';
                 setCallStatus('connected');
                 const phone = extractPhoneNumber(data || {});
-                if (phone) {
-                    console.log('[Zoom Phone] Phone number from connected event:', phone);
-                    setActiveCallNumber(phone);
-                }
-                // SUCCESS: Stop retrying immediately
+                if (phone) setActiveCallNumber(phone);
                 pendingCallRef.current = null;
+
+            // ── ENDED ──
             } else if (eventLower.includes('ended') || eventLower.includes('hangup') || eventLower.includes('disconnect')) {
                 console.log('[Zoom Phone] Call ended');
+                callStatusRef.current = 'ended';
                 setCallStatus('ended');
                 setIsDialing(false);
                 pendingCallRef.current = null;
-                // We keep activeCallNumber so the recorder can use it for the upload
-                // Reset to idle after a brief delay so consumers can react to 'ended' first
+                outboundIntentRef.current = false;
+                if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
                 setTimeout(() => {
+                    callStatusRef.current = 'idle';
                     setCallStatus('idle');
                     setCallDirection(null);
                     setIncomingCallerNumber(null);
                 }, 2000);
             }
 
-            // Always try to extract phone number from any Zoom event with data
-            // This catches dial pad events, number entry, call log clicks, etc.
+            // Catch-all: extract phone number from any event with data
             if (data && typeof data === 'object') {
                 const phone = extractPhoneNumber(data as Record<string, unknown>);
-                if (phone) {
-                    if (phone !== activeCallNumber) {
-                        console.log('[Zoom Phone] ✅ New phone number detected from event:', phone);
-                        setActiveCallNumber(phone);
-                    }
-                } else if (Object.keys(data).length > 0) {
-                    // Only log if data exists but no phone found (skip empty data objects)
-                    console.log('[Zoom Phone] ℹ️ Event has data but no phone number found. Event type:', type, 'Data keys:', Object.keys(data));
+                if (phone && phone !== activeCallNumber) {
+                    setActiveCallNumber(phone);
                 }
             }
         };
@@ -292,7 +345,6 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, [activeCallNumber]);
 
     const sendDialMessage = useCallback((phoneNumber: string) => {
-        // Try ref first, then fallback to DOM ID
         const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
 
         if (!iframe?.contentWindow) {
@@ -324,7 +376,6 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
         console.log('[Zoom Phone] Sending end call commands...');
 
-        // Try multiple command variations to ensure compatibility with Zoom's API
         const commands = [
             'zp-hang-up',
             'zp-terminate-call',
@@ -337,35 +388,21 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
         commands.forEach(cmd => {
             iframe.contentWindow?.postMessage(
-                {
-                    type: cmd,
-                    data: {}
-                },
+                { type: cmd, data: {} },
                 'https://applications.zoom.us'
             );
         });
 
-        // Also try with alternative data structures
-        iframe.contentWindow?.postMessage(
-            {
-                action: 'endCall'
-            },
-            'https://applications.zoom.us'
-        );
+        iframe.contentWindow?.postMessage({ action: 'endCall' }, 'https://applications.zoom.us');
+        iframe.contentWindow?.postMessage({ action: 'hangup' }, 'https://applications.zoom.us');
 
-        iframe.contentWindow?.postMessage(
-            {
-                action: 'hangup'
-            },
-            'https://applications.zoom.us'
-        );
-
-        // Force update call status to ended after a brief delay if Zoom doesn't respond
+        // Force status update if Zoom doesn't respond
         setTimeout(() => {
             if (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected') {
                 console.log('[Zoom Phone] Zoom did not respond to end call, forcing status update');
+                callStatusRef.current = 'ended';
                 setCallStatus('ended');
-                setTimeout(() => setCallStatus('idle'), 2000);
+                setTimeout(() => { callStatusRef.current = 'idle'; setCallStatus('idle'); }, 2000);
             }
         }, 1000);
     }, []);
@@ -405,20 +442,15 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, [callStatus]);
 
     // Retry sending pending call with increasing delays
-    // The Zoom app inside the iframe needs time to initialize its message listeners
-    // even after the iframe's onload fires
     useEffect(() => {
         const pending = pendingCallRef.current;
         if (!pending || !iframeReady) return;
 
-        // Try multiple times with increasing delays
         const delays = [500, 1500, 3000, 5000];
         const timers: NodeJS.Timeout[] = [];
 
         delays.forEach(delay => {
             timers.push(setTimeout(() => {
-                // IMPORTANT: Only retry if it's still the SAME pending number
-                // AND we are still in idle state (no call has started)
                 if (pendingCallRef.current === pending && callStatusRef.current === 'idle') {
                     console.log('[Zoom Phone] Retrying dial for:', pending);
                     sendDialMessage(pending);
@@ -426,7 +458,6 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             }, delay));
         });
 
-        // Clear pending after the last attempt
         timers.push(setTimeout(() => {
             if (pendingCallRef.current === pending) {
                 pendingCallRef.current = null;
@@ -437,7 +468,6 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, [iframeReady, sendDialMessage]);
 
     const dialNumber = useCallback((phoneNumber: string) => {
-        // Clean the phone number
         const hasPlus = phoneNumber.startsWith('+');
         const digits = phoneNumber.replace(/\D/g, '');
         const cleaned = hasPlus ? `+${digits}` : digits;
@@ -450,37 +480,32 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        // Invoke dial callback synchronously (within user gesture) so
-        // CallRecorderControls can auto-start the recording session
+        // Invoke dial callback synchronously (within user gesture)
         dialCallbackRef.current?.();
 
-        // Open the dialer if it's not already open
+        // Mark outbound intent — persists for the ENTIRE call lifecycle.
+        // Cleared only when the call ends (in the 'ended' handler).
+        outboundIntentRef.current = true;
+        if (outboundIntentTimerRef.current) clearTimeout(outboundIntentTimerRef.current);
+        outboundIntentTimerRef.current = setTimeout(() => { outboundIntentRef.current = false; }, 60000);
+
         setIsDialerOpen(true);
-        // Track dialed number for the call recorder
         setLastDialedNumber(cleaned);
-        // Also update the active call number
         setActiveCallNumber(cleaned);
-        // Hide custom overlay immediately
         setIsDialing(true);
 
         // Safety timeout for isDialing in case Zoom never responds
         setTimeout(() => {
             setIsDialing(prev => {
-                // Only reset if we haven't transitioned to an active call state
-                if (prev && callStatusRef.current === 'idle') {
-                    return false;
-                }
+                if (prev && callStatusRef.current === 'idle') return false;
                 return prev;
             });
         }, 10000);
 
         if (iframeReady && iframeRef.current?.contentWindow) {
-            // Dialer is loaded — send immediately and also retry in case
-            // the Zoom app hasn't fully initialized
             sendDialMessage(cleaned);
             pendingCallRef.current = cleaned;
         } else {
-            // Queue it — the useEffect will fire once iframeReady becomes true
             pendingCallRef.current = cleaned;
         }
     }, [iframeReady, sendDialMessage]);

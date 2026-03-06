@@ -92,12 +92,13 @@ export function IncomingCallHandler() {
         if (session) {
             pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
                 total_dials: (session.total_dials || 0) + 1,
+                total_incoming: (session.total_incoming || 0) + 1,
             }).then(updated => {
                 setSession(updated);
                 dialIncrementedRef.current = true;
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment dials:', err));
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callStatus, callDirection]);
 
     // ── Effect 2: Inbound call answered ──
@@ -118,7 +119,7 @@ export function IncomingCallHandler() {
                 pickupIncrementedRef.current = true;
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment pickups:', err));
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callStatus, callDirection]);
 
     // ── Effect 3: Inbound call ended ──

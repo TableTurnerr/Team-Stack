@@ -187,7 +187,7 @@ export interface CallLog extends RecordModel {
   duration?: number; // Total duration (ring_duration + call_duration) in seconds
   ring_duration?: number; // Time spent ringing before pickup (in seconds)
   call_duration?: number; // Time spent on actual call after pickup (in seconds)
-  call_outcome?: 'Interested' | 'Not Interested' | 'Callback' | 'No Answer' | 'Fumbled' | 'Other' | 'Hung Up (Rude Recep)' | 'Hung Up (Other)' | 'Bad Lead' | 'Send Email' | 'Missed Call';
+  call_outcome?: string[];
   direction?: 'outbound' | 'inbound';
   owner_name_found?: string;
   receptionist_name?: string;
@@ -230,6 +230,8 @@ export interface ColdCallingSession extends RecordModel {
   is_test?: boolean; // True for test sessions — all data can be deleted at end of session
   /** Count of call logs with callbacks in this session */
   total_callbacks?: number;
+  /** Count of incoming/received calls in this session */
+  total_incoming?: number;
   expand?: {
     user?: User;
   };

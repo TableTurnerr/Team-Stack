@@ -67,7 +67,7 @@ export function CallRecorderControls() {
         return () => registerDialCallback(null);
     }, [registerDialCallback, isSessionActive, startSession]);
 
-    // ── Auto-record: start on call connect, stop on call end ────────
+    // ── Auto-record: start on ringing/connect, stop on call end ────
     const prevCallStatusRef = useRef(callStatus);
 
     useEffect(() => {
@@ -76,8 +76,9 @@ export function CallRecorderControls() {
 
         if (!isSessionActive) return;
 
-        // Auto-start only if auto-mode is ON
-        if (isAutoMode && callStatus === 'connected' && prev !== 'connected' && status === 'idle') {
+        // Auto-start on ringing OR connected (catches immediately-answered calls that skip
+        // the ringing event as well as normal calls).
+        if (isAutoMode && (callStatus === 'ringing' || callStatus === 'connected') && prev !== callStatus && status === 'idle') {
             startRecording();
         }
 
@@ -87,6 +88,21 @@ export function CallRecorderControls() {
             stopRecording();
         }
     }, [callStatus, isAutoMode, isSessionActive, status, startRecording, stopRecording]);
+
+    // ── Retry when session becomes active mid-call ───────────────
+    // If screen share is granted after the call was already ringing/connected,
+    // start recording immediately without waiting for the next callStatus event.
+    const prevIsSessionActiveRef = useRef(isSessionActive);
+    useEffect(() => {
+        const wasActive = prevIsSessionActiveRef.current;
+        prevIsSessionActiveRef.current = isSessionActive;
+
+        if (!wasActive && isSessionActive && (callStatus === 'ringing' || callStatus === 'connected') && status === 'idle') {
+            if (isAutoMode) {
+                startRecording();
+            }
+        }
+    }, [isSessionActive, callStatus, status, isAutoMode, startRecording]);
 
     // ── Render ──────────────────────────────────────────────────────
 
@@ -118,10 +134,14 @@ export function CallRecorderControls() {
                             UPLOADED
                         </div>
                     ) : status === 'error' ? (
-                        <div className="flex items-center gap-1.5 text-[10px] text-red-400 font-semibold max-w-[100px] truncate" title={error || ''}>
-                            <AlertCircle size={12} />
-                            {error || 'FAILED'}
-                        </div>
+                        <button
+                            onClick={startRecording}
+                            className="flex items-center gap-1.5 text-[10px] text-red-400 font-semibold max-w-[160px] truncate hover:text-red-300 transition-colors"
+                            title={`${error || 'Recording failed'} — Click to retry`}
+                        >
+                            <AlertCircle size={12} className="shrink-0" />
+                            {error ? 'REC FAILED — Retry' : 'FAILED — Retry'}
+                        </button>
                     ) : isAutoMode ? (
                         <span className="text-[10px] text-green-400 font-semibold" title="Recording will start automatically when a call connects">
                             AUTO

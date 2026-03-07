@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Zap, ChevronDown, ChevronUp, Play, Pause, Square, Check, RotateCcw } from 'lucide-react';
 
 export interface DialerEntry {
@@ -76,6 +76,15 @@ export function PowerDialerPanel({
 }: PowerDialerPanelProps) {
     const [expanded, setExpanded] = useState(true);
     const [inputMode, setInputMode] = useState(queue.length === 0);
+    // When queue transitions from empty→non-empty (hydrated from localStorage), exit input mode
+    const prevQueueLengthRef = useRef(queue.length);
+    useEffect(() => {
+        const prev = prevQueueLengthRef.current;
+        prevQueueLengthRef.current = queue.length;
+        if (prev === 0 && queue.length > 0) {
+            setInputMode(false);
+        }
+    }, [queue.length]);
     const [rawInput, setRawInput] = useState(() => {
         if (typeof window === 'undefined') return '';
         return localStorage.getItem('power-dialer-raw-input') ?? '';

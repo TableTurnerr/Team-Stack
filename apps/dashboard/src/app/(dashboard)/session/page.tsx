@@ -11,9 +11,11 @@ import {
     Square,
     Pause,
     Play,
+    Copy,
+    Check,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp } from '@/lib/types';
+import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
@@ -148,6 +150,28 @@ export default function SessionPage() {
     const [testSessionCleanupId, setTestSessionCleanupId] = useState<string | null>(null);
     const [cleaningUp, setCleaningUp] = useState(false);
     const [cleanupError, setCleanupError] = useState('');
+    const [testNumbersCopied, setTestNumbersCopied] = useState(false);
+
+    const TEST_CALL_NUMBER_POOL = [
+        '18042221111, Richmond VA - Echo & DTMF',
+        '19093900003, Ontario CA - Instant Echo',
+        '18004444444, Toll-Free - Reads Caller ID',
+        '16317918378, New York NY - Audio Clarity',
+        '12064560649, Seattle WA - Echo & Hold Music',
+        '14086474636, San Jose CA - Echo, DTMF & Frequency Sweep',
+        '18023599100, Vermont - Latency Echo Test',
+        '18004377950, Toll-Free - ANI Caller ID Readback',
+        '19252590082, East Bay CA - Echo Test',
+    ];
+
+    const handleCopyTestNumbers = () => {
+        const shuffled = [...TEST_CALL_NUMBER_POOL].sort(() => Math.random() - 0.5);
+        const picked = shuffled.slice(0, 5).join('\n');
+        navigator.clipboard.writeText(picked).then(() => {
+            setTestNumbersCopied(true);
+            setTimeout(() => setTestNumbersCopied(false), 2000);
+        });
+    };
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -190,6 +214,90 @@ export default function SessionPage() {
             setAutoHangup(false);
         }
     }, [powerDialerActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ---------------------------------------------------------------------------
+    // Power dialer persistence — stored in user_preferences.power_dialer_state
+    // so progress is shared across devices and survives across CRM sessions.
+    // ---------------------------------------------------------------------------
+    const didHydrateDialerRef = useRef(false);
+    const [dialerHydrated, setDialerHydrated] = useState(false);
+    const powerDialerPrefsRecordIdRef = useRef<string | null>(null);
+
+    // Load from PocketBase on mount
+    useEffect(() => {
+        if (!user || didHydrateDialerRef.current) return;
+        didHydrateDialerRef.current = true;
+
+        pb.collection(COLLECTIONS.USER_PREFERENCES).getList<UserPreferences>(1, 1, {
+            filter: `user = "${user.id}"`,
+        }).then(result => {
+            if (result.items.length > 0) {
+                powerDialerPrefsRecordIdRef.current = result.items[0].id;
+                const saved = result.items[0].power_dialer_state;
+                if (saved && Array.isArray(saved.queue) && saved.queue.length > 0) {
+                    setPowerDialerQueue(saved.queue);
+                    setPowerDialerIndex(typeof saved.currentIndex === 'number' ? saved.currentIndex : 0);
+                    if (typeof saved.delay === 'number') setPowerDialerDelay(saved.delay);
+                    if (typeof saved.autoHangupEnabled === 'boolean') setAutoHangupEnabled(saved.autoHangupEnabled);
+                    if (typeof saved.autoHangupSeconds === 'number') setAutoHangupSeconds(saved.autoHangupSeconds);
+                }
+            }
+        }).catch(err => {
+            console.error('Failed to load power dialer state:', err);
+        }).finally(() => {
+            setDialerHydrated(true);
+        });
+    }, [user]);
+
+    // Persist to PocketBase (debounced 1.5s) whenever state changes — only after hydration
+    const savePowerDialerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        if (!user || !dialerHydrated) return;
+
+        if (savePowerDialerTimerRef.current) clearTimeout(savePowerDialerTimerRef.current);
+        savePowerDialerTimerRef.current = setTimeout(async () => {
+            const stateToSave = powerDialerQueue.length === 0 ? null : {
+                queue: powerDialerQueue,
+                currentIndex: powerDialerIndex,
+                delay: powerDialerDelay,
+                autoHangupEnabled,
+                autoHangupSeconds,
+            };
+            try {
+                if (powerDialerPrefsRecordIdRef.current) {
+                    await pb.collection(COLLECTIONS.USER_PREFERENCES).update(
+                        powerDialerPrefsRecordIdRef.current,
+                        { power_dialer_state: stateToSave }
+                    );
+                } else {
+                    // Record not yet cached — look it up first
+                    const result = await pb.collection(COLLECTIONS.USER_PREFERENCES).getList<UserPreferences>(1, 1, {
+                        filter: `user = "${user.id}"`,
+                    });
+                    if (result.items.length > 0) {
+                        powerDialerPrefsRecordIdRef.current = result.items[0].id;
+                        await pb.collection(COLLECTIONS.USER_PREFERENCES).update(
+                            result.items[0].id,
+                            { power_dialer_state: stateToSave }
+                        );
+                    } else {
+                        // First-time user with no preferences record yet — create one
+                        const created = await pb.collection(COLLECTIONS.USER_PREFERENCES).create<UserPreferences>({
+                            user: user.id,
+                            power_dialer_state: stateToSave,
+                        });
+                        powerDialerPrefsRecordIdRef.current = created.id;
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to save power dialer state:', err);
+            }
+        }, 1500);
+
+        return () => {
+            if (savePowerDialerTimerRef.current) clearTimeout(savePowerDialerTimerRef.current);
+        };
+    }, [user, dialerHydrated, powerDialerQueue, powerDialerIndex, powerDialerDelay, autoHangupEnabled, autoHangupSeconds]);
 
     // ---------------------------------------------------------------------------
     // Multi-tab prevention — claim a tab lock and warn if another tab owns it
@@ -613,10 +721,10 @@ export default function SessionPage() {
             setContextPhoneNumber(''); // Clear phone number in context
             window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
-            // Reset power dialer
+            // Stop power dialer automation — keep queue & progress so they persist
+            // into the next session. Index and queue are intentionally NOT reset here.
             setPowerDialerActive(false);
             setPowerDialerPaused(false);
-            setPowerDialerIndex(0);
             setPinnedFormPhoneNumber('');
             if (powerDialerTimerRef.current) {
                 clearTimeout(powerDialerTimerRef.current);
@@ -718,7 +826,36 @@ export default function SessionPage() {
             // 4. Delete all call logs
             await Promise.allSettled(callLogs.map(l => pb.collection(COLLECTIONS.CALL_LOGS).delete(l.id)));
 
-            // 5. Delete the session record
+            // 5. Delete companies that were created solely during this test session
+            //    (i.e. they have no call logs outside this session)
+            const companyIds = [...new Set(callLogs.map(l => l.company).filter(Boolean))];
+            if (companyIds.length > 0) {
+                const companiesOnlyInSession: string[] = [];
+                await Promise.allSettled(
+                    companyIds.map(async (companyId) => {
+                        try {
+                            const otherLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getList(1, 1, {
+                                filter: `company = "${companyId}" && session != "${testSessionCleanupId}"`,
+                            });
+                            if (otherLogs.totalItems === 0) {
+                                companiesOnlyInSession.push(companyId);
+                            }
+                        } catch { /* skip if check fails */ }
+                    })
+                );
+                // Delete phone number records and then the companies themselves
+                for (const companyId of companiesOnlyInSession) {
+                    try {
+                        const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList({
+                            filter: `company = "${companyId}"`,
+                        });
+                        await Promise.allSettled(phones.map(p => pb.collection(COLLECTIONS.PHONE_NUMBERS).delete(p.id)));
+                        await pb.collection(COLLECTIONS.COMPANIES).delete(companyId);
+                    } catch { /* skip if delete fails */ }
+                }
+            }
+
+            // 6. Delete the session record
             await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).delete(testSessionCleanupId);
 
             setShowTestCleanupModal(false);
@@ -971,7 +1108,7 @@ export default function SessionPage() {
                     appointment_set: data.appointmentSet,
                     callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                     is_callback: hasCallbacks ? true : undefined,
-                });
+                }, { expand: 'company,phone_number_record' });
 
                 // Submit this call's recording (pops oldest segment from queue).
                 // Each call's form submission claims exactly one recording via FIFO ordering.
@@ -1446,9 +1583,19 @@ export default function SessionPage() {
                     <div className="flex items-center gap-3">
                         <h1 className="text-2xl font-bold">Call Session</h1>
                         {session.is_test && (
-                            <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                                TEST
-                            </span>
+                            <>
+                                <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                                    TEST
+                                </span>
+                                <button
+                                    onClick={handleCopyTestNumbers}
+                                    title="Copy test phone numbers for the power dialer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-medium bg-amber-500/10 text-amber-500 border border-amber-500/30 hover:bg-amber-500/20 transition-colors"
+                                >
+                                    {testNumbersCopied ? <Check size={11} /> : <Copy size={11} />}
+                                    {testNumbersCopied ? 'Copied!' : 'Test Numbers'}
+                                </button>
+                            </>
                         )}
                         {session.paused_at ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--warning-subtle)] text-[var(--warning)]">
@@ -1649,7 +1796,7 @@ export default function SessionPage() {
                             <div>
                                 <h2 className="text-lg font-bold">Test Session Ended</h2>
                                 <p className="text-sm text-[var(--muted)] mt-1">
-                                    Would you like to delete all data created during this test session? This includes call logs, recordings, and follow-ups.
+                                    Would you like to delete all data created during this test session? This includes call logs, recordings, follow-ups, and any companies that were only created during this session.
                                 </p>
                             </div>
                         </div>

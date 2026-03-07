@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Mic, ExternalLink, Trash2, CheckSquare, Loader2, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Mic, ExternalLink, Trash2, CheckSquare, Loader2, PhoneIncoming, PhoneOutgoing, X, Download } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type CallLog } from '@/lib/types';
+import { COLLECTIONS, type CallLog, type Recording } from '@/lib/types';
 import Link from 'next/link';
 import { useAdminModeOptional } from '@/contexts/admin-mode-context';
 import { cn } from '@/lib/utils';
@@ -27,9 +27,33 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     const [callLogs, setCallLogs] = useState<CallLog[]>([]);
     const [loading, setLoading] = useState(true);
     const [stagingIds, setStagingIds] = useState<Set<string>>(new Set());
+    const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
+    const [playerLoading, setPlayerLoading] = useState<string | null>(null);
+    const audioRef = useRef<HTMLAudioElement>(null);
 
     const adminMode = useAdminModeOptional();
     const isAdminMode = adminMode?.isAdminMode ?? false;
+
+    const handlePlayRecording = async (log: CallLog) => {
+        if (playerLoading === log.id) return;
+        setPlayerLoading(log.id);
+        try {
+            const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+                `call_log = "${log.id}"`
+            );
+            setPlayerRecording(recording);
+        } catch {
+            // No linked recording found — fall back to recordings page
+            window.open(`/recordings?call_log=${log.id}`, '_blank');
+        } finally {
+            setPlayerLoading(null);
+        }
+    };
+
+    const closePlayer = () => {
+        audioRef.current?.pause();
+        setPlayerRecording(null);
+    };
 
     useEffect(() => {
         const fetchCallLogs = async () => {
@@ -95,6 +119,58 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     }
 
     return (
+        <>
+        {playerRecording && (
+            <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm" onClick={closePlayer}>
+                <div
+                    className="w-full max-w-md bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl p-4 space-y-3"
+                    onClick={e => e.stopPropagation()}
+                >
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <Mic size={16} className="text-[var(--primary)] shrink-0" />
+                            <span className="text-sm font-medium truncate">
+                                {playerRecording.note || playerRecording.original_filename || 'Call Recording'}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                            {playerRecording.file && (
+                                <a
+                                    href={pb.files.getUrl(playerRecording, playerRecording.file)}
+                                    download
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                                    title="Download"
+                                >
+                                    <Download size={15} />
+                                </a>
+                            )}
+                            <button
+                                onClick={closePlayer}
+                                className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                                title="Close"
+                            >
+                                <X size={15} />
+                            </button>
+                        </div>
+                    </div>
+                    {playerRecording.file ? (
+                        <audio
+                            ref={audioRef}
+                            controls
+                            autoPlay
+                            preload="metadata"
+                            className="w-full h-10"
+                            src={pb.files.getUrl(playerRecording, playerRecording.file)}
+                            onEnded={closePlayer}
+                        />
+                    ) : (
+                        <p className="text-sm text-[var(--muted)] text-center py-2">No audio file attached.</p>
+                    )}
+                </div>
+            </div>
+        )}
         <div className="overflow-x-auto bg-[var(--sidebar-bg)] border-t border-[var(--card-border)]">
             <table className="w-full text-sm">
                 <thead className="bg-[var(--card-bg)] border-b border-[var(--card-border)]">
@@ -176,12 +252,17 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                                 </td>
                                 <td className="px-4 py-3 text-center">
                                     {log.has_recording ? (
-                                        <Link
-                                            href={`/recordings?call_log=${log.id}`}
-                                            className="inline-flex items-center gap-1 text-[var(--primary)] hover:underline"
+                                        <button
+                                            onClick={() => handlePlayRecording(log)}
+                                            disabled={playerLoading === log.id}
+                                            className="inline-flex items-center justify-center p-1.5 rounded-lg text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors disabled:opacity-60"
+                                            title="Play recording"
                                         >
-                                            <Mic size={14} />
-                                        </Link>
+                                            {playerLoading === log.id
+                                                ? <Loader2 size={14} className="animate-spin" />
+                                                : <Mic size={14} />
+                                            }
+                                        </button>
                                     ) : (
                                         <span className="text-[var(--muted)] text-xs">-</span>
                                     )}
@@ -218,5 +299,6 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                 </tbody>
             </table>
         </div>
+        </>
     );
 }

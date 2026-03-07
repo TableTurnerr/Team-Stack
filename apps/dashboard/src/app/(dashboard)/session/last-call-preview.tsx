@@ -188,18 +188,16 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
             {/* Content */}
             {isExpanded && (
                 <div className="px-4 pb-4 space-y-3 border-t border-[var(--card-border)]">
-                    {/* Company */}
+                    {/* Company + Phone */}
                     <div className="flex items-center gap-2 pt-3">
                         <Building2 size={14} className="text-[var(--muted)]" />
                         <span className="text-sm font-medium">{displayCompany || 'Unknown Company'}</span>
+                        {displayCall.expand?.phone_number_record?.phone_number && (
+                            <span className="text-xs font-light text-[var(--muted)] font-mono">
+                                {displayCall.expand.phone_number_record.phone_number}
+                            </span>
+                        )}
                     </div>
-
-                    {/* Phone number */}
-                    {displayCall.expand?.phone_number_record?.phone_number && (
-                        <div className="text-sm text-[var(--muted)] font-mono">
-                            {displayCall.expand.phone_number_record.phone_number}
-                        </div>
-                    )}
 
                     {/* Performance tracking checkboxes */}
                     <div className="space-y-2 pt-1">

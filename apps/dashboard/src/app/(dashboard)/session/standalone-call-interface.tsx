@@ -211,7 +211,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 appointment_set: data.appointmentSet,
                 callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                 // session field is omitted (will be null) - this marks it as a standalone call
-            });
+            }, { expand: 'company,phone_number_record' });
 
             // Update company metadata
             try {

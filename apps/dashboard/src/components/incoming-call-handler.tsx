@@ -27,6 +27,7 @@ export function IncomingCallHandler() {
     // ── Timing refs (mirroring session/page.tsx pattern) ──
     const ringStartTimeRef = useRef<number | null>(null);
     const connectTimeRef = useRef<number | null>(null);
+    const callEndTimeRef = useRef<number | null>(null);
     const wasConnectedRef = useRef(false);
     const dialIncrementedRef = useRef(false);
     const pickupIncrementedRef = useRef(false);
@@ -126,6 +127,7 @@ export function IncomingCallHandler() {
     useEffect(() => {
         if (callStatus !== 'ended' || callDirection !== 'inbound') return;
 
+        callEndTimeRef.current = Date.now();
         setShowRingingBanner(false);
 
         if (wasConnectedRef.current) {
@@ -151,6 +153,7 @@ export function IncomingCallHandler() {
         // Reset timing refs for next call
         ringStartTimeRef.current = null;
         connectTimeRef.current = null;
+        callEndTimeRef.current = null;
         wasConnectedRef.current = false;
         capturedCallerNumberRef.current = null;
         capturedSessionRef.current = null;
@@ -193,10 +196,10 @@ export function IncomingCallHandler() {
                 } catch { /* ignore */ }
             }
 
-            // Calculate durations
+            // Calculate durations using actual call-end time, not form-submission time
             let ringDuration = 0, callDuration = 0, totalDuration = 0;
+            const endTime = callEndTimeRef.current ?? Date.now();
             if (capturedRingStart) {
-                const endTime = Date.now();
                 if (capturedConnect) {
                     ringDuration = Math.floor((capturedConnect - capturedRingStart) / 1000);
                     callDuration = Math.floor((endTime - capturedConnect) / 1000);

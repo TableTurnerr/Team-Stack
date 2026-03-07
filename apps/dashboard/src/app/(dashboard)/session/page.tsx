@@ -93,6 +93,7 @@ export default function SessionPage() {
         status: recorderStatus,
         duration: recorderDuration,
         startSession: startAudioSession,
+        endSession: endAudioSession,
         startRecording,
         stopRecording,
         discardRecording,
@@ -122,6 +123,9 @@ export default function SessionPage() {
     const [dialCountIncremented, setDialCountIncremented] = useState(false);
     const [pickupCountIncremented, setPickupCountIncremented] = useState(false);
     const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Tracks the exact moment the call ended so duration calculation uses real end time,
+    // not the (possibly much later) form submission time.
+    const callEndTimeRef = useRef<number | null>(null);
 
     // Track unsaved call state — true when call ended but form not yet submitted
     const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
@@ -180,7 +184,7 @@ export default function SessionPage() {
     const [powerDialerIndex, setPowerDialerIndex] = useState(0);
     const [powerDialerActive, setPowerDialerActive] = useState(false);
     const [powerDialerPaused, setPowerDialerPaused] = useState(false);
-    const [powerDialerDelay, setPowerDialerDelay] = useState(2); // seconds; negative = start next call before submit
+    const [powerDialerDelay, setPowerDialerDelay] = useState(0); // seconds; negative = start next call before submit
     // Pins the old call's phone number in the form during a negative-delay overlap
     const [pinnedFormPhoneNumber, setPinnedFormPhoneNumber] = useState('');
     // Company name suggested from power dialer queue for the current call
@@ -423,9 +427,11 @@ export default function SessionPage() {
         if (callStatus === 'ringing') {
             // Call is ringing - start ring timer
             if (!ringStartTime) {
-                setRingStartTime(Date.now());
+                const now = Date.now();
+                setRingStartTime(now);
                 setConnectTime(null);
                 setCurrentCallDuration(0);
+                callEndTimeRef.current = null; // new call starting
 
                 // Increment dial count only once when ringing starts (and only for session mode)
                 if (session && !dialCountIncremented) {
@@ -444,7 +450,13 @@ export default function SessionPage() {
                 }
             }
         } else if (callStatus === 'connected') {
-            // Call connected - mark connect time and start call duration timer
+            // Call connected - mark connect time.
+            // Also set ringStartTime if the call skipped the ringing phase entirely
+            // (some carriers answer immediately without a ringing event).
+            if (!ringStartTime) {
+                setRingStartTime(Date.now());
+                callEndTimeRef.current = null;
+            }
             if (!connectTime) {
                 setConnectTime(Date.now());
 
@@ -457,41 +469,52 @@ export default function SessionPage() {
                         setSession(updatedSession);
                     }).catch(err => console.error('Failed to increment pickup count:', err));
                 }
-
-                // Start call duration timer
-                if (callTimerRef.current) clearInterval(callTimerRef.current);
-                callTimerRef.current = setInterval(() => {
-                    if (connectTime) {
-                        setCurrentCallDuration(Math.floor((Date.now() - connectTime) / 1000));
-                    }
-                }, 1000);
             }
         } else if (callStatus === 'ended') {
-            // Call ended - clear timers, mark as unsaved if there was a phone number
-            if (callTimerRef.current) {
-                clearInterval(callTimerRef.current);
-                callTimerRef.current = null;
-            }
+            // Record the exact call-end time so duration calculations are accurate
+            // regardless of when the user actually submits the form.
+            callEndTimeRef.current = Date.now();
+
             if (currentPhoneNumber) {
                 setHasUnsavedCall(true);
                 // Pin the phone number so the form keeps showing the old number
                 // even if the power dialer auto-dials a new call (negative-delay overlap)
                 setPinnedFormPhoneNumber(currentPhoneNumber);
             }
-        } else if (callStatus === 'idle') {
-            // Idle - just clear timers (don't set unsaved here, it's set on 'ended')
+        }
+    }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
+
+    // ---------------------------------------------------------------------------
+    // Call duration timer — separate effect so its lifecycle is tied only to
+    // connectTime. The main callStatus effect sets callTimerRef but the cleanup
+    // was firing when connectTime changed (batched with ringStartTime in the same
+    // render cycle), clearing the interval before it could tick.
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        if (!connectTime) {
+            // Reset display when call ends/resets
+            setCurrentCallDuration(0);
             if (callTimerRef.current) {
                 clearInterval(callTimerRef.current);
                 callTimerRef.current = null;
             }
+            return;
         }
+
+        // connectTime is now set — start the live call-duration counter.
+        // Capture connectTime in the closure; it won't change until reset.
+        if (callTimerRef.current) clearInterval(callTimerRef.current);
+        callTimerRef.current = setInterval(() => {
+            setCurrentCallDuration(Math.floor((Date.now() - connectTime) / 1000));
+        }, 1000);
 
         return () => {
             if (callTimerRef.current) {
                 clearInterval(callTimerRef.current);
+                callTimerRef.current = null;
             }
         };
-    }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
+    }, [connectTime]);
 
     // ---------------------------------------------------------------------------
     // Power dialer — negative delay: auto-dial next number N seconds after call ends
@@ -564,12 +587,33 @@ export default function SessionPage() {
         prevCallStatusForRecordingRef.current = callStatus;
 
         if (!isSessionActive) return;
-        // Start recording on connect if not already recording
-        if (callStatus === 'connected' && prev !== 'connected' && recorderStatus === 'idle') {
-            console.log('[Session Page] Auto-starting recording on call connect');
+        // Start recording on connect (or ringing) if not already recording.
+        // Ringing handles immediately-answered calls where 'ringing' fires first;
+        // connected handles the fallback for calls that skip directly to 'connected'.
+        if (
+            (callStatus === 'ringing' || callStatus === 'connected') &&
+            prev !== callStatus &&
+            recorderStatus === 'idle'
+        ) {
+            console.log('[Session Page] Auto-starting recording on', callStatus);
             startRecording();
         }
     }, [callStatus, isSessionActive, recorderStatus, startRecording]);
+
+    // Fallback: if audio session becomes active WHILE a call is already connected,
+    // start recording immediately (covers the race where screen share is granted
+    // after Zoom fires the connected event).
+    const prevIsSessionActiveRef = useRef(isSessionActive);
+    useEffect(() => {
+        const wasActive = prevIsSessionActiveRef.current;
+        prevIsSessionActiveRef.current = isSessionActive;
+
+        if (!wasActive && isSessionActive && (callStatus === 'ringing' || callStatus === 'connected') && recorderStatus === 'idle') {
+            console.log('[Session Page] Audio session became active mid-call — starting recording');
+            enterDeferredMode();
+            startRecording();
+        }
+    }, [isSessionActive, callStatus, recorderStatus, startRecording, enterDeferredMode]);
 
     // Warn user before closing tab if session is active
     useEffect(() => {
@@ -721,6 +765,9 @@ export default function SessionPage() {
             setContextPhoneNumber(''); // Clear phone number in context
             window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
+            // Stop screenshare / audio session when call session ends
+            endAudioSession();
+
             // Stop power dialer automation — keep queue & progress so they persist
             // into the next session. Index and queue are intentionally NOT reset here.
             setPowerDialerActive(false);
@@ -742,7 +789,7 @@ export default function SessionPage() {
         } finally {
             setEnding(false);
         }
-    }, [session, elapsedSec, setSession, setContextPhoneNumber]);
+    }, [session, elapsedSec, setSession, setContextPhoneNumber, endAudioSession]);
 
     // Keep endSessionRef in sync so the offline watchdog can always call the
     // latest version without a stale closure (declared here, after endSession).
@@ -979,6 +1026,7 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
+        callEndTimeRef.current = null;
 
         // The previous leg's recording is already queued (added in onstop when the call ended).
         // Deferred mode remains active so the new leg will also be queued.
@@ -994,9 +1042,12 @@ export default function SessionPage() {
     const handleSaveCall = useCallback((data: CallFormData) => {
         if (!session || !user) return;
 
-        // Capture timing values before clearing state
+        // Capture timing values before clearing state.
+        // Use callEndTimeRef for the end time so we measure when the call actually
+        // ended, not when the user happened to submit the form (which could be minutes later).
         const capturedRingStart = ringStartTime;
         const capturedConnectTime = connectTime;
+        const capturedEndTime = callEndTimeRef.current ?? Date.now();
         const capturedPickupIncremented = pickupCountIncremented;
 
         // Determine if this call involved callbacks
@@ -1020,6 +1071,7 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
+        callEndTimeRef.current = null;
         window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
         // Advance power dialer immediately (before background API calls)
@@ -1075,16 +1127,18 @@ export default function SessionPage() {
                     }
                 } catch { /* ignore — still log the call */ }
 
-                // Calculate call durations from captured values
+                // Calculate call durations from captured values.
+                // capturedEndTime is set when callStatus became 'ended', so it reflects
+                // the real call-end moment even if the user submits the form much later.
                 let ringDuration = 0, callDuration = 0, totalDuration = 0;
                 if (capturedRingStart) {
-                    const endTime = Date.now();
                     if (capturedConnectTime) {
                         ringDuration = Math.floor((capturedConnectTime - capturedRingStart) / 1000);
-                        callDuration = Math.floor((endTime - capturedConnectTime) / 1000);
+                        callDuration = Math.floor((capturedEndTime - capturedConnectTime) / 1000);
                         totalDuration = ringDuration + callDuration;
                     } else {
-                        ringDuration = Math.floor((endTime - capturedRingStart) / 1000);
+                        // Call rang but never connected (no answer)
+                        ringDuration = Math.floor((capturedEndTime - capturedRingStart) / 1000);
                         totalDuration = ringDuration;
                     }
                 }
@@ -1201,6 +1255,7 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
+        callEndTimeRef.current = null;
         window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
         // Cancel any pending power dialer auto-dial

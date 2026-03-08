@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  Plus, Download, RefreshCw, Wallet, Search, ChevronDown, Sparkles,
+  Plus, Download, RefreshCw, Wallet, Search, ChevronDown, Sparkles, Trash2, Pencil, Check, X,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { useAuth } from '@/contexts/auth-context';
@@ -48,6 +48,71 @@ function addFrequency(date: Date, frequency: RecurringTransaction['frequency']):
   return d;
 }
 
+// ─── Category colour palettes ─────────────────────────────────────────────────
+const EXPENSE_COLORS = [
+  '#dc2626', '#b91c1c', '#991b1b', // reds
+  '#9f1239', '#be123c', '#e11d48', // roses
+  '#c026d3', '#a21caf', '#86198f', // fuchsias
+  '#7e22ce', '#6b21a8', '#4c1d95', // purples
+];
+const INCOME_COLORS = [
+  '#16a34a', '#15803d', '#166534', // greens
+  '#22c55e', '#4ade80', '#86efac', // light greens
+  '#10b981', '#059669', '#047857', // emeralds
+  '#14b8a6', '#0d9488', '#0f766e', // teals
+];
+const BOTH_COLORS = [
+  '#6366f1', '#3b82f6', '#0ea5e9', // indigo/blue/sky
+  '#f59e0b', '#f97316', '#fb923c', // ambers/oranges
+  '#8b5cf6', '#a855f7', '#ec4899', // violet/purple/pink
+  '#84cc16', '#06b6d4', '#10b981', // lime/cyan/emerald
+];
+
+function defaultColorForType(t: 'income' | 'expense' | 'both') {
+  if (t === 'expense') return EXPENSE_COLORS[0];
+  if (t === 'income') return INCOME_COLORS[0];
+  return BOTH_COLORS[0];
+}
+
+// ─── Inline colour picker used in CategoryManager ─────────────────────────────
+function CategoryColorPicker({
+  color, onChange, type,
+}: {
+  color: string;
+  onChange: (c: string) => void;
+  type: 'income' | 'expense' | 'both';
+}) {
+  const palette = type === 'expense' ? EXPENSE_COLORS : type === 'income' ? INCOME_COLORS : BOTH_COLORS;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {palette.map(c => (
+          <button
+            key={c}
+            onClick={() => onChange(c)}
+            title={c}
+            className={cn(
+              'w-5 h-5 rounded-full transition-all border-2',
+              color === c ? 'border-[var(--foreground)] scale-110' : 'border-transparent opacity-75 hover:opacity-100 hover:scale-105',
+            )}
+            style={{ backgroundColor: c }}
+          />
+        ))}
+        <label className="w-5 h-5 rounded-full border-2 border-dashed border-[var(--card-border)] cursor-pointer flex items-center justify-center hover:border-[var(--foreground)] transition-colors" title="Custom colour">
+          <span className="text-[8px] text-[var(--muted)]">+</span>
+          <input type="color" value={color} onChange={e => onChange(e.target.value)} className="hidden" />
+        </label>
+      </div>
+      {color && (
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+          <span className="text-[10px] text-[var(--muted)] font-mono">{color}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Category Manager (inline, lightweight) ───────────────────────────────────
 function CategoryManager({
   categories,
@@ -61,10 +126,53 @@ function CategoryManager({
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [type, setType] = useState<'income' | 'expense' | 'both'>('expense');
-  const [color, setColor] = useState('#6366f1');
+  const [color, setColor] = useState(defaultColorForType('expense'));
   const [budgetLimit, setBudgetLimit] = useState('');
   const [budgetCurrency, setBudgetCurrency] = useState<SupportedCurrency>('USD');
   const [saving, setSaving] = useState(false);
+
+  // Edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editType, setEditType] = useState<'income' | 'expense' | 'both'>('expense');
+  const [editColor, setEditColor] = useState('');
+  const [editBudgetLimit, setEditBudgetLimit] = useState('');
+  const [editBudgetCurrency, setEditBudgetCurrency] = useState<SupportedCurrency>('USD');
+  const [editSaving, setEditSaving] = useState(false);
+
+  function startEdit(cat: FinCategory) {
+    setEditingId(cat.id);
+    setEditName(cat.name);
+    setEditType(cat.type as 'income' | 'expense' | 'both');
+    setEditColor(cat.color || defaultColorForType(cat.type as 'income' | 'expense' | 'both'));
+    setEditBudgetLimit(cat.budget_limit ? String(cat.budget_limit) : '');
+    setEditBudgetCurrency((cat.budget_currency as SupportedCurrency) || 'USD');
+    setAdding(false); // close add form if open
+  }
+
+  function cancelEdit() { setEditingId(null); }
+
+  function handleTypeChange(t: 'income' | 'expense' | 'both') {
+    setType(t);
+    setColor(prev => {
+      const expDefault = EXPENSE_COLORS.includes(prev);
+      const incDefault = INCOME_COLORS.includes(prev);
+      const bothDefault = BOTH_COLORS.includes(prev);
+      if (expDefault || incDefault || bothDefault) return defaultColorForType(t);
+      return prev;
+    });
+  }
+
+  function handleEditTypeChange(t: 'income' | 'expense' | 'both') {
+    setEditType(t);
+    setEditColor(prev => {
+      const expDefault = EXPENSE_COLORS.includes(prev);
+      const incDefault = INCOME_COLORS.includes(prev);
+      const bothDefault = BOTH_COLORS.includes(prev);
+      if (expDefault || incDefault || bothDefault) return defaultColorForType(t);
+      return prev;
+    });
+  }
 
   async function save() {
     if (!name.trim()) return;
@@ -77,8 +185,25 @@ function CategoryManager({
         created_by: userId,
       });
       setName(''); setBudgetLimit(''); setAdding(false);
+      setColor(defaultColorForType(type));
       onRefresh();
     } finally { setSaving(false); }
+  }
+
+  async function saveEdit() {
+    if (!editName.trim() || !editingId) return;
+    setEditSaving(true);
+    try {
+      await pb.collection(COLLECTIONS.FIN_CATEGORIES).update(editingId, {
+        name: editName.trim(),
+        type: editType,
+        color: editColor,
+        budget_limit: editBudgetLimit ? parseFloat(editBudgetLimit) : null,
+        budget_currency: editBudgetCurrency,
+      });
+      setEditingId(null);
+      onRefresh();
+    } finally { setEditSaving(false); }
   }
 
   async function deleteCategory(id: string) {
@@ -87,33 +212,56 @@ function CategoryManager({
     onRefresh();
   }
 
+  const typeLabel: Record<string, string> = { expense: 'Expense', income: 'Income', both: 'Both' };
+
   return (
     <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold">Categories</h3>
-        <button onClick={() => setAdding(a => !a)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[var(--foreground)] text-[var(--background)] rounded-lg hover:opacity-90">
+        <button
+          onClick={() => { setAdding(a => !a); setEditingId(null); }}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[var(--foreground)] text-[var(--background)] rounded-lg hover:opacity-90"
+        >
           <Plus size={12} />{adding ? 'Cancel' : 'Add'}
         </button>
       </div>
 
       {adding && (
-        <div className="mb-4 space-y-2 p-3 bg-[var(--card-hover)] rounded-lg">
+        <div className="mb-4 space-y-3 p-3 bg-[var(--card-hover)] rounded-lg">
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Category name" className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]" />
-          <div className="grid grid-cols-3 gap-2">
-            <select value={type} onChange={e => setType(e.target.value as typeof type)} className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg">
-              <option value="expense">Expense</option>
-              <option value="income">Income</option>
-              <option value="both">Both</option>
-            </select>
-            <input type="number" value={budgetLimit} onChange={e => setBudgetLimit(e.target.value)} placeholder="Budget limit" className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]" />
+          <div className="flex rounded-lg border border-[var(--card-border)] p-0.5 gap-0.5 bg-[var(--background)]">
+            {(['expense', 'income', 'both'] as const).map(t => (
+              <button
+                key={t}
+                onClick={() => handleTypeChange(t)}
+                className={cn(
+                  'flex-1 py-1.5 text-xs rounded-md font-medium capitalize transition-all',
+                  type === t
+                    ? t === 'income' ? 'bg-[var(--success)] text-white'
+                    : t === 'expense' ? 'bg-[var(--error)] text-white'
+                    : 'bg-[var(--foreground)] text-[var(--background)]'
+                    : 'text-[var(--muted)] hover:bg-[var(--card-hover)]',
+                )}
+              >
+                {typeLabel[t]}
+              </button>
+            ))}
+          </div>
+          <div>
+            <p className="text-[10px] font-medium text-[var(--muted)] mb-1.5">
+              {type === 'expense' ? 'Suggested colours — dark & red tones' : type === 'income' ? 'Suggested colours — green & bright tones' : 'Suggested colours'}
+            </p>
+            <CategoryColorPicker color={color} onChange={setColor} type={type} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input type="number" value={budgetLimit} onChange={e => setBudgetLimit(e.target.value)} placeholder="Budget limit (optional)" className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]" />
             <select value={budgetCurrency} onChange={e => setBudgetCurrency(e.target.value as SupportedCurrency)} className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg">
               {SUPPORTED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-7 h-7 rounded cursor-pointer border-0" />
-            <button onClick={save} disabled={saving || !name.trim()} className="flex-1 py-1.5 text-xs bg-[var(--foreground)] text-[var(--background)] rounded-lg disabled:opacity-50">Save</button>
-          </div>
+          <button onClick={save} disabled={saving || !name.trim()} className="w-full py-2 text-xs bg-[var(--foreground)] text-[var(--background)] rounded-lg disabled:opacity-50 font-medium">
+            {saving ? 'Saving…' : 'Save Category'}
+          </button>
         </div>
       )}
 
@@ -122,12 +270,108 @@ function CategoryManager({
       ) : (
         <div className="space-y-1.5">
           {categories.map(cat => (
-            <div key={cat.id} className="flex items-center gap-2 text-xs py-1.5 group">
-              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color || 'var(--muted)' }} />
-              <span className="flex-1 font-medium">{cat.name}</span>
-              <span className="text-[var(--muted)] capitalize text-[10px]">{cat.type}</span>
-              {cat.budget_limit && <span className="text-[var(--muted)] text-[10px]">{CURRENCY_SYMBOLS[cat.budget_currency ?? 'USD']}{cat.budget_limit}</span>}
-              <button onClick={() => deleteCategory(cat.id)} className="opacity-0 group-hover:opacity-100 text-[var(--error)] hover:opacity-70 transition-opacity text-[10px]">✕</button>
+            <div key={cat.id}>
+              {editingId === cat.id ? (
+                /* ── Inline edit form ── */
+                <div className="space-y-3 p-3 bg-[var(--card-hover)] rounded-lg border border-[var(--card-border)]">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wide">Edit Category</span>
+                    <button onClick={cancelEdit} className="p-1 rounded text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)] transition-all">
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <input
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    placeholder="Category name"
+                    autoFocus
+                    className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                  />
+                  <div className="flex rounded-lg border border-[var(--card-border)] p-0.5 gap-0.5 bg-[var(--background)]">
+                    {(['expense', 'income', 'both'] as const).map(t => (
+                      <button
+                        key={t}
+                        onClick={() => handleEditTypeChange(t)}
+                        className={cn(
+                          'flex-1 py-1.5 text-xs rounded-md font-medium capitalize transition-all',
+                          editType === t
+                            ? t === 'income' ? 'bg-[var(--success)] text-white'
+                            : t === 'expense' ? 'bg-[var(--error)] text-white'
+                            : 'bg-[var(--foreground)] text-[var(--background)]'
+                            : 'text-[var(--muted)] hover:bg-[var(--card-hover)]',
+                        )}
+                      >
+                        {typeLabel[t]}
+                      </button>
+                    ))}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-medium text-[var(--muted)] mb-1.5">
+                      {editType === 'expense' ? 'Suggested colours — dark & red tones' : editType === 'income' ? 'Suggested colours — green & bright tones' : 'Suggested colours'}
+                    </p>
+                    <CategoryColorPicker color={editColor} onChange={setEditColor} type={editType} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="number"
+                      value={editBudgetLimit}
+                      onChange={e => setEditBudgetLimit(e.target.value)}
+                      placeholder="Budget limit (optional)"
+                      className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                    />
+                    <select
+                      value={editBudgetCurrency}
+                      onChange={e => setEditBudgetCurrency(e.target.value as SupportedCurrency)}
+                      className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg"
+                    >
+                      {SUPPORTED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={saveEdit}
+                      disabled={editSaving || !editName.trim()}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs bg-[var(--foreground)] text-[var(--background)] rounded-lg disabled:opacity-50 font-medium"
+                    >
+                      <Check size={11} />{editSaving ? 'Saving…' : 'Save Changes'}
+                    </button>
+                    <button onClick={cancelEdit} className="px-3 py-2 text-xs border border-[var(--card-border)] rounded-lg text-[var(--muted)] hover:bg-[var(--card-hover)] transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ── Read-only row ── */
+                <div className="flex items-center gap-2 text-xs py-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color || 'var(--muted)' }} />
+                  <span className="flex-1 font-medium">{cat.name}</span>
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded-full border capitalize"
+                    style={{
+                      borderColor: cat.color ? `${cat.color}55` : undefined,
+                      color: cat.color || 'var(--muted)',
+                      backgroundColor: cat.color ? `${cat.color}18` : undefined,
+                    }}
+                  >
+                    {cat.type}
+                  </span>
+                  {cat.budget_limit && <span className="text-[var(--muted)] text-[10px]">{CURRENCY_SYMBOLS[cat.budget_currency ?? 'USD']}{cat.budget_limit}</span>}
+                  <button
+                    onClick={() => startEdit(cat)}
+                    className="shrink-0 p-1 rounded-md text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)] transition-all duration-150"
+                    title="Edit category"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    onClick={() => deleteCategory(cat.id)}
+                    className="shrink-0 p-1 rounded-md text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-all duration-150"
+                    title="Delete category"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -230,6 +474,7 @@ export default function FinancialPage() {
                 currency: rec.currency,
                 fee_amount: null,
                 category: rec.category || null,
+                category_splits: rec.category_splits && rec.category_splits.length > 1 ? rec.category_splits : null,
                 description: `${rec.description} (Setup Fee)`,
                 status: 'cleared',
                 date: dateStr + ' 00:00:00',
@@ -256,6 +501,7 @@ export default function FinancialPage() {
               currency: rec.currency,
               fee_amount: rec.fee_amount || null,
               category: rec.category || null,
+              category_splits: rec.category_splits && rec.category_splits.length > 1 ? rec.category_splits : null,
               description: rec.description,
               status: 'cleared',
               date: dateStr + ' 00:00:00',
@@ -446,14 +692,68 @@ export default function FinancialPage() {
             )}
           </div>
 
-          <button onClick={() => setShowInvoiceUpload(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-opacity">
-            <Sparkles size={14} />Upload Invoice
+          <button
+            onClick={() => setShowInvoiceUpload(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold rounded-lg border transition-all duration-200"
+            style={{
+              background: 'linear-gradient(135deg, #080e1f 0%, #0b1428 100%)',
+              borderColor: '#1a3060',
+              color: '#5aabff',
+              boxShadow: '0 0 12px rgba(77,159,255,0.18), inset 0 1px 0 rgba(90,171,255,0.08)',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 22px rgba(77,159,255,0.38), inset 0 1px 0 rgba(90,171,255,0.12)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = '#2a4e9a';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 12px rgba(77,159,255,0.18), inset 0 1px 0 rgba(90,171,255,0.08)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = '#1a3060';
+            }}
+          >
+            <Sparkles size={14} style={{ color: '#5aabff', filter: 'drop-shadow(0 0 4px rgba(90,171,255,0.7))' }} />
+            Upload Invoice
           </button>
-          <button onClick={() => { setShowAddTxn(true); setAddTxnType('income'); }} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-[var(--success)] text-white rounded-lg hover:opacity-90 transition-opacity">
-            <Plus size={14} />Income
+          <button
+            onClick={() => { setShowAddTxn(true); setAddTxnType('income'); }}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold rounded-lg border transition-all duration-200"
+            style={{
+              background: 'linear-gradient(135deg, #071408 0%, #0a1c0c 100%)',
+              borderColor: '#1a4020',
+              color: '#2dde6e',
+              boxShadow: '0 0 12px rgba(34,197,94,0.18), inset 0 1px 0 rgba(45,222,110,0.08)',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 22px rgba(34,197,94,0.38), inset 0 1px 0 rgba(45,222,110,0.12)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = '#2a6030';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 12px rgba(34,197,94,0.18), inset 0 1px 0 rgba(45,222,110,0.08)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = '#1a4020';
+            }}
+          >
+            <Plus size={14} style={{ color: '#2dde6e', filter: 'drop-shadow(0 0 4px rgba(45,222,110,0.7))' }} />
+            Income
           </button>
-          <button onClick={() => { setShowAddTxn(true); setAddTxnType('expense'); }} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-[var(--error)] text-white rounded-lg hover:opacity-90 transition-opacity">
-            <Plus size={14} />Expense
+          <button
+            onClick={() => { setShowAddTxn(true); setAddTxnType('expense'); }}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold rounded-lg border transition-all duration-200"
+            style={{
+              background: 'linear-gradient(135deg, #130608 0%, #1c0a0d 100%)',
+              borderColor: '#4a1420',
+              color: '#ff4d6a',
+              boxShadow: '0 0 12px rgba(255,77,106,0.18), inset 0 1px 0 rgba(255,77,106,0.08)',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 22px rgba(255,77,106,0.38), inset 0 1px 0 rgba(255,77,106,0.12)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = '#6e1e30';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 12px rgba(255,77,106,0.18), inset 0 1px 0 rgba(255,77,106,0.08)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = '#4a1420';
+            }}
+          >
+            <Plus size={14} style={{ color: '#ff4d6a', filter: 'drop-shadow(0 0 4px rgba(255,77,106,0.7))' }} />
+            Expense
           </button>
           <button onClick={() => setShowExport(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm border border-[var(--card-border)] rounded-lg hover:bg-[var(--card-hover)] transition-colors bg-[var(--card-bg)]">
             <Download size={14} />Export

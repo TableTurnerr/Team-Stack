@@ -5,7 +5,7 @@
 // Update Checker - Checks for new versions from GitHub
 // ============================================================================
 
-var VERSION_JSON_URL = 'https://raw.githubusercontent.com/Hashaam101/google-maps-easy-scrape/main/version.json';
+var VERSION_JSON_URL = 'https://raw.githubusercontent.com/TableTurnerr/Team-Stack/release/tools/TT-lead-scraper-extension/version.json';
 var UPDATE_CHECK_ALARM_NAME = 'checkForUpdates';
 var CHECK_INTERVAL_MINUTES = 60;
 
@@ -75,7 +75,7 @@ function checkForUpdates() {
                 chrome.storage.local.set({
                     updateAvailable: true,
                     updateVersion: remoteVersion,
-                    updateUrl: versionInfo.downloadUrl || 'https://github.com/Hashaam101/google-maps-easy-scrape/releases/latest',
+                    updateUrl: versionInfo.downloadUrl || 'https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension',
                     updateReleaseNotes: versionInfo.releaseNotes || 'Bug fixes and improvements'
                 }, function () {
                     showUpdateNotification(remoteVersion, versionInfo.downloadUrl, versionInfo.releaseNotes);
@@ -126,7 +126,7 @@ chrome.notifications.onButtonClicked.addListener(function (notificationId, butto
     if (buttonIndex === 0) {
         // Download Update button clicked
         chrome.storage.local.get(['notification_' + notificationId + '_url', 'updateUrl'], function (data) {
-            var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/Hashaam101/google-maps-easy-scrape/releases/latest';
+            var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension';
             chrome.tabs.create({ url: url });
             // Clear notification URL
             chrome.storage.local.remove('notification_' + notificationId + '_url');
@@ -138,7 +138,7 @@ chrome.notifications.onButtonClicked.addListener(function (notificationId, butto
 // Handle notification clicks (clicking the notification itself)
 chrome.notifications.onClicked.addListener(function (notificationId) {
     chrome.storage.local.get(['notification_' + notificationId + '_url', 'updateUrl'], function (data) {
-        var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/Hashaam101/google-maps-easy-scrape/releases/latest';
+        var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension';
         chrome.tabs.create({ url: url });
         chrome.storage.local.remove('notification_' + notificationId + '_url');
     });
@@ -643,14 +643,40 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || msg.type !== 'CHECK_SHOULD_SHOW_OVERLAY') return;
 
-    chrome.storage.local.get(['gmes_mode', 'gmes_overlay_dismissed', 'gmes_manual_auto_popup'], function (data) {
+    chrome.storage.local.get(['gmes_mode', 'gmes_overlay_dismissed', 'gmes_manual_auto_popup', 'gmes_exception_sites'], function (data) {
         var isManualMode = data.gmes_mode === 'manual';
         var isDismissed = data.gmes_overlay_dismissed === true;
         var autoPopup = data.gmes_manual_auto_popup !== false; // default true
-        sendResponse({ shouldShow: isManualMode && !isDismissed && autoPopup });
+        var exceptions = Array.isArray(data.gmes_exception_sites) ? data.gmes_exception_sites : [];
+
+        // Check if the sender's hostname is in the exceptions list
+        var senderHostname = '';
+        try {
+            if (sender && sender.tab && sender.tab.url) {
+                senderHostname = new URL(sender.tab.url).hostname;
+            }
+        } catch (e) {}
+        var isException = senderHostname && exceptions.indexOf(senderHostname) !== -1;
+
+        sendResponse({ shouldShow: isManualMode && !isDismissed && autoPopup && !isException });
     });
 
     // Return true to indicate async response
+    return true;
+});
+
+// Handle ADD_EXCEPTION_SITE messages from content scripts
+chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (!msg || msg.type !== 'ADD_EXCEPTION_SITE') return;
+    var hostname = msg.hostname || '';
+    if (!hostname) { sendResponse({ success: false }); return; }
+    chrome.storage.local.get(['gmes_exception_sites'], function (data) {
+        var sites = Array.isArray(data.gmes_exception_sites) ? data.gmes_exception_sites : [];
+        if (sites.indexOf(hostname) === -1) sites.push(hostname);
+        chrome.storage.local.set({ gmes_exception_sites: sites }, function () {
+            sendResponse({ success: true });
+        });
+    });
     return true;
 });
 
@@ -694,6 +720,52 @@ function handleManualAddItem(item) {
         });
     });
 }
+
+// ============================================================================
+// Auto-Popup: inject overlays automatically when Manual Mode + Auto-Popup is on
+// ============================================================================
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+    if (changeInfo.status !== 'complete') return;
+    var url = tab.url || '';
+    // Skip non-http pages (chrome://, extensions, about:, etc.)
+    if (!url || !url.startsWith('http')) return;
+
+    chrome.storage.local.get(['gmes_mode', 'gmes_manual_auto_popup', 'gmes_exception_sites'], function (data) {
+        if (data.gmes_mode !== 'manual') return;
+        if (data.gmes_manual_auto_popup === false) return;
+
+        // Check exceptions list
+        var exceptions = Array.isArray(data.gmes_exception_sites) ? data.gmes_exception_sites : [];
+        var hostname = '';
+        try { hostname = new URL(url).hostname; } catch (e) {}
+        if (hostname && exceptions.indexOf(hostname) !== -1) return;
+
+        // Maps pages are already injected via manifest; reset dismissed flag and
+        // notify the content script in case it already ran its startup check
+        if (url.indexOf('google.com/maps') !== -1) {
+            chrome.storage.local.set({ gmes_overlay_dismissed: false }, function () {
+                chrome.tabs.sendMessage(tabId, { type: 'SHOW_OVERLAY' }, function () {
+                    // Ignore "receiving end does not exist" — script may not be ready yet
+                    if (chrome.runtime.lastError) { /* ignore */ }
+                });
+            });
+            return;
+        }
+
+        // For all other websites, inject the website scanner overlay
+        chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            files: ['manual_mode_website.js']
+        }, function () {
+            if (chrome.runtime.lastError) {
+                // Some pages (Web Store, etc.) block injection — ignore silently
+            }
+        });
+    });
+});
+// ============================================================================
+// End of Auto-Popup
+// ============================================================================
 
 function scrapeData() {
     var links = Array.from(document.querySelectorAll('a[href^="https://www.google.com/maps/place"]'));

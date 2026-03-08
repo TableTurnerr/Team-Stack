@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, RefreshCw, Pencil, Trash2, Loader2, X, ToggleLeft, ToggleRight, Link2 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Plus, RefreshCw, Pencil, Trash2, Loader2, X, ToggleLeft, ToggleRight, Link2, TrendingDown } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
-import type { RecurringTransaction, BankAccount, FinCategory, SupportedCurrency, CategorySplit } from '@/lib/types';
-import { CURRENCY_SYMBOLS, SUPPORTED_CURRENCIES } from '@/hooks/use-exchange-rates';
+import type { RecurringTransaction, BankAccount, FinCategory, SupportedCurrency, CategorySplit, FinTransaction } from '@/lib/types';
+import { CURRENCY_SYMBOLS, SUPPORTED_CURRENCIES, useExchangeRates } from '@/hooks/use-exchange-rates';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -13,6 +13,8 @@ interface RecurringManagerProps {
   recurring: RecurringTransaction[];
   accounts: BankAccount[];
   categories: FinCategory[];
+  transactions?: FinTransaction[];
+  primaryCurrency?: SupportedCurrency;
   userId: string;
   onRefresh: () => void;
 }
@@ -147,6 +149,7 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
   const [startDate, setStartDate] = useState(editItem?.start_date?.split(' ')[0] ?? new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(editItem?.end_date?.split(' ')[0] ?? '');
   const [initialAmount, setInitialAmount] = useState(editItem?.initial_amount?.toString() ?? '');
+  const [renewalAmount, setRenewalAmount] = useState(editItem?.renewal_amount?.toString() ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -188,6 +191,7 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
           ? editItem.next_run_date ?? startDate + ' 00:00:00'
           : startDate + ' 00:00:00',
         initial_amount: initialAmount ? parseFloat(initialAmount) : null,
+        renewal_amount: renewalAmount ? parseFloat(renewalAmount) : null,
         initial_applied: editItem?.initial_applied ?? false,
         is_active: true,
         created_by: userId,
@@ -195,6 +199,18 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
 
       if (editItem) {
         await pb.collection(COLLECTIONS.RECURRING_TRANSACTIONS).update(editItem.id, data);
+        // Retroactively sync category to all already-generated transactions from this subscription
+        try {
+          const linked = await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).getFullList<FinTransaction>({
+            filter: `recurring_id = "${editItem.id}"`,
+          });
+          await Promise.all(linked.map(txn =>
+            pb.collection(COLLECTIONS.FIN_TRANSACTIONS).update(txn.id, {
+              category: primaryCategory,
+              category_splits: categorySplitsPayload,
+            }),
+          ));
+        } catch { /* silently skip — non-critical */ }
       } else {
         await pb.collection(COLLECTIONS.RECURRING_TRANSACTIONS).create(data);
       }
@@ -254,7 +270,13 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
             <label className="block text-xs font-medium mb-1.5">
               Initial / Setup Amount <span className="text-[var(--muted)] font-normal">(optional — one-time first charge)</span>
             </label>
-            <input type="number" value={initialAmount} onChange={e => setInitialAmount(e.target.value)} placeholder="0.00" className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]" />
+            <div className="grid grid-cols-2 gap-2">
+              <input type="number" value={initialAmount} onChange={e => setInitialAmount(e.target.value)} placeholder="0.00" className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]" />
+              <div>
+                <input type="number" value={renewalAmount} onChange={e => setRenewalAmount(e.target.value)} placeholder={initialAmount ? `Renews at ${initialAmount}` : 'Renewed at'} className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]" />
+                <p className="text-[10px] text-[var(--muted)] mt-1">Renewed at — leave empty to keep same</p>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -308,7 +330,8 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
 }
 
 // ─── Main Manager ─────────────────────────────────────────────────────────────
-export function RecurringManager({ recurring, accounts, categories, userId, onRefresh }: RecurringManagerProps) {
+export function RecurringManager({ recurring, accounts, categories, transactions = [], primaryCurrency = 'USD', userId, onRefresh }: RecurringManagerProps) {
+  const { convert } = useExchangeRates();
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<RecurringTransaction | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -336,6 +359,34 @@ export function RecurringManager({ recurring, accounts, categories, userId, onRe
   }
 
   const freqLabel: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
+  const sym = CURRENCY_SYMBOLS[primaryCurrency];
+
+  // Monthly spend per recurring rule (from generated transactions this month)
+  const monthStartStr = useMemo(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
+  }, []);
+
+  const monthlySpendByRule = useMemo(() => {
+    const result: Record<string, number> = {};
+    for (const txn of transactions) {
+      if (!txn.recurring_id || !txn.is_recurring) continue;
+      const dateStr = txn.date.split(' ')[0];
+      if (dateStr < monthStartStr) continue;
+      const base = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
+      result[txn.recurring_id] = (result[txn.recurring_id] ?? 0) + base;
+    }
+    return result;
+  }, [transactions, convert, primaryCurrency, monthStartStr]);
+
+  // Monthly totals summary
+  const monthlyExpenseTotal = useMemo(() =>
+    recurring.filter(r => r.type === 'expense' && r.is_active).reduce((s, r) => {
+      const multiplier = r.frequency === 'daily' ? 30 : r.frequency === 'weekly' ? 4.33 : r.frequency === 'yearly' ? 1 / 12 : 1;
+      return s + convert(r.amount, r.currency, primaryCurrency) * multiplier;
+    }, 0),
+    [recurring, convert, primaryCurrency],
+  );
 
   // Group by income/expense for clarity
   const incomeRecs = recurring.filter(r => r.type === 'income');
@@ -351,6 +402,7 @@ export function RecurringManager({ recurring, accounts, categories, userId, onRe
             const acc = accounts.find(a => a.id === item.bank_account);
             const symbol = CURRENCY_SYMBOLS[item.currency];
             const isIncome = item.type === 'income';
+            const thisMonthSpend = monthlySpendByRule[item.id] ?? 0;
 
             // Resolve category labels (handle splits)
             const splitsData = item.category_splits && item.category_splits.length > 1
@@ -380,6 +432,15 @@ export function RecurringManager({ recurring, accounts, categories, userId, onRe
                     {acc && <><span>·</span><span>{acc.name}</span></>}
                     {item.next_run_date && (
                       <><span>·</span><span>Next: {format(new Date(item.next_run_date.split(' ')[0] + 'T12:00:00'), 'MMM d')}</span></>
+                    )}
+                    {thisMonthSpend > 0 && (
+                      <>
+                        <span>·</span>
+                        <span className={cn('flex items-center gap-0.5 font-medium', isIncome ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+                          <TrendingDown size={9} />
+                          {sym}{thisMonthSpend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} this month
+                        </span>
+                      </>
                     )}
                   </div>
 
@@ -414,9 +475,14 @@ export function RecurringManager({ recurring, accounts, categories, userId, onRe
                 </div>
 
                 <div className="flex flex-col items-end gap-1 shrink-0">
-                  <p className={cn('text-sm font-bold tabular-nums', isIncome ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
-                    {isIncome ? '+' : '-'}{symbol}{item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
+                  <div className="text-right">
+                    <p className={cn('text-sm font-bold tabular-nums', isIncome ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+                      {isIncome ? '+' : '-'}{symbol}{item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    {item.amount === 0 && (item.initial_amount || item.renewal_amount) && (
+                      <p className="text-[10px] text-[var(--warning)]">amount not set</p>
+                    )}
+                  </div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => handleToggle(item)} disabled={toggling === item.id} className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] transition-colors">
                       {toggling === item.id ? <Loader2 size={14} className="animate-spin" /> : item.is_active ? <ToggleRight size={14} className="text-[var(--success)]" /> : <ToggleLeft size={14} />}
@@ -451,6 +517,16 @@ export function RecurringManager({ recurring, accounts, categories, userId, onRe
           <Plus size={13} />New
         </button>
       </div>
+
+      {/* Monthly cost summary bar */}
+      {recurring.length > 0 && monthlyExpenseTotal > 0 && (
+        <div className="flex items-center justify-between px-3 py-2 mb-4 rounded-lg bg-[var(--error-subtle)] border border-[var(--error)]/20">
+          <span className="text-[11px] text-[var(--muted)]">Est. monthly recurring cost</span>
+          <span className="text-sm font-bold text-[var(--error)] tabular-nums">
+            -{sym}{monthlyExpenseTotal.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} /mo
+          </span>
+        </div>
+      )}
 
       {recurring.length === 0 ? (
         <div className="text-center py-10 text-[var(--muted)]">

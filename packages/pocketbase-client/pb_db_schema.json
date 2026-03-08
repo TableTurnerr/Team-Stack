@@ -4549,6 +4549,18 @@
             },
             {
                 "hidden": false,
+                "id": "number_rec_renewal",
+                "max": null,
+                "min": 0,
+                "name": "renewal_amount",
+                "onlyInt": false,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
                 "id": "bool_rec_initial_applied",
                 "name": "initial_applied",
                 "presentable": false,

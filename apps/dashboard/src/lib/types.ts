@@ -453,6 +453,7 @@ export interface RecurringTransaction extends RecordModel {
   end_date?: string;
   next_run_date?: string;
   initial_amount?: number;
+  renewal_amount?: number;
   initial_applied?: boolean;
   is_active?: boolean;
   created_by: string;

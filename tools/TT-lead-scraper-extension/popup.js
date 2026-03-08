@@ -8,24 +8,60 @@ function pbGetSettings(cb) {
     });
 }
 
-function pbCheckDuplicate(name, phone, cb) {
+function pbCheckCompanyStatus(name, phones, cb) {
     pbGetSettings(function (pbUrl, pbToken) {
-        if (!pbUrl) { cb(false); return; }
+        if (!pbUrl) { cb({ status: 'new' }); return; }
         var headers = {};
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
         var nameFilter = encodeURIComponent('name~"' + String(name || '').replace(/"/g, '') + '"');
         fetch(pbUrl + '/api/collections/companies/records?filter=' + nameFilter + '&perPage=1', { headers: headers })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (d.totalItems > 0) { cb(true); return; }
-                if (!phone) { cb(false); return; }
-                var phoneFilter = encodeURIComponent('number="' + String(phone).replace(/\D/g, '') + '"');
+                if (d.totalItems === 0) {
+                    // Not found by name — check if phone exists anywhere
+                    var phoneNums = (Array.isArray(phones) ? phones : []).map(function (p) { return String(p.number || '').replace(/\D/g, ''); }).filter(Boolean);
+                    if (!phoneNums.length) { cb({ status: 'new' }); return; }
+                    var phoneFilter = encodeURIComponent(phoneNums.map(function (n) { return 'number="' + n + '"'; }).join('||'));
+                    fetch(pbUrl + '/api/collections/phone_numbers/records?filter=' + phoneFilter + '&perPage=1', { headers: headers })
+                        .then(function (r2) { return r2.json(); })
+                        .then(function (d2) { cb({ status: d2.totalItems > 0 ? 'exists_same_phone' : 'new' }); })
+                        .catch(function () { cb({ status: 'new' }); });
+                    return;
+                }
+                // Company found by name
+                var companyId = d.items[0].id;
+                var phoneNums = (Array.isArray(phones) ? phones : []).map(function (p) { return String(p.number || '').replace(/\D/g, ''); }).filter(Boolean);
+                if (!phoneNums.length) { cb({ status: 'exists_same_phone', companyId: companyId }); return; }
+                var phoneFilter = encodeURIComponent('company="' + companyId + '"&&(' + phoneNums.map(function (n) { return 'number="' + n + '"'; }).join('||') + ')');
                 fetch(pbUrl + '/api/collections/phone_numbers/records?filter=' + phoneFilter + '&perPage=1', { headers: headers })
                     .then(function (r2) { return r2.json(); })
-                    .then(function (d2) { cb(d2.totalItems > 0); })
-                    .catch(function () { cb(false); });
+                    .then(function (d2) {
+                        cb(d2.totalItems > 0
+                            ? { status: 'exists_same_phone', companyId: companyId }
+                            : { status: 'exists_new_phone', companyId: companyId });
+                    })
+                    .catch(function () { cb({ status: 'exists_same_phone', companyId: companyId }); });
             })
-            .catch(function () { cb(false); });
+            .catch(function () { cb({ status: 'new' }); });
+    });
+}
+
+function pbAddPhoneToCompany(companyId, phones, cb) {
+    pbGetSettings(function (pbUrl, pbToken) {
+        if (!pbUrl) { cb({ success: false, error: 'No PocketBase URL configured. Set it in \u2699 CRM Settings.' }); return; }
+        var headers = { 'Content-Type': 'application/json' };
+        if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
+        var phoneList = Array.isArray(phones) ? phones : [];
+        if (!phoneList.length) { cb({ success: true }); return; }
+        var phonePromises = phoneList.map(function (pe) {
+            var num = String(pe.number || '').replace(/\D/g, '');
+            if (!num) return Promise.resolve();
+            var phoneBody = JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' });
+            return fetch(pbUrl + '/api/collections/phone_numbers/records', { method: 'POST', headers: headers, body: phoneBody });
+        });
+        Promise.all(phonePromises)
+            .then(function () { cb({ success: true }); })
+            .catch(function (e) { cb({ success: false, error: e.message || String(e) }); });
     });
 }
 
@@ -369,30 +405,85 @@ document.addEventListener('DOMContentLoaded', function () {
                         cell.textContent = '\u2713 Synced';
                         cell.style.color = '#34a853';
                         cell.style.fontWeight = '600';
+                    } else if (item.crmPhoneAdded) {
+                        cell.textContent = '\u2713 Phone Added';
+                        cell.style.color = '#34a853';
+                        cell.style.fontWeight = '600';
                     } else {
                         var sendBtn = document.createElement('button');
-                        sendBtn.textContent = 'Send to CRM';
-                        sendBtn.className = 'button';
-                        sendBtn.style.cssText = 'padding: 4px 10px; font-size: 12px; border-radius: 12px;';
+                        if (item.crmExistingId) {
+                            sendBtn.textContent = 'Add New Phone +';
+                            sendBtn.style.cssText = 'padding: 4px 10px; font-size: 12px; border-radius: 12px; background: #ff9800; color: white; border: none; cursor: pointer;';
+                        } else {
+                            sendBtn.textContent = 'Send to CRM';
+                            sendBtn.className = 'button';
+                            sendBtn.style.cssText = 'padding: 4px 10px; font-size: 12px; border-radius: 12px;';
+                        }
                         (function (capturedItem, capturedCell, capturedBtn) {
-                            capturedBtn.addEventListener('click', function () {
-                                capturedBtn.disabled = true;
-                                capturedBtn.textContent = 'Sending\u2026';
-                                pbSendToCrm(capturedItem, function (result) {
-                                    if (result.success) {
+                            // Async CRM check — update button if company exists with a different phone
+                            if (!capturedItem.crmExistingId && !capturedItem.crmChecked) {
+                                capturedItem.crmChecked = true;
+                                var checkPhones = Array.isArray(capturedItem.phones) && capturedItem.phones.length
+                                    ? capturedItem.phones
+                                    : (capturedItem.phone ? [{ number: capturedItem.phone, label: 'Main' }] : []);
+                                pbCheckCompanyStatus(capturedItem.title, checkPhones, function (statusResult) {
+                                    if (statusResult.status === 'exists_new_phone') {
+                                        capturedItem.crmExistingId = statusResult.companyId;
+                                        capturedBtn.textContent = 'Add New Phone +';
+                                        capturedBtn.className = '';
+                                        capturedBtn.style.cssText = 'padding: 4px 10px; font-size: 12px; border-radius: 12px; background: #ff9800; color: white; border: none; cursor: pointer;';
+                                        saveToStorage();
+                                    } else if (statusResult.status === 'exists_same_phone') {
                                         capturedItem.crmSynced = true;
-                                        if (result.recordId) capturedItem.crmId = result.recordId;
+                                        if (statusResult.companyId) capturedItem.crmId = statusResult.companyId;
                                         capturedCell.innerHTML = '';
-                                        capturedCell.textContent = '\u2713 Synced';
+                                        capturedCell.textContent = '\u2713 In CRM';
                                         capturedCell.style.color = '#34a853';
                                         capturedCell.style.fontWeight = '600';
                                         saveToStorage();
-                                    } else {
-                                        capturedBtn.disabled = false;
-                                        capturedBtn.textContent = 'Retry';
-                                        alert('CRM sync failed: ' + (result.error || 'Unknown error'));
                                     }
                                 });
+                            }
+                            capturedBtn.addEventListener('click', function () {
+                                if (capturedItem.crmExistingId) {
+                                    capturedBtn.disabled = true;
+                                    capturedBtn.textContent = 'Adding\u2026';
+                                    var addPhones = Array.isArray(capturedItem.phones) && capturedItem.phones.length
+                                        ? capturedItem.phones
+                                        : (capturedItem.phone ? [{ number: capturedItem.phone, label: 'Main' }] : []);
+                                    pbAddPhoneToCompany(capturedItem.crmExistingId, addPhones, function (result) {
+                                        if (result.success) {
+                                            capturedItem.crmPhoneAdded = true;
+                                            capturedCell.innerHTML = '';
+                                            capturedCell.textContent = '\u2713 Phone Added';
+                                            capturedCell.style.color = '#34a853';
+                                            capturedCell.style.fontWeight = '600';
+                                            saveToStorage();
+                                        } else {
+                                            capturedBtn.disabled = false;
+                                            capturedBtn.textContent = 'Add New Phone +';
+                                            alert('Failed to add phone: ' + (result.error || 'Unknown error'));
+                                        }
+                                    });
+                                } else {
+                                    capturedBtn.disabled = true;
+                                    capturedBtn.textContent = 'Sending\u2026';
+                                    pbSendToCrm(capturedItem, function (result) {
+                                        if (result.success) {
+                                            capturedItem.crmSynced = true;
+                                            if (result.recordId) capturedItem.crmId = result.recordId;
+                                            capturedCell.innerHTML = '';
+                                            capturedCell.textContent = '\u2713 Synced';
+                                            capturedCell.style.color = '#34a853';
+                                            capturedCell.style.fontWeight = '600';
+                                            saveToStorage();
+                                        } else {
+                                            capturedBtn.disabled = false;
+                                            capturedBtn.textContent = 'Retry';
+                                            alert('CRM sync failed: ' + (result.error || 'Unknown error'));
+                                        }
+                                    });
+                                }
                             });
                         })(item, cell, sendBtn);
                         cell.appendChild(sendBtn);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { Mic, ExternalLink, Trash2, CheckSquare, Loader2, PhoneIncoming, PhoneOutgoing, X, Download } from 'lucide-react';
+import { Mic, ExternalLink, Trash2, CheckSquare, Loader2, PhoneIncoming, PhoneOutgoing, X, Download, Minimize2, Maximize2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type Recording } from '@/lib/types';
 import Link from 'next/link';
@@ -29,6 +29,9 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     const [stagingIds, setStagingIds] = useState<Set<string>>(new Set());
     const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
     const [playerLoading, setPlayerLoading] = useState<string | null>(null);
+    const [playerMinimized, setPlayerMinimized] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [isHoveringMic, setIsHoveringMic] = useState(false);
     const audioRef = useRef<HTMLAudioElement>(null);
 
     const adminMode = useAdminModeOptional();
@@ -42,6 +45,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                 `call_log = "${log.id}"`
             );
             setPlayerRecording(recording);
+            setPlayerMinimized(false);
         } catch {
             // No linked recording found — fall back to recordings page
             window.open(`/recordings?call_log=${log.id}`, '_blank');
@@ -53,6 +57,18 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     const closePlayer = () => {
         audioRef.current?.pause();
         setPlayerRecording(null);
+        setPlayerMinimized(false);
+        setIsPlaying(false);
+    };
+
+    const togglePlayback = () => {
+        if (!audioRef.current) return;
+        if (isPlaying) {
+            audioRef.current.pause();
+        } else {
+            audioRef.current.play();
+        }
+        setIsPlaying(!isPlaying);
     };
 
     useEffect(() => {
@@ -121,20 +137,76 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     return (
         <>
         {playerRecording && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm" onClick={closePlayer}>
+            <div 
+                className={cn(
+                    "fixed z-50 transition-all duration-300",
+                    playerMinimized 
+                        ? "bottom-4 right-4 w-auto" 
+                        : "inset-0 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm"
+                )}
+                onClick={!playerMinimized ? closePlayer : undefined}
+            >
                 <div
-                    className="w-full max-w-md bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl p-4 space-y-3"
+                    className={cn(
+                        "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl transition-all duration-300 overflow-hidden",
+                        playerMinimized 
+                            ? "w-64 p-3 flex flex-col gap-2" 
+                            : "w-full max-w-md p-4 space-y-3"
+                    )}
                     onClick={e => e.stopPropagation()}
                 >
                     <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
-                            <Mic size={16} className="text-[var(--primary)] shrink-0" />
-                            <span className="text-sm font-medium truncate">
-                                {playerRecording.note || playerRecording.original_filename || 'Call Recording'}
-                            </span>
+                            {playerMinimized ? (
+                                <button 
+                                    onClick={togglePlayback}
+                                    onMouseEnter={() => setIsHoveringMic(true)}
+                                    onMouseLeave={() => setIsHoveringMic(false)}
+                                    className={cn(
+                                        "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all",
+                                        isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--warning-subtle)] text-[var(--warning)]"
+                                    )}
+                                >
+                                    {isPlaying ? (
+                                        isHoveringMic ? (
+                                            <Pause size={16} fill="currentColor" />
+                                        ) : (
+                                            <Mic size={16} className="animate-pulse" />
+                                        )
+                                    ) : (
+                                        <Play size={16} fill="currentColor" className="ml-0.5" />
+                                    )}
+                                </button>
+                            ) : (
+                                <div className={cn(
+                                    "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+                                    isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--card-hover)] text-[var(--muted)]"
+                                )}>
+                                    <Mic size={16} />
+                                </div>
+                            )}
+                            <div className="flex flex-col min-w-0">
+                                {playerMinimized ? (
+                                    <span className="text-xs font-medium truncate text-[var(--foreground)]">
+                                        {playerRecording.note || playerRecording.original_filename || 'Call Recording'}
+                                    </span>
+                                ) : (
+                                    <>
+                                        <span className={cn(
+                                            "text-[10px] font-bold uppercase tracking-widest leading-none mb-1",
+                                            isPlaying ? "text-[var(--primary)]" : "text-[var(--muted)]"
+                                        )}>
+                                            {isPlaying ? 'Playing' : 'Paused'}
+                                        </span>
+                                        <span className="text-sm font-medium truncate">
+                                            {playerRecording.note || playerRecording.original_filename || 'Call Recording'}
+                                        </span>
+                                    </>
+                                )}
+                            </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                            {playerRecording.file && (
+                            {!playerMinimized && playerRecording.file && (
                                 <a
                                     href={pb.files.getUrl(playerRecording, playerRecording.file)}
                                     download
@@ -147,8 +219,18 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                                 </a>
                             )}
                             <button
-                                onClick={closePlayer}
+                                onClick={() => setPlayerMinimized(!playerMinimized)}
                                 className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                                title={playerMinimized ? "Expand" : "Minimize"}
+                            >
+                                {playerMinimized ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
+                            </button>
+                            <button
+                                onClick={closePlayer}
+                                className={cn(
+                                    "p-1.5 rounded-lg text-[var(--muted)] transition-colors",
+                                    playerMinimized ? "hover:text-[var(--error)] hover:bg-[var(--error)]/5" : "hover:text-[var(--foreground)] hover:bg-[var(--card-hover)]"
+                                )}
                                 title="Close"
                             >
                                 <X size={15} />
@@ -158,14 +240,19 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                     {playerRecording.file ? (
                         <audio
                             ref={audioRef}
-                            controls
+                            controls={!playerMinimized}
                             autoPlay
                             preload="metadata"
-                            className="w-full h-10"
+                            className={cn(
+                                "w-full h-10 transition-all",
+                                playerMinimized ? "h-0 opacity-0 pointer-events-none" : "h-10 opacity-100"
+                            )}
                             src={pb.files.getUrl(playerRecording, playerRecording.file)}
                             onEnded={closePlayer}
+                            onPlay={() => setIsPlaying(true)}
+                            onPause={() => setIsPlaying(false)}
                         />
-                    ) : (
+                    ) : !playerMinimized && (
                         <p className="text-sm text-[var(--muted)] text-center py-2">No audio file attached.</p>
                     )}
                 </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones, Download } from 'lucide-react';
+import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones, Download, Minimize2, Maximize2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Recording } from '@/lib/types';
 import { formatDate, formatDateTime, formatDuration, cn, sanitizeFilterValue } from '@/lib/utils';
@@ -66,8 +66,36 @@ export default function RecordingsPage() {
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  // Audio player state - track which recording is expanded
-  const [expandedRecordingId, setExpandedRecordingId] = useState<string | null>(null);
+  // Audio player state
+  const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
+  const [playerMinimized, setPlayerMinimized] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isHoveringMic, setIsHoveringMic] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const closePlayer = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setPlayingRecording(null);
+    setPlayerMinimized(false);
+    setIsPlaying(false);
+  };
+
+  const togglePlayback = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handlePlayRecording = (recording: Recording) => {
+    setPlayingRecording(recording);
+    setPlayerMinimized(false);
+  };
 
   // Check for duplicate recordings by original_filename - batched with retry logic
   const checkDuplicates = async (fileNames: string[]): Promise<Map<string, DuplicateInfo>> => {
@@ -739,94 +767,56 @@ export default function RecordingsPage() {
                       </td>
                     )}
                     {isColumnVisible('file') && (
-                      <td
-                        className="py-3 px-4"
-                        colSpan={expandedRecordingId === recording.id ? 3 : 1}
-                      >
+                      <td className="py-3 px-4">
                         {recording.file ? (
-                          expandedRecordingId === recording.id ? (
-                            <div className="flex items-center gap-3">
-                              <audio
-                                controls
-                                autoPlay
-                                preload="metadata"
-                                className="h-8 flex-1 min-w-[200px]"
-                                src={pb.files.getUrl(recording, recording.file)}
-                                onEnded={() => setExpandedRecordingId(null)}
-                              />
-                              <button
-                                onClick={() => setExpandedRecordingId(null)}
-                                className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors shrink-0"
-                                title="Close player"
-                              >
-                                <X size={16} />
-                              </button>
-                              <a
-                                href={pb.files.getUrl(recording, recording.file)}
-                                download
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors shrink-0"
-                                title="Download recording"
-                              >
-                                <Download size={16} />
-                              </a>
-                              {isAdmin && (
-                                <button
-                                  onClick={() => handleDelete(recording.id)}
-                                  className="p-2 rounded-lg text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors shrink-0"
-                                  title="Delete recording"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setExpandedRecordingId(recording.id)}
-                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-sm font-medium hover:bg-[var(--card-hover)] hover:border-[var(--primary)] transition-all group"
-                            >
-                              <Headphones size={14} className="text-[var(--muted)] group-hover:text-[var(--primary)]" />
-                              <span className="group-hover:text-[var(--primary)]">Listen</span>
-                            </button>
-                          )
+                          <button
+                            onClick={() => handlePlayRecording(recording)}
+                            className={cn(
+                              "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all group",
+                              playingRecording?.id === recording.id
+                                ? "bg-[var(--primary)]/10 border-[var(--primary)] text-[var(--primary)]"
+                                : "bg-[var(--sidebar-bg)] border-[var(--card-border)] text-[var(--foreground)] hover:bg-[var(--card-hover)] hover:border-[var(--primary)]"
+                            )}
+                          >
+                            <Headphones size={14} className={cn(
+                              "transition-colors",
+                              playingRecording?.id === recording.id ? "text-[var(--primary)]" : "text-[var(--muted)] group-hover:text-[var(--primary)]"
+                            )} />
+                            <span>{playingRecording?.id === recording.id ? 'Playing...' : 'Listen'}</span>
+                          </button>
                         ) : (
                           <span className="text-xs text-[var(--muted)]">No file</span>
                         )}
                       </td>
                     )}
-                    {isColumnVisible('uploader') && expandedRecordingId !== recording.id && (
-                      <td className="py-3 px-4 text-sm whitespace-nowrap">
-                        {recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A'}
-                      </td>
-                    )}
-                    {expandedRecordingId !== recording.id && (
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {recording.file && (
-                            <a
-                              href={pb.files.getUrl(recording, recording.file)}
-                              download
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors"
-                              title="Download recording"
-                            >
-                              <Download size={16} className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors" />
-                            </a>
-                          )}
-                          {isAdmin && (
-                            <button
-                              onClick={() => handleDelete(recording.id)}
-                              className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
-                              title="Delete recording"
-                            >
-                              <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    )}
+                    <td className="py-3 px-4 text-sm whitespace-nowrap">
+                      {isColumnVisible('uploader') && (recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A')}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {recording.file && (
+                          <a
+                            href={pb.files.getUrl(recording, recording.file)}
+                            download
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors"
+                            title="Download recording"
+                          >
+                            <Download size={16} className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors" />
+                          </a>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDelete(recording.id)}
+                            className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
+                            title="Delete recording"
+                          >
+                            <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -834,6 +824,130 @@ export default function RecordingsPage() {
           </div>
         )}
       </div>
+
+      {/* Floating Recording Player */}
+      {playingRecording && (
+        <div 
+          className={cn(
+            "fixed z-50 transition-all duration-300",
+            playerMinimized 
+              ? "bottom-4 right-4 w-auto" 
+              : "inset-0 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm"
+          )}
+          onClick={!playerMinimized ? closePlayer : undefined}
+        >
+          <div
+            className={cn(
+              "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl transition-all duration-300 overflow-hidden",
+              playerMinimized 
+                ? "w-64 p-3 flex flex-col gap-2" 
+                : "w-full max-w-md p-4 space-y-3"
+            )}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                {playerMinimized ? (
+                  <button 
+                    onClick={togglePlayback}
+                    onMouseEnter={() => setIsHoveringMic(true)}
+                    onMouseLeave={() => setIsHoveringMic(false)}
+                    className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all",
+                      isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--warning-subtle)] text-[var(--warning)]"
+                    )}
+                  >
+                    {isPlaying ? (
+                      isHoveringMic ? (
+                        <Pause size={16} fill="currentColor" />
+                      ) : (
+                        <Mic size={16} className="animate-pulse" />
+                      )
+                    ) : (
+                      <Play size={16} fill="currentColor" className="ml-0.5" />
+                    )}
+                  </button>
+                ) : (
+                  <div className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+                    isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--card-hover)] text-[var(--muted)]"
+                  )}>
+                    <Mic size={16} />
+                  </div>
+                )}
+                <div className="flex flex-col min-w-0">
+                  {playerMinimized ? (
+                    <span className="text-xs font-medium truncate text-[var(--foreground)]">
+                      {playingRecording.note || playingRecording.original_filename || 'Call Recording'}
+                    </span>
+                  ) : (
+                    <>
+                      <span className={cn(
+                        "text-[10px] font-bold uppercase tracking-widest leading-none mb-1",
+                        isPlaying ? "text-[var(--primary)]" : "text-[var(--muted)]"
+                      )}>
+                        {isPlaying ? 'Playing' : 'Paused'}
+                      </span>
+                      <span className="text-sm font-medium truncate">
+                        {playingRecording.note || playingRecording.original_filename || 'Call Recording'}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {!playerMinimized && playingRecording.file && (
+                  <a
+                    href={pb.files.getUrl(playingRecording, playingRecording.file)}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                    title="Download"
+                  >
+                    <Download size={15} />
+                  </a>
+                )}
+                <button
+                  onClick={() => setPlayerMinimized(!playerMinimized)}
+                  className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                  title={playerMinimized ? "Expand" : "Minimize"}
+                >
+                  {playerMinimized ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
+                </button>
+                <button
+                  onClick={closePlayer}
+                  className={cn(
+                    "p-1.5 rounded-lg text-[var(--muted)] transition-colors",
+                    playerMinimized ? "hover:text-[var(--error)] hover:bg-[var(--error)]/5" : "hover:text-[var(--foreground)] hover:bg-[var(--card-hover)]"
+                  )}
+                  title="Close"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            {playingRecording.file ? (
+              <audio
+                ref={audioRef}
+                controls={!playerMinimized}
+                autoPlay
+                preload="metadata"
+                className={cn(
+                  "w-full h-10 transition-all",
+                  playerMinimized ? "h-0 opacity-0 pointer-events-none" : "h-10 opacity-100"
+                )}
+                src={pb.files.getUrl(playingRecording, playingRecording.file)}
+                onEnded={closePlayer}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+              />
+            ) : !playerMinimized && (
+              <p className="text-sm text-[var(--muted)] text-center py-2">No audio file attached.</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (

@@ -459,6 +459,16 @@ body {
   }
 }
 
+/* Prior call history attention pulse — fires 2× when a call starts */
+@keyframes prior-call-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px var(--primary), 0 0 10px -2px var(--primary);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--primary), 0 0 22px -2px var(--primary);
+  }
+}
+
 /* Company not found - red pulse glow */
 @keyframes pulse-red-border {
   0%, 100% {

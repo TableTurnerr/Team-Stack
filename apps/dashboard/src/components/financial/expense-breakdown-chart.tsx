@@ -27,12 +27,11 @@ export function ExpenseBreakdownChart({ transactions, categories, primaryCurrenc
     for (const txn of expenses) {
       const baseAmount = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
 
-      // If the transaction has multi-category splits, distribute proportionally
-      const splits = txn.category_splits;
-      if (splits && splits.length > 1) {
+      // If the transaction has category splits, distribute proportionally
+      const splits = txn.category_splits?.filter(sp => sp.category_id);
+      if (splits && splits.length > 0) {
         for (const sp of splits) {
-          if (!sp.category_id) continue;
-          const share = baseAmount * (sp.percentage / 100);
+          const share = splits.length === 1 ? baseAmount : baseAmount * (sp.percentage / 100);
           byCategory[sp.category_id] = (byCategory[sp.category_id] ?? 0) + share;
         }
       } else {

@@ -116,13 +116,18 @@ function CategoryColorPicker({
 // ─── Category Manager (inline, lightweight) ───────────────────────────────────
 function CategoryManager({
   categories,
+  transactions,
+  primaryCurrency,
   userId,
   onRefresh,
 }: {
   categories: FinCategory[];
+  transactions: FinTransaction[];
+  primaryCurrency: SupportedCurrency;
   userId: string;
   onRefresh: () => void;
 }) {
+  const { convert } = useExchangeRates();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [type, setType] = useState<'income' | 'expense' | 'both'>('expense');
@@ -139,6 +144,45 @@ function CategoryManager({
   const [editBudgetLimit, setEditBudgetLimit] = useState('');
   const [editBudgetCurrency, setEditBudgetCurrency] = useState<SupportedCurrency>('USD');
   const [editSaving, setEditSaving] = useState(false);
+
+  // ── Spending per category (current month, cleared expenses) ──────────────
+  const catSym = CURRENCY_SYMBOLS[primaryCurrency];
+  const monthStartStr = useMemo(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
+  }, []);
+
+  const spendingByCategory = useMemo(() => {
+    const result: Record<string, number> = {};
+    for (const txn of transactions) {
+      const dateStr = txn.date.split(' ')[0];
+      if (dateStr < monthStartStr || txn.type !== 'expense' || txn.status !== 'cleared') continue;
+      const base = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
+      const splits = txn.category_splits;
+      if (splits && splits.length > 1) {
+        for (const sp of splits) {
+          if (!sp.category_id) continue;
+          result[sp.category_id] = (result[sp.category_id] ?? 0) + base * (sp.percentage / 100);
+        }
+      } else if (txn.category) {
+        result[txn.category] = (result[txn.category] ?? 0) + base;
+      }
+    }
+    return result;
+  }, [transactions, convert, primaryCurrency, monthStartStr]);
+
+  // ── Group categories by prefix before " - " ───────────────────────────────
+  const groupedCategories = useMemo(() => {
+    const grouped: Record<string, FinCategory[]> = {};
+    const order: string[] = [];
+    for (const cat of categories) {
+      const dashIdx = cat.name.indexOf(' - ');
+      const group = dashIdx > 0 ? cat.name.slice(0, dashIdx) : '';
+      if (!grouped[group]) { grouped[group] = []; order.push(group); }
+      grouped[group].push(cat);
+    }
+    return order.map(g => ({ groupName: g, cats: grouped[g] }));
+  }, [categories]);
 
   function startEdit(cat: FinCategory) {
     setEditingId(cat.id);
@@ -268,112 +312,145 @@ function CategoryManager({
       {categories.length === 0 ? (
         <p className="text-xs text-[var(--muted)] text-center py-4">No categories yet</p>
       ) : (
-        <div className="space-y-1.5">
-          {categories.map(cat => (
-            <div key={cat.id}>
-              {editingId === cat.id ? (
-                /* ── Inline edit form ── */
-                <div className="space-y-3 p-3 bg-[var(--card-hover)] rounded-lg border border-[var(--card-border)]">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wide">Edit Category</span>
-                    <button onClick={cancelEdit} className="p-1 rounded text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)] transition-all">
-                      <X size={12} />
-                    </button>
+        <div className="space-y-3">
+          {groupedCategories.map(({ groupName, cats }) => {
+            const groupSpend = cats.reduce((s, c) => s + (spendingByCategory[c.id] ?? 0), 0);
+            const isGroup = groupName !== '' && cats.length > 1;
+            return (
+              <div key={groupName || '__root__'}>
+                {/* Group header */}
+                {isGroup && (
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider shrink-0">{groupName}</p>
+                    <div className="flex-1 h-px bg-[var(--card-border)]" />
+                    {groupSpend > 0 && (
+                      <span className="text-[10px] font-semibold text-[var(--error)] tabular-nums shrink-0">
+                        {catSym}{groupSpend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} this month
+                      </span>
+                    )}
                   </div>
-                  <input
-                    value={editName}
-                    onChange={e => setEditName(e.target.value)}
-                    placeholder="Category name"
-                    autoFocus
-                    className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
-                  />
-                  <div className="flex rounded-lg border border-[var(--card-border)] p-0.5 gap-0.5 bg-[var(--background)]">
-                    {(['expense', 'income', 'both'] as const).map(t => (
-                      <button
-                        key={t}
-                        onClick={() => handleEditTypeChange(t)}
-                        className={cn(
-                          'flex-1 py-1.5 text-xs rounded-md font-medium capitalize transition-all',
-                          editType === t
-                            ? t === 'income' ? 'bg-[var(--success)] text-white'
-                            : t === 'expense' ? 'bg-[var(--error)] text-white'
-                            : 'bg-[var(--foreground)] text-[var(--background)]'
-                            : 'text-[var(--muted)] hover:bg-[var(--card-hover)]',
+                )}
+
+                <div className={cn('space-y-1', isGroup && 'pl-2.5 border-l-2 border-[var(--card-border)]')}>
+                  {cats.map(cat => {
+                    const spent = spendingByCategory[cat.id] ?? 0;
+                    const displayName = isGroup ? cat.name.slice(groupName.length + 3) : cat.name;
+                    return (
+                      <div key={cat.id}>
+                        {editingId === cat.id ? (
+                          /* ── Inline edit form ── */
+                          <div className="space-y-3 p-3 bg-[var(--card-hover)] rounded-lg border border-[var(--card-border)]">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wide">Edit Category</span>
+                              <button onClick={cancelEdit} className="p-1 rounded text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)] transition-all">
+                                <X size={12} />
+                              </button>
+                            </div>
+                            <input
+                              value={editName}
+                              onChange={e => setEditName(e.target.value)}
+                              placeholder="Category name"
+                              autoFocus
+                              className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                            />
+                            <div className="flex rounded-lg border border-[var(--card-border)] p-0.5 gap-0.5 bg-[var(--background)]">
+                              {(['expense', 'income', 'both'] as const).map(t => (
+                                <button
+                                  key={t}
+                                  onClick={() => handleEditTypeChange(t)}
+                                  className={cn(
+                                    'flex-1 py-1.5 text-xs rounded-md font-medium capitalize transition-all',
+                                    editType === t
+                                      ? t === 'income' ? 'bg-[var(--success)] text-white'
+                                      : t === 'expense' ? 'bg-[var(--error)] text-white'
+                                      : 'bg-[var(--foreground)] text-[var(--background)]'
+                                      : 'text-[var(--muted)] hover:bg-[var(--card-hover)]',
+                                  )}
+                                >
+                                  {typeLabel[t]}
+                                </button>
+                              ))}
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-medium text-[var(--muted)] mb-1.5">
+                                {editType === 'expense' ? 'Suggested colours — dark & red tones' : editType === 'income' ? 'Suggested colours — green & bright tones' : 'Suggested colours'}
+                              </p>
+                              <CategoryColorPicker color={editColor} onChange={setEditColor} type={editType} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="number"
+                                value={editBudgetLimit}
+                                onChange={e => setEditBudgetLimit(e.target.value)}
+                                placeholder="Budget limit (optional)"
+                                className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                              />
+                              <select
+                                value={editBudgetCurrency}
+                                onChange={e => setEditBudgetCurrency(e.target.value as SupportedCurrency)}
+                                className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg"
+                              >
+                                {SUPPORTED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={saveEdit}
+                                disabled={editSaving || !editName.trim()}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs bg-[var(--foreground)] text-[var(--background)] rounded-lg disabled:opacity-50 font-medium"
+                              >
+                                <Check size={11} />{editSaving ? 'Saving…' : 'Save Changes'}
+                              </button>
+                              <button onClick={cancelEdit} className="px-3 py-2 text-xs border border-[var(--card-border)] rounded-lg text-[var(--muted)] hover:bg-[var(--card-hover)] transition-colors">
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          /* ── Read-only row ── */
+                          <div className="flex items-center gap-2 text-xs py-1">
+                            <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color || 'var(--muted)' }} />
+                            <span className="flex-1 font-medium min-w-0 truncate">{displayName}</span>
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded-full border capitalize shrink-0"
+                              style={{
+                                borderColor: cat.color ? `${cat.color}55` : undefined,
+                                color: cat.color || 'var(--muted)',
+                                backgroundColor: cat.color ? `${cat.color}18` : undefined,
+                              }}
+                            >
+                              {cat.type}
+                            </span>
+                            {/* Spending this month */}
+                            <span className="text-[10px] tabular-nums shrink-0" style={{ color: spent > 0 ? 'var(--error)' : 'var(--muted)' }}>
+                              {catSym}{spent.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              {cat.budget_limit && (
+                                <span className="opacity-50"> /{CURRENCY_SYMBOLS[cat.budget_currency ?? 'USD']}{cat.budget_limit}</span>
+                              )}
+                            </span>
+                            <button
+                              onClick={() => startEdit(cat)}
+                              className="shrink-0 p-1 rounded-md text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)] transition-all duration-150"
+                              title="Edit category"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                            <button
+                              onClick={() => deleteCategory(cat.id)}
+                              className="shrink-0 p-1 rounded-md text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-all duration-150"
+                              title="Delete category"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         )}
-                      >
-                        {typeLabel[t]}
-                      </button>
-                    ))}
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-medium text-[var(--muted)] mb-1.5">
-                      {editType === 'expense' ? 'Suggested colours — dark & red tones' : editType === 'income' ? 'Suggested colours — green & bright tones' : 'Suggested colours'}
-                    </p>
-                    <CategoryColorPicker color={editColor} onChange={setEditColor} type={editType} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="number"
-                      value={editBudgetLimit}
-                      onChange={e => setEditBudgetLimit(e.target.value)}
-                      placeholder="Budget limit (optional)"
-                      className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
-                    />
-                    <select
-                      value={editBudgetCurrency}
-                      onChange={e => setEditBudgetCurrency(e.target.value as SupportedCurrency)}
-                      className="px-2 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg"
-                    >
-                      {SUPPORTED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={saveEdit}
-                      disabled={editSaving || !editName.trim()}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs bg-[var(--foreground)] text-[var(--background)] rounded-lg disabled:opacity-50 font-medium"
-                    >
-                      <Check size={11} />{editSaving ? 'Saving…' : 'Save Changes'}
-                    </button>
-                    <button onClick={cancelEdit} className="px-3 py-2 text-xs border border-[var(--card-border)] rounded-lg text-[var(--muted)] hover:bg-[var(--card-hover)] transition-colors">
-                      Cancel
-                    </button>
-                  </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ) : (
-                /* ── Read-only row ── */
-                <div className="flex items-center gap-2 text-xs py-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color || 'var(--muted)' }} />
-                  <span className="flex-1 font-medium">{cat.name}</span>
-                  <span
-                    className="text-[10px] px-1.5 py-0.5 rounded-full border capitalize"
-                    style={{
-                      borderColor: cat.color ? `${cat.color}55` : undefined,
-                      color: cat.color || 'var(--muted)',
-                      backgroundColor: cat.color ? `${cat.color}18` : undefined,
-                    }}
-                  >
-                    {cat.type}
-                  </span>
-                  {cat.budget_limit && <span className="text-[var(--muted)] text-[10px]">{CURRENCY_SYMBOLS[cat.budget_currency ?? 'USD']}{cat.budget_limit}</span>}
-                  <button
-                    onClick={() => startEdit(cat)}
-                    className="shrink-0 p-1 rounded-md text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)] transition-all duration-150"
-                    title="Edit category"
-                  >
-                    <Pencil size={12} />
-                  </button>
-                  <button
-                    onClick={() => deleteCategory(cat.id)}
-                    className="shrink-0 p-1 rounded-md text-[var(--muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-all duration-150"
-                    title="Delete category"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -381,10 +458,17 @@ function CategoryManager({
 }
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, trend, color }: { label: string; value: string; sub?: string; trend?: 'up' | 'down' | 'neutral'; color?: string }) {
+function KpiCard({ label, value, sub, color, badge }: { label: string; value: string; sub?: string; color?: string; badge?: { label: string; color: string } }) {
   return (
     <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
-      <p className="text-xs text-[var(--muted)] mb-2">{label}</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-[var(--muted)]">{label}</p>
+        {badge && (
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ color: badge.color, backgroundColor: `${badge.color}18` }}>
+            {badge.label}
+          </span>
+        )}
+      </div>
       <p className="text-2xl font-bold tracking-tight" style={{ color }}>{value}</p>
       {sub && <p className="text-[11px] text-[var(--muted)] mt-1">{sub}</p>}
     </div>
@@ -427,11 +511,15 @@ export default function FinancialPage() {
   const [adjustAccount, setAdjustAccount] = useState<BankAccount | null>(null);
   const [showAddTxn, setShowAddTxn] = useState(false);
   const [addTxnType, setAddTxnType] = useState<'income' | 'expense'>('expense');
+  const [editTransaction, setEditTransaction] = useState<FinTransaction | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [txnSearch, setTxnSearch] = useState('');
   const [txnStatusFilter, setTxnStatusFilter] = useState<'all' | 'pending' | 'cleared'>('all');
   const [txnTypeFilter, setTxnTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
+  const [txnAccountFilter, setTxnAccountFilter] = useState<string>('all');
+  const [txnCategoryFilter, setTxnCategoryFilter] = useState<string>('all');
+  const [txnSortBy, setTxnSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
 
   const fetchAll = useCallback(async () => {
     if (!user?.id) return;
@@ -605,24 +693,64 @@ export default function FinancialPage() {
     [transactions, convert, primaryCurrency]
   );
 
-  // Filtered transactions for Transactions tab
+  const savingsRate = useMemo(() => {
+    if (monthlyIncome <= 0) return null;
+    const net = monthlyIncome - monthlyExpenses;
+    return Math.round((net / monthlyIncome) * 100);
+  }, [monthlyIncome, monthlyExpenses]);
+
+  // Filtered + sorted transactions for Transactions tab
   const filteredTxns = useMemo(() => {
-    return transactions.filter(t => {
+    const base = transactions.filter(t => {
       if (txnTypeFilter !== 'all' && t.type !== txnTypeFilter) return false;
       if (txnStatusFilter !== 'all' && t.status !== txnStatusFilter) return false;
+      if (txnAccountFilter !== 'all' && t.bank_account !== txnAccountFilter) return false;
+      if (txnCategoryFilter !== 'all') {
+        const matchesPrimary = t.category === txnCategoryFilter;
+        const matchesSplit = t.category_splits?.some(sp => sp.category_id === txnCategoryFilter);
+        if (!matchesPrimary && !matchesSplit) return false;
+      }
       if (txnSearch) {
         const q = txnSearch.toLowerCase();
         const cat = categories.find(c => c.id === t.category);
         const acc = accounts.find(a => a.id === t.bank_account);
+        const splitCatNames = t.category_splits
+          ? t.category_splits.map(sp => categories.find(c => c.id === sp.category_id)?.name ?? '').join(' ').toLowerCase()
+          : '';
+        // Also allow searching by ID prefix
         if (
           !(t.description?.toLowerCase().includes(q)) &&
           !(cat?.name.toLowerCase().includes(q)) &&
-          !(acc?.name.toLowerCase().includes(q))
+          !(acc?.name.toLowerCase().includes(q)) &&
+          !splitCatNames.includes(q) &&
+          !t.id.toLowerCase().startsWith(q) &&
+          !(Array.isArray(t.tags) && t.tags.some(tag => tag.toLowerCase().includes(q)))
         ) return false;
       }
       return true;
     });
-  }, [transactions, txnTypeFilter, txnStatusFilter, txnSearch, categories, accounts]);
+
+    return base.sort((a, b) => {
+      switch (txnSortBy) {
+        case 'date-asc':  return a.date.localeCompare(b.date);
+        case 'amount-desc': return b.amount - a.amount;
+        case 'amount-asc':  return a.amount - b.amount;
+        default: return b.date.localeCompare(a.date); // date-desc
+      }
+    });
+  }, [transactions, txnTypeFilter, txnStatusFilter, txnAccountFilter, txnCategoryFilter, txnSearch, txnSortBy, categories, accounts]);
+
+  // Aggregated stats for the filtered set (converted to primary currency)
+  const filteredStats = useMemo(() => {
+    const income = filteredTxns
+      .filter(t => t.type === 'income' && t.status === 'cleared')
+      .reduce((s, t) => s + convert(t.amount, t.currency, primaryCurrency), 0);
+    const expense = filteredTxns
+      .filter(t => t.type === 'expense' && t.status === 'cleared')
+      .reduce((s, t) => s + convert(t.amount + (t.fee_amount ?? 0), t.currency, primaryCurrency), 0);
+    const pending = filteredTxns.filter(t => t.status === 'pending').length;
+    return { income, expense, net: income - expense, pending };
+  }, [filteredTxns, convert, primaryCurrency]);
 
   const sym = CURRENCY_SYMBOLS[primaryCurrency];
 
@@ -793,21 +921,29 @@ export default function FinancialPage() {
                 <KpiCard
                   label="Total Balance"
                   value={`${sym}${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  sub={`${accounts.filter(a => a.is_active !== false).length} accounts · ${primaryCurrency}`}
+                  sub={`${accounts.filter(a => a.is_active !== false).length} active accounts · ${primaryCurrency}`}
                 />
                 <KpiCard
                   label="This Month Income"
                   value={`${sym}${monthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   sub="Cleared transactions"
-                  trend="up"
                   color="var(--success)"
                 />
                 <KpiCard
                   label="This Month Expenses"
                   value={`${sym}${monthlyExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   sub="Including fees"
-                  trend="down"
                   color="var(--error)"
+                />
+                <KpiCard
+                  label="Savings Rate"
+                  value={savingsRate === null ? '—' : `${savingsRate}%`}
+                  sub={savingsRate === null ? 'No income this month' : savingsRate >= 0 ? 'Of income saved this month' : 'Spending exceeds income'}
+                  color={savingsRate === null ? undefined : savingsRate >= 20 ? 'var(--success)' : savingsRate >= 0 ? 'var(--warning)' : 'var(--error)'}
+                  badge={savingsRate !== null ? {
+                    label: savingsRate >= 20 ? 'Healthy' : savingsRate >= 0 ? 'Watch' : 'Deficit',
+                    color: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 0 ? 'var(--warning)' : 'var(--error)',
+                  } : undefined}
                 />
                 <KpiCard
                   label="Pending Revenue"
@@ -820,12 +956,6 @@ export default function FinancialPage() {
                   value={psLoading ? '…' : `${sym}${psKpis.totalEarned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   sub={`Approved PartnerStack rewards · ${primaryCurrency}`}
                   color="var(--primary)"
-                />
-                <KpiCard
-                  label="PS Pending"
-                  value={psLoading ? '…' : `${sym}${psKpis.pending.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  sub={`Awaiting PartnerStack approval · ${primaryCurrency}`}
-                  color="var(--warning)"
                 />
               </div>
 
@@ -853,14 +983,14 @@ export default function FinancialPage() {
           {/* ── TRANSACTIONS TAB ── */}
           {tab === 'transactions' && (
             <div className="space-y-4">
-              {/* Filters */}
+              {/* Filter row 1: Search + Type + Status */}
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative flex-1 min-w-48">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
                   <input
                     value={txnSearch}
                     onChange={e => setTxnSearch(e.target.value)}
-                    placeholder="Search transactions..."
+                    placeholder="Search by description, category, account, tag, or ID…"
                     className="w-full pl-8 pr-3 py-2 text-sm bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
                   />
                 </div>
@@ -874,14 +1004,79 @@ export default function FinancialPage() {
                     <button key={f} onClick={() => setTxnStatusFilter(f)} className={cn('px-3 py-1.5 text-xs rounded-md capitalize transition-all', txnStatusFilter === f ? 'bg-[var(--foreground)] text-[var(--background)] font-medium' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]')}>{f}</button>
                   ))}
                 </div>
+              </div>
+
+              {/* Filter row 2: Account + Category + Sort */}
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={txnAccountFilter}
+                  onChange={e => setTxnAccountFilter(e.target.value)}
+                  className="px-3 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                >
+                  <option value="all">All accounts</option>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+                <select
+                  value={txnCategoryFilter}
+                  onChange={e => setTxnCategoryFilter(e.target.value)}
+                  className="px-3 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                >
+                  <option value="all">All categories</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select
+                  value={txnSortBy}
+                  onChange={e => setTxnSortBy(e.target.value as typeof txnSortBy)}
+                  className="px-3 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                >
+                  <option value="date-desc">Newest first</option>
+                  <option value="date-asc">Oldest first</option>
+                  <option value="amount-desc">Highest amount</option>
+                  <option value="amount-asc">Lowest amount</option>
+                </select>
+                {(txnAccountFilter !== 'all' || txnCategoryFilter !== 'all' || txnTypeFilter !== 'all' || txnStatusFilter !== 'all' || txnSearch) && (
+                  <button
+                    onClick={() => { setTxnAccountFilter('all'); setTxnCategoryFilter('all'); setTxnTypeFilter('all'); setTxnStatusFilter('all'); setTxnSearch(''); setTxnSortBy('date-desc'); }}
+                    className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors px-2 py-1.5 border border-[var(--card-border)] rounded-lg hover:bg-[var(--card-hover)]"
+                  >
+                    Clear filters
+                  </button>
+                )}
                 <p className="text-xs text-[var(--muted)] ml-auto">{filteredTxns.length} transactions</p>
               </div>
+
+              {/* Stats row for filtered results */}
+              {filteredTxns.length > 0 && (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg px-4 py-3">
+                    <p className="text-[11px] text-[var(--muted)] mb-1">Cleared Income</p>
+                    <p className="text-sm font-bold text-[var(--success)]">
+                      +{sym}{filteredStats.income.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg px-4 py-3">
+                    <p className="text-[11px] text-[var(--muted)] mb-1">Cleared Expenses</p>
+                    <p className="text-sm font-bold text-[var(--error)]">
+                      -{sym}{filteredStats.expense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg px-4 py-3">
+                    <p className="text-[11px] text-[var(--muted)] mb-1">
+                      Net · {filteredStats.pending > 0 ? `${filteredStats.pending} pending` : 'cleared only'}
+                    </p>
+                    <p className={cn('text-sm font-bold', filteredStats.net >= 0 ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+                      {filteredStats.net >= 0 ? '+' : ''}{sym}{Math.abs(filteredStats.net).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <TransactionList
                 transactions={filteredTxns}
                 accounts={accounts}
                 categories={categories}
                 onRefresh={fetchAll}
+                onEdit={txn => { setEditTransaction(txn); setShowAddTxn(true); }}
               />
 
               {/* PartnerStack rewards inline */}
@@ -1009,7 +1204,7 @@ export default function FinancialPage() {
               )}
 
               {/* Category manager */}
-              <CategoryManager categories={categories} userId={user.id} onRefresh={fetchAll} />
+              <CategoryManager categories={categories} transactions={transactions} primaryCurrency={primaryCurrency} userId={user.id} onRefresh={fetchAll} />
             </div>
           )}
 
@@ -1019,6 +1214,8 @@ export default function FinancialPage() {
               recurring={recurring}
               accounts={accounts}
               categories={categories}
+              transactions={transactions}
+              primaryCurrency={primaryCurrency}
               userId={user.id}
               onRefresh={fetchAll}
             />
@@ -1055,12 +1252,13 @@ export default function FinancialPage() {
       )}
       {showAddTxn && (
         <AddTransactionModal
-          onClose={() => setShowAddTxn(false)}
+          onClose={() => { setShowAddTxn(false); setEditTransaction(null); }}
           onSaved={fetchAll}
           userId={user.id}
           accounts={accounts}
           categories={categories}
           defaultType={addTxnType}
+          editTransaction={editTransaction ?? undefined}
         />
       )}
       {showExport && (

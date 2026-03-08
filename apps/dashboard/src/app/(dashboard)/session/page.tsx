@@ -215,7 +215,7 @@ export default function SessionPage() {
 
         // If no blur within 2 s, Zoom was not detected.
         setTimeout(() => resolve(false), 2000);
-    }, [refreshDialer]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [refreshDialer]);
 
     // ---------------------------------------------------------------------------
     // Power Dialer state

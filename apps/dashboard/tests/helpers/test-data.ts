@@ -83,7 +83,7 @@ export const SELECTORS = {
 export async function waitForTableLoad(page: import('@playwright/test').Page) {
   // Wait for any skeleton to disappear
   await page.waitForFunction(() => {
-    const skeletons = document.querySelectorAll('[data-testid="skeleton"], .animate-pulse');
+    const skeletons = document.querySelectorAll('[data-testid="skeleton"], .animate-pulse, .animate-shimmer');
     return skeletons.length === 0;
   }, { timeout: 15_000 }).catch(() => {
     // If no skeleton was ever found, that's fine

@@ -9,6 +9,7 @@ export interface User extends RecordModel {
   email: string;
   role: 'admin' | 'operator' | 'member';
   status: 'online' | 'offline' | 'suspended';
+  avatar?: string;
   last_activity?: string;
 }
 

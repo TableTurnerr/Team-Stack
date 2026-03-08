@@ -98,7 +98,6 @@ export function IncomingCallHandler() {
                 dialIncrementedRef.current = true;
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callStatus, callDirection]);
 
     // ── Effect 2: Inbound call answered ──
@@ -111,7 +110,6 @@ export function IncomingCallHandler() {
 
         // Inbound answered — do not count as a pickup (received calls are tracked separately via total_incoming)
         pickupIncrementedRef.current = false;
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callStatus, callDirection]);
 
     // ── Effect 3: Inbound call ended ──

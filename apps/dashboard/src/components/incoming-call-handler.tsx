@@ -89,15 +89,14 @@ export function IncomingCallHandler() {
 
         lookupIncomingNumber(incomingCallerNumber);
 
-        // Increment session total_dials (paused sessions are still 'active')
+        // Increment session total_incoming only (inbound calls are not dials)
         if (session) {
             pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
-                total_dials: (session.total_dials || 0) + 1,
                 total_incoming: (session.total_incoming || 0) + 1,
             }).then(updated => {
                 setSession(updated);
                 dialIncrementedRef.current = true;
-            }).catch(err => console.error('[IncomingCallHandler] Failed to increment dials:', err));
+            }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callStatus, callDirection]);
@@ -110,16 +109,8 @@ export function IncomingCallHandler() {
         wasConnectedRef.current = true;
         setShowRingingBanner(false);
 
-        // Increment session total_pickups
-        const activeSession = capturedSessionRef.current || session;
-        if (activeSession) {
-            pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(activeSession.id, {
-                total_pickups: (activeSession.total_pickups || 0) + 1,
-            }).then(updated => {
-                setSession(updated);
-                pickupIncrementedRef.current = true;
-            }).catch(err => console.error('[IncomingCallHandler] Failed to increment pickups:', err));
-        }
+        // Inbound answered — do not count as a pickup (received calls are tracked separately via total_incoming)
+        pickupIncrementedRef.current = false;
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [callStatus, callDirection]);
 

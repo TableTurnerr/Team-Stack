@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Loader2, Upload, Tag } from 'lucide-react';
+import { X, Loader2, Upload, Tag, Plus, Trash2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
-import type { BankAccount, FinCategory, SupportedCurrency } from '@/lib/types';
+import type { BankAccount, FinCategory, SupportedCurrency, CategorySplit } from '@/lib/types';
 import { SUPPORTED_CURRENCIES, CURRENCY_LABELS } from '@/hooks/use-exchange-rates';
 import { cn } from '@/lib/utils';
 
@@ -17,13 +17,122 @@ interface AddTransactionModalProps {
   defaultType?: 'income' | 'expense';
 }
 
+// ─── Category Split Editor ────────────────────────────────────────────────────
+function CategorySplitEditor({
+  splits,
+  onChange,
+  filteredCategories,
+}: {
+  splits: CategorySplit[];
+  onChange: (s: CategorySplit[]) => void;
+  filteredCategories: FinCategory[];
+}) {
+  const total = splits.reduce((s, sp) => s + (sp.percentage || 0), 0);
+  const isValid = splits.length === 0 || Math.abs(total - 100) < 0.01;
+
+  function update(i: number, field: keyof CategorySplit, value: string | number) {
+    const next = splits.map((sp, idx) =>
+      idx === i ? { ...sp, [field]: field === 'percentage' ? Number(value) : value } : sp,
+    );
+    onChange(next);
+  }
+
+  function add() {
+    // auto-fill remaining percentage
+    const remaining = Math.max(0, 100 - total);
+    onChange([...splits, { category_id: '', percentage: remaining }]);
+  }
+
+  function remove(i: number) {
+    onChange(splits.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="text-xs font-medium">
+          {splits.length > 1 ? 'Category Splits' : 'Category'}
+        </label>
+        {splits.length > 1 && (
+          <span
+            className={cn(
+              'text-[10px] font-semibold tabular-nums',
+              isValid ? 'text-[var(--success)]' : total > 100 ? 'text-[var(--error)]' : 'text-[var(--warning)]',
+            )}
+          >
+            {total.toFixed(0)}% / 100%
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        {splits.map((sp, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <select
+              value={sp.category_id}
+              onChange={e => update(i, 'category_id', e.target.value)}
+              className="flex-1 px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+            >
+              <option value="">No category</option>
+              {filteredCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+
+            {splits.length > 1 && (
+              <div className="relative w-20 shrink-0">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={sp.percentage}
+                  onChange={e => update(i, 'percentage', e.target.value)}
+                  className="w-full pl-2 pr-5 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)] tabular-nums"
+                />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[var(--muted)] pointer-events-none">%</span>
+              </div>
+            )}
+
+            {splits.length > 1 && (
+              <button
+                onClick={() => remove(i)}
+                className="p-1.5 text-[var(--muted)] hover:text-[var(--error)] transition-colors shrink-0"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {splits.length > 0 && !isValid && (
+        <p className="text-[10px] text-[var(--warning)] mt-1">
+          Percentages must add up to 100% (currently {total.toFixed(0)}%).
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={add}
+        className="mt-2 flex items-center gap-1 text-xs text-[var(--primary)] hover:opacity-80 transition-opacity"
+      >
+        <Plus size={11} />
+        {splits.length === 0 ? 'Add category' : 'Add another category split'}
+      </button>
+    </div>
+  );
+}
+
+// ─── Main Modal ───────────────────────────────────────────────────────────────
 export function AddTransactionModal({ onClose, onSaved, userId, accounts, categories, defaultType = 'expense' }: AddTransactionModalProps) {
   const [type, setType] = useState<'income' | 'expense'>(defaultType);
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState<SupportedCurrency>(() => accounts[0]?.currency ?? 'USD');
   const [feeAmount, setFeeAmount] = useState('');
-  const [categoryId, setCategoryId] = useState('');
+  // Category splits — start with one empty split slot
+  const [splits, setSplits] = useState<CategorySplit[]>([{ category_id: '', percentage: 100 }]);
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<'pending' | 'cleared'>('cleared');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -40,6 +149,11 @@ export function AddTransactionModal({ onClose, onSaved, userId, accounts, catego
     if (acc) setCurrency(acc.currency);
   }, [accountId, accounts]);
 
+  // Reset splits to one empty slot when type changes (category list changes)
+  useEffect(() => {
+    setSplits([{ category_id: '', percentage: 100 }]);
+  }, [type]);
+
   const filteredCategories = categories.filter(c => c.type === type || c.type === 'both');
 
   function addTag() {
@@ -48,22 +162,43 @@ export function AddTransactionModal({ onClose, onSaved, userId, accounts, catego
     setTagInput('');
   }
 
+  function getSplitsTotal() {
+    return splits.reduce((s, sp) => s + (sp.percentage || 0), 0);
+  }
+
+  function isSplitsValid() {
+    const meaningful = splits.filter(sp => sp.category_id);
+    if (meaningful.length <= 1) return true; // single/no category — no % constraint
+    return Math.abs(getSplitsTotal() - 100) < 0.01;
+  }
+
   async function handleSave() {
     const amountNum = parseFloat(amount);
     if (!accountId) { setError('Select an account'); return; }
     if (isNaN(amountNum) || amountNum <= 0) { setError('Enter a valid amount'); return; }
     if (!date) { setError('Date is required'); return; }
+    if (!isSplitsValid()) { setError('Category percentages must add up to 100%'); return; }
 
     setSaving(true);
     setError('');
     try {
+      // Determine primary category (first non-empty split)
+      const meaningfulSplits = splits.filter(sp => sp.category_id);
+      const primaryCategory = meaningfulSplits[0]?.category_id ?? '';
+
+      // Build category_splits payload only when more than one meaningful split
+      const categorySplitsPayload = meaningfulSplits.length > 1
+        ? JSON.stringify(meaningfulSplits)
+        : null;
+
       const formData = new FormData();
       formData.append('bank_account', accountId);
       formData.append('type', type);
       formData.append('amount', amountNum.toString());
       formData.append('currency', currency);
       if (feeAmount && !isNaN(parseFloat(feeAmount))) formData.append('fee_amount', feeAmount);
-      if (categoryId) formData.append('category', categoryId);
+      if (primaryCategory) formData.append('category', primaryCategory);
+      if (categorySplitsPayload) formData.append('category_splits', categorySplitsPayload);
       if (tags.length > 0) formData.append('tags', JSON.stringify(tags));
       if (description.trim()) formData.append('description', description.trim());
       formData.append('status', status);
@@ -72,7 +207,7 @@ export function AddTransactionModal({ onClose, onSaved, userId, accounts, catego
       formData.append('created_by', userId);
       if (receiptFile) formData.append('receipt_file', receiptFile);
 
-      const txn = await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).create(formData);
+      await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).create(formData);
 
       // Update account balance if cleared
       if (status === 'cleared') {
@@ -177,17 +312,18 @@ export function AddTransactionModal({ onClose, onSaved, userId, accounts, catego
             <p className="text-[11px] text-[var(--muted)] mt-1">Include bank cuts or exchange rate losses to match your actual bank statement.</p>
           </div>
 
-          {/* Category */}
-          <div>
-            <label className="block text-xs font-medium mb-1.5">Category</label>
-            <select
-              value={categoryId}
-              onChange={e => setCategoryId(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
-            >
-              <option value="">No category</option>
-              {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+          {/* Category with splits */}
+          <div className="p-3 bg-[var(--card-hover)] rounded-lg">
+            <CategorySplitEditor
+              splits={splits}
+              onChange={setSplits}
+              filteredCategories={filteredCategories}
+            />
+            {splits.length > 1 && (
+              <p className="text-[10px] text-[var(--muted)] mt-2">
+                Splits let you attribute this {type} across multiple categories by percentage. E.g. 60% SaaS Tools, 40% Marketing.
+              </p>
+            )}
           </div>
 
           {/* Description */}

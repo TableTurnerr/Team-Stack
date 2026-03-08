@@ -23,6 +23,7 @@ import {
   Headphones,
   History,
   CalendarClock,
+  TrendingUp,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -43,6 +44,7 @@ const navItems = [
   { href: '/recordings', label: 'Recordings', icon: Mic },
   { href: '/companies', label: 'Companies', icon: Building2 },
   { href: '/follow-ups', label: 'Follow-Ups', icon: CalendarClock },
+  { href: '/financial', label: 'Financial', icon: TrendingUp },
   { href: '/actors', label: 'Actors', icon: Instagram },
   { href: '/notes', label: 'Notes', icon: StickyNote },
   { href: '/team', label: 'Team', icon: UserCog },

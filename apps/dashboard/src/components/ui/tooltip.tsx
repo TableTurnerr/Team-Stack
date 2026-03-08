@@ -14,7 +14,7 @@ export function Tooltip({ content, children, className, delay = 200 }: TooltipPr
     const [isVisible, setIsVisible] = useState(false);
     const [coords, setCoords] = useState({ x: 0, y: 0 });
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const triggerRef = useRef<HTMLElement | null>(null);
+    const triggerRef = useRef<HTMLDivElement>(null);
 
     const handleMouseEnter = (e: React.MouseEvent) => {
         const rect = e.currentTarget.getBoundingClientRect();
@@ -55,12 +55,13 @@ export function Tooltip({ content, children, className, delay = 200 }: TooltipPr
     }, [isVisible]);
 
     return (
-        <>
-            {React.cloneElement(children, {
-                ref: triggerRef,
-                onMouseEnter: handleMouseEnter,
-                onMouseLeave: handleMouseLeave,
-            })}
+        <div 
+            ref={triggerRef}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            className="inline-block w-fit"
+        >
+            {children}
             {isVisible && (
                 <div
                     className={cn(
@@ -84,6 +85,6 @@ export function Tooltip({ content, children, className, delay = 200 }: TooltipPr
                     />
                 </div>
             )}
-        </>
+        </div>
     );
 }

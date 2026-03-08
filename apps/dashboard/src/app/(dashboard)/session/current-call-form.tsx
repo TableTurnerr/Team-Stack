@@ -1540,7 +1540,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                     "w-full h-10 transition-all",
                                     playerMinimized ? "hidden" : "block"
                                 )}
-                                src={playerBlob || (playerRecording ? pb.files.getUrl(playerRecording, playerRecording.file) : '')}
+                                src={playerBlob || (playerRecording ? pb.files.getUrl(playerRecording, playerRecording.file as string) : '')}
                                 onEnded={closePlayer}
                                 onPlay={() => setIsPlaying(true)}
                                 onPause={() => setIsPlaying(false)}

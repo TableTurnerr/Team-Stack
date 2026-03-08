@@ -98,7 +98,7 @@ export function IncomingCallHandler() {
                 dialIncrementedRef.current = true;
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
         }
-    }, [callStatus, callDirection]);
+    }, [callStatus, callDirection, incomingCallerNumber, session, setSession, lookupIncomingNumber]);
 
     // ── Effect 2: Inbound call answered ──
     useEffect(() => {

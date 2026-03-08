@@ -55,7 +55,7 @@ function StatusBadge({ status, map }: { status: string; map: Record<string, stri
 // ── KPI Card ──────────────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub, icon: Icon, color }: {
-  label: string; value: string; sub?: string; icon: React.ElementType; color?: string;
+  label: string; value: string; sub?: string; icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>; color?: string;
 }) {
   return (
     <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">

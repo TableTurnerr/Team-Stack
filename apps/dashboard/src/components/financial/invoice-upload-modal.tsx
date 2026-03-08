@@ -324,7 +324,7 @@ export function InvoiceUploadModal({ onClose, onSaved, userId, accounts, categor
 
   // ── File handling ──────────────────────────────────────────────────────────
 
-  function buildReviewTxns(parsed: InvoiceParseResult): ReviewTransaction[] {
+  const buildReviewTxns = useCallback((parsed: InvoiceParseResult): ReviewTransaction[] => {
     return parsed.transactions.map((t, i) => ({
       ...t,
       _id: `${i}`,
@@ -341,9 +341,9 @@ export function InvoiceUploadModal({ onClose, onSaved, userId, accounts, categor
       editRecurringFreq: t.recurring_frequency ?? 'monthly',
       editFee: t.fee_amount ? String(t.fee_amount) : '',
     }));
-  }
+  }, [categories, defaultAccountId]);
 
-  async function processFile(f: File) {
+  const processFile = useCallback(async (f: File) => {
     setFile(f);
     setError('');
     setStep('processing');
@@ -378,14 +378,14 @@ export function InvoiceUploadModal({ onClose, onSaved, userId, accounts, categor
       setError('Network error — could not reach the AI service');
       setStep('upload');
     }
-  }
+  }, [buildReviewTxns]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const f = e.dataTransfer.files[0];
     if (f) processFile(f);
-  }, []);
+  }, [processFile]);
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];

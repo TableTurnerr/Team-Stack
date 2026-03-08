@@ -444,184 +444,302 @@ function pbSendToCrm_maps(item, cb) {
           position: fixed;
           top: 80px;
           right: 20px;
-          width: 320px;
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+          width: 330px;
+          background: #ffffff;
+          border-radius: 14px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.1);
           z-index: 10000;
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          font-size: 14px;
+          font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+          font-size: 13.5px;
+          border: 1px solid rgba(0,0,0,0.08);
+          overflow: hidden;
         }
-        #gmes-manual-overlay .header {
+        #gmes-manual-overlay .gmes-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 12px 16px;
-          background: #4285f4;
+          padding: 11px 14px;
+          background: linear-gradient(135deg, #1557b0 0%, #1a73e8 60%, #4285f4 100%);
           color: white;
-          border-radius: 12px 12px 0 0;
           font-weight: 600;
+          font-size: 13.5px;
         }
-        #gmes-manual-overlay .close-btn {
-          background: none;
-          border: none;
+        #gmes-manual-overlay .gmes-header-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        #gmes-manual-overlay .gmes-header-logo {
+          width: 22px;
+          height: 22px;
+          border-radius: 6px;
+          flex-shrink: 0;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+        }
+        #gmes-manual-overlay .gmes-header-actions {
+          display: flex;
+          gap: 4px;
+          align-items: center;
+        }
+        #gmes-manual-overlay .gmes-hbtn {
+          background: rgba(255,255,255,0.15);
+          border: 1px solid rgba(255,255,255,0.22);
           color: white;
-          font-size: 20px;
+          width: 28px;
+          height: 28px;
+          border-radius: 7px;
           cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: background 0.15s;
           padding: 0;
-          line-height: 1;
+          flex-shrink: 0;
         }
-        #gmes-manual-overlay .refresh-btn {
-          background: none;
-          border: none;
+        #gmes-manual-overlay .gmes-hbtn:hover { background: rgba(255,255,255,0.28); }
+        #gmes-manual-overlay .gmes-hbtn svg { display: block; }
+        #gmes-manual-overlay .gmes-refresh-btn .gmes-refresh-icon { transition: transform 0.35s; }
+        #gmes-manual-overlay .gmes-refresh-btn:hover .gmes-refresh-icon { transform: rotate(180deg); }
+        #gmes-manual-overlay .gmes-exception-btn { position: relative; }
+        #gmes-manual-overlay .gmes-exception-tooltip {
+          display: none;
+          position: absolute;
+          top: 34px;
+          right: 0;
+          background: rgba(30,30,40,0.92);
           color: white;
-          font-size: 14px;
-          cursor: pointer;
-          padding: 2px 4px;
-          line-height: 1;
-          transition: transform 0.3s;
+          font-size: 11px;
+          padding: 5px 9px;
+          border-radius: 6px;
+          white-space: nowrap;
+          pointer-events: none;
+          z-index: 10002;
         }
-        #gmes-manual-overlay .refresh-btn:hover {
-          transform: rotate(180deg);
+        #gmes-manual-overlay .gmes-exception-btn:hover .gmes-exception-tooltip { display: block; }
+
+        #gmes-manual-overlay .gmes-content {
+          padding: 14px 16px 10px;
         }
-        #gmes-manual-overlay .content {
-          padding: 16px;
+        #gmes-manual-overlay .gmes-field {
+          margin-bottom: 9px;
+          position: relative;
         }
-        #gmes-manual-overlay .field {
-          margin-bottom: 10px;
-          position: relative; /* For suggestions positioning */
-        }
-        #gmes-manual-overlay .field-label {
-          font-weight: 600;
-          color: #666;
-          font-size: 12px;
+        #gmes-manual-overlay .gmes-field-label {
+          font-weight: 700;
+          color: #80868b;
+          font-size: 10.5px;
           text-transform: uppercase;
+          letter-spacing: 0.5px;
           margin-bottom: 2px;
+          display: flex;
+          align-items: center;
+          gap: 4px;
         }
-        #gmes-manual-overlay .field-value {
-          color: #333;
+        #gmes-manual-overlay .gmes-field-value {
+          color: #202124;
           word-break: break-word;
+          font-size: 13.5px;
+          line-height: 1.4;
         }
-        #gmes-manual-overlay .field-value a {
-          color: #4285f4;
+        #gmes-manual-overlay .gmes-field-value a {
+          color: #1a73e8;
           text-decoration: none;
         }
-        #gmes-manual-overlay .add-btn {
+        #gmes-manual-overlay .gmes-field-value a:hover { text-decoration: underline; }
+        #gmes-manual-overlay .gmes-divider {
+          height: 1px;
+          background: #f1f3f4;
+          margin: 10px 0;
+        }
+        #gmes-manual-overlay .gmes-add-btn {
           width: 100%;
-          padding: 12px;
+          padding: 11px;
           background: #34a853;
           color: white;
           border: none;
-          border-radius: 8px;
-          font-size: 14px;
-          font-weight: 600;
+          border-radius: 9px;
+          font-size: 13.5px;
+          font-weight: 700;
           cursor: pointer;
           margin-top: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+          transition: background 0.18s, transform 0.12s, box-shadow 0.18s;
+          font-family: inherit;
         }
-        #gmes-manual-overlay .add-btn:hover {
-          background: #2d9249;
+        #gmes-manual-overlay .gmes-add-btn:hover {
+          background: #2b8c46;
+          transform: translateY(-1px);
+          box-shadow: 0 3px 10px rgba(52,168,83,0.28);
         }
-        #gmes-manual-overlay .add-btn:disabled {
-          background: #ccc;
+        #gmes-manual-overlay .gmes-add-btn:active { transform: translateY(0); box-shadow: none; }
+        #gmes-manual-overlay .gmes-add-btn:disabled {
+          background: #e0e0e0;
+          color: #9e9e9e;
           cursor: not-allowed;
+          transform: none !important;
+          box-shadow: none !important;
         }
-        #gmes-manual-overlay .add-btn.already-added {
-          background: #6c757d;
+        #gmes-manual-overlay .gmes-add-btn.already-added {
+          background: #5f6368;
           cursor: default;
         }
-        #gmes-manual-overlay .success-msg {
-          color: #34a853;
-          text-align: center;
-          padding: 8px;
-          font-weight: 600;
+        #gmes-manual-overlay .gmes-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-top: 9px;
+          font-size: 11px;
+          color: #9aa0a6;
+          padding-bottom: 2px;
         }
-        /* Suggestions Box Styles */
+        #gmes-manual-overlay .gmes-shortcut-hint {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        #gmes-manual-overlay .gmes-settings-icon {
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          color: #9aa0a6;
+          transition: color 0.15s;
+          background: none;
+          border: none;
+          font-family: inherit;
+          font-size: 11px;
+          padding: 0;
+        }
+        #gmes-manual-overlay .gmes-settings-icon:hover { color: #5f6368; }
+        /* Suggestions */
         #gmes-manual-overlay .suggestions-box {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: white;
-            border: 1px solid #ddd;
-            border-top: none;
-            border-radius: 0 0 6px 6px;
-            max-height: 150px;
-            overflow-y: auto;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            display: none;
-            z-index: 10001;
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          background: white;
+          border: 1.5px solid #e2e5eb;
+          border-top: none;
+          border-radius: 0 0 8px 8px;
+          max-height: 150px;
+          overflow-y: auto;
+          box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+          display: none;
+          z-index: 10001;
         }
         #gmes-manual-overlay .suggestion-item {
-            padding: 8px 10px;
-            cursor: pointer;
-            border-bottom: 1px solid #eee;
-            color: #333;
+          padding: 8px 12px;
+          cursor: pointer;
+          border-bottom: 1px solid #f1f3f4;
+          color: #3c4043;
+          font-size: 13px;
+          transition: background 0.12s;
         }
-        #gmes-manual-overlay .suggestion-item:last-child {
-            border-bottom: none;
-        }
-        #gmes-manual-overlay .suggestion-item:hover {
-            background-color: #f5f5f5;
-            color: #4285f4;
-        }
+        #gmes-manual-overlay .suggestion-item:last-child { border-bottom: none; }
+        #gmes-manual-overlay .suggestion-item:hover { background: #f8f9fa; color: #1a73e8; }
       </style>
-      <div class="header">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <img src="${chrome.runtime.getURL('icon.png')}" style="width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;" alt="Logo">
+      <div class="gmes-header">
+        <div class="gmes-header-left">
+          <img src="${chrome.runtime.getURL('icon.png')}" class="gmes-header-logo" alt="">
           <span>Quick Add</span>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <button class="refresh-btn" id="gmes-refresh-btn" title="Refresh data">🔄</button>
-          <button class="close-btn" id="gmes-close-btn">&times;</button>
+        <div class="gmes-header-actions">
+          <button class="gmes-hbtn gmes-refresh-btn" id="gmes-refresh-btn" title="Refresh data">
+            <svg class="gmes-refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+          <div class="gmes-hbtn gmes-exception-btn" id="gmes-exception-btn" title="Don't auto-open on this site">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span class="gmes-exception-tooltip">Add to exceptions<br>(won't auto-open here)</span>
+          </div>
+          <button class="gmes-hbtn" id="gmes-close-btn" title="Close">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
       </div>
-      <div class="content">
-        <div class="field">
-          <div class="field-label">Name</div>
-          <div class="field-value">${escapeHtml(item.title) || 'N/A'}</div>
+      <div class="gmes-content">
+        <div class="gmes-field">
+          <div class="gmes-field-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Name
+          </div>
+          <div class="gmes-field-value">${escapeHtml(item.title) || '<em style="color:#9aa0a6">N/A</em>'}</div>
         </div>
-        <div class="field">
-          <div class="field-label">Rating</div>
-          <div class="field-value">${escapeHtml(item.rating)} ★ ${escapeHtml(item.reviewCount)}</div>
+        <div class="gmes-field">
+          <div class="gmes-field-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Rating
+          </div>
+          <div class="gmes-field-value">${escapeHtml(item.rating) || '—'} ★ ${escapeHtml(item.reviewCount) || ''}</div>
         </div>
-        <div class="field">
-          <div class="field-label">Category</div>
-          <div class="field-value">${escapeHtml(item.industry) || 'N/A'} ${escapeHtml(item.expensiveness)}</div>
+        <div class="gmes-field">
+          <div class="gmes-field-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Category
+          </div>
+          <div class="gmes-field-value">${escapeHtml(item.industry) || '<em style="color:#9aa0a6">N/A</em>'} ${item.expensiveness ? '<span style="color:#5f6368;font-size:12px">' + escapeHtml(item.expensiveness) + '</span>' : ''}</div>
         </div>
-        <div class="field">
-          <div class="field-label">Phone</div>
-          <div class="field-value">${(function() {
+        <div class="gmes-field">
+          <div class="gmes-field-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.07 13.93 19.79 19.79 0 0 1 1 5.18C1 4.09 1.81 3 2.92 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 10.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 17.9v3z"/></svg>
+            Phone
+          </div>
+          <div class="gmes-field-value">${(function() {
             if (item.phones && item.phones.length > 0) {
                 var primary = formatPhoneDisplay(item.phones[0].number);
                 if (item.phones.length > 1) {
                     var extra = item.phones.length - 1;
                     var tooltip = item.phones.slice(1).map(function(p) { return formatPhoneDisplay(p.number); }).join(', ');
-                    return escapeHtml(primary) + ' <span style="color:#4285f4;font-size:11px;cursor:help;" title="' + escapeHtml(tooltip) + '">(+' + extra + ' more)</span>';
+                    return escapeHtml(primary) + ' <span style="color:#1a73e8;font-size:11px;cursor:help;" title="' + escapeHtml(tooltip) + '">(+' + extra + ' more)</span>';
                 }
                 return escapeHtml(primary);
             }
-            return item.phone ? escapeHtml(formatPhoneDisplay(item.phone)) : 'N/A';
+            return item.phone ? escapeHtml(formatPhoneDisplay(item.phone)) : '<em style="color:#9aa0a6">N/A</em>';
           })()}</div>
         </div>
-        <div class="field">
-          <div class="field-label">Address</div>
-          <div class="field-value">${escapeHtml(item.address) || 'N/A'}</div>
+        <div class="gmes-field">
+          <div class="gmes-field-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            Address
+          </div>
+          <div class="gmes-field-value">${escapeHtml(item.address) || '<em style="color:#9aa0a6">N/A</em>'}</div>
         </div>
-        <div class="field">
-          <div class="field-label">Website</div>
-          <div class="field-value">${item.companyUrl ? `<a id="gmes-website-link" href="${escapeHtml(item.companyUrl)}" target="_blank">${escapeHtml(new URL(item.companyUrl).hostname)}</a>` : '<span id="gmes-website-link" data-search="true">N/A</span>'}</div>
+        <div class="gmes-field">
+          <div class="gmes-field-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            Website
+          </div>
+          <div class="gmes-field-value">${item.companyUrl ? '<a id="gmes-website-link" href="' + escapeHtml(item.companyUrl) + '" target="_blank">' + escapeHtml((function(u){try{return new URL(u).hostname;}catch(e){return u;};})(item.companyUrl)) + '</a>' : '<span id="gmes-website-link" data-search="true"><em style="color:#9aa0a6">N/A</em></span>'}</div>
         </div>
-        <div class="field">
-          <div class="field-label">Note <span style="color: red;">*</span></div>
+        <div class="gmes-divider"></div>
+        <div class="gmes-field">
+          <div class="gmes-field-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Note <span style="color:#ea4335; margin-left:2px;">*</span>
+          </div>
           <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)" autocomplete="off"></textarea>
           <div id="gmes-suggestions-box" class="suggestions-box"></div>
         </div>
-        <button class="add-btn" id="gmes-add-btn">Add to List <span class="shortcut">(Alt+Shift+S)</span></button>
-        <div id="gmes-crm-status" style="display:none; margin-top:6px; padding:5px 10px; border-radius:6px; font-size:13px; font-weight:600; text-align:center;"></div>
-        <button id="gmes-crm-btn" style="display:none; width:100%; margin-top:6px; padding:10px; background:#6f42c1; color:white; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;">Send to CRM</button>
-        <div class="shortcuts-info">
-             <span>Open Website: Alt+Shift+W</span>
-             <span id="gmes-settings-btn" class="settings-icon" title="Change shortcuts">⚙️</span>
+        <button class="gmes-add-btn" id="gmes-add-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add to List <span style="font-size:11px; opacity:0.8; font-weight:400;">(Alt+Shift+S)</span>
+        </button>
+        <div id="gmes-crm-status" style="display:none; margin-top:8px; padding:7px 12px; border-radius:8px; font-size:13px; font-weight:600; text-align:center;"></div>
+        <button id="gmes-crm-btn" style="display:none; width:100%; margin-top:8px; padding:10px; background:#6f42c1; color:white; border:none; border-radius:9px; font-size:13px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-family:inherit;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          Send to CRM
+        </button>
+        <div class="gmes-footer">
+          <span class="gmes-shortcut-hint">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            Alt+Shift+W &mdash; Open Website
+          </span>
+          <button id="gmes-settings-btn" class="gmes-settings-icon" title="Change shortcuts">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Shortcuts
+          </button>
         </div>
       </div>
     `;
@@ -633,47 +751,31 @@ function pbSendToCrm_maps(item, cb) {
         style.textContent = `
             #gmes-manual-overlay .note-input {
                 width: 100%;
-                padding: 8px;
-                border: 1px solid #ddd;
-                border-radius: 6px;
+                padding: 9px 11px;
+                border: 1.5px solid #e2e5eb;
+                border-radius: 8px;
                 font-family: inherit;
-                font-size: 14px;
+                font-size: 13.5px;
                 resize: vertical;
-                min-height: 60px;
+                min-height: 62px;
                 box-sizing: border-box;
-                margin-top: 5px;
+                margin-top: 4px;
+                transition: border-color 0.18s;
+                color: #202124;
+                background: #fafafa;
             }
             #gmes-manual-overlay .note-input.error {
-                border-color: #dc3545;
-                background-color: #fff8f8;
+                border-color: #ea4335;
+                background-color: #fff8f7;
                 outline: none;
             }
             #gmes-manual-overlay .note-input:focus {
-                border-color: #4285f4;
+                border-color: #1a73e8;
+                background: #fff;
                 outline: none;
             }
-            #gmes-manual-overlay .shortcut {
-                font-size: 11px;
-                opacity: 0.8;
-                margin-left: 4px;
-                font-weight: normal;
-            }
-            #gmes-manual-overlay .shortcuts-info {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-top: 8px;
-                font-size: 11px;
-                color: #666;
-            }
-            #gmes-manual-overlay .settings-icon {
+            #gmes-manual-overlay .gmes-exception-btn {
                 cursor: pointer;
-                font-size: 14px;
-                transition: transform 0.2s;
-            }
-            #gmes-manual-overlay .settings-icon:hover {
-                transform: rotate(45deg);
-                color: #333;
             }
         `;
         document.head.appendChild(style);
@@ -742,9 +844,12 @@ function pbSendToCrm_maps(item, cb) {
         });
 
         // Refresh button handler
-        document.getElementById('gmes-refresh-btn').addEventListener('click', () => {
-            createOverlay();
-        });
+        const refreshBtn = document.getElementById('gmes-refresh-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                createOverlay();
+            });
+        }
 
         // Close button handler
         document.getElementById('gmes-close-btn').addEventListener('click', () => {
@@ -752,6 +857,24 @@ function pbSendToCrm_maps(item, cb) {
             style.remove();
             chrome.storage.local.set({ gmes_overlay_dismissed: true });
         });
+
+        // Exception button handler — add current site to exceptions so overlay won't auto-open
+        const exceptionBtn = document.getElementById('gmes-exception-btn');
+        if (exceptionBtn) {
+            exceptionBtn.addEventListener('click', () => {
+                const hostname = window.location.hostname;
+                chrome.runtime.sendMessage({ type: 'ADD_EXCEPTION_SITE', hostname: hostname }, () => {
+                    overlay.remove();
+                    style.remove();
+                    // Show brief toast
+                    const toast = document.createElement('div');
+                    toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(30,30,40,0.92);color:white;padding:9px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:2147483647;font-family:system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,0.22);';
+                    toast.textContent = hostname + ' added to exceptions';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 2800);
+                });
+            });
+        }
 
         // Settings button handler
         document.getElementById('gmes-settings-btn').addEventListener('click', () => {

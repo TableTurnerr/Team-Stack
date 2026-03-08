@@ -26,18 +26,45 @@
     if (!el) {
       el = document.createElement('div');
       el.id = id;
-      el.style.position = 'fixed';
-      el.style.right = '12px';
-      el.style.bottom = '12px';
-      el.style.zIndex = 2147483647;
-      el.style.background = 'rgba(0,0,0,0.8)';
-      el.style.color = '#fff';
-      el.style.padding = '6px 10px';
-      el.style.borderRadius = '6px';
-      el.style.fontSize = '12px';
-      el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-      el.style.fontFamily = 'Arial, sans-serif';
-      el.textContent = 'Scraping active...  Total scraped (0)';
+      el.style.cssText = [
+        'position:fixed',
+        'right:16px',
+        'bottom:16px',
+        'z-index:2147483647',
+        'background:linear-gradient(135deg,#1557b0 0%,#1a73e8 100%)',
+        'color:#fff',
+        'padding:9px 15px 9px 12px',
+        'border-radius:10px',
+        'font-size:12.5px',
+        'font-weight:600',
+        'box-shadow:0 4px 18px rgba(26,115,232,0.35),0 2px 6px rgba(0,0,0,0.15)',
+        'font-family:system-ui,-apple-system,sans-serif',
+        'display:flex',
+        'align-items:center',
+        'gap:8px',
+        'letter-spacing:0.1px',
+        'border:1px solid rgba(255,255,255,0.18)'
+      ].join(';');
+
+      // Animated dot
+      var dot = document.createElement('span');
+      dot.id = 'gmes-popdown-dot';
+      dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:#34ffa0;flex-shrink:0;animation:gmesGlow 1.2s ease-in-out infinite;';
+      el.appendChild(dot);
+
+      var text = document.createElement('span');
+      text.id = 'gmes-popdown-text';
+      text.textContent = 'Scraping \u2014 0 found';
+      el.appendChild(text);
+
+      // Inject keyframe animation
+      if (!document.getElementById('gmes-popdown-style')) {
+        var styleEl = document.createElement('style');
+        styleEl.id = 'gmes-popdown-style';
+        styleEl.textContent = '@keyframes gmesGlow{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.55;transform:scale(0.85)}}';
+        document.head.appendChild(styleEl);
+      }
+
       document.body.appendChild(el);
     }
     return el;
@@ -191,7 +218,8 @@
       }
 
       var el = ensurePopdown();
-      el.textContent = 'Scraping active.. Total extracted (' + (window.__GMES_SCRAPER__.totalExtracted) + ')';
+      var textEl = document.getElementById('gmes-popdown-text');
+      if (textEl) textEl.textContent = 'Scraping \u2014 ' + window.__GMES_SCRAPER__.totalExtracted + ' found';
 
       if (window.__GMES_SCRAPER__.stop) {
         clearInterval(window.__GMES_SCRAPER__.intervalId);

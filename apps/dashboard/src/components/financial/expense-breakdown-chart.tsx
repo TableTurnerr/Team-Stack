@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import type { FinTransaction, FinCategory, SupportedCurrency } from '@/lib/types';
 import { useExchangeRates, CURRENCY_SYMBOLS } from '@/hooks/use-exchange-rates';
 
@@ -25,14 +25,26 @@ export function ExpenseBreakdownChart({ transactions, categories, primaryCurrenc
     const byCategory: Record<string, number> = {};
 
     for (const txn of expenses) {
-      const key = txn.category || '__uncategorized__';
-      const converted = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
-      byCategory[key] = (byCategory[key] ?? 0) + converted;
+      const baseAmount = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
+
+      // If the transaction has multi-category splits, distribute proportionally
+      const splits = txn.category_splits;
+      if (splits && splits.length > 1) {
+        for (const sp of splits) {
+          if (!sp.category_id) continue;
+          const share = baseAmount * (sp.percentage / 100);
+          byCategory[sp.category_id] = (byCategory[sp.category_id] ?? 0) + share;
+        }
+      } else {
+        // Single category (or no category) — use txn.category field
+        const key = txn.category || '__uncategorized__';
+        byCategory[key] = (byCategory[key] ?? 0) + baseAmount;
+      }
     }
 
     return Object.entries(byCategory)
       .map(([catId, value], i) => {
-        const cat = categories.find(c => c.id === catId);
+        const cat = catId === '__uncategorized__' ? null : categories.find(c => c.id === catId);
         return {
           name: cat?.name ?? 'Uncategorized',
           value: parseFloat(value.toFixed(2)),

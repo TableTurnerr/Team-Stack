@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowUpRight, ArrowDownLeft, Clock, FileText, Tag, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Clock, FileText, Tag, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, Link2, RefreshCw } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import type { FinTransaction, BankAccount, FinCategory } from '@/lib/types';
@@ -204,16 +204,45 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
 
               {/* Description + meta */}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{txn.description || (isIncome ? 'Income' : 'Expense')}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  {cat && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-[var(--card-border)] text-[var(--muted)]" style={{ borderColor: cat.color || undefined, color: cat.color || undefined }}>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-medium truncate">{txn.description || (isIncome ? 'Income' : 'Expense')}</p>
+                  {txn.is_recurring && (
+                    <RefreshCw size={10} className="text-[var(--muted)] shrink-0" />
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  {/* Category split badges */}
+                  {txn.category_splits && txn.category_splits.length > 1 ? (
+                    <>
+                      {txn.category_splits.map((sp, i) => {
+                        const splitCat = getCategory(sp.category_id);
+                        if (!splitCat) return null;
+                        return (
+                          <span
+                            key={i}
+                            className="text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-0.5"
+                            style={{ borderColor: splitCat.color ? `${splitCat.color}55` : undefined, color: splitCat.color || undefined, backgroundColor: splitCat.color ? `${splitCat.color}18` : undefined }}
+                          >
+                            {splitCat.name}
+                            <span className="opacity-60">{sp.percentage}%</span>
+                          </span>
+                        );
+                      })}
+                      <span className="text-[10px] text-[var(--muted)] flex items-center gap-0.5">
+                        <Link2 size={9} />split
+                      </span>
+                    </>
+                  ) : cat ? (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded-full border"
+                      style={{ borderColor: cat.color ? `${cat.color}55` : undefined, color: cat.color || undefined, backgroundColor: cat.color ? `${cat.color}18` : undefined }}
+                    >
                       {cat.name}
                     </span>
-                  )}
+                  ) : null}
                   <span className="text-[11px] text-[var(--muted)]">{acc?.name}</span>
                   <span className="text-[11px] text-[var(--muted)]">·</span>
-                  <span className="text-[11px] text-[var(--muted)]">{format(new Date(txn.date), 'MMM d, yyyy')}</span>
+                  <span className="text-[11px] text-[var(--muted)]">{format(new Date(txn.date.split(' ')[0] + 'T12:00:00'), 'MMM d, yyyy')}</span>
                   {txn.status === 'pending' && (
                     <span className="text-[10px] flex items-center gap-0.5 text-[var(--warning)]">
                       <Clock size={10} />Pending

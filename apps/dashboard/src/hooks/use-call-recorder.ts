@@ -72,6 +72,8 @@ interface UseCallRecorderReturn {
     discardDeferredRecording: () => void;
     /** Whether deferred mode is currently active */
     isDeferredMode: boolean;
+    /** The queue of completed per-call recordings waiting for submission */
+    deferredSegments: DeferredSegment[];
 }
 
 /**
@@ -98,6 +100,7 @@ export function useCallRecorder(
     const [duration, setDuration] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [isDeferredMode, setIsDeferredMode] = useState(false);
+    const [deferredSegments, setDeferredSegments] = useState<DeferredSegment[]>([]);
 
     const streamRef = useRef<MediaStream | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -432,16 +435,19 @@ export function useCallRecorder(
 
             // Deferred mode: push this call's completed recording to the queue.
             // This preserves recordings when the next call starts before the
-            // previous form is submitted.
+            // previous call's form is submitted.
             // Always push even if stale — we must not lose completed recordings.
             if (isDeferredRef.current) {
                 if (blob.size > 100) {
-                    deferredSegmentsRef.current.push({
+                    const newSegment = {
                         blob,
                         duration: durationSec,
                         phone: capturedPhone,
                         mimeType,
-                    });
+                    };
+                    deferredSegmentsRef.current.push(newSegment);
+                    setDeferredSegments([...deferredSegmentsRef.current]);
+                    console.log('[Recorder] Queued deferred segment. Queue size:', deferredSegmentsRef.current.length);
                 }
                 if (!isStale) {
                     setStatus('idle');
@@ -449,6 +455,7 @@ export function useCallRecorder(
                 resolve?.();
                 return;
             }
+
 
             // Normal mode: upload immediately (only if this is the active recorder)
             // Use the phone number captured when recording started (not the ref, which may
@@ -558,6 +565,7 @@ export function useCallRecorder(
 
         // Pop the oldest segment from the queue (FIFO)
         const segment = deferredSegmentsRef.current.shift();
+        setDeferredSegments([...deferredSegmentsRef.current]);
 
         // Exit deferred mode once the queue is empty
         if (deferredSegmentsRef.current.length === 0) {
@@ -601,6 +609,7 @@ export function useCallRecorder(
             // Recording already stopped — just pop and discard the oldest segment
             stopPendingRef.current = false;
             deferredSegmentsRef.current.shift();
+            setDeferredSegments([...deferredSegmentsRef.current]);
             if (deferredSegmentsRef.current.length === 0) {
                 isDeferredRef.current = false;
                 setIsDeferredMode(false);
@@ -639,6 +648,7 @@ export function useCallRecorder(
 
         const segments = deferredSegmentsRef.current;
         deferredSegmentsRef.current = [];
+        setDeferredSegments([]);
 
         if (segments.length === 0) return null;
 
@@ -668,6 +678,7 @@ export function useCallRecorder(
     const discardDeferredRecording = useCallback(() => {
         shouldDiscardRef.current = true;
         deferredSegmentsRef.current = [];
+        setDeferredSegments([]);
         isDeferredRef.current = false;
         setIsDeferredMode(false);
 
@@ -696,5 +707,6 @@ export function useCallRecorder(
         submitDeferredRecording,
         discardDeferredRecording,
         isDeferredMode,
+        deferredSegments,
     };
 }

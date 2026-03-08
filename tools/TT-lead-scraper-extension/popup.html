@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>TableTurner Lead Scraper</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+
+    /* ── Design tokens (light) ───────────────────────── */
+    :root {
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --surface-2: #f1f3f4;
+      --border: #e2e5eb;
+      --border-focus: #1a73e8;
+      --text: #202124;
+      --text-2: #3c4043;
+      --text-muted: #5f6368;
+      --text-faint: #80868b;
+      --primary: #1a73e8;
+      --primary-dark: #1558c0;
+      --primary-shadow: rgba(26,115,232,0.28);
+      --success: #34a853;
+      --success-bg: #e8f5e9;
+      --success-border: #a5d6a7;
+      --danger: #ea4335;
+      --danger-dark: #c5221f;
+      --danger-shadow: rgba(234,67,53,0.28);
+      --warning: #fbbc04;
+      --neutral: #3c4043;
+      --mode-bg: #e2e5eb;
+      --mode-active-bg: #ffffff;
+      --header-gradient: linear-gradient(135deg, #1557b0 0%, #1a73e8 60%, #4285f4 100%);
+      --pill-off: #bdc1c6;
+    }
+
+    /* ── Dark mode tokens ────────────────────────────── */
+    [data-theme="dark"] {
+      --bg: #16161e;
+      --surface: #1e1e2a;
+      --surface-2: #252535;
+      --border: #35354a;
+      --border-focus: #4285f4;
+      --text: #e8eaed;
+      --text-2: #bdc1c6;
+      --text-muted: #9aa0a6;
+      --text-faint: #6c7075;
+      --primary: #4285f4;
+      --primary-dark: #1a73e8;
+      --primary-shadow: rgba(66,133,244,0.3);
+      --success: #34a853;
+      --success-bg: #1a2e1e;
+      --success-border: #2d5a37;
+      --danger: #ea4335;
+      --danger-dark: #d33426;
+      --danger-shadow: rgba(234,67,53,0.3);
+      --warning: #fbbc04;
+      --neutral: #5f6368;
+      --mode-bg: #252535;
+      --mode-active-bg: #35354a;
+      --header-gradient: linear-gradient(135deg, #0f2d5c 0%, #1557b0 60%, #1a73e8 100%);
+      --pill-off: #5f6368;
+    }
+
+    body {
+      min-width: 590px;
+      padding: 0;
+      font-family: 'Poppins', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    /* ── App Header ─────────────────────────────────── */
+    .app-header {
+      background: var(--header-gradient);
+      padding: 16px 20px 14px;
+      color: white;
+    }
+    .app-header-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .app-logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+      flex-shrink: 0;
+    }
+    .app-header-titles { flex: 1; }
+    h1 {
+      font-weight: 700;
+      font-size: 19px;
+      margin: 0 0 2px 0;
+      letter-spacing: -0.3px;
+      line-height: 1.2;
+    }
+    .header-byline { font-size: 12px; opacity: 0.82; }
+    .header-byline a { color: white; text-decoration: none; }
+    .header-byline a:hover { text-decoration: underline; }
+
+    /* Header right-side controls */
+    .header-controls { display: flex; gap: 8px; align-items: center; }
+    .icon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.22);
+      color: white;
+      cursor: pointer;
+      transition: background 0.18s;
+      flex-shrink: 0;
+    }
+    .icon-btn:hover { background: rgba(255,255,255,0.25); }
+    .icon-btn svg { display: block; }
+
+    .shortcut-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+    .shortcut-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+    }
+    .shortcut-badge svg { flex-shrink: 0; }
+
+    /* ── Body ────────────────────────────────────────── */
+    .body-content { padding: 16px 20px 20px; }
+
+    /* ── Mode Toggle ─────────────────────────────────── */
+    .mode-toggle-container {
+      display: flex;
+      gap: 5px;
+      padding: 4px;
+      background: var(--mode-bg);
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 9px 10px;
+      border: none;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-family: 'Poppins', sans-serif;
+    }
+    .mode-btn.active {
+      background: var(--mode-active-bg);
+      color: var(--primary);
+      box-shadow: 0 1px 5px rgba(0,0,0,0.13);
+    }
+    .mode-btn:hover:not(.active) { background: rgba(255,255,255,0.35); }
+
+    /* ── Status Message ──────────────────────────────── */
+    #message {
+      font-size: 13.5px;
+      padding: 11px 14px;
+      background: var(--surface);
+      border-radius: 9px;
+      border: 1.5px solid var(--border);
+      color: var(--text-2);
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+
+    /* ── Buttons ─────────────────────────────────────── */
+    .button {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 16px;
+      border: none;
+      color: white;
+      background: var(--primary);
+      cursor: pointer;
+      transition: background 0.18s, box-shadow 0.18s, transform 0.12s;
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .button:hover {
+      background: var(--primary-dark);
+      box-shadow: 0 2px 8px var(--primary-shadow);
+      transform: translateY(-1px);
+    }
+    .button:active { transform: translateY(0); box-shadow: none; }
+    .button:disabled, .button[disabled] {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+    .button.full { width: 100%; justify-content: center; padding: 11px 16px; }
+
+    .button.red-btn { background: var(--danger); }
+    .button.red-btn:hover { background: var(--danger-dark); box-shadow: 0 2px 8px var(--danger-shadow); }
+
+    .button.black-btn { background: var(--neutral); }
+    .button.black-btn:hover { background: #202124; box-shadow: 0 2px 8px rgba(60,64,67,0.3); }
+
+    .button.green-btn { background: var(--success); }
+    .button.green-btn:hover { background: #2b8c46; box-shadow: 0 2px 8px rgba(52,168,83,0.3); }
+
+    .input {
+      padding: 9px 13px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      background: var(--surface);
+      color: var(--text);
+      transition: border-color 0.18s;
+    }
+    .input:focus { border-color: var(--border-focus); outline: none; }
+
+    /* ── Scraping Mode ───────────────────────────────── */
+    #scrapingModeSection .button { width: 100%; justify-content: center; }
+
+    /* ── Manual Mode ─────────────────────────────────── */
+    .manual-mode-info {
+      padding: 14px 16px;
+      background: var(--success-bg);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      border: 1.5px solid var(--success-border);
+    }
+    .manual-mode-info h3 {
+      margin: 0 0 8px 0;
+      color: var(--success);
+      font-size: 14.5px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .manual-mode-info p { margin: 5px 0; color: var(--text-2); font-size: 12.5px; line-height: 1.4; }
+    .manual-mode-info ul { margin: 5px 0; padding-left: 16px; font-size: 12.5px; color: var(--text-2); }
+    .manual-mode-info li { margin: 2px 0; }
+    .manual-mode-info small { color: var(--text-muted); }
+
+    /* Auto-popup row */
+    .auto-popup-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 13px;
+      background: var(--surface);
+      border-radius: 9px;
+      border: 1.5px solid var(--border);
+      margin-bottom: 10px;
+    }
+    .auto-popup-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Pill Toggle */
+    .pill-toggle {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      width: 52px;
+      height: 26px;
+      background: var(--pill-off);
+      border-radius: 13px;
+      cursor: pointer;
+      border: none;
+      padding: 0;
+      transition: background 0.25s;
+      flex-shrink: 0;
+    }
+    .pill-toggle.on { background: var(--success); }
+    .pill-toggle .pill-knob {
+      position: absolute;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      transition: left 0.25s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    }
+    .pill-toggle.on .pill-knob { left: 29px; }
+    .pill-toggle .pill-text {
+      position: absolute;
+      font-size: 9px;
+      font-weight: 700;
+      color: white;
+      user-select: none;
+      pointer-events: none;
+      letter-spacing: 0.4px;
+    }
+    .pill-toggle.on .pill-text { left: 6px; }
+    .pill-toggle:not(.on) .pill-text { right: 5px; }
+
+    /* ── Panel (shared card style) ───────────────────── */
+    .panel {
+      margin-top: 12px;
+      padding: 14px;
+      background: var(--surface);
+      border-radius: 10px;
+      border: 1.5px solid var(--border);
+    }
+    .panel-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 11px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Controls */
+    .controls-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .controls-row + .controls-row { margin-top: 8px; }
+
+    /* ── CRM Panel ───────────────────────────────────── */
+    .crm-input, #crmAdvancedPanel .crm-input {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      margin-bottom: 10px;
+      box-sizing: border-box;
+      transition: border-color 0.18s;
+      background: var(--surface);
+      color: var(--text);
+    }
+    .crm-input:focus { border-color: var(--border-focus); outline: none; }
+    .crm-settings-panel label, #crmAdvancedPanel label {
+      display: block;
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--text-faint);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-chip.connected { background: var(--success-bg); color: var(--success); }
+    .status-chip-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    /* Legacy dot classes used dynamically by popup.js */
+    .crm-status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .crm-status-dot.connected { background: #34a853; }
+    .crm-status-dot.connecting { background: #fbbc04; animation: crmPulse 1s infinite; }
+    @keyframes crmPulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+    .advanced-toggle-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text-faint);
+      font-family: 'Poppins', sans-serif;
+      padding: 4px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 8px;
+      transition: color 0.15s;
+    }
+    .advanced-toggle-btn:hover { color: var(--primary); }
+    .advanced-toggle-chevron { transition: transform 0.2s; }
+    .advanced-toggle-btn.open .advanced-toggle-chevron { transform: rotate(90deg); }
+
+    /* ── Settings Panel ──────────────────────────────── */
+    .settings-section {
+      margin-top: 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .settings-toggle-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: none;
+      cursor: pointer;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      text-align: left;
+      transition: background 0.15s;
+    }
+    .settings-toggle-btn:hover { background: var(--surface-2); }
+    .settings-toggle-btn .chevron { margin-left: auto; transition: transform 0.22s; color: var(--text-faint); }
+    .settings-toggle-btn.open .chevron { transform: rotate(180deg); }
+
+    .settings-content {
+      display: none;
+      padding: 14px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    .settings-content.open { display: block; }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-row-label {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .settings-row-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 400;
+      display: block;
+      margin-top: 1px;
+    }
+
+    /* Exceptions list */
+    .exceptions-list {
+      margin-top: 10px;
+    }
+    .exceptions-sub-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .exception-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      background: var(--surface-2);
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      margin-bottom: 5px;
+    }
+    .exception-hostname {
+      flex: 1;
+      font-size: 12.5px;
+      color: var(--text-2);
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .exception-remove-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--danger);
+      padding: 3px;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .exception-remove-btn:hover { background: rgba(234,67,53,0.12); }
+    .exceptions-empty {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 6px 0;
+    }
+    .exceptions-actions { margin-top: 8px; }
+
+    /* ── Table ───────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1.5px solid var(--border);
+    }
+    th, td { border: 1px solid var(--border); padding: 9px 10px; font-size: 12.5px; }
+    th {
+      padding-top: 11px;
+      padding-bottom: 11px;
+      text-align: left;
+      background: var(--surface-2);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    td { background: var(--surface); color: var(--text-2); }
+    tbody tr:hover td { background: var(--surface-2); }
+  </style>
+</head>
+
+<body>
+  <!-- Header -->
+  <div class="app-header">
+    <div class="app-header-top">
+      <img src="icon.png" class="app-logo" alt="TableTurner">
+      <div class="app-header-titles">
+        <h1>TableTurner Lead Scraper</h1>
+        <div class="header-byline">
+          <a href="https://www.youtube.com/@itsmikepowers" target="_blank">By Mike</a>
+          &nbsp;·&nbsp;
+          <a href="https://github.com/Hashaam101/" target="_blank">Improved by Hashaam101</a>
+        </div>
+      </div>
+      <div class="header-controls">
+        <!-- Dark/Light mode toggle -->
+        <button class="icon-btn" id="themeToggleBtn" title="Toggle dark/light mode">
+          <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg id="themeIconMoon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="shortcut-badges">
+      <span class="shortcut-badge">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        Ctrl+Shift+Y &mdash; Open Popup
+      </span>
+      <span id="scraping-shortcuts" class="shortcut-badge">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        Ctrl+Shift+S &mdash; Scrape Maps Tab
+      </span>
+    </div>
+  </div>
+
+  <div class="body-content">
+    <!-- Mode Toggle -->
+    <div class="mode-toggle-container">
+      <button id="scrapingModeBtn" class="mode-btn active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        Scraping Mode
+      </button>
+      <button id="manualModeBtn" class="mode-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Manual Mode
+      </button>
+    </div>
+
+    <!-- Scraping Mode Section -->
+    <div id="scrapingModeSection">
+      <div id="message">Checking URL...</div>
+      <button id="actionButton" class="button full" disabled>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        Scrape Google Maps
+      </button>
+    </div>
+
+    <!-- Manual Mode Section -->
+    <div id="manualModeSection" style="display: none;">
+      <div class="manual-mode-info">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          Manual Mode Active
+        </h3>
+        <p>Visit any Google Maps place or business website to see the info overlay.</p>
+        <ul>
+          <li><strong>Google Maps:</strong> View place details and add with one click</li>
+          <li><strong>Websites:</strong> Auto-scan for contact info, emails &amp; addresses</li>
+        </ul>
+        <p><small>Use <strong>Ctrl+Shift+M</strong> to toggle the overlay on any page.</small></p>
+      </div>
+      <div class="auto-popup-row">
+        <span class="auto-popup-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
+          Auto-Popup Overlay
+        </span>
+        <button id="autoPopupToggle" class="pill-toggle on">
+          <div class="pill-knob"></div>
+          <span class="pill-text">ON</span>
+        </button>
+      </div>
+      <button id="manualAddBtn" class="button green-btn full">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Show Quick Add
+      </button>
+    </div>
+
+    <!-- Shared Controls -->
+    <div class="panel">
+      <div class="panel-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Actions
+      </div>
+      <div class="controls-row">
+        <button id="clearListButton" class="button red-btn" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          Clear List
+        </button>
+        <button id="openTabButton" class="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Open Results Tab
+        </button>
+      </div>
+      <div class="controls-row" style="margin-top: 8px;">
+        <button id="downloadCsvButton" class="button black-btn" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download CSV
+        </button>
+        <input type="text" id="filenameInput" class="input" placeholder="File name..." style="flex: 1; min-width: 120px;" />
+      </div>
+    </div>
+
+    <!-- CRM Connect Panel -->
+    <div class="panel" id="crmConnectPanel">
+      <div class="panel-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        TableTurnerr CRM
+      </div>
+
+      <!-- Disconnected state -->
+      <div id="crmStateDisconnected">
+        <button id="crmConnectBtn" class="button" style="font-size:13px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Connect to TableTurnerr CRM
+        </button>
+        <span id="crmConnectStatus" style="margin-left:10px; font-size:12px; color:var(--text-muted);"></span>
+      </div>
+
+      <!-- Connected state -->
+      <div id="crmStateConnected" style="display:none;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span class="status-chip connected">
+            <span class="status-chip-dot"></span>
+            Connected
+          </span>
+          <span id="crmUserEmail" style="font-size:13px; font-weight:600; color:var(--success); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+          <button id="crmDisconnectBtn" class="button red-btn" style="font-size:12px; padding:6px 12px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+            Disconnect
+          </button>
+        </div>
+      </div>
+
+      <!-- Advanced fallback -->
+      <div>
+        <button id="crmAdvancedToggle" class="advanced-toggle-btn">
+          <svg class="advanced-toggle-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><polyline points="9 18 15 12 9 6"/></svg>
+          Advanced (manual token)
+        </button>
+        <div id="crmAdvancedPanel" style="display:none; margin-top:10px;">
+          <label>PocketBase URL</label>
+          <input type="text" id="pbUrlInput" class="crm-input" placeholder="https://your-pb.example.com" />
+          <label>Auth Token</label>
+          <input type="text" id="pbTokenInput" class="crm-input" placeholder="Your PocketBase auth token" />
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button id="pbSaveBtn" class="button" style="font-size:13px; padding:8px 16px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Save Settings
+            </button>
+            <span id="pbSaveStatus" style="font-size:13px; color:var(--success); display:none; font-weight:600;">✓ Saved</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Panel (dark mode + exceptions) -->
+    <div class="settings-section">
+      <button class="settings-toggle-btn" id="settingsToggleBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+        <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="settings-content" id="settingsContent">
+        <!-- Dark Mode row -->
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            Dark Mode
+            <span class="settings-row-desc">Switch popup to dark theme</span>
+          </div>
+          <button id="darkModeToggle" class="pill-toggle">
+            <div class="pill-knob"></div>
+            <span class="pill-text">OFF</span>
+          </button>
+        </div>
+
+        <!-- Exceptions -->
+        <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 0;">
+          <div style="display:flex; align-items:center; gap:8px; padding: 4px 0 10px;">
+            <div class="settings-row-label" style="flex:1;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Overlay Exceptions
+              <span class="settings-row-desc">Sites where auto-popup is disabled</span>
+            </div>
+          </div>
+          <div class="exceptions-list" id="exceptionsList">
+            <div class="exceptions-empty">No exceptions added yet.</div>
+          </div>
+          <div class="exceptions-actions" id="exceptionsActions" style="display:none;">
+            <button class="button red-btn" id="clearExceptionsBtn" style="font-size:12px; padding:6px 12px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              Clear All Exceptions
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <table id="resultsTable">
+      <thead>
+        <tr></tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+  </div>
+
+  <script src="popup.js"></script>
+
+  <!-- Dark mode + exceptions management (inline, separate from popup.js) -->
+  <script>
+    (function () {
+      'use strict';
+
+      // ── Dark mode ───────────────────────────────────────
+      var themeToggleBtn = document.getElementById('themeToggleBtn');
+      var darkModeToggle = document.getElementById('darkModeToggle');
+      var sunIcon = document.getElementById('themeIconSun');
+      var moonIcon = document.getElementById('themeIconMoon');
+
+      function applyTheme(dark) {
+        if (dark) {
+          document.body.setAttribute('data-theme', 'dark');
+          sunIcon.style.display = 'block';
+          moonIcon.style.display = 'none';
+          darkModeToggle.classList.add('on');
+          darkModeToggle.querySelector('.pill-text').textContent = 'ON';
+        } else {
+          document.body.removeAttribute('data-theme');
+          sunIcon.style.display = 'none';
+          moonIcon.style.display = 'block';
+          darkModeToggle.classList.remove('on');
+          darkModeToggle.querySelector('.pill-text').textContent = 'OFF';
+        }
+      }
+
+      chrome.storage.local.get(['gmes_dark_mode'], function (data) {
+        applyTheme(data.gmes_dark_mode === true);
+      });
+
+      function toggleTheme() {
+        var isDark = document.body.getAttribute('data-theme') === 'dark';
+        var newDark = !isDark;
+        chrome.storage.local.set({ gmes_dark_mode: newDark });
+        applyTheme(newDark);
+      }
+
+      themeToggleBtn.addEventListener('click', toggleTheme);
+      darkModeToggle.addEventListener('click', toggleTheme);
+
+      // ── Settings panel toggle ────────────────────────────
+      var settingsToggleBtn = document.getElementById('settingsToggleBtn');
+      var settingsContent = document.getElementById('settingsContent');
+
+      settingsToggleBtn.addEventListener('click', function () {
+        var open = settingsContent.classList.toggle('open');
+        settingsToggleBtn.classList.toggle('open', open);
+        if (open) loadExceptions();
+      });
+
+      // ── Exceptions management ────────────────────────────
+      var exceptionsList = document.getElementById('exceptionsList');
+      var exceptionsActions = document.getElementById('exceptionsActions');
+      var clearExceptionsBtn = document.getElementById('clearExceptionsBtn');
+
+      function loadExceptions() {
+        chrome.storage.local.get(['gmes_exception_sites'], function (data) {
+          var sites = Array.isArray(data.gmes_exception_sites) ? data.gmes_exception_sites : [];
+          renderExceptions(sites);
+        });
+      }
+
+      function renderExceptions(sites) {
+        if (!sites.length) {
+          exceptionsList.innerHTML = '<div class="exceptions-empty">No exceptions added yet.<br><small style="color:var(--text-muted)">Click the shield icon (🛡) in any page overlay to add a site.</small></div>';
+          exceptionsActions.style.display = 'none';
+          return;
+        }
+        exceptionsActions.style.display = 'block';
+        exceptionsList.innerHTML = '';
+        sites.forEach(function (hostname) {
+          var item = document.createElement('div');
+          item.className = 'exception-item';
+          item.innerHTML =
+            '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
+            '<span class="exception-hostname">' + escapeHtml(hostname) + '</span>' +
+            '<button class="exception-remove-btn" data-hostname="' + escapeHtml(hostname) + '" title="Remove exception">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+            '</button>';
+          exceptionsList.appendChild(item);
+        });
+
+        exceptionsList.querySelectorAll('.exception-remove-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var host = btn.dataset.hostname;
+            chrome.storage.local.get(['gmes_exception_sites'], function (data) {
+              var updated = (data.gmes_exception_sites || []).filter(function (s) { return s !== host; });
+              chrome.storage.local.set({ gmes_exception_sites: updated }, function () {
+                renderExceptions(updated);
+              });
+            });
+          });
+        });
+      }
+
+      clearExceptionsBtn.addEventListener('click', function () {
+        if (confirm('Clear all exception sites?')) {
+          chrome.storage.local.set({ gmes_exception_sites: [] }, function () {
+            renderExceptions([]);
+          });
+        }
+      });
+
+      function escapeHtml(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      // Advanced toggle chevron animation
+      var crmAdvancedToggle = document.getElementById('crmAdvancedToggle');
+      if (crmAdvancedToggle) {
+        crmAdvancedToggle.addEventListener('click', function () {
+          this.classList.toggle('open');
+        });
+      }
+    })();
+  </script>
+</body>
+
+</html>

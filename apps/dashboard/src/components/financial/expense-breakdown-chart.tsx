@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { format, subDays, startOfDay } from 'date-fns';
 import type { FinTransaction, FinCategory, SupportedCurrency } from '@/lib/types';
 import { useExchangeRates, CURRENCY_SYMBOLS } from '@/hooks/use-exchange-rates';
 
@@ -14,20 +15,23 @@ interface ExpenseBreakdownChartProps {
   transactions: FinTransaction[];
   categories: FinCategory[];
   primaryCurrency: SupportedCurrency;
+  period: 30 | 60 | 90;
 }
 
-export function ExpenseBreakdownChart({ transactions, categories, primaryCurrency }: ExpenseBreakdownChartProps) {
+export function ExpenseBreakdownChart({ transactions, categories, primaryCurrency, period }: ExpenseBreakdownChartProps) {
   const { convert } = useExchangeRates();
   const symbol = CURRENCY_SYMBOLS[primaryCurrency];
 
   const data = useMemo(() => {
-    const expenses = transactions.filter(t => t.type === 'expense' && t.status === 'cleared');
+    const cutoff = format(subDays(startOfDay(new Date()), period - 1), 'yyyy-MM-dd');
+    const expenses = transactions.filter(t =>
+      t.type === 'expense' && t.status === 'cleared' && t.date.split(' ')[0] >= cutoff
+    );
     const byCategory: Record<string, number> = {};
 
     for (const txn of expenses) {
       const baseAmount = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
 
-      // If the transaction has category splits, distribute proportionally
       const splits = txn.category_splits?.filter(sp => sp.category_id);
       if (splits && splits.length > 0) {
         for (const sp of splits) {
@@ -35,7 +39,6 @@ export function ExpenseBreakdownChart({ transactions, categories, primaryCurrenc
           byCategory[sp.category_id] = (byCategory[sp.category_id] ?? 0) + share;
         }
       } else {
-        // Single category (or no category) — use txn.category field
         const key = txn.category || '__uncategorized__';
         byCategory[key] = (byCategory[key] ?? 0) + baseAmount;
       }
@@ -51,8 +54,8 @@ export function ExpenseBreakdownChart({ transactions, categories, primaryCurrenc
         };
       })
       .sort((a, b) => b.value - a.value)
-      .slice(0, 10); // Top 10
-  }, [transactions, categories, convert, primaryCurrency]);
+      .slice(0, 10);
+  }, [transactions, categories, convert, primaryCurrency, period]);
 
   const total = data.reduce((s, d) => s + d.value, 0);
 
@@ -73,7 +76,7 @@ export function ExpenseBreakdownChart({ transactions, categories, primaryCurrenc
     return (
       <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5">
         <h3 className="text-sm font-semibold mb-1">Expense Breakdown</h3>
-        <p className="text-xs text-[var(--muted)] mb-6">By category</p>
+        <p className="text-xs text-[var(--muted)] mb-6">By category · last {period}d</p>
         <div className="flex items-center justify-center h-40 text-[var(--muted)] text-sm">No expense data</div>
       </div>
     );
@@ -82,26 +85,31 @@ export function ExpenseBreakdownChart({ transactions, categories, primaryCurrenc
   return (
     <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5">
       <h3 className="text-sm font-semibold mb-0.5">Expense Breakdown</h3>
-      <p className="text-xs text-[var(--muted)] mb-4">By category — {symbol}{total.toLocaleString('en-US', { minimumFractionDigits: 2 })} total</p>
+      <p className="text-xs text-[var(--muted)] mb-4">Last {period}d — {symbol}{total.toLocaleString('en-US', { minimumFractionDigits: 2 })} total</p>
 
-      <ResponsiveContainer width="100%" height={200}>
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="50%"
-            innerRadius={55}
-            outerRadius={80}
-            paddingAngle={2}
-            dataKey="value"
-          >
-            {data.map((entry, index) => (
-              <Cell key={index} fill={entry.color} />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip />} />
-        </PieChart>
-      </ResponsiveContainer>
+      <div style={{ outline: 'none' }} tabIndex={-1} onMouseDown={e => e.preventDefault()}>
+        <ResponsiveContainer width="100%" height={200}>
+          <PieChart style={{ outline: 'none' }}>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={55}
+              outerRadius={80}
+              paddingAngle={2}
+              dataKey="value"
+              stroke="none"
+              strokeWidth={0}
+              style={{ outline: 'none' }}
+            >
+              {data.map((entry, index) => (
+                <Cell key={index} fill={entry.color} stroke="none" strokeWidth={0} />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
 
       {/* Legend */}
       <div className="mt-3 space-y-1.5 max-h-32 overflow-y-auto">

@@ -166,10 +166,12 @@ document.addEventListener('DOMContentLoaded', function () {
             // Inject website scanner if on non-Maps page
             chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
                 var url = tabs[0] ? tabs[0].url : '';
-                if (url && !url.includes('google.com/maps')) {
+                if (url && !url.startsWith('chrome://') && !url.startsWith('edge://') && !url.startsWith('about:') && !url.includes('google.com/maps')) {
                     chrome.scripting.executeScript({
                         target: { tabId: tabs[0].id },
                         files: ['manual_mode_website.js']
+                    }, function () {
+                        if (chrome.runtime.lastError) { /* ignore — page may block injection */ }
                     });
                 }
             });
@@ -209,7 +211,11 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('manualAddBtn').addEventListener('click', function () {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, { type: 'MANUAL_ADD_OVERLAY' });
+                var u = tabs[0].url || '';
+                if (u.startsWith('chrome://') || u.startsWith('edge://') || u.startsWith('about:')) return;
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'MANUAL_ADD_OVERLAY' }, function () {
+                    if (chrome.runtime.lastError) { /* receiver not ready — ignore */ }
+                });
             }
         });
     });

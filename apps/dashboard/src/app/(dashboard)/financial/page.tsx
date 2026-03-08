@@ -27,7 +27,7 @@ import { CurrencyTooltip } from '@/components/financial/currency-tooltip';
 import { CashFlowChart } from '@/components/financial/cash-flow-chart';
 import { ExpenseBreakdownChart } from '@/components/financial/expense-breakdown-chart';
 import { ForecastWidget } from '@/components/financial/forecast-widget';
-import { BudgetProgress } from '@/components/financial/budget-progress';
+import { RecentTransactionsQuickView } from '@/components/financial/recent-transactions-quick-view';
 import { RecurringManager } from '@/components/financial/recurring-manager';
 import { ExportModal } from '@/components/financial/export-modal';
 import { PartnerStackPanel } from '@/components/financial/partnerstack-panel';
@@ -484,6 +484,9 @@ export default function FinancialPage() {
   const [primaryCurrency, setPrimaryCurrency] = useState<SupportedCurrency>('USD');
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [showMoreCurrencies, setShowMoreCurrencies] = useState(false);
+  const [chartPeriod, setChartPeriod] = useState<30 | 60 | 90>(30);
+  const [balanceTags, setBalanceTags] = useState({ bank: true, approvedPS: true, pendingPS: true });
+  const [incomeTags, setIncomeTags] = useState({ bank: true, approvedPS: true, pendingPS: true });
 
   // Data
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
@@ -693,6 +696,32 @@ export default function FinancialPage() {
     [transactions, convert, primaryCurrency]
   );
 
+  const monthlyApprovedPS = useMemo(() =>
+    psRewards
+      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null &&
+        new Date(r.created_at).toISOString().split('T')[0] >= thisMonthStart)
+      .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0),
+    [psRewards, convert, primaryCurrency, thisMonthStart]
+  );
+
+  const monthlyPendingPS = useMemo(() =>
+    psRewards
+      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null &&
+        new Date(r.created_at).toISOString().split('T')[0] >= thisMonthStart)
+      .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0),
+    [psRewards, convert, primaryCurrency, thisMonthStart]
+  );
+
+  const displayedTotalBalance =
+    (balanceTags.bank ? totalBalance : 0) +
+    (balanceTags.approvedPS ? psKpis.totalEarned : 0) +
+    (balanceTags.pendingPS ? psKpis.pending : 0);
+
+  const displayedMonthlyIncome =
+    (incomeTags.bank ? monthlyIncome : 0) +
+    (incomeTags.approvedPS ? monthlyApprovedPS : 0) +
+    (incomeTags.pendingPS ? monthlyPendingPS : 0);
+
   const savingsRate = useMemo(() => {
     if (monthlyIncome <= 0) return null;
     const net = monthlyIncome - monthlyExpenses;
@@ -777,6 +806,16 @@ export default function FinancialPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Global chart period selector */}
+          <div className="flex rounded-lg border border-[var(--card-border)] p-0.5 gap-0.5">
+            {([30, 60, 90] as const).map(p => (
+              <button key={p} onClick={() => setChartPeriod(p)}
+                className={`px-2.5 py-1.5 text-xs rounded-md transition-all ${chartPeriod === p ? 'bg-[var(--foreground)] text-[var(--background)] font-medium' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]'}`}
+              >
+                {p}d
+              </button>
+            ))}
+          </div>
           {/* Primary currency selector */}
           <div className="relative flex items-center gap-1">
             {(['USD', 'PKR'] as SupportedCurrency[]).map(c => (
@@ -918,17 +957,60 @@ export default function FinancialPage() {
             <div className="space-y-6">
               {/* KPI row */}
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                <KpiCard
-                  label="Total Balance"
-                  value={`${sym}${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  sub={`${accounts.filter(a => a.is_active !== false).length} active accounts · ${primaryCurrency}`}
-                />
-                <KpiCard
-                  label="This Month Income"
-                  value={`${sym}${monthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  sub="Cleared transactions"
-                  color="var(--success)"
-                />
+                {/* Total Balance — with toggleable source tags */}
+                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
+                    <p className="text-xs text-[var(--muted)]">Total Balance</p>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {([
+                        { key: 'bank' as const, label: 'Bank Accounts' },
+                        { key: 'approvedPS' as const, label: 'Approved PS' },
+                        { key: 'pendingPS' as const, label: 'Pending PS' },
+                      ]).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          onClick={() => setBalanceTags(prev => ({ ...prev, [key]: !prev[key] }))}
+                          className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border transition-all"
+                          style={balanceTags[key]
+                            ? { color: key === 'pendingPS' ? 'var(--warning)' : key === 'approvedPS' ? 'var(--primary)' : 'var(--foreground)', borderColor: key === 'pendingPS' ? 'var(--warning)' : key === 'approvedPS' ? 'var(--primary)' : 'var(--card-border)', backgroundColor: key === 'pendingPS' ? 'color-mix(in srgb, var(--warning) 15%, transparent)' : key === 'approvedPS' ? 'color-mix(in srgb, var(--primary) 15%, transparent)' : 'var(--card-hover)' }
+                            : { color: 'var(--muted)', borderColor: 'var(--card-border)', opacity: 0.5 }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-2xl font-bold tracking-tight">{sym}{displayedTotalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-[11px] text-[var(--muted)] mt-1">{accounts.filter(a => a.is_active !== false).length} active accounts · {primaryCurrency}</p>
+                </div>
+
+                {/* This Month Income — with toggleable source tags */}
+                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
+                    <p className="text-xs text-[var(--muted)]">This Month Income</p>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {([
+                        { key: 'bank' as const, label: 'Bank Accounts' },
+                        { key: 'approvedPS' as const, label: 'Approved PS' },
+                        { key: 'pendingPS' as const, label: 'Pending PS' },
+                      ]).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          onClick={() => setIncomeTags(prev => ({ ...prev, [key]: !prev[key] }))}
+                          className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border transition-all"
+                          style={incomeTags[key]
+                            ? { color: key === 'pendingPS' ? 'var(--warning)' : key === 'approvedPS' ? 'var(--primary)' : 'var(--success)', borderColor: key === 'pendingPS' ? 'var(--warning)' : key === 'approvedPS' ? 'var(--primary)' : 'var(--success)', backgroundColor: key === 'pendingPS' ? 'color-mix(in srgb, var(--warning) 15%, transparent)' : key === 'approvedPS' ? 'color-mix(in srgb, var(--primary) 15%, transparent)' : 'color-mix(in srgb, var(--success) 15%, transparent)' }
+                            : { color: 'var(--muted)', borderColor: 'var(--card-border)', opacity: 0.5 }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-2xl font-bold tracking-tight" style={{ color: 'var(--success)' }}>{sym}{displayedMonthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-[11px] text-[var(--muted)] mt-1">Cleared + selected sources</p>
+                </div>
+
                 <KpiCard
                   label="This Month Expenses"
                   value={`${sym}${monthlyExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -945,26 +1027,35 @@ export default function FinancialPage() {
                     color: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 0 ? 'var(--warning)' : 'var(--error)',
                   } : undefined}
                 />
-                <KpiCard
-                  label="Pending Revenue"
-                  value={`${sym}${pendingRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  sub="Awaiting clearance"
-                  color="var(--warning)"
-                />
-                <KpiCard
-                  label="PS Earnings"
-                  value={psLoading ? '…' : `${sym}${psKpis.totalEarned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  sub={`Approved PartnerStack rewards · ${primaryCurrency}`}
-                  color="var(--primary)"
-                />
+
+                {/* Pending Revenue — split 50/50: PS Pending | Other Pending */}
+                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 col-span-2 lg:col-span-2">
+                  <p className="text-xs text-[var(--muted)] mb-3">Pending Revenue</p>
+                  <div className="grid grid-cols-2 gap-4 divide-x divide-[var(--card-border)]">
+                    <div>
+                      <p className="text-[10px] text-[var(--muted)] mb-1 font-medium uppercase tracking-wide">PS Pending Approval</p>
+                      <p className="text-xl font-bold tracking-tight" style={{ color: 'var(--warning)' }}>
+                        {psLoading ? '…' : `${sym}${psKpis.pending.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                      </p>
+                      <p className="text-[11px] text-[var(--muted)] mt-1">PartnerStack awaiting approval</p>
+                    </div>
+                    <div className="pl-4">
+                      <p className="text-[10px] text-[var(--muted)] mb-1 font-medium uppercase tracking-wide">Other Pending Income</p>
+                      <p className="text-xl font-bold tracking-tight" style={{ color: 'var(--warning)' }}>
+                        {sym}{pendingRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      <p className="text-[11px] text-[var(--muted)] mt-1">Transactions awaiting clearance</p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Charts row */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="lg:col-span-2">
-                  <CashFlowChart transactions={transactions} primaryCurrency={primaryCurrency} psRewards={psRewards} accounts={accounts} />
+                  <CashFlowChart transactions={transactions} primaryCurrency={primaryCurrency} psRewards={psRewards} accounts={accounts} period={chartPeriod} />
                 </div>
-                <ExpenseBreakdownChart transactions={transactions} categories={categories} primaryCurrency={primaryCurrency} />
+                <ExpenseBreakdownChart transactions={transactions} categories={categories} primaryCurrency={primaryCurrency} period={chartPeriod} />
               </div>
 
               {/* Forecast + Budget row */}
@@ -975,7 +1066,7 @@ export default function FinancialPage() {
                   recurringTransactions={recurring}
                   primaryCurrency={primaryCurrency}
                 />
-                <BudgetProgress transactions={transactions} categories={categories} primaryCurrency={primaryCurrency} />
+                <RecentTransactionsQuickView transactions={transactions} categories={categories} primaryCurrency={primaryCurrency} />
               </div>
             </div>
           )}

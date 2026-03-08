@@ -60,7 +60,11 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
         frequency,
         start_date: startDate + ' 00:00:00',
         end_date: endDate ? endDate + ' 00:00:00' : null,
-        next_run_date: startDate + ' 00:00:00',
+        // When editing, keep the existing next_run_date so we don't re-generate
+        // already-created transactions. Only set it for new records.
+        next_run_date: editItem
+          ? editItem.next_run_date ?? startDate + ' 00:00:00'
+          : startDate + ' 00:00:00',
         initial_amount: initialAmount ? parseFloat(initialAmount) : null,
         initial_applied: editItem?.initial_applied ?? false,
         is_active: true,

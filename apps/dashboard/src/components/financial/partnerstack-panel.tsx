@@ -166,8 +166,22 @@ function PayoutsTable({ payouts }: { payouts: PSPayout[] }) {
 
 // ── Main Panel ────────────────────────────────────────────────────────────────
 
-export function PartnerStackPanel() {
-  const { payouts, rewards, loading, error, refresh } = usePartnerstack();
+interface PartnerStackPanelProps {
+  payouts?: PSPayout[];
+  rewards?: PSReward[];
+  loading?: boolean;
+  error?: string | null;
+  onRefresh?: () => void;
+}
+
+export function PartnerStackPanel(props: PartnerStackPanelProps) {
+  // Fall back to internal hook if no data is passed from the parent
+  const internal = usePartnerstack();
+  const payouts  = props.payouts  ?? internal.payouts;
+  const rewards  = props.rewards  ?? internal.rewards;
+  const loading  = props.loading  ?? internal.loading;
+  const error    = props.error    ?? internal.error;
+  const refresh  = props.onRefresh ?? internal.refresh;
 
   // KPI calculations (all amounts are in cents from API)
   const kpis = useMemo(() => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  Plus, Download, RefreshCw, Wallet, DollarSign, Search, ChevronDown,
+  Plus, Download, RefreshCw, Wallet, Search, ChevronDown, Sparkles,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { useAuth } from '@/contexts/auth-context';
@@ -31,9 +31,22 @@ import { BudgetProgress } from '@/components/financial/budget-progress';
 import { RecurringManager } from '@/components/financial/recurring-manager';
 import { ExportModal } from '@/components/financial/export-modal';
 import { PartnerStackPanel } from '@/components/financial/partnerstack-panel';
+import { InvoiceUploadModal } from '@/components/financial/invoice-upload-modal';
 import { usePartnerstack } from '@/hooks/use-partnerstack';
 
 type Tab = 'overview' | 'transactions' | 'accounts' | 'recurring' | 'partnerstack';
+
+// ─── Recurring helpers ────────────────────────────────────────────────────────
+function addFrequency(date: Date, frequency: RecurringTransaction['frequency']): Date {
+  const d = new Date(date);
+  switch (frequency) {
+    case 'daily':   d.setDate(d.getDate() + 1); break;
+    case 'weekly':  d.setDate(d.getDate() + 7); break;
+    case 'monthly': d.setMonth(d.getMonth() + 1); break;
+    case 'yearly':  d.setFullYear(d.getFullYear() + 1); break;
+  }
+  return d;
+}
 
 // ─── Category Manager (inline, lightweight) ───────────────────────────────────
 function CategoryManager({
@@ -142,6 +155,7 @@ export default function FinancialPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [primaryCurrency, setPrimaryCurrency] = useState<SupportedCurrency>('USD');
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [showMoreCurrencies, setShowMoreCurrencies] = useState(false);
 
   // Data
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
@@ -155,15 +169,14 @@ export default function FinancialPage() {
   const { rewards: psRewards, payouts: psPayouts, loading: psLoading } = usePartnerstack();
 
   const psKpis = useMemo(() => {
-    const currency = psRewards[0]?.currency ?? psPayouts[0]?.currency ?? 'USD';
     const totalEarned = psRewards
-      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.currency === currency)
-      .reduce((s, r) => s + (r.amount ?? 0) / 100, 0);
+      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null)
+      .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
     const pending = psRewards
-      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.currency === currency)
-      .reduce((s, r) => s + (r.amount ?? 0) / 100, 0);
-    return { totalEarned, pending, currency };
-  }, [psRewards, psPayouts]);
+      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null)
+      .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
+    return { totalEarned, pending };
+  }, [psRewards, convert, primaryCurrency]);
 
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [editAccount, setEditAccount] = useState<BankAccount | null>(null);
@@ -171,6 +184,7 @@ export default function FinancialPage() {
   const [showAddTxn, setShowAddTxn] = useState(false);
   const [addTxnType, setAddTxnType] = useState<'income' | 'expense'>('expense');
   const [showExport, setShowExport] = useState(false);
+  const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [txnSearch, setTxnSearch] = useState('');
   const [txnStatusFilter, setTxnStatusFilter] = useState<'all' | 'pending' | 'cleared'>('all');
   const [txnTypeFilter, setTxnTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
@@ -185,15 +199,116 @@ export default function FinancialPage() {
         pb.collection(COLLECTIONS.FIN_CATEGORIES).getFullList<FinCategory>({ sort: 'name' }),
         pb.collection(COLLECTIONS.RECURRING_TRANSACTIONS).getFullList<RecurringTransaction>({ sort: '-created', expand: 'category' }),
       ]);
+      // Auto-generate transactions for due recurring subscriptions
+      const todayDate = new Date();
+      todayDate.setHours(0, 0, 0, 0);
+      const todayStr = todayDate.toISOString().split('T')[0];
+      let didGenerate = false;
+
+      for (const rec of recs) {
+        if (!rec.is_active || !rec.next_run_date) continue;
+
+        const endDate = rec.end_date ? new Date(rec.end_date.split(' ')[0]) : null;
+        let nextRun = new Date(rec.next_run_date.split(' ')[0]);
+        nextRun.setHours(0, 0, 0, 0);
+
+        let initialApplied = rec.initial_applied ?? false;
+        let advanced = false;
+
+        while (nextRun <= todayDate) {
+          if (endDate && nextRun > endDate) break;
+
+          const dateStr = nextRun.toISOString().split('T')[0];
+
+          // One-time setup fee on first occurrence
+          if (!initialApplied && rec.initial_amount) {
+            try {
+              await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).create({
+                bank_account: rec.bank_account,
+                type: rec.type,
+                amount: rec.initial_amount,
+                currency: rec.currency,
+                fee_amount: null,
+                category: rec.category || null,
+                description: `${rec.description} (Setup Fee)`,
+                status: 'cleared',
+                date: dateStr + ' 00:00:00',
+                is_recurring: true,
+                recurring_id: rec.id,
+                created_by: rec.created_by,
+              });
+              const acc = accs.find(a => a.id === rec.bank_account);
+              if (acc) {
+                const delta = rec.type === 'income' ? rec.initial_amount : -rec.initial_amount;
+                acc.balance += delta;
+                await pb.collection(COLLECTIONS.BANK_ACCOUNTS).update(acc.id, { balance: acc.balance });
+              }
+              initialApplied = true;
+            } catch { /* silently skip */ }
+          }
+
+          // Regular recurring transaction
+          try {
+            await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).create({
+              bank_account: rec.bank_account,
+              type: rec.type,
+              amount: rec.amount,
+              currency: rec.currency,
+              fee_amount: rec.fee_amount || null,
+              category: rec.category || null,
+              description: rec.description,
+              status: 'cleared',
+              date: dateStr + ' 00:00:00',
+              is_recurring: true,
+              recurring_id: rec.id,
+              created_by: rec.created_by,
+            });
+            const acc = accs.find(a => a.id === rec.bank_account);
+            if (acc) {
+              const delta = rec.type === 'income' ? rec.amount : -(rec.amount + (rec.fee_amount ?? 0));
+              acc.balance += delta;
+              await pb.collection(COLLECTIONS.BANK_ACCOUNTS).update(acc.id, { balance: acc.balance });
+            }
+          } catch { /* silently skip */ }
+
+          nextRun = addFrequency(nextRun, rec.frequency);
+          advanced = true;
+        }
+
+        // Persist updated next_run_date and initial_applied
+        if (advanced || initialApplied !== (rec.initial_applied ?? false)) {
+          try {
+            const updates: Record<string, unknown> = {};
+            if (advanced) updates.next_run_date = nextRun.toISOString().split('T')[0] + ' 00:00:00';
+            if (initialApplied !== (rec.initial_applied ?? false)) updates.initial_applied = true;
+            await pb.collection(COLLECTIONS.RECURRING_TRANSACTIONS).update(rec.id, updates);
+            didGenerate = true;
+          } catch { /* silently skip */ }
+        }
+      }
+
+      // If we generated any transactions, re-fetch fresh data so UI reflects them
+      if (didGenerate) {
+        const [freshAccs, freshTxns, freshRecs] = await Promise.all([
+          pb.collection(COLLECTIONS.BANK_ACCOUNTS).getFullList<BankAccount>({ sort: '-created' }),
+          pb.collection(COLLECTIONS.FIN_TRANSACTIONS).getFullList<FinTransaction>({ sort: '-date', expand: 'category' }),
+          pb.collection(COLLECTIONS.RECURRING_TRANSACTIONS).getFullList<RecurringTransaction>({ sort: '-created', expand: 'category' }),
+        ]);
+        setAccounts(freshAccs);
+        setTransactions(freshTxns);
+        setRecurring(freshRecs);
+        setCategories(cats);
+        return;
+      }
+
       setAccounts(accs);
       setCategories(cats);
       setRecurring(recs);
       setTransactions(txns);
 
       // Auto-clear pending transactions whose expected_clear_date has passed
-      const today = new Date().toISOString().split('T')[0];
       const toApprove = txns.filter(t =>
-        t.status === 'pending' && t.expected_clear_date && t.expected_clear_date.split(' ')[0] <= today
+        t.status === 'pending' && t.expected_clear_date && t.expected_clear_date.split(' ')[0] <= todayStr
       );
       for (const txn of toApprove) {
         const acc = accs.find(a => a.id === txn.bank_account);
@@ -289,18 +404,36 @@ export default function FinancialPage() {
 
         <div className="flex items-center gap-2">
           {/* Primary currency selector */}
-          <div className="relative">
+          <div className="relative flex items-center gap-1">
+            {(['USD', 'PKR'] as SupportedCurrency[]).map(c => (
+              <button
+                key={c}
+                onClick={() => { setPrimaryCurrency(c); setShowCurrencyPicker(false); setShowMoreCurrencies(false); }}
+                className={cn(
+                  'px-3 py-2 text-xs font-medium border rounded-lg transition-colors',
+                  primaryCurrency === c
+                    ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                    : 'bg-[var(--card-bg)] border-[var(--card-border)] hover:bg-[var(--card-hover)]',
+                )}
+              >
+                {c}
+              </button>
+            ))}
             <button
-              onClick={() => setShowCurrencyPicker(p => !p)}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-[var(--card-border)] rounded-lg hover:bg-[var(--card-hover)] transition-colors bg-[var(--card-bg)]"
+              onClick={() => { setShowCurrencyPicker(p => !p); setShowMoreCurrencies(true); }}
+              className={cn(
+                'flex items-center gap-1 px-3 py-2 text-xs border rounded-lg transition-colors',
+                !['USD', 'PKR'].includes(primaryCurrency)
+                  ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                  : 'bg-[var(--card-bg)] border-[var(--card-border)] hover:bg-[var(--card-hover)]',
+              )}
             >
-              <DollarSign size={14} />
-              {primaryCurrency}
-              <ChevronDown size={13} />
+              {!['USD', 'PKR'].includes(primaryCurrency) ? primaryCurrency : 'More'}
+              <ChevronDown size={12} />
             </button>
-            {showCurrencyPicker && (
+            {showCurrencyPicker && showMoreCurrencies && (
               <div className="absolute right-0 top-10 z-20 w-52 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl py-1 max-h-64 overflow-y-auto">
-                {SUPPORTED_CURRENCIES.map(c => (
+                {SUPPORTED_CURRENCIES.filter(c => !['USD', 'PKR'].includes(c)).map(c => (
                   <button
                     key={c}
                     onClick={() => { setPrimaryCurrency(c); setShowCurrencyPicker(false); }}
@@ -313,6 +446,9 @@ export default function FinancialPage() {
             )}
           </div>
 
+          <button onClick={() => setShowInvoiceUpload(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-opacity">
+            <Sparkles size={14} />Upload Invoice
+          </button>
           <button onClick={() => { setShowAddTxn(true); setAddTxnType('income'); }} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-[var(--success)] text-white rounded-lg hover:opacity-90 transition-opacity">
             <Plus size={14} />Income
           </button>
@@ -381,14 +517,14 @@ export default function FinancialPage() {
                 />
                 <KpiCard
                   label="PS Earnings"
-                  value={psLoading ? '…' : new Intl.NumberFormat('en-US', { style: 'currency', currency: psKpis.currency }).format(psKpis.totalEarned)}
-                  sub="Approved PartnerStack rewards"
+                  value={psLoading ? '…' : `${sym}${psKpis.totalEarned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  sub={`Approved PartnerStack rewards · ${primaryCurrency}`}
                   color="var(--primary)"
                 />
                 <KpiCard
                   label="PS Pending"
-                  value={psLoading ? '…' : new Intl.NumberFormat('en-US', { style: 'currency', currency: psKpis.currency }).format(psKpis.pending)}
-                  sub="Awaiting PartnerStack approval"
+                  value={psLoading ? '…' : `${sym}${psKpis.pending.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  sub={`Awaiting PartnerStack approval · ${primaryCurrency}`}
                   color="var(--warning)"
                 />
               </div>
@@ -396,7 +532,7 @@ export default function FinancialPage() {
               {/* Charts row */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="lg:col-span-2">
-                  <CashFlowChart transactions={transactions} primaryCurrency={primaryCurrency} psRewards={psRewards} />
+                  <CashFlowChart transactions={transactions} primaryCurrency={primaryCurrency} psRewards={psRewards} accounts={accounts} />
                 </div>
                 <ExpenseBreakdownChart transactions={transactions} categories={categories} primaryCurrency={primaryCurrency} />
               </div>
@@ -447,6 +583,79 @@ export default function FinancialPage() {
                 categories={categories}
                 onRefresh={fetchAll}
               />
+
+              {/* PartnerStack rewards inline */}
+              {txnTypeFilter !== 'expense' && (() => {
+                const q = txnSearch.toLowerCase();
+                const filtered = psRewards.filter(r => {
+                  if (txnStatusFilter === 'cleared' && !['approved', 'paid'].includes(r.reward_status)) return false;
+                  if (txnStatusFilter === 'pending' && !['pending', 'hold'].includes(r.reward_status)) return false;
+                  if (q) {
+                    const text = [r.description, r.company?.name, r.customer?.name, r.customer?.email].join(' ').toLowerCase();
+                    if (!text.includes(q)) return false;
+                  }
+                  return true;
+                }).sort((a, b) => b.created_at - a.created_at);
+
+                if (filtered.length === 0 && !psLoading) return null;
+
+                return (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 px-1 pt-2">
+                      <div className="h-px flex-1 bg-[var(--card-border)]" />
+                      <span className="text-[11px] font-medium text-[var(--muted)] px-1">
+                        PartnerStack Rewards{psLoading ? ' · loading…' : ` · ${filtered.length}`}
+                      </span>
+                      <div className="h-px flex-1 bg-[var(--card-border)]" />
+                    </div>
+                    {filtered.map(r => {
+                      const isApproved = ['approved', 'paid'].includes(r.reward_status);
+                      const amt = r.amount != null
+                        ? (r.amount / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : '—';
+                      const currencySymbol = r.currency
+                        ? new Intl.NumberFormat('en-US', { style: 'currency', currency: r.currency })
+                            .formatToParts(0).find(p => p.type === 'currency')?.value ?? r.currency
+                        : '';
+                      return (
+                        <div key={r.key} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg flex items-center gap-3 px-4 py-3">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-[var(--primary)]/10">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {r.description ?? r.company?.name ?? 'PartnerStack Reward'}
+                            </p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-[var(--primary)]/30 text-[var(--primary)]">
+                                PartnerStack
+                              </span>
+                              {r.customer?.name && (
+                                <span className="text-[11px] text-[var(--muted)] truncate">{r.customer.name}</span>
+                              )}
+                              <span className="text-[11px] text-[var(--muted)]">·</span>
+                              <span className="text-[11px] text-[var(--muted)]">
+                                {new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-bold text-[var(--success)]">+{currencySymbol}{amt}</p>
+                            <span className={cn(
+                              'text-[10px] font-semibold capitalize',
+                              isApproved ? 'text-[var(--success)]' : 'text-[var(--warning)]',
+                            )}>
+                              {r.reward_status}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -516,7 +725,14 @@ export default function FinancialPage() {
           )}
 
           {/* ── PARTNERSTACK TAB ── */}
-          {tab === 'partnerstack' && <PartnerStackPanel />}
+          {tab === 'partnerstack' && (
+            <PartnerStackPanel
+              rewards={psRewards}
+              payouts={psPayouts}
+              loading={psLoading}
+              onRefresh={() => { /* hook auto-manages */ }}
+            />
+          )}
         </>
       )}
 
@@ -551,6 +767,15 @@ export default function FinancialPage() {
         <ExportModal
           onClose={() => setShowExport(false)}
           transactions={transactions}
+          accounts={accounts}
+          categories={categories}
+        />
+      )}
+      {showInvoiceUpload && (
+        <InvoiceUploadModal
+          onClose={() => setShowInvoiceUpload(false)}
+          onSaved={fetchAll}
+          userId={user.id}
           accounts={accounts}
           categories={categories}
         />

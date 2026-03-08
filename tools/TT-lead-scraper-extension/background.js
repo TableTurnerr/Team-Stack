@@ -501,6 +501,8 @@ chrome.commands.onCommand.addListener(function (command) {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             var tab = tabs && tabs[0];
             if (!tab) return;
+            var tabUrl = tab.url || '';
+            if (tabUrl.startsWith('chrome://') || tabUrl.startsWith('edge://') || tabUrl.startsWith('about:')) return;
 
             chrome.scripting.executeScript({
                 target: { tabId: tab.id },
@@ -565,7 +567,11 @@ chrome.commands.onCommand.addListener(function (command) {
     } else if (command === 'manual_add_to_list') {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_MANUAL_ADD' });
+                var u = tabs[0].url || '';
+                if (u.startsWith('chrome://') || u.startsWith('edge://') || u.startsWith('about:')) return;
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_MANUAL_ADD' }, function () {
+                    if (chrome.runtime.lastError) { /* receiver not ready — ignore */ }
+                });
             }
         });
     } else if (command === 'open_website') {
@@ -575,6 +581,11 @@ chrome.commands.onCommand.addListener(function (command) {
             if (!tab) {
                  console.warn('GMES: No active tab found');
                  return;
+            }
+            var tabUrl = tab.url || '';
+            if (tabUrl.startsWith('chrome://') || tabUrl.startsWith('edge://') || tabUrl.startsWith('about:')) {
+                console.warn('GMES: Cannot interact with restricted URL:', tabUrl);
+                return;
             }
 
             function sendMessageToTab() {

@@ -13,6 +13,7 @@ import {
     Play,
     Copy,
     Check,
+    ExternalLink,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences } from '@/lib/types';
@@ -85,6 +86,8 @@ export default function SessionPage() {
     const [pausing, setPausing] = useState(false);
     const [collectionMissing, setCollectionMissing] = useState(false);
     const [zoomAppConfirmed, setZoomAppConfirmed] = useState(false);
+    const [zoomDetecting, setZoomDetecting] = useState(false);
+    const [zoomDetected, setZoomDetected] = useState<boolean | null>(null);
     const [awaitingAudioConnect, setAwaitingAudioConnect] = useState(false);
 
     // Recording state
@@ -176,6 +179,43 @@ export default function SessionPage() {
             setTimeout(() => setTestNumbersCopied(false), 2000);
         });
     };
+
+    // ---------------------------------------------------------------------------
+    // Zoom detection — tries to open zoommtg:// and watches for window blur,
+    // which fires when the OS hands focus to the Zoom desktop app.
+    // ---------------------------------------------------------------------------
+    const verifyZoomRunning = useCallback(() => {
+        if (!document.hasFocus()) window.focus();
+        setZoomDetecting(true);
+        setZoomDetected(null);
+
+        let resolved = false;
+        const resolve = (detected: boolean) => {
+            if (resolved) return;
+            resolved = true;
+            window.removeEventListener('blur', onBlur);
+            setZoomDetecting(false);
+            setZoomDetected(detected);
+            if (detected) {
+                setZoomAppConfirmed(true);
+                refreshDialer();
+            }
+        };
+        const onBlur = () => resolve(true);
+        window.addEventListener('blur', onBlur);
+
+        // Trigger the Zoom protocol handler; if Zoom is running the OS will
+        // switch focus to it, causing the browser window to blur.
+        const a = document.createElement('a');
+        a.href = 'zoommtg://zoom.us/';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // If no blur within 2 s, Zoom was not detected.
+        setTimeout(() => resolve(false), 2000);
+    }, [refreshDialer]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -460,6 +500,18 @@ export default function SessionPage() {
             if (!connectTime) {
                 setConnectTime(Date.now());
 
+                // If the call skipped the ringing phase, increment dial count now
+                if (session && !dialCountIncremented) {
+                    console.log('[Session Page] Incrementing dial count at connect (no ringing phase):', session.id);
+                    setDialCountIncremented(true);
+                    pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
+                        total_dials: (session.total_dials || 0) + 1
+                    }).then(updatedSession => {
+                        console.log('[Session Page] Dial count updated at connect:', updatedSession.total_dials);
+                        setSession(updatedSession);
+                    }).catch(err => console.error('Failed to increment dial count at connect:', err));
+                }
+
                 // Increment pickup count when call is connected (only for session mode)
                 if (session && !pickupCountIncremented) {
                     setPickupCountIncremented(true);
@@ -481,8 +533,14 @@ export default function SessionPage() {
                 // even if the power dialer auto-dials a new call (negative-delay overlap)
                 setPinnedFormPhoneNumber(currentPhoneNumber);
             }
+
+            // Automatically stop the current recording so it gets queued in deferredSegments
+            if (isSessionActive && recorderStatus === 'recording') {
+                console.log('[Session Page] Call ended — auto-stopping recording');
+                stopRecording();
+            }
         }
-    }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
+    }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber, isSessionActive, recorderStatus, stopRecording]);
 
     // ---------------------------------------------------------------------------
     // Call duration timer — separate effect so its lifecycle is tied only to
@@ -559,9 +617,10 @@ export default function SessionPage() {
         }
     }, [currentPhoneNumber]);
 
-    // Sync currentPhoneNumber from zoom context when a call is initiated from docked dialer
+    // Sync currentPhoneNumber from zoom context when a call is initiated from docked dialer.
+    // Handles both ringing and instantly-answered calls that skip straight to 'connected'.
     useEffect(() => {
-        if (activeCallNumber && callStatus === 'ringing') {
+        if (activeCallNumber && (callStatus === 'ringing' || callStatus === 'connected')) {
             // Check if this is a new call (different number or no current number)
             if (!currentPhoneNumber || activeCallNumber !== currentPhoneNumber) {
                 console.log('[Session Page] New call detected from dialer:', activeCallNumber);
@@ -590,15 +649,19 @@ export default function SessionPage() {
         // Start recording on connect (or ringing) if not already recording.
         // Ringing handles immediately-answered calls where 'ringing' fires first;
         // connected handles the fallback for calls that skip directly to 'connected'.
+        // enterDeferredMode() is always called here so that instantly-answered calls
+        // (which skip ringing and may bypass the activeCallNumber effect) are still
+        // queued properly and linked to the call log on form submission.
         if (
             (callStatus === 'ringing' || callStatus === 'connected') &&
             prev !== callStatus &&
             recorderStatus === 'idle'
         ) {
             console.log('[Session Page] Auto-starting recording on', callStatus);
+            enterDeferredMode();
             startRecording();
         }
-    }, [callStatus, isSessionActive, recorderStatus, startRecording]);
+    }, [callStatus, isSessionActive, recorderStatus, startRecording, enterDeferredMode]);
 
     // Fallback: if audio session becomes active WHILE a call is already connected,
     // start recording immediately (covers the race where screen share is granted
@@ -764,6 +827,7 @@ export default function SessionPage() {
             setCallbackEvents([]);
             setContextPhoneNumber(''); // Clear phone number in context
             window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            window.localStorage.removeItem('crm:session:last-call:v1');
 
             // Stop screenshare / audio session when call session ends
             endAudioSession();
@@ -1074,14 +1138,15 @@ export default function SessionPage() {
         callEndTimeRef.current = null;
         window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
-        // Advance power dialer immediately (before background API calls)
-        if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current >= 0) {
+        // Advance power dialer immediately (before background API calls).
+        // Always advance the index even when paused — the call is done regardless.
+        // Only schedule the next dial when not paused.
+        if (powerDialerActiveRef.current && powerDialerDelayRef.current >= 0) {
             const nextIdx = powerDialerIndexRef.current + 1;
+            setPowerDialerIndex(nextIdx);
             if (nextIdx >= powerDialerQueueRef.current.length) {
-                setPowerDialerIndex(nextIdx);
                 setPowerDialerActive(false);
-            } else {
-                setPowerDialerIndex(nextIdx);
+            } else if (!powerDialerPausedRef.current) {
                 if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
                 const delayMs = powerDialerDelayRef.current * 1000;
                 const nextEntry = powerDialerQueueRef.current[nextIdx];
@@ -1277,6 +1342,20 @@ export default function SessionPage() {
         handleDial(powerDialerQueue[powerDialerIndex].number, powerDialerQueue[powerDialerIndex].company);
     }, [powerDialerQueue, powerDialerIndex, hasUnsavedCall, callStatus, handleDial]);
 
+    const handlePowerDialerStartFrom = useCallback((index: number) => {
+        if (powerDialerQueue.length === 0 || hasUnsavedCall) return;
+        if (callStatus === 'ringing' || callStatus === 'connected') return;
+        if (powerDialerTimerRef.current) {
+            clearTimeout(powerDialerTimerRef.current);
+            powerDialerTimerRef.current = null;
+        }
+        powerDialerNegSubmitCountRef.current = 0;
+        setPowerDialerIndex(index);
+        setPowerDialerActive(true);
+        setPowerDialerPaused(false);
+        handleDial(powerDialerQueue[index].number, powerDialerQueue[index].company);
+    }, [powerDialerQueue, hasUnsavedCall, callStatus, handleDial]);
+
     const handlePowerDialerPause = useCallback(() => {
         setPowerDialerPaused(true);
         if (powerDialerTimerRef.current) {
@@ -1416,20 +1495,44 @@ export default function SessionPage() {
                                         <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
                                     </ol>
                                 </div>
-                                <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
-                                    <input
-                                        type="checkbox"
-                                        checked={zoomAppConfirmed}
-                                        onChange={(e) => {
-                                            setZoomAppConfirmed(e.target.checked);
-                                            if (e.target.checked) refreshDialer();
-                                        }}
-                                        className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                                    />
-                                    <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
-                                        <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
-                                    </span>
-                                </label>
+                                <button
+                                    type="button"
+                                    onClick={verifyZoomRunning}
+                                    disabled={zoomDetecting || zoomDetected === true}
+                                    className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                        zoomDetected === true
+                                            ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                            : zoomDetected === false
+                                                ? 'border-[var(--error)] bg-[var(--error-subtle)]/20 hover:bg-[var(--error-subtle)]/30 cursor-pointer active:scale-[0.99]'
+                                                : zoomDetecting
+                                                    ? 'border-[var(--card-border)] bg-[var(--sidebar-bg)] cursor-wait'
+                                                    : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                    }`}
+                                >
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${zoomDetected === true ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                        {zoomDetecting
+                                            ? <Loader2 size={20} className="animate-spin text-[var(--muted)]" />
+                                            : zoomDetected === true
+                                                ? <Check size={20} className="text-[var(--success)]" />
+                                                : zoomDetected === false
+                                                    ? <AlertTriangle size={20} className="text-[var(--error)]" />
+                                                    : <ExternalLink size={20} className="text-[var(--muted)]" />
+                                        }
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className={`text-sm font-semibold ${zoomDetected === true ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                            Open and Verify Zoom Workplace app is running and logged in
+                                        </p>
+                                        {zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Opening Zoom and verifying...</p>}
+                                        {zoomDetected === true && (
+                                            <p className="text-xs text-[var(--success)] mt-0.5">
+                                                Zoom detected and running
+                                            </p>
+                                        )}
+                                        {zoomDetected === false && <p className="text-xs text-[var(--error)] mt-0.5">Zoom not detected — click to try again</p>}
+                                        {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
+                                    </div>
+                                </button>
                                 {recorderError && (
                                     <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                         {recorderError}
@@ -1473,20 +1576,44 @@ export default function SessionPage() {
                                     <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
                                 </ol>
                             </div>
-                            <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
-                                <input
-                                    type="checkbox"
-                                    checked={zoomAppConfirmed}
-                                    onChange={(e) => {
-                                        setZoomAppConfirmed(e.target.checked);
-                                        if (e.target.checked) refreshDialer();
-                                    }}
-                                    className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                                />
-                                <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
-                                    <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
-                                </span>
-                            </label>
+                            <button
+                                type="button"
+                                onClick={verifyZoomRunning}
+                                disabled={zoomDetecting || zoomDetected === true}
+                                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                    zoomDetected === true
+                                        ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                        : zoomDetected === false
+                                            ? 'border-[var(--error)] bg-[var(--error-subtle)]/20 hover:bg-[var(--error-subtle)]/30 cursor-pointer active:scale-[0.99]'
+                                            : zoomDetecting
+                                                ? 'border-[var(--card-border)] bg-[var(--sidebar-bg)] cursor-wait'
+                                                : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                }`}
+                            >
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${zoomDetected === true ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                    {zoomDetecting
+                                        ? <Loader2 size={20} className="animate-spin text-[var(--muted)]" />
+                                        : zoomDetected === true
+                                            ? <Check size={20} className="text-[var(--success)]" />
+                                            : zoomDetected === false
+                                                ? <AlertTriangle size={20} className="text-[var(--error)]" />
+                                                : <ExternalLink size={20} className="text-[var(--muted)]" />
+                                    }
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-semibold ${zoomDetected === true ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                        Open and Verify Zoom Workplace app is running and logged in
+                                    </p>
+                                    {zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Opening Zoom and verifying...</p>}
+                                    {zoomDetected === true && (
+                                        <p className="text-xs text-[var(--success)] mt-0.5">
+                                            Zoom detected and running
+                                        </p>
+                                    )}
+                                    {zoomDetected === false && <p className="text-xs text-[var(--error)] mt-0.5">Zoom not detected — click to try again</p>}
+                                    {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
+                                </div>
+                            </button>
                             {recorderError && (
                                 <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                     {recorderError}
@@ -1599,20 +1726,44 @@ export default function SessionPage() {
                                     <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
                                 </ol>
                             </div>
-                            <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
-                                <input
-                                    type="checkbox"
-                                    checked={zoomAppConfirmed}
-                                    onChange={(e) => {
-                                        setZoomAppConfirmed(e.target.checked);
-                                        if (e.target.checked) refreshDialer();
-                                    }}
-                                    className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                                />
-                                <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
-                                    <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
-                                </span>
-                            </label>
+                            <button
+                                type="button"
+                                onClick={verifyZoomRunning}
+                                disabled={zoomDetecting || zoomDetected === true}
+                                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                    zoomDetected === true
+                                        ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                        : zoomDetected === false
+                                            ? 'border-[var(--error)] bg-[var(--error-subtle)]/20 hover:bg-[var(--error-subtle)]/30 cursor-pointer active:scale-[0.99]'
+                                            : zoomDetecting
+                                                ? 'border-[var(--card-border)] bg-[var(--sidebar-bg)] cursor-wait'
+                                                : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                }`}
+                            >
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${zoomDetected === true ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                    {zoomDetecting
+                                        ? <Loader2 size={20} className="animate-spin text-[var(--muted)]" />
+                                        : zoomDetected === true
+                                            ? <Check size={20} className="text-[var(--success)]" />
+                                            : zoomDetected === false
+                                                ? <AlertTriangle size={20} className="text-[var(--error)]" />
+                                                : <ExternalLink size={20} className="text-[var(--muted)]" />
+                                    }
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-semibold ${zoomDetected === true ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                        Open and Verify Zoom Workplace app is running and logged in
+                                    </p>
+                                    {zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Opening Zoom and verifying...</p>}
+                                    {zoomDetected === true && (
+                                        <p className="text-xs text-[var(--success)] mt-0.5">
+                                            Zoom detected and running
+                                        </p>
+                                    )}
+                                    {zoomDetected === false && <p className="text-xs text-[var(--error)] mt-0.5">Zoom not detected — click to try again</p>}
+                                    {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
+                                </div>
+                            </button>
                             {recorderError && (
                                 <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                     {recorderError}
@@ -1785,6 +1936,7 @@ export default function SessionPage() {
                     onPause={handlePowerDialerPause}
                     onResume={handlePowerDialerResume}
                     onStop={handlePowerDialerStop}
+                    onStartFrom={handlePowerDialerStartFrom}
                     onDelayChange={setPowerDialerDelay}
                     onQueueLoad={handlePowerDialerQueueLoad}
                     disabled={!!session.paused_at}

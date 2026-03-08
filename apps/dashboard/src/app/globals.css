@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Suppress focus outlines on Recharts SVG elements */
+.recharts-wrapper,
+.recharts-wrapper svg,
+.recharts-wrapper *:focus,
+.recharts-surface {
+  outline: none !important;
+}
+
 /* Sign-in page animations */
 @keyframes fadeSlideIn {
   from {

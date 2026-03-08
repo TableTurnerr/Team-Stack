@@ -10,9 +10,24 @@ import { cn } from '@/lib/utils';
 
 const ACCOUNT_TYPES = ['checking', 'savings', 'wallet', 'credit', 'crypto', 'cash'] as const;
 
+// Curated, perceptually distinct palette for account colours
 const PRESET_COLORS = [
-  '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#84cc16',
+  '#6366f1', // indigo
+  '#3b82f6', // blue
+  '#0ea5e9', // sky
+  '#06b6d4', // cyan
+  '#10b981', // emerald
+  '#22c55e', // green
+  '#84cc16', // lime
+  '#eab308', // yellow
+  '#f97316', // orange
+  '#ef4444', // red
+  '#ec4899', // pink
+  '#a855f7', // purple
+  '#8b5cf6', // violet
+  '#14b8a6', // teal
+  '#f59e0b', // amber
+  '#64748b', // slate (neutral)
 ];
 
 interface AddAccountModalProps {
@@ -129,24 +144,37 @@ export function AddAccountModal({ onClose, onSaved, editAccount, userId }: AddAc
 
           {/* Color */}
           <div>
-            <label className="block text-xs font-medium mb-1.5">Color</label>
-            <div className="flex items-center gap-2 flex-wrap">
+            <label className="block text-xs font-medium mb-1.5">Colour</label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
               {PRESET_COLORS.map(c => (
                 <button
                   key={c}
                   onClick={() => setColor(c)}
-                  className={cn('w-6 h-6 rounded-full transition-all', color === c ? 'ring-2 ring-offset-2 ring-[var(--foreground)] scale-110' : 'opacity-70 hover:opacity-100')}
+                  title={c}
+                  className={cn(
+                    'w-6 h-6 rounded-full transition-all border-2',
+                    color === c
+                      ? 'border-[var(--foreground)] scale-110'
+                      : 'border-transparent opacity-70 hover:opacity-100 hover:scale-105',
+                  )}
                   style={{ backgroundColor: c }}
                 />
               ))}
-              <input
-                type="color"
-                value={color}
-                onChange={e => setColor(e.target.value)}
-                className="w-6 h-6 rounded-full cursor-pointer border-0"
-                title="Custom color"
-              />
+              <label
+                className="w-6 h-6 rounded-full border-2 border-dashed border-[var(--card-border)] cursor-pointer flex items-center justify-center hover:border-[var(--foreground)] transition-colors"
+                title="Custom colour"
+              >
+                <span className="text-[9px] text-[var(--muted)]">+</span>
+                <input type="color" value={color || '#6366f1'} onChange={e => setColor(e.target.value)} className="hidden" />
+              </label>
             </div>
+            {color && (
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-[10px] text-[var(--muted)] font-mono">{color}</span>
+                <button onClick={() => setColor('')} className="text-[10px] text-[var(--muted)] hover:text-[var(--error)] ml-auto">Clear</button>
+              </div>
+            )}
           </div>
 
           {/* Notes */}

@@ -2,7 +2,6 @@
 
 import { useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { startOfMonth } from 'date-fns';
 import type { FinTransaction, FinCategory, SupportedCurrency } from '@/lib/types';
 import { useExchangeRates, CURRENCY_SYMBOLS } from '@/hooks/use-exchange-rates';
 import { cn } from '@/lib/utils';
@@ -17,23 +16,40 @@ export function BudgetProgress({ transactions, categories, primaryCurrency }: Bu
   const { convert } = useExchangeRates();
   const symbol = CURRENCY_SYMBOLS[primaryCurrency];
 
-  const categoriesWithBudget = categories.filter(c => c.budget_limit && c.budget_limit > 0 && (c.type === 'expense' || c.type === 'both'));
+  const categoriesWithBudget = categories.filter(
+    c => c.budget_limit && c.budget_limit > 0 && (c.type === 'expense' || c.type === 'both'),
+  );
 
-  const monthStart = startOfMonth(new Date());
+  // Use string-based month start comparison (avoids timezone Date-parsing issues)
+  const now = new Date();
+  const monthStartStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
   const spending = useMemo(() => {
     const result: Record<string, number> = {};
-    const monthTxns = transactions.filter(t => {
-      const d = new Date(t.date.split(' ')[0]);
-      return d >= monthStart && t.type === 'expense' && t.status === 'cleared';
+
+    const monthExpenses = transactions.filter(t => {
+      const dateStr = t.date.split(' ')[0]; // "YYYY-MM-DD"
+      return dateStr >= monthStartStr && t.type === 'expense' && t.status === 'cleared';
     });
-    for (const txn of monthTxns) {
-      if (!txn.category) continue;
-      const converted = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
-      result[txn.category] = (result[txn.category] ?? 0) + converted;
+
+    for (const txn of monthExpenses) {
+      const baseAmount = convert(txn.amount + (txn.fee_amount ?? 0), txn.currency, primaryCurrency);
+
+      // Multi-category splits — distribute proportionally
+      const splits = txn.category_splits;
+      if (splits && splits.length > 1) {
+        for (const sp of splits) {
+          if (!sp.category_id) continue;
+          const share = baseAmount * (sp.percentage / 100);
+          result[sp.category_id] = (result[sp.category_id] ?? 0) + share;
+        }
+      } else if (txn.category) {
+        result[txn.category] = (result[txn.category] ?? 0) + baseAmount;
+      }
     }
+
     return result;
-  }, [transactions, convert, primaryCurrency, monthStart]);
+  }, [transactions, convert, primaryCurrency, monthStartStr]);
 
   if (categoriesWithBudget.length === 0) {
     return (
@@ -53,7 +69,7 @@ export function BudgetProgress({ transactions, categories, primaryCurrency }: Bu
         {categoriesWithBudget.map(cat => {
           const spent = spending[cat.id] ?? 0;
           const limit = convert(cat.budget_limit!, cat.budget_currency ?? primaryCurrency, primaryCurrency);
-          const pct = Math.min((spent / limit) * 100, 100);
+          const pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
           const isOver = spent > limit;
           const isWarning = pct >= 80 && !isOver;
 
@@ -84,6 +100,9 @@ export function BudgetProgress({ transactions, categories, primaryCurrency }: Bu
                   style={{ width: `${pct}%`, backgroundColor: barColor }}
                 />
               </div>
+              {spent === 0 && (
+                <p className="text-[10px] text-[var(--muted)] mt-0.5">No cleared expenses this month</p>
+              )}
               {isOver && (
                 <p className="text-[10px] text-[var(--error)] mt-0.5">
                   Over by {symbol}{(spent - limit).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}

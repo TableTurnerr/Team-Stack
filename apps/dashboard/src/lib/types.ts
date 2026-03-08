@@ -367,6 +367,12 @@ export interface UserPreferences extends RecordModel {
 
 export type SupportedCurrency = 'USD' | 'PKR' | 'GBP' | 'EUR' | 'AED' | 'CAD' | 'AUD' | 'SGD' | 'INR' | 'SAR';
 
+/** Represents a category's percentage contribution to a transaction or subscription. */
+export interface CategorySplit {
+  category_id: string;
+  percentage: number; // 0–100, all splits on a transaction must sum to 100
+}
+
 export interface BankAccount extends RecordModel {
   name: string;
   currency: SupportedCurrency;
@@ -414,6 +420,8 @@ export interface FinTransaction extends RecordModel {
   currency: SupportedCurrency;
   fee_amount?: number;
   category?: string;
+  /** Multi-category percentage splits. When present, overrides single `category` for breakdown/budget logic. */
+  category_splits?: CategorySplit[];
   tags?: string[];
   description?: string;
   status: 'pending' | 'cleared';
@@ -437,6 +445,8 @@ export interface RecurringTransaction extends RecordModel {
   currency: SupportedCurrency;
   fee_amount?: number;
   category?: string;
+  /** Multi-category percentage splits — propagated to each generated FinTransaction. */
+  category_splits?: CategorySplit[];
   description: string;
   frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
   start_date: string;

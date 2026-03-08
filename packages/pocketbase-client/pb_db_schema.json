@@ -4202,6 +4202,16 @@
             },
             {
                 "hidden": false,
+                "id": "json_txn_category_splits",
+                "maxSize": 0,
+                "name": "category_splits",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
                 "id": "json_txn_tags",
                 "maxSize": 0,
                 "name": "tags",
@@ -4451,6 +4461,16 @@
                 "required": false,
                 "system": false,
                 "type": "relation"
+            },
+            {
+                "hidden": false,
+                "id": "json_rec_category_splits",
+                "maxSize": 0,
+                "name": "category_splits",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
             },
             {
                 "autogeneratePattern": "",

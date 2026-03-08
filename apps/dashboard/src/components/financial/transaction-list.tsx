@@ -1,7 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { ArrowUpRight, ArrowDownLeft, Clock, FileText, Tag, ExternalLink, Trash2, ChevronDown, ChevronUp, Loader2, Link2, RefreshCw } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import {
+  ArrowUpRight, ArrowDownLeft, Clock, FileText, Tag, ExternalLink, Trash2,
+  ChevronDown, ChevronUp, Loader2, Link2, RefreshCw, Copy, Check, Pencil,
+  CheckCircle2, AlertCircle, Hash,
+} from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import type { FinTransaction, BankAccount, FinCategory } from '@/lib/types';
@@ -15,11 +19,34 @@ interface TransactionListProps {
   accounts: BankAccount[];
   categories: FinCategory[];
   onRefresh: () => void;
+  onEdit?: (txn: FinTransaction) => void;
 }
 
-export function TransactionList({ transactions, accounts, categories, onRefresh }: TransactionListProps) {
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [text]);
+  return (
+    <button
+      onClick={handleCopy}
+      title={`Copy ${label ?? text}`}
+      className="inline-flex items-center gap-1 text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+    >
+      {copied ? <Check size={11} className="text-[var(--success)]" /> : <Copy size={11} />}
+      {label && <span className="text-[10px]">{copied ? 'Copied!' : label}</span>}
+    </button>
+  );
+}
+
+export function TransactionList({ transactions, accounts, categories, onRefresh, onEdit }: TransactionListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [clearing, setClearing] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -41,6 +68,24 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
       setSelected(new Set());
     } else {
       setSelected(new Set(transactions.map(t => t.id)));
+    }
+  }
+
+  async function handleClearPending(txn: FinTransaction, e: React.MouseEvent) {
+    e.stopPropagation();
+    setClearing(txn.id);
+    try {
+      await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).update(txn.id, { status: 'cleared' });
+      const acc = accounts.find(a => a.id === txn.bank_account);
+      if (acc) {
+        const delta = txn.type === 'income' ? txn.amount : -(txn.amount + (txn.fee_amount ?? 0));
+        await pb.collection(COLLECTIONS.BANK_ACCOUNTS).update(acc.id, { balance: acc.balance + delta });
+      }
+      onRefresh();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setClearing(null);
     }
   }
 
@@ -72,7 +117,6 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
     try {
       const toDelete = transactions.filter(t => ids.includes(t.id));
 
-      // Group balance reversals by account to avoid stale reads
       const balanceDeltas = new Map<string, number>();
       for (const txn of toDelete) {
         if (txn.status === 'cleared') {
@@ -81,7 +125,6 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
         }
       }
 
-      // Apply balance reversals
       for (const [accId, delta] of balanceDeltas) {
         const acc = accounts.find(a => a.id === accId);
         if (acc) {
@@ -89,7 +132,6 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
         }
       }
 
-      // Delete all selected transactions
       await Promise.all(toDelete.map(txn => pb.collection(COLLECTIONS.FIN_TRANSACTIONS).delete(txn.id)));
       setSelected(new Set());
       onRefresh();
@@ -104,7 +146,7 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
     return (
       <div className="text-center py-12 text-[var(--muted)]">
         <FileText size={32} className="mx-auto mb-2 opacity-30" />
-        <p className="text-sm">No transactions yet</p>
+        <p className="text-sm">No transactions found</p>
       </div>
     );
   }
@@ -112,12 +154,27 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
   const allSelected = selected.size === transactions.length;
   const someSelected = selected.size > 0 && !allSelected;
 
+  // Bulk selection totals
+  const selectedTxns = transactions.filter(t => selected.has(t.id));
+  const selectedIncome = selectedTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const selectedExpense = selectedTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount + (t.fee_amount ?? 0), 0);
+
   return (
     <div className="space-y-1">
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg sticky top-0 z-10">
-          <span className="text-sm font-medium">{selected.size} selected</span>
+        <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg sticky top-0 z-10 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-sm font-medium shrink-0">{selected.size} selected</span>
+            <div className="flex items-center gap-3 text-[11px] text-[var(--muted)]">
+              {selectedIncome > 0 && (
+                <span className="text-[var(--success)]">+{selectedIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              )}
+              {selectedExpense > 0 && (
+                <span className="text-[var(--error)]">-{selectedExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              )}
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSelected(new Set())}
@@ -137,7 +194,7 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
         </div>
       )}
 
-      {/* Select-all header — only visible when something is selected */}
+      {/* Select-all header */}
       {selected.size > 0 && (
         <div className="flex items-center gap-3 px-4 py-1.5">
           <input
@@ -161,6 +218,8 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
         const isIncome = txn.type === 'income';
         const symbol = CURRENCY_SYMBOLS[txn.currency];
         const tags: string[] = Array.isArray(txn.tags) ? txn.tags : [];
+        const netAmount = isIncome ? txn.amount : txn.amount + (txn.fee_amount ?? 0);
+        const shortId = txn.id.slice(0, 8);
 
         const showCheckbox = selected.size > 0 || hoveredId === txn.id;
 
@@ -179,7 +238,7 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
               className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--card-hover)] transition-colors cursor-pointer"
               onClick={() => setExpandedId(isExpanded ? null : txn.id)}
             >
-              {/* Icon / Checkbox slot — checkbox replaces icon on hover or selection */}
+              {/* Icon / Checkbox slot */}
               <div className="relative w-8 h-8 shrink-0 flex items-center justify-center">
                 <div className={cn(
                   'w-8 h-8 rounded-full flex items-center justify-center transition-opacity absolute inset-0',
@@ -240,7 +299,9 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
                       {cat.name}
                     </span>
                   ) : null}
-                  <span className="text-[11px] text-[var(--muted)]">{acc?.name}</span>
+                  {acc && (
+                    <span className="text-[11px] text-[var(--muted)]">{acc.name}</span>
+                  )}
                   <span className="text-[11px] text-[var(--muted)]">·</span>
                   <span className="text-[11px] text-[var(--muted)]">{format(new Date(txn.date.split(' ')[0] + 'T12:00:00'), 'MMM d, yyyy')}</span>
                   {txn.status === 'pending' && (
@@ -248,8 +309,23 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
                       <Clock size={10} />Pending
                     </span>
                   )}
+                  {/* Short ID */}
+                  <span className="text-[10px] text-[var(--muted)]/50 font-mono hidden sm:inline">#{shortId}</span>
                 </div>
               </div>
+
+              {/* Quick clear button for pending */}
+              {txn.status === 'pending' && hoveredId === txn.id && (
+                <button
+                  onClick={e => handleClearPending(txn, e)}
+                  disabled={clearing === txn.id}
+                  title="Mark as cleared"
+                  className="shrink-0 flex items-center gap-1 text-[10px] px-2 py-1 rounded-md bg-[var(--success-subtle)] text-[var(--success)] hover:opacity-80 transition-opacity disabled:opacity-50"
+                >
+                  {clearing === txn.id ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle2 size={10} />}
+                  Clear
+                </button>
+              )}
 
               {/* Amount */}
               <CurrencyTooltip amount={txn.amount} currency={txn.currency}>
@@ -263,57 +339,198 @@ export function TransactionList({ transactions, accounts, categories, onRefresh 
 
             {/* Expanded details */}
             {isExpanded && (
-              <div className="px-4 pb-3 border-t border-[var(--card-border)] bg-[var(--background)] space-y-2">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-2 text-xs text-[var(--muted)]">
-                  {txn.fee_amount && txn.fee_amount > 0 && (
-                    <>
-                      <span>Fee / Exchange Loss</span>
-                      <span className="font-medium text-[var(--error)]">-{symbol}{txn.fee_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-                    </>
-                  )}
-                  {txn.status === 'pending' && txn.expected_clear_date && (
-                    <>
-                      <span>Expected Clear</span>
-                      <span className="font-medium">{format(new Date(txn.expected_clear_date), 'MMM d, yyyy')}</span>
-                    </>
-                  )}
-                  {txn.is_recurring && (
-                    <>
-                      <span>Type</span>
-                      <span className="font-medium">Recurring</span>
-                    </>
-                  )}
-                </div>
+              <div className="border-t border-[var(--card-border)] bg-[var(--background)]">
 
-                {tags.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <Tag size={11} className="text-[var(--muted)]" />
-                    {tags.map(tag => (
-                      <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-[var(--card-hover)] rounded-full">{tag}</span>
-                    ))}
+                {/* Full description (if meaningful) */}
+                {txn.description && txn.description !== 'Income' && txn.description !== 'Expense' && (
+                  <div className="px-4 pt-3 pb-0">
+                    <p className="text-[10px] text-[var(--muted)] mb-0.5">Description</p>
+                    <p className="text-sm font-medium leading-snug">{txn.description}</p>
                   </div>
                 )}
 
-                {txn.receipt_file && (
-                  <a
-                    href={pb.files.getUrl(txn, txn.receipt_file)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-[var(--primary)] hover:underline"
-                  >
-                    <FileText size={12} />View Receipt <ExternalLink size={11} />
-                  </a>
-                )}
+                <div className="px-4 pb-4 pt-3 space-y-3">
 
-                <div className="flex justify-end pt-1">
-                  <button
-                    onClick={() => handleDelete(txn)}
-                    disabled={deleting === txn.id}
-                    className="flex items-center gap-1.5 text-xs text-[var(--error)] hover:opacity-70 transition-opacity disabled:opacity-40"
-                  >
-                    {deleting === txn.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                    Delete
-                  </button>
+                  {/* Status + amount summary row */}
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      'flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold',
+                      txn.status === 'cleared' ? 'bg-[var(--success-subtle)] text-[var(--success)]' : 'bg-[var(--warning-subtle,var(--card-hover))] text-[var(--warning)]',
+                    )}>
+                      {txn.status === 'cleared' ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                      {txn.status}
+                    </div>
+                    <div className={cn(
+                      'flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold',
+                      isIncome ? 'bg-[var(--success-subtle)] text-[var(--success)]' : 'bg-[var(--error-subtle)] text-[var(--error)]',
+                    )}>
+                      {txn.type}
+                    </div>
+                    {txn.is_recurring && (
+                      <div className="flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold bg-[var(--card-hover)] text-[var(--muted)]">
+                        <RefreshCw size={9} />recurring
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Transaction ID */}
+                  <div className="flex items-center gap-2 p-2.5 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg">
+                    <Hash size={12} className="text-[var(--muted)] shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] text-[var(--muted)] mb-0.5">Transaction ID</p>
+                      <p className="text-xs font-mono truncate">{txn.id}</p>
+                    </div>
+                    <CopyButton text={txn.id} label="Copy" />
+                  </div>
+
+                  {/* Details grid */}
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs">
+                    <div>
+                      <p className="text-[10px] text-[var(--muted)] mb-0.5">Amount</p>
+                      <p className="font-semibold tabular-nums">
+                        {symbol}{txn.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-[10px] text-[var(--muted)] font-normal">{txn.currency}</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-[var(--muted)] mb-0.5">Net {isIncome ? 'Received' : 'Spent'}</p>
+                      <p className={cn('font-bold tabular-nums', isIncome ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+                        {isIncome ? '+' : '-'}{symbol}{netAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    {txn.fee_amount != null && txn.fee_amount > 0 && (
+                      <div>
+                        <p className="text-[10px] text-[var(--muted)] mb-0.5">Fee / Exchange Loss</p>
+                        <p className="font-medium text-[var(--error)] tabular-nums">
+                          -{symbol}{txn.fee_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })} {txn.currency}
+                        </p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-[10px] text-[var(--muted)] mb-0.5">Date</p>
+                      <p className="font-medium">{format(new Date(txn.date.split(' ')[0] + 'T12:00:00'), 'MMM d, yyyy')}</p>
+                    </div>
+                    {acc && (
+                      <div>
+                        <p className="text-[10px] text-[var(--muted)] mb-0.5">Account</p>
+                        <div className="flex items-center gap-1.5">
+                          {acc.color && <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: acc.color }} />}
+                          <p className="font-medium truncate">{acc.name}</p>
+                          <span className="text-[10px] text-[var(--muted)]">{acc.currency}</span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Single category display */}
+                    {cat && (!txn.category_splits || txn.category_splits.length <= 1) && (
+                      <div>
+                        <p className="text-[10px] text-[var(--muted)] mb-0.5">Category</p>
+                        <div className="flex items-center gap-1.5">
+                          {cat.color && <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />}
+                          <p className="font-medium truncate">{cat.name}</p>
+                        </div>
+                      </div>
+                    )}
+                    {txn.status === 'pending' && txn.expected_clear_date && (
+                      <div>
+                        <p className="text-[10px] text-[var(--muted)] mb-0.5">Clears on</p>
+                        <p className="font-medium">{format(new Date(txn.expected_clear_date.split(' ')[0] + 'T12:00:00'), 'MMM d, yyyy')}</p>
+                      </div>
+                    )}
+                    {txn.is_recurring && txn.recurring_id && (
+                      <div>
+                        <p className="text-[10px] text-[var(--muted)] mb-0.5">Rule ID</p>
+                        <div className="flex items-center gap-1">
+                          <p className="font-mono text-[10px] truncate">{txn.recurring_id.slice(0, 8)}…</p>
+                          <CopyButton text={txn.recurring_id} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Category splits */}
+                  {txn.category_splits && txn.category_splits.length > 1 && (
+                    <div className="p-2.5 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg">
+                      <p className="text-[10px] text-[var(--muted)] mb-2 font-medium">Category Split</p>
+                      <div className="space-y-1.5">
+                        {txn.category_splits.map((sp, i) => {
+                          const splitCat = getCategory(sp.category_id);
+                          const splitAmt = (netAmount * sp.percentage) / 100;
+                          return (
+                            <div key={i} className="flex items-center gap-2 text-xs">
+                              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                {splitCat?.color && <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: splitCat.color }} />}
+                                <span className="truncate">{splitCat?.name ?? 'Unknown'}</span>
+                              </div>
+                              <span className="text-[var(--muted)] tabular-nums shrink-0">{sp.percentage}%</span>
+                              <span className={cn('tabular-nums font-medium shrink-0', isIncome ? 'text-[var(--success)]' : 'text-[var(--error)]')}>
+                                {isIncome ? '+' : '-'}{symbol}{splitAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tags */}
+                  {tags.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-[var(--muted)] mb-1.5">Tags</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {tags.map(tag => (
+                          <span key={tag} className="text-[10px] px-2 py-0.5 bg-[var(--card-hover)] rounded-full border border-[var(--card-border)] flex items-center gap-1">
+                            <Tag size={9} className="text-[var(--muted)]" />
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Receipt */}
+                  {txn.receipt_file && (
+                    <a
+                      href={pb.files.getUrl(txn, txn.receipt_file)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs px-3 py-2 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg hover:bg-[var(--card-hover)] transition-colors w-fit"
+                    >
+                      <FileText size={12} className="text-[var(--muted)]" />
+                      <span>View Receipt</span>
+                      <ExternalLink size={10} className="text-[var(--muted)]" />
+                    </a>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-2 border-t border-[var(--card-border)]">
+                    {txn.status === 'pending' ? (
+                      <button
+                        onClick={e => handleClearPending(txn, e)}
+                        disabled={clearing === txn.id}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[var(--success-subtle)] text-[var(--success)] rounded-lg hover:opacity-80 transition-opacity disabled:opacity-40 font-medium"
+                      >
+                        {clearing === txn.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                        Mark Cleared
+                      </button>
+                    ) : <div />}
+                    <div className="flex items-center gap-2">
+                      {onEdit && (
+                        <button
+                          onClick={() => onEdit(txn)}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-[var(--card-border)] rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                        >
+                          <Pencil size={12} />Edit
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(txn)}
+                        disabled={deleting === txn.id}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-[var(--error)]/30 rounded-lg text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors disabled:opacity-40"
+                      >
+                        {deleting === txn.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

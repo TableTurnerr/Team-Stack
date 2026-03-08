@@ -9,6 +9,13 @@ var VERSION_JSON_URL = 'https://raw.githubusercontent.com/Hashaam101/google-maps
 var UPDATE_CHECK_ALARM_NAME = 'checkForUpdates';
 var CHECK_INTERVAL_MINUTES = 60;
 
+// ============================================================================
+// CRM Auto-Connect — Background login polling
+// ============================================================================
+var CRM_POLL_ALARM = 'gmes_crm_login_poll';
+var CRM_BG_URL     = 'https://crm.tableturnerr.com';
+var CRM_BG_PB_URL  = 'https://crmdb.tableturnerr.com';
+
 // Get current extension version from manifest
 function getCurrentVersion() {
     return chrome.runtime.getManifest().version;
@@ -149,6 +156,46 @@ function setupUpdateAlarm() {
 chrome.alarms.onAlarm.addListener(function (alarm) {
     if (alarm.name === UPDATE_CHECK_ALARM_NAME) {
         checkForUpdates();
+        return;
+    }
+
+    // CRM login poll: fires every 30s while waiting for the user to log in
+    if (alarm.name === CRM_POLL_ALARM) {
+        chrome.storage.local.get(['gmes_crm_waiting'], function (data) {
+            if (!data.gmes_crm_waiting) { chrome.alarms.clear(CRM_POLL_ALARM); return; }
+            chrome.tabs.query({ url: CRM_BG_URL + '/*' }, function (tabs) {
+                if (!tabs || !tabs.length) return;
+                var nonLoginTab = null;
+                for (var i = 0; i < tabs.length; i++) {
+                    if (tabs[i].url && tabs[i].url.indexOf('/login') === -1) { nonLoginTab = tabs[i]; break; }
+                }
+                if (!nonLoginTab) return;
+                chrome.scripting.executeScript({
+                    target: { tabId: nonLoginTab.id },
+                    func: function () {
+                        try {
+                            var raw = localStorage.getItem('pocketbase_auth');
+                            if (!raw) return null;
+                            var p = JSON.parse(raw);
+                            if (!p || !p.token) return null;
+                            var email = (p.model && (p.model.email || p.model.username)) || '';
+                            return { token: p.token, email: email };
+                        } catch (e) { return null; }
+                    }
+                }, function (results) {
+                    var auth = results && results[0] && results[0].result;
+                    if (auth && auth.token) {
+                        chrome.alarms.clear(CRM_POLL_ALARM);
+                        chrome.storage.local.set({
+                            gmes_pb_url: CRM_BG_PB_URL,
+                            gmes_pb_token: auth.token,
+                            gmes_crm_email: auth.email,
+                            gmes_crm_waiting: false
+                        });
+                    }
+                });
+            });
+        });
         return;
     }
 
@@ -565,10 +612,15 @@ chrome.commands.onCommand.addListener(function (command) {
     }
 });
 
-// Handle opening shortcuts settings
+// Handle opening shortcuts settings + CRM login poll start
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (!msg || !msg.type) return;
     if (msg.type === 'OPEN_SHORTCUTS_SETTINGS') {
         chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+    }
+    if (msg.type === 'START_CRM_LOGIN_POLL') {
+        // Poll every 30 seconds (minimum allowed by Chrome is ~0.5 min = 30s)
+        chrome.alarms.create(CRM_POLL_ALARM, { periodInMinutes: 0.5 });
     }
 });
 

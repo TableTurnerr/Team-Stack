@@ -555,36 +555,163 @@ document.addEventListener('DOMContentLoaded', function () {
         // Load persisted items (if any) and enable buttons accordingly
         loadFromStorage();
 
-        // CRM Settings panel toggle and save/load
-        (function initCrmSettings() {
-            var toggle = document.getElementById('crmSettingsToggle');
-            var panel = document.getElementById('crmSettingsPanel');
-            if (!toggle || !panel) return;
+        // CRM Connect panel — one-click auth via crm.tableturnerr.com
+        (function initCrmConnect() {
+            var CRM_URL    = 'https://crm.tableturnerr.com';
+            var CRM_PB_URL = 'https://crmdb.tableturnerr.com';
+            var CRM_LOGIN  = 'https://crm.tableturnerr.com/login';
 
-            chrome.storage.local.get(['gmes_pb_url', 'gmes_pb_token'], function (data) {
-                var urlInput = document.getElementById('pbUrlInput');
+            var connectBtn        = document.getElementById('crmConnectBtn');
+            var connectStatus     = document.getElementById('crmConnectStatus');
+            var stateDisconnected = document.getElementById('crmStateDisconnected');
+            var stateConnected    = document.getElementById('crmStateConnected');
+            var userEmailEl       = document.getElementById('crmUserEmail');
+            var disconnectBtn     = document.getElementById('crmDisconnectBtn');
+            var advancedToggle    = document.getElementById('crmAdvancedToggle');
+            var advancedPanel     = document.getElementById('crmAdvancedPanel');
+            var pbSaveBtn         = document.getElementById('pbSaveBtn');
+            var pbSaveStatus      = document.getElementById('pbSaveStatus');
+
+            // ---- UI state helpers ----
+            function setUiConnected(email) {
+                stateDisconnected.style.display = 'none';
+                stateConnected.style.display = 'block';
+                userEmailEl.innerHTML = '<span class="crm-status-dot connected"></span>' + (email || 'Connected');
+            }
+
+            function setUiDisconnected(msg) {
+                stateConnected.style.display = 'none';
+                stateDisconnected.style.display = 'block';
+                if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = 'Connect to TableTurnerr CRM'; }
+                if (connectStatus) connectStatus.textContent = msg || '';
+            }
+
+            function setUiConnecting(msg) {
+                if (connectBtn) { connectBtn.disabled = true; connectBtn.textContent = msg || 'Connecting\u2026'; }
+                if (connectStatus) connectStatus.innerHTML = '<span class="crm-status-dot connecting"></span>';
+            }
+
+            // ---- On popup open: restore state ----
+            chrome.storage.local.get(['gmes_pb_url', 'gmes_pb_token', 'gmes_crm_email', 'gmes_crm_waiting'], function (data) {
+                if (data.gmes_pb_token) {
+                    setUiConnected(data.gmes_crm_email);
+                } else if (data.gmes_crm_waiting) {
+                    setUiConnecting('Waiting for login\u2026');
+                    pollForLogin();
+                } else {
+                    setUiDisconnected('');
+                }
+                var urlInput   = document.getElementById('pbUrlInput');
                 var tokenInput = document.getElementById('pbTokenInput');
-                if (urlInput && data.gmes_pb_url) urlInput.value = data.gmes_pb_url;
+                if (urlInput && data.gmes_pb_url)     urlInput.value   = data.gmes_pb_url;
                 if (tokenInput && data.gmes_pb_token) tokenInput.value = data.gmes_pb_token;
             });
 
-            toggle.addEventListener('click', function () {
-                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-            });
+            // ---- Connect button ----
+            if (connectBtn) {
+                connectBtn.addEventListener('click', function () {
+                    setUiConnecting('Looking for CRM tab\u2026');
+                    attemptConnect();
+                });
+            }
 
-            var saveBtn = document.getElementById('pbSaveBtn');
-            if (saveBtn) {
-                saveBtn.addEventListener('click', function () {
-                    var pbUrl = (document.getElementById('pbUrlInput').value || '').trim().replace(/\/$/, '');
-                    var pbToken = (document.getElementById('pbTokenInput').value || '').trim();
-                    chrome.storage.local.set({ gmes_pb_url: pbUrl, gmes_pb_token: pbToken }, function () {
-                        var status = document.getElementById('pbSaveStatus');
-                        if (status) {
-                            status.style.display = 'inline';
-                            setTimeout(function () { status.style.display = 'none'; }, 2000);
-                        }
+            // ---- Disconnect button ----
+            if (disconnectBtn) {
+                disconnectBtn.addEventListener('click', function () {
+                    chrome.storage.local.remove(['gmes_pb_url', 'gmes_pb_token', 'gmes_crm_email', 'gmes_crm_waiting'], function () {
+                        setUiDisconnected('Disconnected.');
                     });
                 });
+            }
+
+            // ---- Advanced toggle ----
+            if (advancedToggle && advancedPanel) {
+                advancedToggle.addEventListener('click', function () {
+                    advancedPanel.style.display = advancedPanel.style.display === 'none' ? 'block' : 'none';
+                });
+            }
+
+            // ---- Advanced manual save ----
+            if (pbSaveBtn) {
+                pbSaveBtn.addEventListener('click', function () {
+                    var pbUrl   = (document.getElementById('pbUrlInput').value || '').trim().replace(/\/$/, '');
+                    var pbToken = (document.getElementById('pbTokenInput').value || '').trim();
+                    chrome.storage.local.set({ gmes_pb_url: pbUrl, gmes_pb_token: pbToken, gmes_crm_email: 'Manual', gmes_crm_waiting: false }, function () {
+                        if (pbSaveStatus) { pbSaveStatus.style.display = 'inline'; setTimeout(function () { pbSaveStatus.style.display = 'none'; }, 2000); }
+                        if (pbToken) setUiConnected('Manual token');
+                    });
+                });
+            }
+
+            // ---- Read PocketBase auth from a CRM tab (injected as serializable function) ----
+            function readCrmAuth() {
+                try {
+                    var raw = localStorage.getItem('pocketbase_auth');
+                    if (!raw) return null;
+                    var p = JSON.parse(raw);
+                    if (!p || !p.token) return null;
+                    var email = (p.model && (p.model.email || p.model.username)) || '';
+                    return { token: p.token, email: email };
+                } catch (e) { return null; }
+            }
+
+            function saveAuthAndConnect(token, email) {
+                chrome.storage.local.set({ gmes_pb_url: CRM_PB_URL, gmes_pb_token: token, gmes_crm_email: email, gmes_crm_waiting: false }, function () {
+                    setUiConnected(email || 'Connected');
+                });
+            }
+
+            // ---- Try to grab auth from any open CRM tab ----
+            function attemptConnect() {
+                chrome.tabs.query({ url: CRM_URL + '/*' }, function (tabs) {
+                    if (tabs && tabs.length > 0) {
+                        chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, func: readCrmAuth }, function (results) {
+                            var auth = results && results[0] && results[0].result;
+                            if (auth && auth.token) {
+                                saveAuthAndConnect(auth.token, auth.email);
+                            } else {
+                                // Tab open but not logged in — redirect to login page
+                                chrome.tabs.update(tabs[0].id, { url: CRM_LOGIN, active: true });
+                                beginWaiting();
+                            }
+                        });
+                    } else {
+                        chrome.tabs.create({ url: CRM_LOGIN });
+                        beginWaiting();
+                    }
+                });
+            }
+
+            // ---- Poll until user completes login ----
+            var _pollInterval = null;
+
+            function beginWaiting() {
+                chrome.storage.local.set({ gmes_crm_waiting: true });
+                chrome.runtime.sendMessage({ type: 'START_CRM_LOGIN_POLL' });
+                setUiConnecting('Waiting for login\u2026');
+                pollForLogin();
+            }
+
+            function pollForLogin() {
+                if (_pollInterval) clearInterval(_pollInterval);
+                _pollInterval = setInterval(function () {
+                    chrome.tabs.query({ url: CRM_URL + '/*' }, function (tabs) {
+                        if (!tabs || !tabs.length) return;
+                        var nonLoginTab = null;
+                        for (var i = 0; i < tabs.length; i++) {
+                            if (tabs[i].url && tabs[i].url.indexOf('/login') === -1) { nonLoginTab = tabs[i]; break; }
+                        }
+                        if (!nonLoginTab) return;
+                        chrome.scripting.executeScript({ target: { tabId: nonLoginTab.id }, func: readCrmAuth }, function (results) {
+                            var auth = results && results[0] && results[0].result;
+                            if (auth && auth.token) {
+                                clearInterval(_pollInterval);
+                                _pollInterval = null;
+                                saveAuthAndConnect(auth.token, auth.email);
+                            }
+                        });
+                    });
+                }, 1500);
             }
         })();
 

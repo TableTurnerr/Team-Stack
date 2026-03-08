@@ -14,7 +14,7 @@ function pbCheckDuplicate_website(name, phone, cb) {
         if (!pbUrl) { cb(false); return; }
         var headers = {};
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
-        var nameFilter = encodeURIComponent('name~"' + String(name || '').replace(/"/g, '') + '"');
+        var nameFilter = encodeURIComponent('company_name~"' + String(name || '').replace(/"/g, '') + '"');
         fetch(pbUrl + '/api/collections/companies/records?filter=' + nameFilter + '&perPage=1', { headers: headers })
             .then(function (r) { return r.json(); })
             .then(function (d) {
@@ -37,14 +37,11 @@ function pbSendToCrm_website(item, cb) {
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
         var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
         var companyBody = JSON.stringify({
-            name: item.title || '',
-            website: item.companyUrl || '',
-            address: item.address || '',
-            city: item.city || '',
-            industry: item.industry || '',
-            rating: item.rating || '',
-            maps_url: item.href || '',
-            note: item.note || ''
+            company_name: item.title || '',
+            company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
+            google_maps_link: item.href || '',
+            source: 'Google Maps',
+            notes: item.note || ''
         });
         fetch(pbUrl + '/api/collections/companies/records', { method: 'POST', headers: headers, body: companyBody })
             .then(function (r) {
@@ -142,7 +139,14 @@ function pbSendToCrm_website(item, cb) {
                 var heading = section.querySelector('h2, h3, h4');
                 if (heading) location_name = heading.textContent.trim();
                 var addr = section.querySelector('[class*="address"], address');
-                if (addr) location_address = addr.textContent.trim().substring(0, 100);
+                if (addr) {
+                    let rawAddr = addr.textContent.trim();
+                    // Remove leading Unicode icon if present
+                    if (rawAddr && rawAddr.charCodeAt(0) > 127 && !/^\d/.test(rawAddr)) {
+                        rawAddr = rawAddr.substring(1).trim();
+                    }
+                    location_address = rawAddr.substring(0, 100);
+                }
             }
 
             addEntry(raw, label, location_name, location_address);

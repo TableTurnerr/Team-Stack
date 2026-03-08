@@ -14,7 +14,7 @@ function pbCheckDuplicate_maps(name, phone, cb) {
         if (!pbUrl) { cb(false); return; }
         var headers = {};
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
-        var nameFilter = encodeURIComponent('name~"' + String(name || '').replace(/"/g, '') + '"');
+        var nameFilter = encodeURIComponent('company_name~"' + String(name || '').replace(/"/g, '') + '"');
         fetch(pbUrl + '/api/collections/companies/records?filter=' + nameFilter + '&perPage=1', { headers: headers })
             .then(function (r) { return r.json(); })
             .then(function (d) {
@@ -32,19 +32,16 @@ function pbCheckDuplicate_maps(name, phone, cb) {
 
 function pbSendToCrm_maps(item, cb) {
     pbGetSettings_maps(function (pbUrl, pbToken) {
-        if (!pbUrl) { cb({ success: false, error: 'No PocketBase URL configured. Set it in \u2699 CRM Settings in the popup.' }); return; }
+        if (!pbUrl) { cb({ success: false, error: 'Not connected to CRM. Click "Connect to TableTurnerr CRM" in the extension popup.' }); return; }
         var headers = { 'Content-Type': 'application/json' };
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
         var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
         var companyBody = JSON.stringify({
-            name: item.title || '',
-            website: item.companyUrl || '',
-            address: item.address || '',
-            city: item.city || '',
-            industry: item.industry || '',
-            rating: item.rating || '',
-            maps_url: item.href || '',
-            note: item.note || ''
+            company_name: item.title || '',
+            company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
+            google_maps_link: item.href || '',
+            source: 'Google Maps',
+            notes: item.note || ''
         });
         fetch(pbUrl + '/api/collections/companies/records', { method: 'POST', headers: headers, body: companyBody })
             .then(function (r) {
@@ -333,7 +330,14 @@ function pbSendToCrm_maps(item, cb) {
 
         // 5. Address
         const addressBtn = container.querySelector('[data-item-id="address"]');
-        if (addressBtn) item.address = addressBtn.textContent.trim();
+        if (addressBtn) {
+            let addr = addressBtn.textContent.trim();
+            // Remove leading Unicode icon if present (common in Google Maps)
+            if (addr && addr.charCodeAt(0) > 127 && !/^\d/.test(addr)) {
+                addr = addr.substring(1).trim();
+            }
+            item.address = addr;
+        }
 
         // 6. Website Extraction (Robust)
         // Priority 1: The standard "authority" button

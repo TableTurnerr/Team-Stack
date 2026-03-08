@@ -231,7 +231,8 @@
       color: #333;
       margin-bottom: 4px;
     }
-    .crm-settings-panel .crm-input {
+    .crm-settings-panel .crm-input,
+    #crmAdvancedPanel .crm-input {
       width: 100%;
       padding: 8px 12px;
       border: 1px solid #c2c2c2;
@@ -241,6 +242,24 @@
       margin-bottom: 10px;
       box-sizing: border-box;
     }
+    #crmAdvancedPanel label {
+      display: block;
+      font-weight: 600;
+      font-size: 13px;
+      color: #333;
+      margin-bottom: 4px;
+    }
+    .crm-status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .crm-status-dot.connected { background: #34a853; }
+    .crm-status-dot.connecting { background: #fbbc04; animation: crmPulse 1s infinite; }
+    @keyframes crmPulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
   </style>
 </head>
 
@@ -305,16 +324,32 @@
     <input type="text" id="filenameInput" class="input" placeholder="Enter file name" style="margin-left: 10px;" />
   </div>
 
-  <!-- CRM Settings Collapsible Panel -->
-  <div style="margin-top: 14px;">
-    <button id="crmSettingsToggle" class="button black-btn" style="margin: 0; font-size: 13px; padding: 8px 16px;">&#x2699; CRM Settings</button>
-    <div id="crmSettingsPanel" class="crm-settings-panel" style="display: none;">
-      <label for="pbUrlInput">PocketBase URL</label>
-      <input type="text" id="pbUrlInput" class="crm-input" placeholder="https://your-pb.example.com" />
-      <label for="pbTokenInput">Auth Token</label>
-      <input type="text" id="pbTokenInput" class="crm-input" placeholder="Your PocketBase auth token" />
-      <button id="pbSaveBtn" class="button" style="margin: 0; font-size: 13px; padding: 8px 18px;">Save</button>
-      <span id="pbSaveStatus" style="margin-left: 10px; font-size: 13px; color: #34a853; display: none;">&#x2713; Saved</span>
+  <!-- CRM Connect Panel -->
+  <div id="crmConnectPanel" style="margin-top:14px; padding:14px; background:#f0f4ff; border-radius:8px; border:1px solid #c5d3f5;">
+
+    <!-- Disconnected state -->
+    <div id="crmStateDisconnected">
+      <button id="crmConnectBtn" class="button" style="margin:0; font-size:13px; padding:8px 18px;">Connect to TableTurnerr CRM</button>
+      <span id="crmConnectStatus" style="margin-left:10px; font-size:12px; color:#666;"></span>
+    </div>
+
+    <!-- Connected state (hidden initially) -->
+    <div id="crmStateConnected" style="display:none;">
+      <span id="crmUserEmail" style="font-size:13px; font-weight:600; color:#2e7d32;"></span>
+      <button id="crmDisconnectBtn" class="button red-btn" style="margin-left:10px; font-size:12px; padding:6px 14px;">Disconnect</button>
+    </div>
+
+    <!-- Advanced fallback -->
+    <div style="margin-top:10px;">
+      <button id="crmAdvancedToggle" style="background:none; border:none; cursor:pointer; font-size:12px; color:#888; font-family:'Poppins',sans-serif; padding:0;">&#9658; Advanced (manual token)</button>
+      <div id="crmAdvancedPanel" style="display:none; margin-top:8px;">
+        <label>PocketBase URL</label>
+        <input type="text" id="pbUrlInput" class="crm-input" placeholder="https://your-pb.example.com" />
+        <label>Auth Token</label>
+        <input type="text" id="pbTokenInput" class="crm-input" placeholder="Your PocketBase auth token" />
+        <button id="pbSaveBtn" class="button" style="margin:0; font-size:13px; padding:8px 18px;">Save</button>
+        <span id="pbSaveStatus" style="margin-left:10px; font-size:13px; color:#34a853; display:none;">&#x2713; Saved</span>
+      </div>
     </div>
   </div>
 

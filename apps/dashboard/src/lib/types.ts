@@ -362,6 +362,98 @@ export interface UserPreferences extends RecordModel {
 }
 
 // ============================================================================
+// Financial Types
+// ============================================================================
+
+export type SupportedCurrency = 'USD' | 'PKR' | 'GBP' | 'EUR' | 'AED' | 'CAD' | 'AUD' | 'SGD' | 'INR' | 'SAR';
+
+export interface BankAccount extends RecordModel {
+  name: string;
+  currency: SupportedCurrency;
+  balance: number;
+  account_type: 'checking' | 'savings' | 'wallet' | 'credit' | 'crypto' | 'cash';
+  color?: string;
+  icon?: string;
+  notes?: string;
+  is_active?: boolean;
+  created_by: string;
+  expand?: {
+    created_by?: User;
+  };
+}
+
+export interface BalanceAdjustment extends RecordModel {
+  bank_account: string;
+  old_balance: number;
+  new_balance: number;
+  reason: string;
+  adjusted_by: string;
+  expand?: {
+    bank_account?: BankAccount;
+    adjusted_by?: User;
+  };
+}
+
+export interface FinCategory extends RecordModel {
+  name: string;
+  type: 'income' | 'expense' | 'both';
+  color?: string;
+  icon?: string;
+  budget_limit?: number;
+  budget_currency?: SupportedCurrency;
+  created_by: string;
+  expand?: {
+    created_by?: User;
+  };
+}
+
+export interface FinTransaction extends RecordModel {
+  bank_account: string;
+  type: 'income' | 'expense';
+  amount: number;
+  currency: SupportedCurrency;
+  fee_amount?: number;
+  category?: string;
+  tags?: string[];
+  description?: string;
+  status: 'pending' | 'cleared';
+  date: string;
+  expected_clear_date?: string;
+  receipt_file?: string;
+  created_by: string;
+  is_recurring?: boolean;
+  recurring_id?: string;
+  expand?: {
+    bank_account?: BankAccount;
+    category?: FinCategory;
+    created_by?: User;
+  };
+}
+
+export interface RecurringTransaction extends RecordModel {
+  bank_account: string;
+  type: 'income' | 'expense';
+  amount: number;
+  currency: SupportedCurrency;
+  fee_amount?: number;
+  category?: string;
+  description: string;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  start_date: string;
+  end_date?: string;
+  next_run_date?: string;
+  initial_amount?: number;
+  initial_applied?: boolean;
+  is_active?: boolean;
+  created_by: string;
+  expand?: {
+    bank_account?: BankAccount;
+    category?: FinCategory;
+    created_by?: User;
+  };
+}
+
+// ============================================================================
 // Collection Names Constants
 // ============================================================================
 
@@ -388,4 +480,11 @@ export const COLLECTIONS = {
   RECORDINGS: 'recordings',
   USER_PREFERENCES: 'user_preferences',
   COLD_CALLING_SESSIONS: 'cold_calling_sessions',
+
+  // Financial collections
+  BANK_ACCOUNTS: 'bank_accounts',
+  BALANCE_ADJUSTMENTS: 'balance_adjustments',
+  FIN_CATEGORIES: 'fin_categories',
+  FIN_TRANSACTIONS: 'fin_transactions',
+  RECURRING_TRANSACTIONS: 'recurring_transactions',
 } as const;

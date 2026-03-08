@@ -11,8 +11,8 @@ import { cn } from '@/lib/utils';
 const ACCOUNT_TYPES = ['checking', 'savings', 'wallet', 'credit', 'crypto', 'cash'] as const;
 
 const PRESET_COLORS = [
-  '#3b82f6', '#22c55e', '#a855f7', '#ef4444', '#f59e0b',
-  '#14b8a6', '#ec4899', '#f97316', '#6366f1', '#84cc16',
+  '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+  '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#84cc16',
 ];
 
 interface AddAccountModalProps {
@@ -27,7 +27,7 @@ export function AddAccountModal({ onClose, onSaved, editAccount, userId }: AddAc
   const [currency, setCurrency] = useState<SupportedCurrency>(editAccount?.currency ?? 'USD');
   const [balance, setBalance] = useState(editAccount?.balance?.toString() ?? '0');
   const [accountType, setAccountType] = useState<typeof ACCOUNT_TYPES[number]>(editAccount?.account_type ?? 'checking');
-  const [color, setColor] = useState(editAccount?.color ?? PRESET_COLORS[0]);
+  const [color, setColor] = useState(editAccount?.color ?? '');
   const [notes, setNotes] = useState(editAccount?.notes ?? '');
   const [isActive, setIsActive] = useState(editAccount?.is_active ?? true);
   const [saving, setSaving] = useState(false);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Power, Loader2, Mic, MicOff, Phone, Square, ArrowLeft, PhoneCall } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type PhoneNumber } from '@/lib/types';
@@ -46,6 +46,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     const { user } = useAuth();
     const { callStatus, endCall, activeCallNumber, dialNumber, setAutoHangup } = useZoomPhone();
     const {
+        isSessionActive,
         status: recorderStatus,
         duration: recordingDuration,
         stopRecording,
@@ -63,6 +64,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     const [hydratedStorage, setHydratedStorage] = useState(false);
     const [ringStartTime, setRingStartTime] = useState<number | null>(null);
     const [connectTime, setConnectTime] = useState<number | null>(null);
+    // Tracks when the call actually ended for accurate duration calculation
+    const callEndTimeRef = useRef<number | null>(null);
     const [callbackEvents, setCallbackEvents] = useState<Array<{ reason: string; timestamp: string }>>([]);
     const [autoHangupEnabled, setAutoHangupEnabled] = useState(false);
     const [autoHangupSeconds, setAutoHangupSeconds] = useState(15);
@@ -114,35 +117,62 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         window.localStorage.setItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY, JSON.stringify(payload));
     }, [hydratedStorage, hasUnsavedCall, currentPhoneNumber, callDraft]);
 
-    // Track active call from Zoom Phone context
+    // Track active call from Zoom Phone context — handles both ringing and immediately-answered calls
     useEffect(() => {
-        if (activeCallNumber && callStatus === 'ringing') {
+        if (activeCallNumber && (callStatus === 'ringing' || callStatus === 'connected')) {
             // Check if this is a new call (different number or no current number)
             if (!currentPhoneNumber || activeCallNumber !== currentPhoneNumber) {
                 console.log('[Standalone] New call detected from dialer:', activeCallNumber);
                 setCurrentPhoneNumber(activeCallNumber);
                 setContextPhoneNumber(activeCallNumber);
 
-                // Auto-start recording
-                startRecording();
+                // Auto-start recording if session is active
+                if (isSessionActive && recorderStatus === 'idle') {
+                    startRecording();
+                }
             }
         }
-    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, startRecording]);
+    }, [activeCallNumber, currentPhoneNumber, callStatus, setContextPhoneNumber, startRecording, isSessionActive, recorderStatus]);
 
     useEffect(() => {
         if (callStatus === 'ringing') {
             if (!ringStartTime) {
                 setRingStartTime(Date.now());
                 setConnectTime(null);
+                callEndTimeRef.current = null; // new call starting
             }
         } else if (callStatus === 'connected') {
+            // Handle calls that skip ringing and connect immediately
+            if (!ringStartTime) {
+                setRingStartTime(Date.now());
+                callEndTimeRef.current = null;
+            }
             if (!connectTime) {
                 setConnectTime(Date.now());
+                // Start recording if session is active and not already recording
+                if (isSessionActive && recorderStatus === 'idle') {
+                    startRecording();
+                }
             }
-        } else if (callStatus === 'ended' && currentPhoneNumber) {
-            setHasUnsavedCall(true);
+        } else if (callStatus === 'ended') {
+            callEndTimeRef.current = Date.now();
+            if (currentPhoneNumber) {
+                setHasUnsavedCall(true);
+            }
         }
-    }, [callStatus, currentPhoneNumber, ringStartTime, connectTime]);
+    }, [callStatus, currentPhoneNumber, ringStartTime, connectTime, isSessionActive, recorderStatus, startRecording]);
+
+    // Fallback: if audio session becomes active while call is already live, start recording
+    const prevIsSessionActiveRef = useRef(isSessionActive);
+    useEffect(() => {
+        const wasActive = prevIsSessionActiveRef.current;
+        prevIsSessionActiveRef.current = isSessionActive;
+
+        if (!wasActive && isSessionActive && (callStatus === 'ringing' || callStatus === 'connected') && recorderStatus === 'idle') {
+            console.log('[Standalone] Audio session became active mid-call — starting recording');
+            startRecording();
+        }
+    }, [isSessionActive, callStatus, recorderStatus, startRecording]);
 
     // Handle saving standalone call
     const handleSaveCall = useCallback(async (data: CallFormData) => {
@@ -153,13 +183,13 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             stopRecording();
             setContextPhoneNumber('');
 
-            // Calculate call durations
+            // Calculate call durations using the actual call-end time (not form submission time)
             let ringDuration = 0;
             let callDuration = 0;
             let totalDuration = 0;
+            const endTime = callEndTimeRef.current ?? Date.now();
 
             if (ringStartTime) {
-                const endTime = Date.now();
                 if (connectTime) {
                     ringDuration = Math.floor((connectTime - ringStartTime) / 1000);
                     callDuration = Math.floor((endTime - connectTime) / 1000);
@@ -211,7 +241,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 appointment_set: data.appointmentSet,
                 callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                 // session field is omitted (will be null) - this marks it as a standalone call
-            });
+            }, { expand: 'company,phone_number_record' });
 
             // Update company metadata
             try {
@@ -238,6 +268,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
             // Reset timing state for next call
             setRingStartTime(null);
             setConnectTime(null);
+            callEndTimeRef.current = null;
         } catch (err) {
             console.error('Failed to save standalone call:', err);
         } finally {
@@ -254,6 +285,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         setCurrentPhoneNumber('');
         setRingStartTime(null);
         setConnectTime(null);
+        callEndTimeRef.current = null;
         window.localStorage.removeItem(STANDALONE_UNSAVED_CALL_STORAGE_KEY);
     }, [stopRecording, setContextPhoneNumber]);
 
@@ -265,6 +297,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         // Reset timing for new call leg
         setRingStartTime(null);
         setConnectTime(null);
+        callEndTimeRef.current = null;
         dialNumber(currentPhoneNumber);
     }, [currentPhoneNumber, dialNumber]);
 

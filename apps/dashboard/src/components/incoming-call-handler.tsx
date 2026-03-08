@@ -27,6 +27,7 @@ export function IncomingCallHandler() {
     // ── Timing refs (mirroring session/page.tsx pattern) ──
     const ringStartTimeRef = useRef<number | null>(null);
     const connectTimeRef = useRef<number | null>(null);
+    const callEndTimeRef = useRef<number | null>(null);
     const wasConnectedRef = useRef(false);
     const dialIncrementedRef = useRef(false);
     const pickupIncrementedRef = useRef(false);
@@ -88,18 +89,16 @@ export function IncomingCallHandler() {
 
         lookupIncomingNumber(incomingCallerNumber);
 
-        // Increment session total_dials (paused sessions are still 'active')
+        // Increment session total_incoming only (inbound calls are not dials)
         if (session) {
             pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
-                total_dials: (session.total_dials || 0) + 1,
                 total_incoming: (session.total_incoming || 0) + 1,
             }).then(updated => {
                 setSession(updated);
                 dialIncrementedRef.current = true;
-            }).catch(err => console.error('[IncomingCallHandler] Failed to increment dials:', err));
+            }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [callStatus, callDirection]);
+    }, [callStatus, callDirection, incomingCallerNumber, session, setSession, lookupIncomingNumber]);
 
     // ── Effect 2: Inbound call answered ──
     useEffect(() => {
@@ -109,23 +108,15 @@ export function IncomingCallHandler() {
         wasConnectedRef.current = true;
         setShowRingingBanner(false);
 
-        // Increment session total_pickups
-        const activeSession = capturedSessionRef.current || session;
-        if (activeSession) {
-            pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(activeSession.id, {
-                total_pickups: (activeSession.total_pickups || 0) + 1,
-            }).then(updated => {
-                setSession(updated);
-                pickupIncrementedRef.current = true;
-            }).catch(err => console.error('[IncomingCallHandler] Failed to increment pickups:', err));
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Inbound answered — do not count as a pickup (received calls are tracked separately via total_incoming)
+        pickupIncrementedRef.current = false;
     }, [callStatus, callDirection]);
 
     // ── Effect 3: Inbound call ended ──
     useEffect(() => {
         if (callStatus !== 'ended' || callDirection !== 'inbound') return;
 
+        callEndTimeRef.current = Date.now();
         setShowRingingBanner(false);
 
         if (wasConnectedRef.current) {
@@ -151,6 +142,7 @@ export function IncomingCallHandler() {
         // Reset timing refs for next call
         ringStartTimeRef.current = null;
         connectTimeRef.current = null;
+        callEndTimeRef.current = null;
         wasConnectedRef.current = false;
         capturedCallerNumberRef.current = null;
         capturedSessionRef.current = null;
@@ -193,10 +185,10 @@ export function IncomingCallHandler() {
                 } catch { /* ignore */ }
             }
 
-            // Calculate durations
+            // Calculate durations using actual call-end time, not form-submission time
             let ringDuration = 0, callDuration = 0, totalDuration = 0;
+            const endTime = callEndTimeRef.current ?? Date.now();
             if (capturedRingStart) {
-                const endTime = Date.now();
                 if (capturedConnect) {
                     ringDuration = Math.floor((capturedConnect - capturedRingStart) / 1000);
                     callDuration = Math.floor((endTime - capturedConnect) / 1000);

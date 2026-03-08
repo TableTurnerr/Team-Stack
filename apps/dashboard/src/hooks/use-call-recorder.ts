@@ -72,6 +72,8 @@ interface UseCallRecorderReturn {
     discardDeferredRecording: () => void;
     /** Whether deferred mode is currently active */
     isDeferredMode: boolean;
+    /** The queue of completed per-call recordings waiting for submission */
+    deferredSegments: DeferredSegment[];
 }
 
 /**
@@ -98,6 +100,7 @@ export function useCallRecorder(
     const [duration, setDuration] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [isDeferredMode, setIsDeferredMode] = useState(false);
+    const [deferredSegments, setDeferredSegments] = useState<DeferredSegment[]>([]);
 
     const streamRef = useRef<MediaStream | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -119,6 +122,12 @@ export function useCallRecorder(
 
     // Promise resolver for waiting on onstop after stop() call
     const onStopResolveRef = useRef<(() => void) | null>(null);
+
+    // True between when stop() is called and when onstop fires.
+    // Lets submitOldestDeferredRecording/submitDeferredRecording wait even when
+    // the recorder state is already 'inactive' (stop called externally) but the
+    // onstop callback hasn't pushed the blob to the queue yet.
+    const stopPendingRef = useRef(false);
 
     // Generation counter: increments on each startRecording() call.
     // Old onstop handlers compare their captured gen to the current gen
@@ -355,10 +364,12 @@ export function useCallRecorder(
     const startRecording = useCallback(() => {
         if (!streamRef.current || streamRef.current.getAudioTracks().length === 0) {
             setError('No active audio session. Enable recording session first.');
+            setStatus('error');
             return;
         }
 
         if (mediaRecorderRef.current?.state === 'recording') {
+            stopPendingRef.current = true;
             mediaRecorderRef.current.stop();
         }
 
@@ -387,6 +398,11 @@ export function useCallRecorder(
         };
 
         recorder.onstop = async () => {
+            // stop() has fully fired — clear the pending flag before anything else
+            // so that any awaiter in submitOldestDeferredRecording can read a
+            // consistent queue state after we resolve their promise below.
+            stopPendingRef.current = false;
+
             const blob = new Blob(localChunks, { type: mimeType });
             const durationSec = startTimeRef.current
                 ? (Date.now() - startTimeRef.current.getTime()) / 1000
@@ -419,16 +435,19 @@ export function useCallRecorder(
 
             // Deferred mode: push this call's completed recording to the queue.
             // This preserves recordings when the next call starts before the
-            // previous form is submitted.
+            // previous call's form is submitted.
             // Always push even if stale — we must not lose completed recordings.
             if (isDeferredRef.current) {
-                if (blob.size > 0 && durationSec > 1) {
-                    deferredSegmentsRef.current.push({
+                if (blob.size > 100) {
+                    const newSegment = {
                         blob,
                         duration: durationSec,
                         phone: capturedPhone,
                         mimeType,
-                    });
+                    };
+                    deferredSegmentsRef.current.push(newSegment);
+                    setDeferredSegments([...deferredSegmentsRef.current]);
+                    console.log('[Recorder] Queued deferred segment. Queue size:', deferredSegmentsRef.current.length);
                 }
                 if (!isStale) {
                     setStatus('idle');
@@ -436,6 +455,7 @@ export function useCallRecorder(
                 resolve?.();
                 return;
             }
+
 
             // Normal mode: upload immediately (only if this is the active recorder)
             // Use the phone number captured when recording started (not the ref, which may
@@ -448,7 +468,7 @@ export function useCallRecorder(
 
             const finalPhone = capturedPhone;
 
-            if (blob.size > 0 && durationSec > 1) {
+            if (blob.size > 100) {
                 try {
                     setStatus('uploading');
                     await uploadRecording(blob, durationSec, finalPhone);
@@ -467,7 +487,7 @@ export function useCallRecorder(
         };
 
         mediaRecorderRef.current = recorder;
-        recorder.start(1000);
+        recorder.start(250); // 250ms timeslice: capture chunks frequently so very short calls aren't missed
         startTimer();
         setStatus('recording');
         setError(null);
@@ -476,6 +496,7 @@ export function useCallRecorder(
     const stopRecording = useCallback(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
             setStatus('stopping');
+            stopPendingRef.current = true;
             mediaRecorderRef.current.stop();
         }
     }, []);
@@ -494,8 +515,10 @@ export function useCallRecorder(
 
         if (mediaRecorderRef.current?.state === 'recording') {
             setStatus('stopping');
+            stopPendingRef.current = true;
             mediaRecorderRef.current.stop();
         } else {
+            stopPendingRef.current = false;
             resetTimer();
             setStatus('idle');
         }
@@ -522,17 +545,27 @@ export function useCallRecorder(
         // Capture phone synchronously before any async gap
         const phoneForUpload = phoneNumberRef.current;
 
-        // If currently recording, stop and wait for onstop to queue the final segment
+        // If currently recording, stop and wait for onstop to queue the final segment.
+        // Also wait if stop() was already called externally (stopPendingRef=true) but
+        // onstop hasn't fired yet — otherwise the queue is empty and the recording is lost.
         if (mediaRecorderRef.current?.state === 'recording') {
             await new Promise<void>(resolve => {
                 onStopResolveRef.current = resolve;
                 setStatus('stopping');
+                stopPendingRef.current = true;
                 mediaRecorderRef.current!.stop();
+            });
+        } else if (stopPendingRef.current) {
+            // stop() was called externally (e.g., by call-recorder-controls) but onstop
+            // hasn't fired yet.  Register a resolver so onstop will wake us up.
+            await new Promise<void>(resolve => {
+                onStopResolveRef.current = resolve;
             });
         }
 
         // Pop the oldest segment from the queue (FIFO)
         const segment = deferredSegmentsRef.current.shift();
+        setDeferredSegments([...deferredSegmentsRef.current]);
 
         // Exit deferred mode once the queue is empty
         if (deferredSegmentsRef.current.length === 0) {
@@ -540,7 +573,7 @@ export function useCallRecorder(
             setIsDeferredMode(false);
         }
 
-        if (!segment || segment.blob.size === 0 || segment.duration <= 1) return null;
+        if (!segment || segment.blob.size <= 100) return null;
 
         try {
             setStatus('uploading');
@@ -570,10 +603,13 @@ export function useCallRecorder(
             // Set discard flag so onstop does NOT push to the queue
             shouldDiscardRef.current = true;
             setStatus('stopping');
+            stopPendingRef.current = true;
             mediaRecorderRef.current.stop();
         } else {
             // Recording already stopped — just pop and discard the oldest segment
+            stopPendingRef.current = false;
             deferredSegmentsRef.current.shift();
+            setDeferredSegments([...deferredSegmentsRef.current]);
             if (deferredSegmentsRef.current.length === 0) {
                 isDeferredRef.current = false;
                 setIsDeferredMode(false);
@@ -596,7 +632,13 @@ export function useCallRecorder(
             await new Promise<void>(resolve => {
                 onStopResolveRef.current = resolve;
                 setStatus('stopping');
+                stopPendingRef.current = true;
                 mediaRecorderRef.current!.stop();
+            });
+        } else if (stopPendingRef.current) {
+            // stop() was called externally but onstop hasn't fired yet — wait for it
+            await new Promise<void>(resolve => {
+                onStopResolveRef.current = resolve;
             });
         }
 
@@ -606,6 +648,7 @@ export function useCallRecorder(
 
         const segments = deferredSegmentsRef.current;
         deferredSegmentsRef.current = [];
+        setDeferredSegments([]);
 
         if (segments.length === 0) return null;
 
@@ -613,7 +656,7 @@ export function useCallRecorder(
         const mimeType = segments[segments.length - 1]?.mimeType || 'audio/webm';
         const merged = new Blob(segments.map(s => s.blob), { type: mimeType });
 
-        if (merged.size > 0 && totalDuration > 1) {
+        if (merged.size > 100) {
             try {
                 setStatus('uploading');
                 const recordingId = await uploadRecording(merged, totalDuration, finalPhone, callLogId);
@@ -635,6 +678,7 @@ export function useCallRecorder(
     const discardDeferredRecording = useCallback(() => {
         shouldDiscardRef.current = true;
         deferredSegmentsRef.current = [];
+        setDeferredSegments([]);
         isDeferredRef.current = false;
         setIsDeferredMode(false);
 
@@ -663,5 +707,6 @@ export function useCallRecorder(
         submitDeferredRecording,
         discardDeferredRecording,
         isDeferredMode,
+        deferredSegments,
     };
 }

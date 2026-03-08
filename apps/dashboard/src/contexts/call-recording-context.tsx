@@ -37,6 +37,8 @@ interface CallRecordingContextType {
     discardDeferredRecording: () => void;
     /** Whether deferred mode is currently active */
     isDeferredMode: boolean;
+    /** The queue of completed per-call recordings waiting for submission */
+    deferredSegments: any[]; // Use any[] or import DeferredSegment if possible, but any[] is safer for quick fix
 }
 
 const CallRecordingContext = createContext<CallRecordingContextType | undefined>(undefined);

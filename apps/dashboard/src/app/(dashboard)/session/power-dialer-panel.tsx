@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Zap, ChevronDown, ChevronUp, Play, Pause, Square, Check, RotateCcw } from 'lucide-react';
 
 export interface DialerEntry {
@@ -20,6 +20,7 @@ interface PowerDialerPanelProps {
     onStop: () => void;
     onDelayChange: (delay: number) => void;
     onQueueLoad: (entries: DialerEntry[]) => void;
+    onStartFrom?: (index: number) => void;
     disabled?: boolean;
     canStart?: boolean;
     autoHangupEnabled?: boolean;
@@ -68,6 +69,7 @@ export function PowerDialerPanel({
     onStop,
     onDelayChange,
     onQueueLoad,
+    onStartFrom,
     disabled = false,
     canStart = true,
     autoHangupEnabled = true,
@@ -76,6 +78,16 @@ export function PowerDialerPanel({
 }: PowerDialerPanelProps) {
     const [expanded, setExpanded] = useState(true);
     const [inputMode, setInputMode] = useState(queue.length === 0);
+    const [stopConfirming, setStopConfirming] = useState(false);
+    // When queue transitions from empty→non-empty (hydrated from localStorage), exit input mode
+    const prevQueueLengthRef = useRef(queue.length);
+    useEffect(() => {
+        const prev = prevQueueLengthRef.current;
+        prevQueueLengthRef.current = queue.length;
+        if (prev === 0 && queue.length > 0) {
+            setInputMode(false);
+        }
+    }, [queue.length]);
     const [rawInput, setRawInput] = useState(() => {
         if (typeof window === 'undefined') return '';
         return localStorage.getItem('power-dialer-raw-input') ?? '';
@@ -115,6 +127,21 @@ export function PowerDialerPanel({
         onStop();
         setInputMode(true);
         setParsedPreview([]);
+        setStopConfirming(false);
+    };
+
+    const handleEditList = () => {
+        // Convert current queue back to editable text
+        const text = queue.map(e => e.company ? `${e.number},${e.company}` : e.number).join('\n');
+        setRawInput(text);
+        setParsedPreview([]);
+        setInputMode(true);
+        setStopConfirming(false);
+    };
+
+    const handleConfirmStop = () => {
+        onStop();
+        setStopConfirming(false);
     };
 
     const delayColorClass =
@@ -282,18 +309,28 @@ export function PowerDialerPanel({
                                         Queue &mdash; {remaining} remaining
                                     </label>
                                     {!active && (
-                                        <button
-                                            onClick={handleNewList}
-                                            className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
-                                        >
-                                            <RotateCcw size={11} /> New list
-                                        </button>
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={handleEditList}
+                                                className="flex items-center gap-1 text-[11px] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                                            >
+                                                Edit list
+                                            </button>
+                                            <button
+                                                onClick={handleNewList}
+                                                className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+                                            >
+                                                <RotateCcw size={11} /> New list
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                                 <div className="max-h-44 overflow-y-auto rounded-xl border border-[var(--card-border)] divide-y divide-[var(--card-border)]">
                                     {queue.map((entry, i) => {
                                         const isDone = i < currentIndex;
                                         const isCurrent = i === currentIndex;
+                                        const isActivelyCallingThis = isCurrent && active && !paused;
+                                        const canStartHere = !isActivelyCallingThis && onStartFrom && (!isCurrent || !active);
                                         return (
                                             <div
                                                 key={i}
@@ -304,6 +341,29 @@ export function PowerDialerPanel({
                                                 }`}
                                             >
                                                 <span className="w-5 text-right text-[var(--muted)]/60 shrink-0 text-[10px]">{i + 1}.</span>
+                                                {isCurrent && !isActivelyCallingThis ? (
+                                                    canStartHere ? (
+                                                        <button
+                                                            onClick={() => onStartFrom!(i)}
+                                                            className="text-[9px] font-bold text-blue-400 hover:text-blue-300 uppercase tracking-wider shrink-0 transition-colors cursor-pointer"
+                                                            title={`Start dialer from #${i + 1}`}
+                                                        >
+                                                            Current
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-[9px] font-bold text-blue-400 uppercase tracking-wider shrink-0">Current</span>
+                                                    )
+                                                ) : canStartHere ? (
+                                                    <button
+                                                        onClick={() => onStartFrom!(i)}
+                                                        className="text-[9px] font-medium text-[var(--muted)]/50 hover:text-blue-400 uppercase tracking-wider shrink-0 transition-colors cursor-pointer"
+                                                        title={`Start dialer from #${i + 1}`}
+                                                    >
+                                                        Start here
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-[9px] w-[52px] shrink-0" />
+                                                )}
                                                 <span className={`flex-1 min-w-0 ${isDone ? 'line-through text-[var(--muted)]' : isCurrent ? 'font-semibold text-[var(--foreground)]' : 'text-[var(--muted)]'}`}>
                                                     {entry.number}
                                                     {entry.company && (
@@ -313,9 +373,9 @@ export function PowerDialerPanel({
                                                     )}
                                                 </span>
                                                 {isDone && <Check size={10} className="text-[var(--success)] shrink-0" />}
-                                                {isCurrent && (
+                                                {isActivelyCallingThis && (
                                                     <span className="text-[9px] font-bold text-[var(--success)] uppercase tracking-wider shrink-0">
-                                                        {active && !paused ? 'Calling' : 'Start here'}
+                                                        Calling
                                                     </span>
                                                 )}
                                             </div>
@@ -412,39 +472,79 @@ export function PowerDialerPanel({
                                     </button>
                                 </div>
                             ) : active && !paused ? (
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={onPause}
-                                        disabled={disabled}
-                                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--warning-subtle)] text-[var(--warning)] text-sm font-medium border border-[var(--warning)]/20 hover:bg-[var(--warning)] hover:text-white transition-all disabled:opacity-50"
-                                    >
-                                        <Pause size={14} /> Pause
-                                    </button>
-                                    <button
-                                        onClick={onStop}
-                                        disabled={disabled}
-                                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--error-subtle)] text-[var(--error)] text-sm font-medium border border-[var(--error)]/20 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
-                                    >
-                                        <Square size={14} /> Stop
-                                    </button>
-                                </div>
+                                stopConfirming ? (
+                                    <div className="rounded-xl border border-[var(--error)]/30 bg-[var(--error-subtle)] p-3 space-y-2">
+                                        <p className="text-xs text-[var(--error)] font-medium text-center">Stop the dialer? This will reset progress back to #1.</p>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setStopConfirming(false)}
+                                                className="flex-1 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] text-xs font-medium hover:bg-[var(--card-hover)] transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={handleConfirmStop}
+                                                className="flex-1 py-2 rounded-lg bg-[var(--error)] text-white text-xs font-semibold hover:opacity-90 transition-all"
+                                            >
+                                                Yes, Stop & Reset
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={onPause}
+                                            disabled={disabled}
+                                            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--warning-subtle)] text-[var(--warning)] text-sm font-medium border border-[var(--warning)]/20 hover:bg-[var(--warning)] hover:text-white transition-all disabled:opacity-50"
+                                        >
+                                            <Pause size={14} /> Pause
+                                        </button>
+                                        <button
+                                            onClick={() => setStopConfirming(true)}
+                                            disabled={disabled}
+                                            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--error-subtle)] text-[var(--error)] text-sm font-medium border border-[var(--error)]/20 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
+                                        >
+                                            <Square size={14} /> Stop
+                                        </button>
+                                    </div>
+                                )
                             ) : paused ? (
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={onResume}
-                                        disabled={disabled}
-                                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--success-subtle)] text-[var(--success)] text-sm font-medium border border-[var(--success)]/20 hover:bg-[var(--success)] hover:text-white transition-all disabled:opacity-50"
-                                    >
-                                        <Play size={14} /> Resume
-                                    </button>
-                                    <button
-                                        onClick={onStop}
-                                        disabled={disabled}
-                                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--error-subtle)] text-[var(--error)] text-sm font-medium border border-[var(--error)]/20 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
-                                    >
-                                        <Square size={14} /> Stop
-                                    </button>
-                                </div>
+                                stopConfirming ? (
+                                    <div className="rounded-xl border border-[var(--error)]/30 bg-[var(--error-subtle)] p-3 space-y-2">
+                                        <p className="text-xs text-[var(--error)] font-medium text-center">Stop the dialer? This will reset progress back to #1.</p>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setStopConfirming(false)}
+                                                className="flex-1 py-2 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] text-xs font-medium hover:bg-[var(--card-hover)] transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={handleConfirmStop}
+                                                className="flex-1 py-2 rounded-lg bg-[var(--error)] text-white text-xs font-semibold hover:opacity-90 transition-all"
+                                            >
+                                                Yes, Stop & Reset
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={onResume}
+                                            disabled={disabled}
+                                            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--success-subtle)] text-[var(--success)] text-sm font-medium border border-[var(--success)]/20 hover:bg-[var(--success)] hover:text-white transition-all disabled:opacity-50"
+                                        >
+                                            <Play size={14} /> Resume
+                                        </button>
+                                        <button
+                                            onClick={() => setStopConfirming(true)}
+                                            disabled={disabled}
+                                            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--error-subtle)] text-[var(--error)] text-sm font-medium border border-[var(--error)]/20 hover:bg-[var(--error)] hover:text-white transition-all disabled:opacity-50"
+                                        >
+                                            <Square size={14} /> Stop
+                                        </button>
+                                    </div>
+                                )
                             ) : (
                                 <button
                                     onClick={onStart}

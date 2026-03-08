@@ -3614,6 +3614,16 @@
             },
             {
                 "hidden": false,
+                "id": "json_power_dialer_state",
+                "maxSize": 100000,
+                "name": "power_dialer_state",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
                 "onCreate": true,

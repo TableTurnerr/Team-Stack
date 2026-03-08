@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Play, Pause, Download, Loader2, Minimize2, Maximize2 } from 'lucide-react';
+import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type PhoneNumber, type CallLog } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording } from '@/lib/types';
+import { cn, timeAgo, formatDateTime } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
+import { Tooltip } from '@/components/ui/tooltip';
 
 const OUTCOMES = [
     'Interested',
@@ -168,10 +170,89 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [showAdditionalPhone, setShowAdditionalPhone] = useState(false);
     const [email, setEmail] = useState('');
     const [showEmail, setShowEmail] = useState(false);
+    const [shouldPulseOwnerReached, setShouldPulseOwnerReached] = useState(false);
+    const pulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const callbackDropdownRef = useRef<HTMLDivElement>(null);
     const hungUpDropdownRef = useRef<HTMLDivElement>(null);
+
+    const { deferredSegments } = useCallRecording();
+
+    // Recording playback
+    const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
+    const [playerBlob, setPlayerBlob] = useState<string | null>(null);
+    const [playerLoading, setPlayerLoading] = useState<string | null>(null);
+    const [playerMinimized, setPlayerMinimized] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [isHoveringMic, setIsHoveringMic] = useState(false);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    const handlePlayRecording = async (call: CallLog) => {
+        if (playerLoading === call.id) return;
+        
+        // If clicking the same one that's already loaded, just expand if minimized
+        if (playerRecording?.call_log === call.id) {
+            setPlayerMinimized(false);
+            return;
+        }
+
+        setPlayerLoading(call.id);
+        setPlayerBlob(null); // Clear blob player
+        try {
+            const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(`call_log = "${call.id}"`);
+            if (recording && recording.file) {
+                setPlayerRecording(recording);
+                setPlayerMinimized(false);
+                setIsPlaying(true);
+            }
+        } catch (err) {
+            console.error('Failed to fetch recording for prior call:', err);
+        } finally {
+            setPlayerLoading(null);
+        }
+    };
+
+    const handlePlayUnsubmitted = () => {
+        if (deferredSegments.length === 0) return;
+        
+        // Use the oldest segment in the queue (or current one)
+        const segment = deferredSegments[0];
+        const url = URL.createObjectURL(segment.blob);
+        
+        setPlayerRecording(null); // Clear PocketBase player
+        setPlayerBlob(url);
+        setPlayerMinimized(false);
+        setIsPlaying(true);
+    };
+
+    const togglePlayback = () => {
+        if (!audioRef.current) return;
+        if (isPlaying) {
+            audioRef.current.pause();
+        } else {
+            audioRef.current.play();
+        }
+        setIsPlaying(!isPlaying);
+    };
+
+    const formatTime = (seconds: number) => {
+        if (!isFinite(seconds) || isNaN(seconds)) return '00:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const closePlayer = () => {
+        audioRef.current?.pause();
+        if (playerBlob) {
+            URL.revokeObjectURL(playerBlob);
+        }
+        setPlayerRecording(null);
+        setPlayerBlob(null);
+        setPlayerMinimized(false);
+        setIsPlaying(false);
+    };
 
     // Auto-fetch company state
     const [autoFetchedCompany, setAutoFetchedCompany] = useState<Company | null>(null);
@@ -184,6 +265,12 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [callHistory, setCallHistory] = useState<CallLog[]>([]);
     const [callHistoryLoading, setCallHistoryLoading] = useState(false);
     const lastFetchedHistoryCompanyId = useRef('');
+
+    // Prior calls attention pulse
+    const priorCallsRef = useRef<HTMLDivElement>(null);
+    const ownerNameRef = useRef<HTMLDivElement>(null);
+    const [priorCallsPulsing, setPriorCallsPulsing] = useState(false);
+    const priorCallsPulseTriggeredRef = useRef(false);
 
     const [companyLookupState, setCompanyLookupState] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle');
 
@@ -334,9 +421,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         setSelectedCompany(company);
                         setCompanySearch(company.company_name);
                         setIsNewCompany(false);
-                        if (bestMatch.receptionist_name) {
-                            setReceptionistName(bestMatch.receptionist_name);
-                        }
                         if (company.owner_name) {
                             setOwnerName(company.owner_name);
                         }
@@ -438,6 +522,25 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             setCallHistoryLoading(false);
         });
     }, [autoFetchedCompany]);
+
+    // Reset pulse trigger when call ends so next call can re-trigger
+    useEffect(() => {
+        if (!isCallLive) {
+            priorCallsPulseTriggeredRef.current = false;
+        }
+    }, [isCallLive]);
+
+    // Scroll to & pulse Prior Calls + owner name when call starts and history is available
+    useEffect(() => {
+        if (!isCallLive || callHistory.length === 0 || priorCallsPulseTriggeredRef.current) return;
+        priorCallsPulseTriggeredRef.current = true;
+        const timer = setTimeout(() => {
+            priorCallsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            setPriorCallsPulsing(true);
+            setTimeout(() => setPriorCallsPulsing(false), 3700);
+        }, 200);
+        return () => clearTimeout(timer);
+    }, [isCallLive, callHistory.length]);
 
     // Search companies
     useEffect(() => {
@@ -638,6 +741,16 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             <span className="text-[10px] font-semibold text-[var(--warning)] uppercase tracking-wider">
                                 Recorded but unsubmitted
                             </span>
+                            {deferredSegments.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={handlePlayUnsubmitted}
+                                    className="flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warning)] text-white hover:scale-110 active:scale-95 transition-all ml-1 shadow-sm animate-pulse"
+                                    title="Listen to unsubmitted recording"
+                                >
+                                    <Mic size={12} />
+                                </button>
+                            )}
                         </div>
 
                         {/* Callback dropdown */}
@@ -713,15 +826,15 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 const groups = [...byPhone.entries()].sort((a, b) => b[1].calls.length - a[1].calls.length);
 
                 return (
-                    <div className="border border-[var(--card-border)] rounded-lg overflow-hidden text-xs">
+                    <div ref={priorCallsRef} className={cn("border border-[var(--card-border)] rounded-lg overflow-hidden text-sm", priorCallsPulsing && "animate-[prior-call-pulse_1.8s_ease-in-out_2]")}>
                         <div className="px-3 py-1.5 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] flex items-center justify-between">
-                            <span className="font-semibold uppercase tracking-wider text-[var(--muted)] text-[10px]">
+                            <span className="font-semibold uppercase tracking-wider text-[var(--muted)] text-xs">
                                 Prior Calls
                             </span>
                             {callHistoryLoading ? (
-                                <span className="text-[10px] text-[var(--muted)]">Loading…</span>
+                                <span className="text-xs text-[var(--muted)]">Loading…</span>
                             ) : (
-                                <span className="text-[10px] text-[var(--muted)]">{callHistory.length} total</span>
+                                <span className="text-xs text-[var(--muted)]">{callHistory.length} total</span>
                             )}
                         </div>
                         {!callHistoryLoading && (
@@ -732,26 +845,88 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                         <div key={key} className="px-3 py-2">
                                             <div className="flex items-center gap-1.5 mb-1">
                                                 <span className="font-mono font-medium text-[var(--foreground)]">{phone}</span>
-                                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] font-semibold whitespace-nowrap">
+                                                <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] font-semibold whitespace-nowrap">
                                                     {calls.length} call{calls.length !== 1 ? 's' : ''}
                                                 </span>
-                                                {calls[0]?.call_outcome && (Array.isArray(calls[0].call_outcome) ? calls[0].call_outcome : [calls[0].call_outcome]).length > 0 && (
-                                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] truncate max-w-[120px]">
-                                                        {(Array.isArray(calls[0].call_outcome) ? calls[0].call_outcome : [calls[0].call_outcome]).join(', ')}
-                                                    </span>
-                                                )}
+                                                {/* Group-level summary tags (most recent call) */}
+                                                <div className="flex gap-1 flex-wrap overflow-hidden max-w-[150px]">
+                                                    {(Array.isArray(calls[0]?.call_outcome) ? calls[0].call_outcome : calls[0]?.call_outcome ? [calls[0].call_outcome] : []).map(outcome => {
+                                                        const colors = OUTCOME_COLORS[outcome] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]', border: 'border-[var(--card-border)]' };
+                                                        return (
+                                                            <span
+                                                                key={outcome}
+                                                                className={cn(
+                                                                    "px-1 py-0.5 rounded text-[9px] font-semibold border leading-none whitespace-nowrap",
+                                                                    colors.bg,
+                                                                    colors.text,
+                                                                    colors.border
+                                                                )}
+                                                            >
+                                                                {outcome}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
-                                            {notedCalls.length > 0 && (
-                                                <div className="space-y-0.5 ml-1.5 border-l border-[var(--card-border)] pl-2">
-                                                    {notedCalls.slice(0, 3).map(call => (
-                                                        <div key={call.id} className="flex gap-1.5 text-[10px]">
-                                                            <span className="text-[var(--muted)] whitespace-nowrap shrink-0">
-                                                                {new Date(call.call_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                                            </span>
-                                                            <span className="text-[var(--foreground)]/70 line-clamp-1" title={call.post_call_notes}>
-                                                                {call.post_call_notes}
-                                                            </span>
-                                                        </div>
+                                            {(notedCalls.length > 0 || calls.some(c => c.receptionist_name)) && (
+                                                <div className="space-y-1 ml-1.5 border-l border-[var(--card-border)] pl-2">
+                                                    {calls.slice(0, 3).map((call, idx) => (
+                                                        (call.post_call_notes || call.receptionist_name || (Array.isArray(call.call_outcome) ? call.call_outcome.length > 0 : call.call_outcome)) && (
+                                                            <div key={call.id} className="space-y-0.5">
+                                                                <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                                                                    <Tooltip content={`${formatDateTime(call.call_time)} (Your Time)`}>
+                                                                        <span className="text-[var(--muted)] whitespace-nowrap shrink-0 cursor-help">
+                                                                            {timeAgo(call.call_time)}
+                                                                        </span>
+                                                                    </Tooltip>
+                                                                    {call.has_recording && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handlePlayRecording(call)}
+                                                                            disabled={!!playerLoading}
+                                                                            className={cn(
+                                                                                "flex items-center justify-center w-5 h-5 rounded-lg transition-all",
+                                                                                playerLoading === call.id 
+                                                                                    ? "text-[var(--primary)]" 
+                                                                                    : "text-[var(--primary)] hover:bg-[var(--primary)]/10"
+                                                                            )}
+                                                                            title="Play recording"
+                                                                        >
+                                                                            {playerLoading === call.id ? <Loader2 size={10} className="animate-spin" /> : <Mic size={10} />}
+                                                                        </button>
+                                                                    )}
+                                                                    {call.receptionist_name && (
+                                                                        <span className="text-[var(--foreground)]/80 whitespace-nowrap shrink-0 font-medium">
+                                                                            {call.receptionist_name}
+                                                                        </span>
+                                                                    )}
+                                                                    {/* Outcome tags for this specific call */}
+                                                                    <div className="flex gap-1 flex-wrap">
+                                                                        {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(outcome => {
+                                                                            const colors = OUTCOME_COLORS[outcome] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]', border: 'border-[var(--card-border)]' };
+                                                                            return (
+                                                                                <span
+                                                                                    key={outcome}
+                                                                                    className={cn(
+                                                                                        "px-1.5 py-0.5 rounded text-[9px] font-semibold border leading-none",
+                                                                                        colors.bg,
+                                                                                        colors.text,
+                                                                                        colors.border
+                                                                                    )}
+                                                                                >
+                                                                                    {outcome}
+                                                                                </span>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                                {call.post_call_notes && (
+                                                                    <div className="text-[var(--foreground)]/70 line-clamp-1 text-xs ml-4" title={call.post_call_notes}>
+                                                                        {call.post_call_notes}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )
                                                     ))}
                                                 </div>
                                             )}
@@ -872,7 +1047,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             "text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider border transition-all cursor-pointer",
                             ownerReached
                                 ? "bg-[var(--success-subtle)] text-[var(--success)] border-[var(--success)]/30 hover:bg-[var(--success)]/20"
-                                : "bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]"
+                                : "bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]",
+                            shouldPulseOwnerReached && "animate-[attention-pulse_1.5s_ease-in-out_infinite] border-[var(--warning)] text-[var(--warning)]"
                         )}
                     >
                         Owner Reached?
@@ -896,12 +1072,28 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     <Crown size={11} className={ownerReached ? "text-[var(--success)]" : "text-[var(--muted)]"} />
                     <span className={ownerReached ? "text-[var(--success)]" : ""}>Owner&apos;s Name</span>
                     {ownerReached && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] border border-[var(--success)]/30 font-semibold uppercase tracking-wider">
+                        <button
+                            type="button"
+                            onClick={() => setOwnerReached(false)}
+                            className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] border border-[var(--success)]/30 font-semibold uppercase tracking-wider hover:bg-[var(--success)]/10 transition-colors cursor-pointer"
+                        >
                             Reached
-                        </span>
+                        </button>
+                    )}
+                    {/* Saved/Update Status Tag */}
+                    {selectedCompany?.owner_name && (
+                        ownerName === selectedCompany.owner_name ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] border border-[var(--success)]/30 font-semibold uppercase tracking-wider">
+                                Saved
+                            </span>
+                        ) : ownerName.trim() !== '' && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/30 font-semibold uppercase tracking-wider">
+                                Update
+                            </span>
+                        )
                     )}
                 </label>
-                <div className="relative">
+                <div ref={ownerNameRef} className={cn("relative rounded-lg", priorCallsPulsing && ownerName.trim() && "animate-[prior-call-pulse_1.8s_ease-in-out_2]")}>
                     <Crown size={14} className={cn("absolute left-3 top-1/2 -translate-y-1/2", ownerReached ? "text-[var(--success)]" : "text-[var(--muted)]")} />
                     <input
                         type="text"
@@ -909,9 +1101,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         onChange={e => {
                             const val = e.target.value;
                             setOwnerName(val);
+                            
+                            // Signal that owner might have been reached, but don't auto-toggle
                             if (val.trim() && !ownerReached) {
-                                setOwnerReached(true);
-                                setNoneSelected(false);
+                                setShouldPulseOwnerReached(true);
+                                if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
+                                pulseTimeoutRef.current = setTimeout(() => {
+                                    setShouldPulseOwnerReached(false);
+                                }, 8000);
                             }
                         }}
                         placeholder="Owner name(s), e.g. John, Mike"
@@ -1226,6 +1423,134 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 cancelText="Keep Editing"
                 variant="warning"
             />
+
+            {/* Recording Player Overlay */}
+            {(playerRecording || playerBlob) && (
+                <div 
+                    className={cn(
+                        "fixed z-[60] transition-all duration-500 ease-in-out",
+                        playerMinimized 
+                            ? "bottom-6 right-6 translate-x-0 translate-y-0" 
+                            : "inset-0 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm"
+                    )}
+                    onClick={!playerMinimized ? closePlayer : undefined}
+                >
+                    <div
+                        className={cn(
+                            "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl transition-all duration-500",
+                            playerMinimized 
+                                ? "p-3 flex items-center gap-3 border-[var(--primary)]/30 w-auto" 
+                                : "w-full max-w-md p-4 space-y-3"
+                        )}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Player Header */}
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                                {playerMinimized ? (
+                                    <button 
+                                        onClick={togglePlayback}
+                                        onMouseEnter={() => setIsHoveringMic(true)}
+                                        onMouseLeave={() => setIsHoveringMic(false)}
+                                        className={cn(
+                                            "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all",
+                                            isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--warning-subtle)] text-[var(--warning)]"
+                                        )}
+                                    >
+                                        {isPlaying ? (
+                                            isHoveringMic ? (
+                                                <Pause size={16} fill="currentColor" />
+                                            ) : (
+                                                <Mic size={16} className="animate-pulse" />
+                                            )
+                                        ) : (
+                                            <Play size={16} fill="currentColor" className="ml-0.5" />
+                                        )}
+                                    </button>
+                                ) : (
+                                    <div className={cn(
+                                        "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+                                        isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--card-hover)] text-[var(--muted)]"
+                                    )}>
+                                        <Mic size={16} />
+                                    </div>
+                                )}
+                                <div className="flex flex-col min-w-0">
+                                    {!playerMinimized && (
+                                        <span className="text-sm font-medium truncate">
+                                            {playerRecording ? (playerRecording.note || playerRecording.original_filename || 'Call Recording') : 'Unsubmitted Recording'}
+                                        </span>
+                                    )}
+                                    {playerMinimized && (
+                                        <>
+                                            <span className={cn(
+                                                "text-[10px] font-bold uppercase tracking-widest leading-none mb-1",
+                                                isPlaying ? "text-[var(--primary)]" : "text-[var(--warning)]"
+                                            )}>
+                                                {isPlaying ? 'Playing' : 'Paused'}
+                                            </span>
+                                            <span className="text-xs font-medium truncate text-[var(--foreground)] max-w-[120px]">
+                                                {playerRecording ? (playerRecording.note || playerRecording.original_filename || 'Call Recording') : 'Unsubmitted Recording'}
+                                            </span>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                                {!playerMinimized && playerRecording?.file && (
+                                    <a
+                                        href={pb.files.getUrl(playerRecording, playerRecording.file)}
+                                        download
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                                        title="Download"
+                                    >
+                                        <Download size={15} />
+                                    </a>
+                                )}
+                                <button
+                                    onClick={() => setPlayerMinimized(!playerMinimized)}
+                                    className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                                    title={playerMinimized ? "Expand" : "Minimize"}
+                                >
+                                    {playerMinimized ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
+                                </button>
+                                <button
+                                    onClick={closePlayer}
+                                    className={cn(
+                                        "p-1.5 rounded-lg text-[var(--muted)] transition-colors",
+                                        playerMinimized ? "hover:text-[var(--error)] hover:bg-[var(--error)]/5" : "hover:text-[var(--foreground)] hover:bg-[var(--card-hover)]"
+                                    )}
+                                    title="Close"
+                                >
+                                    <X size={15} />
+                                </button>
+                            </div>
+                        </div>
+                        
+                        {/* Persistent Audio Element - Visible controls only when maximized */}
+                        {(playerRecording?.file || playerBlob) ? (
+                            <audio
+                                ref={audioRef}
+                                controls={!playerMinimized}
+                                autoPlay
+                                preload="metadata"
+                                className={cn(
+                                    "w-full h-10 transition-all",
+                                    playerMinimized ? "hidden" : "block"
+                                )}
+                                src={playerBlob || (playerRecording ? pb.files.getUrl(playerRecording, playerRecording.file as string) : '')}
+                                onEnded={closePlayer}
+                                onPlay={() => setIsPlaying(true)}
+                                onPause={() => setIsPlaying(false)}
+                            />
+                        ) : !playerMinimized && (
+                            <p className="text-sm text-[var(--muted)] text-center py-2">No audio file attached.</p>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { ChevronDown, ChevronRight, Clock, User, Trash2, CheckSquare, Loader2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type Recording, type FollowUp } from '@/lib/types';
@@ -9,6 +10,8 @@ import { CallLogsNestedTable } from './call-logs-nested-table';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { useAdminModeOptional } from '@/contexts/admin-mode-context';
 import { cn } from '@/lib/utils';
+
+import { Tooltip } from '@/components/ui/tooltip';
 
 interface SessionLogRowProps {
     session: ColdCallingSession;
@@ -236,10 +239,24 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                 </td>
                 <td className="px-4 py-3">
                     {session.expand?.user ? (
-                        <div className="flex items-center gap-2">
-                            <User size={14} className="text-[var(--muted)]" />
-                            <span className="text-sm">{session.expand.user.name}</span>
-                        </div>
+                        <Tooltip content={session.expand.user.name}>
+                            <div className="flex items-center w-fit cursor-help">
+                                {session.expand.user.avatar ? (
+                                    <div className="w-6 h-6 rounded-full overflow-hidden border border-[var(--card-border)] bg-[var(--sidebar-bg)] relative">
+                                        <Image
+                                            src={pb.files.getUrl(session.expand.user, session.expand.user.avatar, { thumb: '64x64' })}
+                                            alt={session.expand.user.name}
+                                            fill
+                                            className="object-cover"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="w-6 h-6 rounded-full bg-[var(--muted)]/20 flex items-center justify-center border border-[var(--card-border)]">
+                                        <User size={12} className="text-[var(--muted)]" />
+                                    </div>
+                                )}
+                            </div>
+                        </Tooltip>
                     ) : (
                         <span className="text-[var(--muted)] text-sm">-</span>
                     )}

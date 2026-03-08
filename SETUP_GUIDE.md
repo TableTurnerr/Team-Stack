@@ -255,15 +255,25 @@ pnpm test:report      # View last HTML report
 
 ### 8.4 Live Call Testing
 
-When `TEST_LIVE_CALLS=true`, the suite dials **5 public telecom test lines** to verify the full Zoom Phone → recording → call log pipeline:
+When `TEST_LIVE_CALLS=true`, the suite dials public telecom test lines to verify the full Zoom Phone → recording → call log pipeline.
+
+The **"Test Numbers"** button inside an active Test Session also uses this pool — it randomly picks 5 numbers each click and copies them in power dialer format (`number,label`).
+
+**Full pool of 9 verified public test lines:**
 
 | Number | Location | Purpose |
 |--------|----------|---------|
-| 1 (804) 222-1111 | Richmond, VA | All-in-One: echo, DTMF, tone menu |
-| 1 (909) 390-0003 | Ontario, CA | Instant audio echo (latency test) |
+| 1 (804) 222-1111 | Richmond, VA | All-in-One: echo, DTMF, tone menu (Infotelsystems) |
+| 1 (909) 390-0003 | Ontario, CA | Instant audio echo — talk and hear yourself back (Verizon CA) |
 | 1 (800) 444-4444 | Toll-Free | Reads back your outbound Caller ID |
-| 1 (631) 791-8378 | New York, NY | Audio clarity test (CallCentric) |
+| 1 (631) 791-8378 | New York, NY | Audio clarity test (TheTestCall / CallCentric) |
 | 1 (206) 456-0649 | Seattle, WA | Echo + hold music (IPKall) |
+| 1 (408) 647-4636 | San Jose, CA | Multi-function: echo, DTMF, music on hold, frequency sweep |
+| 1 (802) 359-9100 | Vermont | Voice latency echo test (Interpage) |
+| 1 (800) 437-7950 | Toll-Free | ANI/Caller ID readback — hear your outbound number (MCI) |
+| 1 (925) 259-0082 | East Bay, CA | Audio echo test |
+
+> All numbers are free public telecom test lines with no cost to call. Lines may occasionally go offline — verify before relying on them.
 
 Run with `--headed` to monitor calls visually:
 ```bash

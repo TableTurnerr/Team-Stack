@@ -9,6 +9,7 @@ export interface User extends RecordModel {
   email: string;
   role: 'admin' | 'operator' | 'member';
   status: 'online' | 'offline' | 'suspended';
+  avatar?: string;
   last_activity?: string;
 }
 
@@ -347,6 +348,14 @@ export interface UserPreferences extends RecordModel {
     show_online_status?: boolean;
     activity_visibility?: 'team' | 'admins_only';
   };
+  /** Persisted power dialer queue + progress, survives across CRM sessions and devices */
+  power_dialer_state?: {
+    queue: Array<{ number: string; company?: string }>;
+    currentIndex: number;
+    delay: number;
+    autoHangupEnabled: boolean;
+    autoHangupSeconds: number;
+  } | null;
   expand?: {
     user?: User;
   };

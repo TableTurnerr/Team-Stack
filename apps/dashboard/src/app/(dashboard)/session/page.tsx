@@ -11,9 +11,12 @@ import {
     Square,
     Pause,
     Play,
+    Copy,
+    Check,
+    ExternalLink,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp } from '@/lib/types';
+import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
@@ -83,6 +86,8 @@ export default function SessionPage() {
     const [pausing, setPausing] = useState(false);
     const [collectionMissing, setCollectionMissing] = useState(false);
     const [zoomAppConfirmed, setZoomAppConfirmed] = useState(false);
+    const [zoomDetecting, setZoomDetecting] = useState(false);
+    const [zoomDetected, setZoomDetected] = useState<boolean | null>(null);
     const [awaitingAudioConnect, setAwaitingAudioConnect] = useState(false);
 
     // Recording state
@@ -91,6 +96,7 @@ export default function SessionPage() {
         status: recorderStatus,
         duration: recorderDuration,
         startSession: startAudioSession,
+        endSession: endAudioSession,
         startRecording,
         stopRecording,
         discardRecording,
@@ -120,6 +126,9 @@ export default function SessionPage() {
     const [dialCountIncremented, setDialCountIncremented] = useState(false);
     const [pickupCountIncremented, setPickupCountIncremented] = useState(false);
     const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Tracks the exact moment the call ended so duration calculation uses real end time,
+    // not the (possibly much later) form submission time.
+    const callEndTimeRef = useRef<number | null>(null);
 
     // Track unsaved call state — true when call ended but form not yet submitted
     const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
@@ -148,6 +157,65 @@ export default function SessionPage() {
     const [testSessionCleanupId, setTestSessionCleanupId] = useState<string | null>(null);
     const [cleaningUp, setCleaningUp] = useState(false);
     const [cleanupError, setCleanupError] = useState('');
+    const [testNumbersCopied, setTestNumbersCopied] = useState(false);
+
+    const TEST_CALL_NUMBER_POOL = [
+        '18042221111, Richmond VA - Echo & DTMF',
+        '19093900003, Ontario CA - Instant Echo',
+        '18004444444, Toll-Free - Reads Caller ID',
+        '16317918378, New York NY - Audio Clarity',
+        '12064560649, Seattle WA - Echo & Hold Music',
+        '14086474636, San Jose CA - Echo, DTMF & Frequency Sweep',
+        '18023599100, Vermont - Latency Echo Test',
+        '18004377950, Toll-Free - ANI Caller ID Readback',
+        '19252590082, East Bay CA - Echo Test',
+    ];
+
+    const handleCopyTestNumbers = () => {
+        const shuffled = [...TEST_CALL_NUMBER_POOL].sort(() => Math.random() - 0.5);
+        const picked = shuffled.slice(0, 5).join('\n');
+        navigator.clipboard.writeText(picked).then(() => {
+            setTestNumbersCopied(true);
+            setTimeout(() => setTestNumbersCopied(false), 2000);
+        });
+    };
+
+    // ---------------------------------------------------------------------------
+    // Zoom detection — tries to open zoommtg:// and watches for window blur,
+    // which fires when the OS hands focus to the Zoom desktop app.
+    // ---------------------------------------------------------------------------
+    const verifyZoomRunning = useCallback(() => {
+        if (!document.hasFocus()) window.focus();
+        setZoomDetecting(true);
+        setZoomDetected(null);
+
+        let resolved = false;
+        const resolve = (detected: boolean) => {
+            if (resolved) return;
+            resolved = true;
+            window.removeEventListener('blur', onBlur);
+            setZoomDetecting(false);
+            setZoomDetected(detected);
+            if (detected) {
+                setZoomAppConfirmed(true);
+                refreshDialer();
+            }
+        };
+        const onBlur = () => resolve(true);
+        window.addEventListener('blur', onBlur);
+
+        // Trigger the Zoom protocol handler; if Zoom is running the OS will
+        // switch focus to it, causing the browser window to blur.
+        const a = document.createElement('a');
+        a.href = 'zoommtg://zoom.us/';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // If no blur within 2 s, Zoom was not detected.
+        setTimeout(() => resolve(false), 2000);
+    }, [refreshDialer]);
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -156,7 +224,7 @@ export default function SessionPage() {
     const [powerDialerIndex, setPowerDialerIndex] = useState(0);
     const [powerDialerActive, setPowerDialerActive] = useState(false);
     const [powerDialerPaused, setPowerDialerPaused] = useState(false);
-    const [powerDialerDelay, setPowerDialerDelay] = useState(2); // seconds; negative = start next call before submit
+    const [powerDialerDelay, setPowerDialerDelay] = useState(0); // seconds; negative = start next call before submit
     // Pins the old call's phone number in the form during a negative-delay overlap
     const [pinnedFormPhoneNumber, setPinnedFormPhoneNumber] = useState('');
     // Company name suggested from power dialer queue for the current call
@@ -190,6 +258,90 @@ export default function SessionPage() {
             setAutoHangup(false);
         }
     }, [powerDialerActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ---------------------------------------------------------------------------
+    // Power dialer persistence — stored in user_preferences.power_dialer_state
+    // so progress is shared across devices and survives across CRM sessions.
+    // ---------------------------------------------------------------------------
+    const didHydrateDialerRef = useRef(false);
+    const [dialerHydrated, setDialerHydrated] = useState(false);
+    const powerDialerPrefsRecordIdRef = useRef<string | null>(null);
+
+    // Load from PocketBase on mount
+    useEffect(() => {
+        if (!user || didHydrateDialerRef.current) return;
+        didHydrateDialerRef.current = true;
+
+        pb.collection(COLLECTIONS.USER_PREFERENCES).getList<UserPreferences>(1, 1, {
+            filter: `user = "${user.id}"`,
+        }).then(result => {
+            if (result.items.length > 0) {
+                powerDialerPrefsRecordIdRef.current = result.items[0].id;
+                const saved = result.items[0].power_dialer_state;
+                if (saved && Array.isArray(saved.queue) && saved.queue.length > 0) {
+                    setPowerDialerQueue(saved.queue);
+                    setPowerDialerIndex(typeof saved.currentIndex === 'number' ? saved.currentIndex : 0);
+                    if (typeof saved.delay === 'number') setPowerDialerDelay(saved.delay);
+                    if (typeof saved.autoHangupEnabled === 'boolean') setAutoHangupEnabled(saved.autoHangupEnabled);
+                    if (typeof saved.autoHangupSeconds === 'number') setAutoHangupSeconds(saved.autoHangupSeconds);
+                }
+            }
+        }).catch(err => {
+            console.error('Failed to load power dialer state:', err);
+        }).finally(() => {
+            setDialerHydrated(true);
+        });
+    }, [user]);
+
+    // Persist to PocketBase (debounced 1.5s) whenever state changes — only after hydration
+    const savePowerDialerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        if (!user || !dialerHydrated) return;
+
+        if (savePowerDialerTimerRef.current) clearTimeout(savePowerDialerTimerRef.current);
+        savePowerDialerTimerRef.current = setTimeout(async () => {
+            const stateToSave = powerDialerQueue.length === 0 ? null : {
+                queue: powerDialerQueue,
+                currentIndex: powerDialerIndex,
+                delay: powerDialerDelay,
+                autoHangupEnabled,
+                autoHangupSeconds,
+            };
+            try {
+                if (powerDialerPrefsRecordIdRef.current) {
+                    await pb.collection(COLLECTIONS.USER_PREFERENCES).update(
+                        powerDialerPrefsRecordIdRef.current,
+                        { power_dialer_state: stateToSave }
+                    );
+                } else {
+                    // Record not yet cached — look it up first
+                    const result = await pb.collection(COLLECTIONS.USER_PREFERENCES).getList<UserPreferences>(1, 1, {
+                        filter: `user = "${user.id}"`,
+                    });
+                    if (result.items.length > 0) {
+                        powerDialerPrefsRecordIdRef.current = result.items[0].id;
+                        await pb.collection(COLLECTIONS.USER_PREFERENCES).update(
+                            result.items[0].id,
+                            { power_dialer_state: stateToSave }
+                        );
+                    } else {
+                        // First-time user with no preferences record yet — create one
+                        const created = await pb.collection(COLLECTIONS.USER_PREFERENCES).create<UserPreferences>({
+                            user: user.id,
+                            power_dialer_state: stateToSave,
+                        });
+                        powerDialerPrefsRecordIdRef.current = created.id;
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to save power dialer state:', err);
+            }
+        }, 1500);
+
+        return () => {
+            if (savePowerDialerTimerRef.current) clearTimeout(savePowerDialerTimerRef.current);
+        };
+    }, [user, dialerHydrated, powerDialerQueue, powerDialerIndex, powerDialerDelay, autoHangupEnabled, autoHangupSeconds]);
 
     // ---------------------------------------------------------------------------
     // Multi-tab prevention — claim a tab lock and warn if another tab owns it
@@ -315,9 +467,11 @@ export default function SessionPage() {
         if (callStatus === 'ringing') {
             // Call is ringing - start ring timer
             if (!ringStartTime) {
-                setRingStartTime(Date.now());
+                const now = Date.now();
+                setRingStartTime(now);
                 setConnectTime(null);
                 setCurrentCallDuration(0);
+                callEndTimeRef.current = null; // new call starting
 
                 // Increment dial count only once when ringing starts (and only for session mode)
                 if (session && !dialCountIncremented) {
@@ -336,9 +490,27 @@ export default function SessionPage() {
                 }
             }
         } else if (callStatus === 'connected') {
-            // Call connected - mark connect time and start call duration timer
+            // Call connected - mark connect time.
+            // Also set ringStartTime if the call skipped the ringing phase entirely
+            // (some carriers answer immediately without a ringing event).
+            if (!ringStartTime) {
+                setRingStartTime(Date.now());
+                callEndTimeRef.current = null;
+            }
             if (!connectTime) {
                 setConnectTime(Date.now());
+
+                // If the call skipped the ringing phase, increment dial count now
+                if (session && !dialCountIncremented) {
+                    console.log('[Session Page] Incrementing dial count at connect (no ringing phase):', session.id);
+                    setDialCountIncremented(true);
+                    pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
+                        total_dials: (session.total_dials || 0) + 1
+                    }).then(updatedSession => {
+                        console.log('[Session Page] Dial count updated at connect:', updatedSession.total_dials);
+                        setSession(updatedSession);
+                    }).catch(err => console.error('Failed to increment dial count at connect:', err));
+                }
 
                 // Increment pickup count when call is connected (only for session mode)
                 if (session && !pickupCountIncremented) {
@@ -349,41 +521,58 @@ export default function SessionPage() {
                         setSession(updatedSession);
                     }).catch(err => console.error('Failed to increment pickup count:', err));
                 }
-
-                // Start call duration timer
-                if (callTimerRef.current) clearInterval(callTimerRef.current);
-                callTimerRef.current = setInterval(() => {
-                    if (connectTime) {
-                        setCurrentCallDuration(Math.floor((Date.now() - connectTime) / 1000));
-                    }
-                }, 1000);
             }
         } else if (callStatus === 'ended') {
-            // Call ended - clear timers, mark as unsaved if there was a phone number
-            if (callTimerRef.current) {
-                clearInterval(callTimerRef.current);
-                callTimerRef.current = null;
-            }
+            // Record the exact call-end time so duration calculations are accurate
+            // regardless of when the user actually submits the form.
+            callEndTimeRef.current = Date.now();
+
             if (currentPhoneNumber) {
                 setHasUnsavedCall(true);
                 // Pin the phone number so the form keeps showing the old number
                 // even if the power dialer auto-dials a new call (negative-delay overlap)
                 setPinnedFormPhoneNumber(currentPhoneNumber);
             }
-        } else if (callStatus === 'idle') {
-            // Idle - just clear timers (don't set unsaved here, it's set on 'ended')
+
+            // Automatically stop the current recording so it gets queued in deferredSegments
+            if (isSessionActive && recorderStatus === 'recording') {
+                console.log('[Session Page] Call ended — auto-stopping recording');
+                stopRecording();
+            }
+        }
+    }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber, isSessionActive, recorderStatus, stopRecording]);
+
+    // ---------------------------------------------------------------------------
+    // Call duration timer — separate effect so its lifecycle is tied only to
+    // connectTime. The main callStatus effect sets callTimerRef but the cleanup
+    // was firing when connectTime changed (batched with ringStartTime in the same
+    // render cycle), clearing the interval before it could tick.
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        if (!connectTime) {
+            // Reset display when call ends/resets
+            setCurrentCallDuration(0);
             if (callTimerRef.current) {
                 clearInterval(callTimerRef.current);
                 callTimerRef.current = null;
             }
+            return;
         }
+
+        // connectTime is now set — start the live call-duration counter.
+        // Capture connectTime in the closure; it won't change until reset.
+        if (callTimerRef.current) clearInterval(callTimerRef.current);
+        callTimerRef.current = setInterval(() => {
+            setCurrentCallDuration(Math.floor((Date.now() - connectTime) / 1000));
+        }, 1000);
 
         return () => {
             if (callTimerRef.current) {
                 clearInterval(callTimerRef.current);
+                callTimerRef.current = null;
             }
         };
-    }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber]);
+    }, [connectTime]);
 
     // ---------------------------------------------------------------------------
     // Power dialer — negative delay: auto-dial next number N seconds after call ends
@@ -428,9 +617,10 @@ export default function SessionPage() {
         }
     }, [currentPhoneNumber]);
 
-    // Sync currentPhoneNumber from zoom context when a call is initiated from docked dialer
+    // Sync currentPhoneNumber from zoom context when a call is initiated from docked dialer.
+    // Handles both ringing and instantly-answered calls that skip straight to 'connected'.
     useEffect(() => {
-        if (activeCallNumber && callStatus === 'ringing') {
+        if (activeCallNumber && (callStatus === 'ringing' || callStatus === 'connected')) {
             // Check if this is a new call (different number or no current number)
             if (!currentPhoneNumber || activeCallNumber !== currentPhoneNumber) {
                 console.log('[Session Page] New call detected from dialer:', activeCallNumber);
@@ -456,12 +646,37 @@ export default function SessionPage() {
         prevCallStatusForRecordingRef.current = callStatus;
 
         if (!isSessionActive) return;
-        // Start recording on connect if not already recording
-        if (callStatus === 'connected' && prev !== 'connected' && recorderStatus === 'idle') {
-            console.log('[Session Page] Auto-starting recording on call connect');
+        // Start recording on connect (or ringing) if not already recording.
+        // Ringing handles immediately-answered calls where 'ringing' fires first;
+        // connected handles the fallback for calls that skip directly to 'connected'.
+        // enterDeferredMode() is always called here so that instantly-answered calls
+        // (which skip ringing and may bypass the activeCallNumber effect) are still
+        // queued properly and linked to the call log on form submission.
+        if (
+            (callStatus === 'ringing' || callStatus === 'connected') &&
+            prev !== callStatus &&
+            recorderStatus === 'idle'
+        ) {
+            console.log('[Session Page] Auto-starting recording on', callStatus);
+            enterDeferredMode();
             startRecording();
         }
-    }, [callStatus, isSessionActive, recorderStatus, startRecording]);
+    }, [callStatus, isSessionActive, recorderStatus, startRecording, enterDeferredMode]);
+
+    // Fallback: if audio session becomes active WHILE a call is already connected,
+    // start recording immediately (covers the race where screen share is granted
+    // after Zoom fires the connected event).
+    const prevIsSessionActiveRef = useRef(isSessionActive);
+    useEffect(() => {
+        const wasActive = prevIsSessionActiveRef.current;
+        prevIsSessionActiveRef.current = isSessionActive;
+
+        if (!wasActive && isSessionActive && (callStatus === 'ringing' || callStatus === 'connected') && recorderStatus === 'idle') {
+            console.log('[Session Page] Audio session became active mid-call — starting recording');
+            enterDeferredMode();
+            startRecording();
+        }
+    }, [isSessionActive, callStatus, recorderStatus, startRecording, enterDeferredMode]);
 
     // Warn user before closing tab if session is active
     useEffect(() => {
@@ -612,11 +827,15 @@ export default function SessionPage() {
             setCallbackEvents([]);
             setContextPhoneNumber(''); // Clear phone number in context
             window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+            window.localStorage.removeItem('crm:session:last-call:v1');
 
-            // Reset power dialer
+            // Stop screenshare / audio session when call session ends
+            endAudioSession();
+
+            // Stop power dialer automation — keep queue & progress so they persist
+            // into the next session. Index and queue are intentionally NOT reset here.
             setPowerDialerActive(false);
             setPowerDialerPaused(false);
-            setPowerDialerIndex(0);
             setPinnedFormPhoneNumber('');
             if (powerDialerTimerRef.current) {
                 clearTimeout(powerDialerTimerRef.current);
@@ -634,7 +853,7 @@ export default function SessionPage() {
         } finally {
             setEnding(false);
         }
-    }, [session, elapsedSec, setSession, setContextPhoneNumber]);
+    }, [session, elapsedSec, setSession, setContextPhoneNumber, endAudioSession]);
 
     // Keep endSessionRef in sync so the offline watchdog can always call the
     // latest version without a stale closure (declared here, after endSession).
@@ -718,7 +937,36 @@ export default function SessionPage() {
             // 4. Delete all call logs
             await Promise.allSettled(callLogs.map(l => pb.collection(COLLECTIONS.CALL_LOGS).delete(l.id)));
 
-            // 5. Delete the session record
+            // 5. Delete companies that were created solely during this test session
+            //    (i.e. they have no call logs outside this session)
+            const companyIds = [...new Set(callLogs.map(l => l.company).filter(Boolean))];
+            if (companyIds.length > 0) {
+                const companiesOnlyInSession: string[] = [];
+                await Promise.allSettled(
+                    companyIds.map(async (companyId) => {
+                        try {
+                            const otherLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getList(1, 1, {
+                                filter: `company = "${companyId}" && session != "${testSessionCleanupId}"`,
+                            });
+                            if (otherLogs.totalItems === 0) {
+                                companiesOnlyInSession.push(companyId);
+                            }
+                        } catch { /* skip if check fails */ }
+                    })
+                );
+                // Delete phone number records and then the companies themselves
+                for (const companyId of companiesOnlyInSession) {
+                    try {
+                        const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList({
+                            filter: `company = "${companyId}"`,
+                        });
+                        await Promise.allSettled(phones.map(p => pb.collection(COLLECTIONS.PHONE_NUMBERS).delete(p.id)));
+                        await pb.collection(COLLECTIONS.COMPANIES).delete(companyId);
+                    } catch { /* skip if delete fails */ }
+                }
+            }
+
+            // 6. Delete the session record
             await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).delete(testSessionCleanupId);
 
             setShowTestCleanupModal(false);
@@ -842,6 +1090,7 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
+        callEndTimeRef.current = null;
 
         // The previous leg's recording is already queued (added in onstop when the call ended).
         // Deferred mode remains active so the new leg will also be queued.
@@ -857,9 +1106,12 @@ export default function SessionPage() {
     const handleSaveCall = useCallback((data: CallFormData) => {
         if (!session || !user) return;
 
-        // Capture timing values before clearing state
+        // Capture timing values before clearing state.
+        // Use callEndTimeRef for the end time so we measure when the call actually
+        // ended, not when the user happened to submit the form (which could be minutes later).
         const capturedRingStart = ringStartTime;
         const capturedConnectTime = connectTime;
+        const capturedEndTime = callEndTimeRef.current ?? Date.now();
         const capturedPickupIncremented = pickupCountIncremented;
 
         // Determine if this call involved callbacks
@@ -883,16 +1135,18 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
+        callEndTimeRef.current = null;
         window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
-        // Advance power dialer immediately (before background API calls)
-        if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current >= 0) {
+        // Advance power dialer immediately (before background API calls).
+        // Always advance the index even when paused — the call is done regardless.
+        // Only schedule the next dial when not paused.
+        if (powerDialerActiveRef.current && powerDialerDelayRef.current >= 0) {
             const nextIdx = powerDialerIndexRef.current + 1;
+            setPowerDialerIndex(nextIdx);
             if (nextIdx >= powerDialerQueueRef.current.length) {
-                setPowerDialerIndex(nextIdx);
                 setPowerDialerActive(false);
-            } else {
-                setPowerDialerIndex(nextIdx);
+            } else if (!powerDialerPausedRef.current) {
                 if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
                 const delayMs = powerDialerDelayRef.current * 1000;
                 const nextEntry = powerDialerQueueRef.current[nextIdx];
@@ -938,16 +1192,18 @@ export default function SessionPage() {
                     }
                 } catch { /* ignore — still log the call */ }
 
-                // Calculate call durations from captured values
+                // Calculate call durations from captured values.
+                // capturedEndTime is set when callStatus became 'ended', so it reflects
+                // the real call-end moment even if the user submits the form much later.
                 let ringDuration = 0, callDuration = 0, totalDuration = 0;
                 if (capturedRingStart) {
-                    const endTime = Date.now();
                     if (capturedConnectTime) {
                         ringDuration = Math.floor((capturedConnectTime - capturedRingStart) / 1000);
-                        callDuration = Math.floor((endTime - capturedConnectTime) / 1000);
+                        callDuration = Math.floor((capturedEndTime - capturedConnectTime) / 1000);
                         totalDuration = ringDuration + callDuration;
                     } else {
-                        ringDuration = Math.floor((endTime - capturedRingStart) / 1000);
+                        // Call rang but never connected (no answer)
+                        ringDuration = Math.floor((capturedEndTime - capturedRingStart) / 1000);
                         totalDuration = ringDuration;
                     }
                 }
@@ -971,7 +1227,7 @@ export default function SessionPage() {
                     appointment_set: data.appointmentSet,
                     callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                     is_callback: hasCallbacks ? true : undefined,
-                });
+                }, { expand: 'company,phone_number_record' });
 
                 // Submit this call's recording (pops oldest segment from queue).
                 // Each call's form submission claims exactly one recording via FIFO ordering.
@@ -1064,6 +1320,7 @@ export default function SessionPage() {
         setCurrentCallDuration(0);
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
+        callEndTimeRef.current = null;
         window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
         // Cancel any pending power dialer auto-dial
@@ -1084,6 +1341,20 @@ export default function SessionPage() {
         setPowerDialerPaused(false);
         handleDial(powerDialerQueue[powerDialerIndex].number, powerDialerQueue[powerDialerIndex].company);
     }, [powerDialerQueue, powerDialerIndex, hasUnsavedCall, callStatus, handleDial]);
+
+    const handlePowerDialerStartFrom = useCallback((index: number) => {
+        if (powerDialerQueue.length === 0 || hasUnsavedCall) return;
+        if (callStatus === 'ringing' || callStatus === 'connected') return;
+        if (powerDialerTimerRef.current) {
+            clearTimeout(powerDialerTimerRef.current);
+            powerDialerTimerRef.current = null;
+        }
+        powerDialerNegSubmitCountRef.current = 0;
+        setPowerDialerIndex(index);
+        setPowerDialerActive(true);
+        setPowerDialerPaused(false);
+        handleDial(powerDialerQueue[index].number, powerDialerQueue[index].company);
+    }, [powerDialerQueue, hasUnsavedCall, callStatus, handleDial]);
 
     const handlePowerDialerPause = useCallback(() => {
         setPowerDialerPaused(true);
@@ -1224,20 +1495,44 @@ export default function SessionPage() {
                                         <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
                                     </ol>
                                 </div>
-                                <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
-                                    <input
-                                        type="checkbox"
-                                        checked={zoomAppConfirmed}
-                                        onChange={(e) => {
-                                            setZoomAppConfirmed(e.target.checked);
-                                            if (e.target.checked) refreshDialer();
-                                        }}
-                                        className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                                    />
-                                    <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
-                                        <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
-                                    </span>
-                                </label>
+                                <button
+                                    type="button"
+                                    onClick={verifyZoomRunning}
+                                    disabled={zoomDetecting || zoomDetected === true}
+                                    className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                        zoomDetected === true
+                                            ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                            : zoomDetected === false
+                                                ? 'border-[var(--error)] bg-[var(--error-subtle)]/20 hover:bg-[var(--error-subtle)]/30 cursor-pointer active:scale-[0.99]'
+                                                : zoomDetecting
+                                                    ? 'border-[var(--card-border)] bg-[var(--sidebar-bg)] cursor-wait'
+                                                    : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                    }`}
+                                >
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${zoomDetected === true ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                        {zoomDetecting
+                                            ? <Loader2 size={20} className="animate-spin text-[var(--muted)]" />
+                                            : zoomDetected === true
+                                                ? <Check size={20} className="text-[var(--success)]" />
+                                                : zoomDetected === false
+                                                    ? <AlertTriangle size={20} className="text-[var(--error)]" />
+                                                    : <ExternalLink size={20} className="text-[var(--muted)]" />
+                                        }
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className={`text-sm font-semibold ${zoomDetected === true ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                            Open and Verify Zoom Workplace app is running and logged in
+                                        </p>
+                                        {zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Opening Zoom and verifying...</p>}
+                                        {zoomDetected === true && (
+                                            <p className="text-xs text-[var(--success)] mt-0.5">
+                                                Zoom detected and running
+                                            </p>
+                                        )}
+                                        {zoomDetected === false && <p className="text-xs text-[var(--error)] mt-0.5">Zoom not detected — click to try again</p>}
+                                        {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
+                                    </div>
+                                </button>
                                 {recorderError && (
                                     <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                         {recorderError}
@@ -1281,20 +1576,44 @@ export default function SessionPage() {
                                     <li>Make sure <span className="font-semibold text-[var(--foreground)]">Zoom Workplace app</span> is running on your device</li>
                                 </ol>
                             </div>
-                            <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
-                                <input
-                                    type="checkbox"
-                                    checked={zoomAppConfirmed}
-                                    onChange={(e) => {
-                                        setZoomAppConfirmed(e.target.checked);
-                                        if (e.target.checked) refreshDialer();
-                                    }}
-                                    className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                                />
-                                <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
-                                    <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
-                                </span>
-                            </label>
+                            <button
+                                type="button"
+                                onClick={verifyZoomRunning}
+                                disabled={zoomDetecting || zoomDetected === true}
+                                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                    zoomDetected === true
+                                        ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                        : zoomDetected === false
+                                            ? 'border-[var(--error)] bg-[var(--error-subtle)]/20 hover:bg-[var(--error-subtle)]/30 cursor-pointer active:scale-[0.99]'
+                                            : zoomDetecting
+                                                ? 'border-[var(--card-border)] bg-[var(--sidebar-bg)] cursor-wait'
+                                                : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                }`}
+                            >
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${zoomDetected === true ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                    {zoomDetecting
+                                        ? <Loader2 size={20} className="animate-spin text-[var(--muted)]" />
+                                        : zoomDetected === true
+                                            ? <Check size={20} className="text-[var(--success)]" />
+                                            : zoomDetected === false
+                                                ? <AlertTriangle size={20} className="text-[var(--error)]" />
+                                                : <ExternalLink size={20} className="text-[var(--muted)]" />
+                                    }
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-semibold ${zoomDetected === true ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                        Open and Verify Zoom Workplace app is running and logged in
+                                    </p>
+                                    {zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Opening Zoom and verifying...</p>}
+                                    {zoomDetected === true && (
+                                        <p className="text-xs text-[var(--success)] mt-0.5">
+                                            Zoom detected and running
+                                        </p>
+                                    )}
+                                    {zoomDetected === false && <p className="text-xs text-[var(--error)] mt-0.5">Zoom not detected — click to try again</p>}
+                                    {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
+                                </div>
+                            </button>
                             {recorderError && (
                                 <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                     {recorderError}
@@ -1407,20 +1726,44 @@ export default function SessionPage() {
                                     <li><span className="text-[var(--error)] font-bold">IMPORTANT:</span> Toggle <span className="font-semibold text-[var(--foreground)]">Share system audio</span> &quot;ON&quot; at the bottom</li>
                                 </ol>
                             </div>
-                            <label className="flex items-center gap-3 cursor-pointer bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors text-left group">
-                                <input
-                                    type="checkbox"
-                                    checked={zoomAppConfirmed}
-                                    onChange={(e) => {
-                                        setZoomAppConfirmed(e.target.checked);
-                                        if (e.target.checked) refreshDialer();
-                                    }}
-                                    className="w-4 h-4 rounded border-[var(--card-border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                                />
-                                <span className="text-sm font-medium group-hover:text-[var(--foreground)] transition-colors">
-                                    <span className="text-[var(--error)]">Zoom Workplace app</span> is running and logged in
-                                </span>
-                            </label>
+                            <button
+                                type="button"
+                                onClick={verifyZoomRunning}
+                                disabled={zoomDetecting || zoomDetected === true}
+                                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                    zoomDetected === true
+                                        ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                        : zoomDetected === false
+                                            ? 'border-[var(--error)] bg-[var(--error-subtle)]/20 hover:bg-[var(--error-subtle)]/30 cursor-pointer active:scale-[0.99]'
+                                            : zoomDetecting
+                                                ? 'border-[var(--card-border)] bg-[var(--sidebar-bg)] cursor-wait'
+                                                : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                }`}
+                            >
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${zoomDetected === true ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                    {zoomDetecting
+                                        ? <Loader2 size={20} className="animate-spin text-[var(--muted)]" />
+                                        : zoomDetected === true
+                                            ? <Check size={20} className="text-[var(--success)]" />
+                                            : zoomDetected === false
+                                                ? <AlertTriangle size={20} className="text-[var(--error)]" />
+                                                : <ExternalLink size={20} className="text-[var(--muted)]" />
+                                    }
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-semibold ${zoomDetected === true ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                        Open and Verify Zoom Workplace app is running and logged in
+                                    </p>
+                                    {zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Opening Zoom and verifying...</p>}
+                                    {zoomDetected === true && (
+                                        <p className="text-xs text-[var(--success)] mt-0.5">
+                                            Zoom detected and running
+                                        </p>
+                                    )}
+                                    {zoomDetected === false && <p className="text-xs text-[var(--error)] mt-0.5">Zoom not detected — click to try again</p>}
+                                    {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
+                                </div>
+                            </button>
                             {recorderError && (
                                 <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                     {recorderError}
@@ -1446,9 +1789,19 @@ export default function SessionPage() {
                     <div className="flex items-center gap-3">
                         <h1 className="text-2xl font-bold">Call Session</h1>
                         {session.is_test && (
-                            <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                                TEST
-                            </span>
+                            <>
+                                <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                                    TEST
+                                </span>
+                                <button
+                                    onClick={handleCopyTestNumbers}
+                                    title="Copy test phone numbers for the power dialer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-medium bg-amber-500/10 text-amber-500 border border-amber-500/30 hover:bg-amber-500/20 transition-colors"
+                                >
+                                    {testNumbersCopied ? <Check size={11} /> : <Copy size={11} />}
+                                    {testNumbersCopied ? 'Copied!' : 'Test Numbers'}
+                                </button>
+                            </>
                         )}
                         {session.paused_at ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--warning-subtle)] text-[var(--warning)]">
@@ -1583,6 +1936,7 @@ export default function SessionPage() {
                     onPause={handlePowerDialerPause}
                     onResume={handlePowerDialerResume}
                     onStop={handlePowerDialerStop}
+                    onStartFrom={handlePowerDialerStartFrom}
                     onDelayChange={setPowerDialerDelay}
                     onQueueLoad={handlePowerDialerQueueLoad}
                     disabled={!!session.paused_at}
@@ -1649,7 +2003,7 @@ export default function SessionPage() {
                             <div>
                                 <h2 className="text-lg font-bold">Test Session Ended</h2>
                                 <p className="text-sm text-[var(--muted)] mt-1">
-                                    Would you like to delete all data created during this test session? This includes call logs, recordings, and follow-ups.
+                                    Would you like to delete all data created during this test session? This includes call logs, recordings, follow-ups, and any companies that were only created during this session.
                                 </p>
                             </div>
                         </div>

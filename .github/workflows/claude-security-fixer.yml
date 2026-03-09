@@ -136,7 +136,6 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           allowed_tools: "Bash,Read,Write,Edit"
           prompt: |
             You are a senior security engineer. Your ONLY task is to fix the open security vulnerabilities detected by CodeQL in this repository.

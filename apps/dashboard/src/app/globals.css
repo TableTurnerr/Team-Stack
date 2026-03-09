@@ -508,15 +508,9 @@ body {
   animation: border-spin 1.2s linear infinite;
 }
 
-/* Admin mode confirm button — periodic attention pulse every ~4s */
-@keyframes attention-pulse {
-  0%, 65%, 100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-  }
-  70% {
-    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.4);
-  }
-  85% {
-    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
-  }
+/* Undo delete toast — animated gradient border */
+@keyframes border-gradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }

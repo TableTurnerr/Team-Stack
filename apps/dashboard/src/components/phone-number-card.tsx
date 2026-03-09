@@ -2,23 +2,21 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Phone, MapPin, User, Calendar, Edit2, Trash2, History, Plus, ShieldAlert, CheckSquare } from 'lucide-react';
+import { Phone, MapPin, User, Calendar, Edit2, Trash2, History, Plus, Loader2 } from 'lucide-react';
 import { cn, formatDate } from '@/lib/utils';
 import type { PhoneNumber, CallLog } from '@/lib/types';
 import { ZoomCallButton } from '@/components/zoom-call-button';
 import { useZoomPhoneOptional } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { useSession } from '@/contexts/session-context';
-import { useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
+import { useAuth } from '@/contexts/auth-context';
 
 interface PhoneNumberCardProps {
   phoneNumber: PhoneNumber;
   recentCalls: CallLog[];
-  /** All call logs for this phone number — enables direct staging without modal */
-  adminCallLogs?: CallLog[];
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
-  onAdminDelete?: (id: string) => void;
   onLogCall: (phoneNumberId: string) => void;
   className?: string;
 }
@@ -33,40 +31,37 @@ const LABEL_COLORS: Record<string, string> = {
 export function PhoneNumberCard({
   phoneNumber,
   recentCalls,
-  adminCallLogs,
   onEdit,
   onDelete,
-  onAdminDelete,
   onLogCall,
   className
 }: PhoneNumberCardProps) {
   const router = useRouter();
   const [showHistory, setShowHistory] = useState(false);
-  const [isTrashHovered, setIsTrashHovered] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const zoomPhone = useZoomPhoneOptional();
   const { isSessionActive } = useCallRecording();
   const { session, setStandaloneMode } = useSession();
-  const adminMode = useAdminModeOptional();
-  const isAdminMode = adminMode?.isAdminMode ?? false;
+  const recycleBin = useRecycleBinOptional();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const isDisassociated = !!phoneNumber.disassociated;
-  const isStagedForDeletion = isAdminMode && adminMode?.pendingDeletions.some(
-    d => d.targetId === phoneNumber.id && d.type === 'phone_number'
-  );
 
-  const handleAdminStage = () => {
-    if (!adminMode) return;
-    if (adminCallLogs !== undefined) {
-      adminMode.addStagedDeletion({
-        type: 'phone_number',
-        targetId: phoneNumber.id,
-        targetLabel: phoneNumber.phone_number,
-        associatedCallLogIds: adminCallLogs.map(l => l.id),
-        deleteRecordings: false,
-        hasRecordings: adminCallLogs.some(l => l.has_recording),
+  const handleAdminDelete = async () => {
+    if (!recycleBin || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await recycleBin.moveToTrash({
+        itemType: 'phone_number',
+        originalId: phoneNumber.id,
+        itemLabel: phoneNumber.phone_number,
+        itemData: phoneNumber as unknown as Record<string, unknown>,
       });
-    } else {
-      onAdminDelete?.(phoneNumber.id);
+    } catch (err) {
+      console.error('Failed to delete phone number:', err);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -75,11 +70,7 @@ export function PhoneNumberCard({
       "border rounded-xl overflow-hidden group transition-all duration-200",
       isDisassociated
         ? "bg-[var(--sidebar-bg)] border-[var(--card-border)] opacity-60"
-        : isStagedForDeletion
-          ? "bg-red-500/5 border-red-500/40 shadow-[0_0_0_1px_rgba(239,68,68,0.2)]"
-          : isAdminMode
-            ? "bg-[var(--card-bg)] border-red-500/20 hover:border-red-500/40"
-            : "bg-[var(--card-bg)] border-[var(--card-border)] hover:border-[var(--sidebar-border)]",
+        : "bg-[var(--card-bg)] border-[var(--card-border)] hover:border-[var(--sidebar-border)]",
       className
     )}>
 
@@ -87,14 +78,6 @@ export function PhoneNumberCard({
       {isDisassociated && (
         <div className="px-4 py-1.5 bg-[var(--card-hover)] border-b border-[var(--card-border)] flex items-center gap-2">
           <span className="text-[10px] font-bold text-[var(--muted)] uppercase tracking-widest">Disassociated</span>
-        </div>
-      )}
-
-      {/* Staged for deletion banner */}
-      {isStagedForDeletion && (
-        <div className="px-4 py-1.5 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2">
-          <ShieldAlert size={11} className="text-red-400" />
-          <span className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Staged for permanent deletion</span>
         </div>
       )}
 
@@ -132,8 +115,8 @@ export function PhoneNumberCard({
           </div>
 
           <div className="flex items-center gap-1">
-            {/* Edit button — hidden when disassociated or staged */}
-            {!isDisassociated && !isStagedForDeletion && (
+            {/* Edit button — hidden when disassociated */}
+            {!isDisassociated && (
               <button
                 onClick={() => onEdit(phoneNumber.id)}
                 className="p-1.5 rounded-lg text-[var(--muted)] hover:bg-[var(--card-hover)] hover:text-[var(--foreground)] transition-colors"
@@ -143,28 +126,23 @@ export function PhoneNumberCard({
               </button>
             )}
 
-            {/* Delete button: in admin mode → stage for deletion; normal mode → soft delete */}
-            {!isStagedForDeletion && (
+            {/* Delete button: admin → permanent delete to recycle bin; normal → soft delete (disassociate) */}
+            {isAdmin ? (
               <button
-                onClick={() => isAdminMode ? handleAdminStage() : onDelete(phoneNumber.id)}
-                onMouseEnter={() => { if (isAdminMode) setIsTrashHovered(true); }}
-                onMouseLeave={() => setIsTrashHovered(false)}
-                className={cn(
-                  "p-1.5 rounded-lg transition-all duration-150",
-                  isAdminMode
-                    ? isTrashHovered
-                      ? "text-red-400 bg-red-500/15 scale-110"
-                      : "text-red-400/60 hover:bg-red-500/10 hover:text-red-400"
-                    : "text-[var(--muted)] hover:bg-[var(--error-subtle)] hover:text-[var(--error)]"
-                )}
-                title={isAdminMode ? "Stage for permanent deletion" : "Disassociate"}
+                onClick={handleAdminDelete}
+                disabled={isDeleting}
+                className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 transition-all duration-150 disabled:opacity-50"
+                title="Delete to recycle bin"
               >
-                {isAdminMode
-                  ? isTrashHovered
-                    ? <CheckSquare size={14} />
-                    : <ShieldAlert size={14} />
-                  : <Trash2 size={14} />
-                }
+                {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              </button>
+            ) : !isDisassociated && (
+              <button
+                onClick={() => onDelete(phoneNumber.id)}
+                className="p-1.5 rounded-lg text-[var(--muted)] hover:bg-[var(--error-subtle)] hover:text-[var(--error)] transition-colors"
+                title="Disassociate"
+              >
+                <Trash2 size={14} />
               </button>
             )}
           </div>

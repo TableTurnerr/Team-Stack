@@ -62,6 +62,7 @@ export const OUTCOME_COLORS: Record<string, { bg: string; text: string; border: 
   'Hung Up (Rude Recep)':{ bg: 'bg-red-500/10',             text: 'text-red-500',            border: 'border-red-500'            },
   'Hung Up (Other)':     { bg: 'bg-red-400/10',             text: 'text-red-400',            border: 'border-red-400'            },
   'Missed Call':         { bg: 'bg-[var(--card-hover)]',     text: 'text-[var(--muted)]',     border: 'border-[var(--muted)]'     },
+  'Untouched':           { bg: 'bg-slate-500/10',            text: 'text-slate-400',          border: 'border-slate-400'          },
 };
 
 /** Get colors for any outcome, falling back to a neutral style for custom outcomes */

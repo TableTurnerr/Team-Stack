@@ -2163,22 +2163,13 @@
             },
             {
                 "hidden": false,
-                "id": "select2063623452",
-                "maxSelect": 1,
+                "id": "json_status_arr",
+                "maxSize": 0,
                 "name": "status",
                 "presentable": false,
                 "required": false,
                 "system": false,
-                "type": "select",
-                "values": [
-                    "Cold No Reply",
-                    "Replied",
-                    "Warm",
-                    "Booked",
-                    "Paid",
-                    "Client",
-                    "Excluded"
-                ]
+                "type": "json"
             },
             {
                 "hidden": false,
@@ -6128,6 +6119,84 @@
         ],
         "indexes": [
             "CREATE UNIQUE INDEX `idx_user_preferences_user` ON `user_preferences` (`user`)"
+        ],
+        "system": false
+    },
+    {
+        "id": "pbc_custom_call_outcomes",
+        "listRule": "@request.auth.id != ''",
+        "viewRule": "@request.auth.id != ''",
+        "createRule": "@request.auth.id != ''",
+        "updateRule": "@request.auth.role = 'admin'",
+        "deleteRule": "@request.auth.role = 'admin'",
+        "name": "custom_call_outcomes",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_cco_name",
+                "max": 100,
+                "min": 1,
+                "name": "name",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "relation_cco_created_by",
+                "cascadeDelete": false,
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "created_by",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation",
+                "collectionId": "_pb_users_auth_",
+                "collectionName": "users"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE UNIQUE INDEX `idx_custom_call_outcomes_name` ON `custom_call_outcomes` (`name`)"
         ],
         "system": false
     }

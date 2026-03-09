@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { ChevronDown, ChevronRight, Clock, User, Trash2, CheckSquare, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, User, Trash2, Loader2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type Recording, type FollowUp } from '@/lib/types';
 import { PerformanceCounterInline } from '@/components/performance-counter-inline';
 import { CallLogsNestedTable } from './call-logs-nested-table';
 import { InlineEditField } from '@/components/inline-edit-field';
-import { useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
+import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
 import { Tooltip } from '@/components/ui/tooltip';
@@ -41,21 +42,17 @@ function formatDateTime(dateString: string): string {
 
 export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProps) {
     const [isExpanded, setIsExpanded] = useState(false);
-    const [isTrashHovered, setIsTrashHovered] = useState(false);
-    const [isStagingSession, setIsStagingSession] = useState(false);
     const [actualCallCount, setActualCallCount] = useState<number | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     // Test session deletion state
     const [confirmTestDelete, setConfirmTestDelete] = useState(false);
     const [isDeletingTest, setIsDeletingTest] = useState(false);
     const [testDeleteError, setTestDeleteError] = useState(false);
 
-    const adminMode = useAdminModeOptional();
-    const isAdminMode = adminMode?.isAdminMode ?? false;
-
-    const isStagedForDeletion = isAdminMode && adminMode?.pendingDeletions.some(
-        d => d.targetId === session.id && d.type === 'session'
-    );
+    const recycleBin = useRecycleBinOptional();
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
 
     const pickupRate = session.total_dials > 0
         ? Math.round((session.total_pickups / session.total_dials) * 100)
@@ -90,27 +87,37 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
         }
     };
 
-    const handleDirectStage = async () => {
-        if (!adminMode || isStagedForDeletion) return;
-        setIsStagingSession(true);
+    const handleDeleteSession = async () => {
+        if (!recycleBin || isDeleting) return;
+        setIsDeleting(true);
         try {
             const logs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
                 filter: `session = "${session.id}"`,
                 sort: '-call_time',
             });
-            adminMode.addStagedDeletion({
-                type: 'session',
-                targetId: session.id,
-                targetLabel: sessionLabel,
-                associatedCallLogIds: logs.map(l => l.id),
-                deleteRecordings: false,
-                hasRecordings: logs.some(l => l.has_recording),
+
+            // Collect related data for restoration
+            const relatedData: Record<string, unknown[]> = {};
+            if (logs.length > 0) {
+                relatedData[COLLECTIONS.CALL_LOGS] = logs as unknown as Record<string, unknown>[];
+                // Delete call logs first
+                for (const log of logs) {
+                    try { await pb.collection(COLLECTIONS.CALL_LOGS).delete(log.id); } catch { /* continue */ }
+                }
+            }
+
+            await recycleBin.moveToTrash({
+                itemType: 'session',
+                originalId: session.id,
+                itemLabel: formatDateTime(session.started_at),
+                itemData: session as unknown as Record<string, unknown>,
+                relatedData,
             });
             onDelete?.(session.id);
         } catch (err) {
-            console.error('Failed to stage session deletion:', err);
+            console.error('Failed to delete session:', err);
         } finally {
-            setIsStagingSession(false);
+            setIsDeleting(false);
         }
     };
 
@@ -302,36 +309,19 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                                 <Trash2 size={15} />
                             </button>
                         )
-                    ) : isAdminMode ? (
-                        /* Admin staging delete for normal sessions */
-                        isStagedForDeletion ? (
-                            <div className="p-1.5 rounded-lg text-green-400" title="Staged for deletion">
-                                <CheckSquare size={15} />
-                            </div>
-                        ) : (
-                            <button
-                                onClick={handleDirectStage}
-                                disabled={isStagingSession}
-                                onMouseEnter={() => setIsTrashHovered(true)}
-                                onMouseLeave={() => setIsTrashHovered(false)}
-                                className={cn(
-                                    "p-1.5 rounded-lg transition-all duration-150",
-                                    isStagingSession
-                                        ? "text-red-400 opacity-60"
-                                        : isTrashHovered
-                                            ? "text-red-400 bg-red-500/15 scale-110"
-                                            : "text-red-400/60 hover:bg-red-500/10 hover:text-red-400"
-                                )}
-                                title="Stage for permanent deletion"
-                            >
-                                {isStagingSession
-                                    ? <Loader2 size={15} className="animate-spin" />
-                                    : isTrashHovered
-                                        ? <CheckSquare size={15} />
-                                        : <Trash2 size={15} />
-                                }
-                            </button>
-                        )
+                    ) : isAdmin ? (
+                        /* Admin delete — sends to recycle bin */
+                        <button
+                            onClick={handleDeleteSession}
+                            disabled={isDeleting}
+                            className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 transition-all duration-150 disabled:opacity-50"
+                            title="Delete session (moves to recycle bin)"
+                        >
+                            {isDeleting
+                                ? <Loader2 size={15} className="animate-spin" />
+                                : <Trash2 size={15} />
+                            }
+                        </button>
                     ) : null}
                 </td>
             </tr>

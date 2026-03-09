@@ -6199,5 +6199,149 @@
             "CREATE UNIQUE INDEX `idx_custom_call_outcomes_name` ON `custom_call_outcomes` (`name`)"
         ],
         "system": false
+    },
+    {
+        "id": "pbc_recycle_bin",
+        "listRule": "@request.auth.role = 'admin'",
+        "viewRule": "@request.auth.role = 'admin'",
+        "createRule": "@request.auth.role = 'admin'",
+        "updateRule": "@request.auth.role = 'admin'",
+        "deleteRule": "@request.auth.role = 'admin'",
+        "name": "recycle_bin",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "text_item_type",
+                "max": 50,
+                "min": 1,
+                "name": "item_type",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "text_original_id",
+                "max": 50,
+                "min": 1,
+                "name": "original_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "text_item_label",
+                "max": 500,
+                "min": 0,
+                "name": "item_label",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "json_item_data",
+                "maxSize": 5000000,
+                "name": "item_data",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "json_related_data",
+                "maxSize": 10000000,
+                "name": "related_data",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "relation_deleted_by",
+                "cascadeDelete": false,
+                "collectionId": "_pb_users_auth_",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "deleted_by",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "hidden": false,
+                "id": "date_deleted_at",
+                "name": "deleted_at",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "autodate",
+                "onCreate": true,
+                "onUpdate": false
+            },
+            {
+                "hidden": false,
+                "id": "date_expires_at",
+                "name": "expires_at",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE INDEX `idx_recycle_bin_item_type` ON `recycle_bin` (`item_type`)",
+            "CREATE INDEX `idx_recycle_bin_expires_at` ON `recycle_bin` (`expires_at`)",
+            "CREATE INDEX `idx_recycle_bin_deleted_at` ON `recycle_bin` (`deleted_at`)"
+        ],
+        "system": false
     }
 ]

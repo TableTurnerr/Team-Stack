@@ -5,7 +5,6 @@ import { History, Download, RefreshCw, Loader2, Filter } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { SessionLogRow } from './session-log-row';
-import { useAdminModeOptional } from '@/contexts/admin-mode-context';
 
 export default function SessionLogsPage() {
     const [sessions, setSessions] = useState<ColdCallingSession[]>([]);
@@ -13,9 +12,6 @@ export default function SessionLogsPage() {
     const [refreshing, setRefreshing] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
     const [showFilters, setShowFilters] = useState(false);
-
-    const adminMode = useAdminModeOptional();
-    const isAdminMode = adminMode?.isAdminMode ?? false;
 
     const fetchSessions = useCallback(async () => {
         try {

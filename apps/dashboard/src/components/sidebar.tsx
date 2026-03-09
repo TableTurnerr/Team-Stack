@@ -27,6 +27,7 @@ import {
   Users,
   LayoutDashboard,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
@@ -275,6 +276,7 @@ interface NavCategory {
   href?: string;            // direct link for non-expandable items
   children?: NavChild[];    // sub-items for expandable categories
   comingSoon?: boolean;
+  adminOnly?: boolean;
 }
 
 const navCategories: NavCategory[] = [
@@ -321,6 +323,13 @@ const navCategories: NavCategory[] = [
     label: 'Notes',
     icon: StickyNote,
     href: '/notes',
+  },
+  {
+    key: 'recycle-bin',
+    label: 'Recycle Bin',
+    icon: Trash2,
+    href: '/recycle-bin',
+    adminOnly: true,
   },
 ];
 
@@ -661,7 +670,7 @@ export function Sidebar() {
         )}
 
         <div className="space-y-0.5">
-          {navCategories.map(renderCategory)}
+          {navCategories.filter(c => !c.adminOnly || user?.role === 'admin').map(renderCategory)}
         </div>
 
         {/* Coming Soon */}

@@ -20,8 +20,6 @@ import {
   CheckCircle2,
   Zap,
   CalendarClock,
-  ShieldAlert,
-  CheckSquare,
   CalendarCheck,
   Trash2,
   Send,
@@ -46,7 +44,8 @@ import { ZoomCallButton } from '@/components/zoom-call-button';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { useFollowUps } from '@/contexts/follow-up-context';
-import { useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
+import { useAuth } from '@/contexts/auth-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
 import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
 import { EmailActivityFeed } from '@/components/email/email-activity-feed';
@@ -59,8 +58,9 @@ export default function CompanyDetailPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
   const { completeFollowUp } = useFollowUps();
-  const adminMode = useAdminModeOptional();
-  const isAdminMode = adminMode?.isAdminMode ?? false;
+  const recycleBin = useRecycleBinOptional();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
@@ -82,7 +82,6 @@ export default function CompanyDetailPage() {
   // Phone number modals
   const [editingPhone, setEditingPhone] = useState<PhoneNumber | null>(null);
   const [softDeletingPhone, setSoftDeletingPhone] = useState<PhoneNumber | null>(null);
-  const [isCompanyDeleteHovered, setIsCompanyDeleteHovered] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -250,17 +249,62 @@ export default function CompanyDetailPage() {
     }
   };
 
-  const handleStageCallLog = (log: CallLog) => {
-    if (!adminMode) return;
-    adminMode.addStagedDeletion({
-      type: 'call_log',
-      targetId: log.id,
-      targetLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} – ${company?.company_name ?? ''}`,
-      associatedCallLogIds: [log.id],
-      deleteRecordings: false,
-      hasRecordings: log.has_recording || false,
-    });
-    setCallLogs(prev => prev.filter(l => l.id !== log.id));
+  const [isDeletingCallLog, setIsDeletingCallLog] = useState<string | null>(null);
+  const [isDeletingCompany, setIsDeletingCompany] = useState(false);
+
+  const handleDeleteCallLog = async (log: CallLog) => {
+    if (!recycleBin) return;
+    setIsDeletingCallLog(log.id);
+    try {
+      await recycleBin.moveToTrash({
+        itemType: 'call_log',
+        originalId: log.id,
+        itemLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} – ${company?.company_name ?? ''}`,
+        itemData: log as unknown as Record<string, unknown>,
+      });
+      setCallLogs(prev => prev.filter(l => l.id !== log.id));
+    } catch (err) {
+      console.error('Failed to delete call log:', err);
+    } finally {
+      setIsDeletingCallLog(null);
+    }
+  };
+
+  const handleDeleteCompany = async () => {
+    if (!recycleBin || !company) return;
+    setIsDeletingCompany(true);
+    try {
+      // Collect related data for restoration
+      const relatedData: Record<string, unknown[]> = {};
+      if (phoneNumbers.length > 0) {
+        relatedData[COLLECTIONS.PHONE_NUMBERS] = phoneNumbers as unknown as Record<string, unknown>[];
+      }
+      if (callLogs.length > 0) {
+        relatedData[COLLECTIONS.CALL_LOGS] = callLogs as unknown as Record<string, unknown>[];
+      }
+
+      // Delete phone numbers first (to avoid FK issues)
+      for (const phone of phoneNumbers.filter(p => !p.disassociated)) {
+        try { await pb.collection(COLLECTIONS.PHONE_NUMBERS).delete(phone.id); } catch { /* continue */ }
+      }
+      // Delete call logs
+      for (const log of callLogs) {
+        try { await pb.collection(COLLECTIONS.CALL_LOGS).delete(log.id); } catch { /* continue */ }
+      }
+
+      await recycleBin.moveToTrash({
+        itemType: 'company',
+        originalId: company.id,
+        itemLabel: company.company_name,
+        itemData: company as unknown as Record<string, unknown>,
+        relatedData,
+      });
+      router.push('/companies');
+    } catch (err) {
+      console.error('Failed to delete company:', err);
+    } finally {
+      setIsDeletingCompany(false);
+    }
   };
 
   // Phone number handlers
@@ -355,38 +399,17 @@ export default function CompanyDetailPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Admin mode: delete company button */}
-            {isAdminMode && (() => {
-              const isCompanyStagedForDeletion = adminMode?.pendingDeletions.some(
-                d => d.targetId === company.id && d.type === 'company'
-              );
-              return isCompanyStagedForDeletion ? (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/10 text-red-400/60 text-sm font-bold">
-                  <CheckSquare size={14} />
-                  Staged for Deletion
-                </div>
-              ) : (
-                <button
-                  onClick={() => {
-                    adminMode?.addStagedDeletion({
-                      type: 'company',
-                      targetId: company.id,
-                      targetLabel: company.company_name,
-                      associatedCallLogIds: callLogs.map(l => l.id),
-                      deleteRecordings: false,
-                      hasRecordings: callLogs.some(l => l.has_recording),
-                      associatedPhoneNumberIds: phoneNumbers.filter(p => !p.disassociated).map(p => p.id),
-                    });
-                  }}
-                  onMouseEnter={() => setIsCompanyDeleteHovered(true)}
-                  onMouseLeave={() => setIsCompanyDeleteHovered(false)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/5 text-red-400 text-sm font-bold hover:bg-red-500/10 transition-all"
-                >
-                  {isCompanyDeleteHovered ? <CheckSquare size={14} /> : <ShieldAlert size={14} />}
-                  Delete Company
-                </button>
-              );
-            })()}
+            {/* Delete company button — admin only */}
+            {isAdmin && (
+              <button
+                onClick={handleDeleteCompany}
+                disabled={isDeletingCompany}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-red-500/30 bg-red-500/5 text-red-400 text-sm font-bold hover:bg-red-500/10 transition-all disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                {isDeletingCompany ? 'Deleting...' : 'Delete Company'}
+              </button>
+            )}
             <button
               onClick={() => {
                 setActiveTab('overview');
@@ -634,7 +657,6 @@ export default function CompanyDetailPage() {
                   key={phone.id}
                   phoneNumber={phone}
                   recentCalls={callLogs.filter(c => c.phone_number_record === phone.id).slice(0, 3)}
-                  adminCallLogs={callLogs.filter(c => c.phone_number_record === phone.id)}
                   onEdit={(phoneId) => {
                     const p = phoneNumbers.find(ph => ph.id === phoneId);
                     if (p) setEditingPhone(p);
@@ -682,7 +704,7 @@ export default function CompanyDetailPage() {
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Summary</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">AI</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-right">Actions</th>
-                    {isAdminMode && (
+                    {isAdmin && (
                       <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-center">Del</th>
                     )}
                   </tr>
@@ -690,9 +712,6 @@ export default function CompanyDetailPage() {
                 <tbody className="divide-y divide-[var(--card-border)]">
                   {callLogs.map(call => {
                     const coldCall = call.expand?.cold_call as ColdCall | undefined;
-                    const isCallStaged = isAdminMode && adminMode?.pendingDeletions.some(
-                      d => d.targetId === call.id && d.type === 'call_log'
-                    );
                     return (
                       <tr key={call.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
                         <td className="px-6 py-4 text-sm font-medium">{formatDate(call.call_time)}</td>
@@ -755,21 +774,19 @@ export default function CompanyDetailPage() {
                             View Details
                           </Link>
                         </td>
-                        {isAdminMode && (
+                        {isAdmin && (
                           <td className="px-6 py-4 text-center">
-                            {isCallStaged ? (
-                              <div className="p-1.5 rounded-lg text-green-400 inline-flex" title="Staged for deletion">
-                                <CheckSquare size={14} />
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handleStageCallLog(call)}
-                                className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 hover:scale-110 transition-all duration-150 inline-flex"
-                                title="Stage for deletion"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleDeleteCallLog(call)}
+                              disabled={isDeletingCallLog === call.id}
+                              className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 hover:scale-110 transition-all duration-150 inline-flex disabled:opacity-50"
+                              title="Delete call log"
+                            >
+                              {isDeletingCallLog === call.id
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <Trash2 size={14} />
+                              }
+                            </button>
                           </td>
                         )}
                       </tr>

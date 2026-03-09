@@ -522,4 +522,26 @@ export const COLLECTIONS = {
   EMAIL_SEQUENCE_ENROLLMENTS: 'email_sequence_enrollments',
   EMAIL_EVENTS: 'email_events',
   EMAIL_UNSUBSCRIBES: 'email_unsubscribes',
+
+  // Recycle bin
+  RECYCLE_BIN: 'recycle_bin',
 } as const;
+
+export type RecycleBinItemType = 'company' | 'phone_number' | 'call_log' | 'session';
+
+export interface RecycleBinItem {
+  id: string;
+  item_type: RecycleBinItemType;
+  original_id: string;
+  item_label: string;
+  item_data: Record<string, unknown>;
+  related_data?: Record<string, unknown>;
+  deleted_by: string;
+  deleted_at: string;
+  expires_at: string;
+  created: string;
+  updated: string;
+  expand?: {
+    deleted_by?: User;
+  };
+}

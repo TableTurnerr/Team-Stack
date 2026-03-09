@@ -13,7 +13,6 @@ import { PreferencesSection } from './components/preferences-section';
 import { TeamSection } from './components/team-section';
 import { IntegrationsSection } from './components/integrations-section';
 import { DataPrivacySection } from './components/data-privacy-section';
-import { AdminModeSection } from './components/admin-mode-section';
 import { ToastProvider, useToast } from '@/components/ui/toast';
 import { Loader2 } from 'lucide-react';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
@@ -64,8 +63,6 @@ function SettingsContent() {
         return <IntegrationsSection {...commonProps} />;
       case 'data-privacy':
         return <DataPrivacySection {...commonProps} />;
-      case 'admin-mode':
-        return <AdminModeSection />;
       default:
         return null;
     }

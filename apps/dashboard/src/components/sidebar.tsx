@@ -121,6 +121,19 @@ function TeamAvatars({ collapsed }: { collapsed: boolean }) {
     return 'Offline';
   };
 
+  const getLastSeen = (member: User) => {
+    if (isOnline(member)) return null;
+    if (!member.last_activity) return 'Never';
+    const diff = Date.now() - new Date(member.last_activity).getTime();
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  };
+
   if (collapsed) {
     return (
       <div className="px-2 py-2 border-t border-[var(--sidebar-border)]">
@@ -139,7 +152,7 @@ function TeamAvatars({ collapsed }: { collapsed: boolean }) {
                 >
                   <div className={cn(
                     'w-8 h-8 rounded-full border-2 border-[var(--sidebar-bg)] flex items-center justify-center overflow-hidden relative transition-transform duration-150 flex-shrink-0',
-                    hoveredId === member.id && 'scale-125 ring-2 ring-[var(--primary)]',
+                    hoveredId === member.id && 'scale-125',
                   )}>
                     {avatarUrl ? (
                       <Image src={avatarUrl} alt={member.name} fill sizes="32px" className="object-cover" />
@@ -159,7 +172,12 @@ function TeamAvatars({ collapsed }: { collapsed: boolean }) {
                       <p className="text-[11px] text-[var(--muted)] truncate">{member.email}</p>
                       <div className="flex items-center gap-1.5 mt-1.5">
                         <div className={cn('w-2 h-2 rounded-full', getStatusColor(member))} />
-                        <span className="text-[11px] text-[var(--muted)]">{getStatusLabel(member)}</span>
+                        <span className="text-[11px] text-[var(--muted)]">
+                          {getStatusLabel(member)}
+                          {getStatusLabel(member) === 'Offline' && getLastSeen(member) && (
+                            <span className="opacity-70 font-normal"> - Last seen {getLastSeen(member)}</span>
+                          )}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -191,7 +209,7 @@ function TeamAvatars({ collapsed }: { collapsed: boolean }) {
             >
               <div className={cn(
                 'w-9 h-9 rounded-full border-2 border-[var(--sidebar-bg)] flex items-center justify-center overflow-hidden relative transition-all duration-150 flex-shrink-0',
-                hoveredId === member.id && 'scale-125 ring-2 ring-[var(--primary)] z-50',
+                hoveredId === member.id && 'scale-125 z-50',
               )}>
                 {avatarUrl ? (
                   <Image src={avatarUrl} alt={member.name} fill sizes="36px" className="object-cover" />
@@ -206,7 +224,7 @@ function TeamAvatars({ collapsed }: { collapsed: boolean }) {
 
               {/* Hover card */}
               {hoveredId === member.id && (
-                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[60] min-w-[200px] p-3 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-lg">
+                <div className="absolute bottom-full mb-2 left-0 z-[60] min-w-[200px] p-3 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-lg">
                   <div className="flex items-center gap-2.5">
                     <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden relative flex-shrink-0">
                       {avatarUrl ? (
@@ -224,7 +242,12 @@ function TeamAvatars({ collapsed }: { collapsed: boolean }) {
                   </div>
                   <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-[var(--card-border)]">
                     <div className={cn('w-2 h-2 rounded-full', getStatusColor(member))} />
-                    <span className="text-[11px] text-[var(--muted)]">{getStatusLabel(member)}</span>
+                    <span className="text-[11px] text-[var(--muted)]">
+                      {getStatusLabel(member)}
+                      {getStatusLabel(member) === 'Offline' && getLastSeen(member) && (
+                        <span className="opacity-70 font-normal"> - Last seen {getLastSeen(member)}</span>
+                      )}
+                    </span>
                   </div>
                   <p className="text-[10px] text-[var(--muted)] mt-1 capitalize">{member.role}</p>
                 </div>

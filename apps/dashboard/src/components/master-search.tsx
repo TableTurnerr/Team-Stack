@@ -118,15 +118,16 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
 
     // Search PocketBase collections in parallel
     try {
-      const filter = `company_name ~ "${q.replace(/"/g, '\\"')}"`;
-      const phoneFilter = `number ~ "${q.replace(/"/g, '\\"')}"`;
+      const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const filter = `company_name ~ "${escaped}"`;
+      const phoneFilter = `number ~ "${escaped}"`;
 
       const [companies, notes, recordings, users, followUps] = await Promise.all([
         pb.collection(COLLECTIONS.COMPANIES).getList(1, 5, { filter, fields: 'id,company_name,owner_name', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.NOTES).getList(1, 5, { filter: `note_text ~ "${q.replace(/"/g, '\\"')}"`, fields: 'id,note_text,company', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.RECORDINGS).getList(1, 5, { filter: `filename ~ "${q.replace(/"/g, '\\"')}"`, fields: 'id,filename,company', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.USERS).getList(1, 5, { filter: `name ~ "${q.replace(/"/g, '\\"')}" || email ~ "${q.replace(/"/g, '\\"')}"`, fields: 'id,name,email', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.FOLLOW_UPS).getList(1, 5, { filter: `title ~ "${q.replace(/"/g, '\\"')}" || description ~ "${q.replace(/"/g, '\\"')}"`, fields: 'id,title,due_date', requestKey: null }).catch(() => ({ items: [] })),
+        pb.collection(COLLECTIONS.NOTES).getList(1, 5, { filter: `note_text ~ "${escaped}"`, fields: 'id,note_text,company', requestKey: null }).catch(() => ({ items: [] })),
+        pb.collection(COLLECTIONS.RECORDINGS).getList(1, 5, { filter: `filename ~ "${escaped}"`, fields: 'id,filename,company', requestKey: null }).catch(() => ({ items: [] })),
+        pb.collection(COLLECTIONS.USERS).getList(1, 5, { filter: `name ~ "${escaped}" || email ~ "${escaped}"`, fields: 'id,name,email', requestKey: null }).catch(() => ({ items: [] })),
+        pb.collection(COLLECTIONS.FOLLOW_UPS).getList(1, 5, { filter: `title ~ "${escaped}" || description ~ "${escaped}"`, fields: 'id,title,due_date', requestKey: null }).catch(() => ({ items: [] })),
       ]);
 
       // Also search phone numbers

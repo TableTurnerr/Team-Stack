@@ -24,6 +24,7 @@ import {
   CheckSquare,
   CalendarCheck,
   Trash2,
+  Send,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import {
@@ -47,8 +48,9 @@ import { useFollowUps } from '@/contexts/follow-up-context';
 import { useAdminModeOptional } from '@/contexts/admin-mode-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
 import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
+import { EmailActivityFeed } from '@/components/email/email-activity-feed';
 
-type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline';
+type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline' | 'email_activity';
 
 export default function CompanyDetailPage() {
   const { id } = useParams() as { id: string };
@@ -403,6 +405,7 @@ export default function CompanyDetailPage() {
           { id: 'follow_ups', label: 'Follow-Ups', icon: CalendarClock, count: followUps.length > 0 ? followUps.length : undefined },
           { id: 'notes', label: 'Pre-Call Notes', icon: StickyNote },
           { id: 'timeline', label: 'Timeline', icon: MessageSquare },
+          { id: 'email_activity', label: 'Email Activity', icon: Send },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -964,6 +967,15 @@ export default function CompanyDetailPage() {
                   <p className="text-[var(--muted)] font-medium">No notes yet. Add one to prepare for your next call.</p>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'email_activity' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <h3 className="text-lg font-bold">Email Activity</h3>
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-4">
+              <EmailActivityFeed companyId={id} />
             </div>
           </div>
         )}

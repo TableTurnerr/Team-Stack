@@ -24,6 +24,7 @@ import {
   History,
   CalendarClock,
   TrendingUp,
+  Mail,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -45,6 +46,7 @@ const navItems = [
   { href: '/companies', label: 'Companies', icon: Building2 },
   { href: '/follow-ups', label: 'Follow-Ups', icon: CalendarClock },
   { href: '/financial', label: 'Financial', icon: TrendingUp },
+  { href: '/email', label: 'Email Marketing', icon: Mail },
   { href: '/actors', label: 'Actors', icon: Instagram },
   { href: '/notes', label: 'Notes', icon: StickyNote },
   { href: '/team', label: 'Team', icon: UserCog },

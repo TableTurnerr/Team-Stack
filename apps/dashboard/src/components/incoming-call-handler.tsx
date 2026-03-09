@@ -12,8 +12,11 @@ import { CurrentCallForm, type CallFormData } from '@/app/(dashboard)/session/cu
 
 export function IncomingCallHandler() {
     const { callStatus, callDirection, incomingCallerNumber } = useZoomPhone();
-    const { session, setSession } = useSession();
+    const { session, setSession, isStandaloneMode } = useSession();
     const { user } = useAuth();
+
+    // Only show incoming call notifications to the user who is in an active session (or standalone mode)
+    const isActiveForCalls = !!(session || isStandaloneMode);
 
     // ── UI state ──
     const [showRingingBanner, setShowRingingBanner] = useState(false);
@@ -73,6 +76,7 @@ export function IncomingCallHandler() {
     // ── Effect 1: Inbound ringing ──
     useEffect(() => {
         if (callStatus !== 'ringing' || callDirection !== 'inbound') return;
+        if (!isActiveForCalls) return;
 
         // Capture state for this call's lifecycle
         ringStartTimeRef.current = Date.now();
@@ -99,11 +103,12 @@ export function IncomingCallHandler() {
                 dialIncrementedRef.current = true;
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
         }
-    }, [callStatus, callDirection, incomingCallerNumber, session, setSession, lookupIncomingNumber]);
+    }, [callStatus, callDirection, incomingCallerNumber, session, setSession, lookupIncomingNumber, isActiveForCalls]);
 
     // ── Effect 2: Inbound call answered ──
     useEffect(() => {
         if (callStatus !== 'connected' || callDirection !== 'inbound') return;
+        if (!isActiveForCalls) return;
 
         connectTimeRef.current = Date.now();
         wasConnectedRef.current = true;
@@ -111,11 +116,12 @@ export function IncomingCallHandler() {
 
         // Inbound answered — do not count as a pickup (received calls are tracked separately via total_incoming)
         pickupIncrementedRef.current = false;
-    }, [callStatus, callDirection]);
+    }, [callStatus, callDirection, isActiveForCalls]);
 
     // ── Effect 3: Inbound call ended ──
     useEffect(() => {
         if (callStatus !== 'ended' || callDirection !== 'inbound') return;
+        if (!isActiveForCalls) return;
 
         callEndTimeRef.current = Date.now();
         setShowRingingBanner(false);
@@ -129,7 +135,7 @@ export function IncomingCallHandler() {
             if (missedTimerRef.current) clearTimeout(missedTimerRef.current);
             missedTimerRef.current = setTimeout(() => setShowMissedBanner(false), 30000);
         }
-    }, [callStatus, callDirection]);
+    }, [callStatus, callDirection, isActiveForCalls]);
 
     // ── Cleanup timer on unmount ──
     useEffect(() => {

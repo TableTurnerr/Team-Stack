@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences } from '@/lib/types';
+import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
@@ -1284,6 +1285,16 @@ export default function SessionPage() {
                             if (data.email && !existingCompany.email) {
                                 companyUpdates.email = data.email;
                             }
+                            // Compute company status from last call per phone number
+                            try {
+                                const allLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                                    filter: `company = "${data.companyId}"`,
+                                    sort: '-call_time',
+                                    fields: 'phone_number_record,call_time,call_outcome',
+                                });
+                                const statuses = computeCompanyStatuses(allLogs);
+                                companyUpdates.status = statuses;
+                            } catch { /* non-critical */ }
                             await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
                         } catch { /* non-critical */ }
                     })(),

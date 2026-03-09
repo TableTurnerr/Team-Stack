@@ -22,6 +22,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog } from '@/lib/types';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { getOutcomeColors } from '@/lib/call-outcomes';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
@@ -48,14 +49,11 @@ const CALL_LOG_COLUMNS: ColumnDefinition[] = [
 
 // ─── Shared Components ───────────────────────────────────────────────────────
 
-const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
-  'Interested': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
-  'Not Interested': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]' },
-  'Callback': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]' },
-  'No Answer': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' },
-  'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500' },
-  'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
-};
+// Outcome filter options (built-in outcomes for the filter UI)
+const OUTCOME_FILTER_OPTIONS = [
+  'Interested', 'Not Interested', 'Callback', 'No Answer', 'Fumbled',
+  'Bad Lead', 'Send Email', 'Hung Up (Rude Recep)', 'Hung Up (Other)', 'Missed Call',
+];
 
 function SortHeader({
   label,
@@ -341,20 +339,23 @@ export default function ColdCallsPage() {
           <div>
             <label className="text-sm text-[var(--muted)] block mb-1">Outcome</label>
             <div className="flex flex-wrap gap-1">
-              {Object.keys(OUTCOME_COLORS).map(outcome => (
-                <button
-                  key={outcome}
-                  onClick={() => toggleOutcomeFilter(outcome)}
-                  className={cn(
-                    "px-2 py-1 rounded-md text-xs transition-all",
-                    outcomeFilter.includes(outcome)
-                      ? `${OUTCOME_COLORS[outcome].bg} ${OUTCOME_COLORS[outcome].text}`
-                      : "bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-border)]"
-                  )}
-                >
-                  {outcome}
-                </button>
-              ))}
+              {OUTCOME_FILTER_OPTIONS.map(outcome => {
+                const colors = getOutcomeColors(outcome);
+                return (
+                  <button
+                    key={outcome}
+                    onClick={() => toggleOutcomeFilter(outcome)}
+                    className={cn(
+                      "px-2 py-1 rounded-md text-xs transition-all",
+                      outcomeFilter.includes(outcome)
+                        ? `${colors.bg} ${colors.text}`
+                        : "bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-border)]"
+                    )}
+                  >
+                    {outcome}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -495,15 +496,14 @@ function CallLogsTable({
                       {isColumnVisible('call_outcome') && (
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {(Array.isArray(log.call_outcome) ? log.call_outcome : log.call_outcome ? [log.call_outcome] : []).map(oc => (
-                              <span key={oc} className={cn(
-                                "px-2 py-1 rounded-md text-xs font-medium",
-                                OUTCOME_COLORS[oc]?.bg || 'bg-gray-500/20',
-                                OUTCOME_COLORS[oc]?.text || 'text-gray-400'
-                              )}>
-                                {oc}
-                              </span>
-                            ))}
+                            {(Array.isArray(log.call_outcome) ? log.call_outcome : log.call_outcome ? [log.call_outcome] : []).map(oc => {
+                              const colors = getOutcomeColors(oc);
+                              return (
+                                <span key={oc} className={cn("px-2 py-1 rounded-md text-xs font-medium", colors.bg, colors.text)}>
+                                  {oc}
+                                </span>
+                              );
+                            })}
                             {(log.callback_events?.length ?? 0) > 0 && (
                               <span
                                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/30"

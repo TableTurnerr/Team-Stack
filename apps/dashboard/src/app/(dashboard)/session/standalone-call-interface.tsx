@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Power, Loader2, Mic, MicOff, Phone, Square, ArrowLeft, PhoneCall } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type PhoneNumber } from '@/lib/types';
+import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
@@ -243,7 +244,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 // session field is omitted (will be null) - this marks it as a standalone call
             }, { expand: 'company,phone_number_record' });
 
-            // Update company metadata
+            // Update company metadata + compute status from call logs
             try {
                 const companyUpdates: Record<string, any> = {
                     last_contacted: new Date().toISOString(),
@@ -251,6 +252,15 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 if (data.ownerReached && data.ownerName) {
                     companyUpdates.owner_name = data.ownerName;
                 }
+                // Compute company status from last call per phone number
+                try {
+                    const allLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                        filter: `company = "${data.companyId}"`,
+                        sort: '-call_time',
+                        fields: 'phone_number_record,call_time,call_outcome',
+                    });
+                    companyUpdates.status = computeCompanyStatuses(allLogs);
+                } catch { /* non-critical */ }
                 await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
             } catch (err) {
                 // ignore

@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { useAuth } from '@/contexts/auth-context';
 import { Loader2 } from 'lucide-react';
+import { SidebarProvider, useSidebar } from '@/contexts/sidebar-context';
 
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
 import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
@@ -86,24 +87,26 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AuthGuard>
-      <ToastProvider>
-        <ZoomPhoneProvider>
-          <SessionProvider>
-            <TeamPresenceProvider>
-              <CallRecordingProvider>
-                <UnsavedChangesProvider>
-                  <FollowUpProvider>
-                    <AdminModeProvider>
-                      <DashboardLayoutContent>{children}</DashboardLayoutContent>
-                    </AdminModeProvider>
-                  </FollowUpProvider>
-                </UnsavedChangesProvider>
-              </CallRecordingProvider>
-            </TeamPresenceProvider>
-          </SessionProvider>
-        </ZoomPhoneProvider>
-      </ToastProvider>
-    </AuthGuard>
+    <SidebarProvider>
+      <AuthGuard>
+        <ToastProvider>
+          <ZoomPhoneProvider>
+            <SessionProvider>
+              <TeamPresenceProvider>
+                <CallRecordingProvider>
+                  <UnsavedChangesProvider>
+                    <FollowUpProvider>
+                      <AdminModeProvider>
+                        <DashboardLayoutContent>{children}</DashboardLayoutContent>
+                      </AdminModeProvider>
+                    </FollowUpProvider>
+                  </UnsavedChangesProvider>
+                </CallRecordingProvider>
+              </TeamPresenceProvider>
+            </SessionProvider>
+          </ZoomPhoneProvider>
+        </ToastProvider>
+      </AuthGuard>
+    </SidebarProvider>
   );
 }

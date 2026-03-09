@@ -4,32 +4,62 @@ on:
   workflow_run:
     workflows: ["CodeQL"]
     types: [completed]
-  workflow_dispatch:  # Allow manual trigger anytime
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run - show alerts without fixing'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      severity_filter:
+        description: 'Minimum severity to fix'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'high_and_critical'
+          - 'critical_only'
 
 jobs:
   fix-security-issues:
-    # Only run if CodeQL found something (or manually triggered)
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       security-events: read
       actions: read
+      issues: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config --global user.name "Claude Security Bot"
+          git config --global user.email "claude-security-bot@users.noreply.github.com"
 
       - name: Fetch open CodeQL alerts
         id: get-alerts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "========================================"
           echo "Fetching open CodeQL alerts..."
+          echo "Repository: ${{ github.repository }}"
+          echo "========================================"
 
+          # Fetch all open CodeQL alerts with full detail
           gh api \
             "repos/${{ github.repository }}/code-scanning/alerts?state=open&tool_name=CodeQL&per_page=100" \
             --jq '
@@ -40,74 +70,181 @@ jobs:
                 severity: .rule.severity,
                 security_severity: .rule.security_severity_level,
                 description: .rule.description,
+                help_uri: .rule.help_uri,
+                tags: .rule.tags,
                 file: .most_recent_instance.location.path,
                 start_line: .most_recent_instance.location.start_line,
                 end_line: .most_recent_instance.location.end_line,
+                start_column: .most_recent_instance.location.start_column,
+                end_column: .most_recent_instance.location.end_column,
                 message: .most_recent_instance.message.text,
-                html_url: .html_url
+                commit_sha: .most_recent_instance.commit_sha,
+                html_url: .html_url,
+                created_at: .created_at,
+                updated_at: .updated_at
               }]
-            ' > codeql_alerts.json
+            ' > all_alerts.json
+
+          TOTAL=$(cat all_alerts.json | jq 'length')
+          echo "Total open alerts: $TOTAL"
+
+          # Apply severity filter based on input (default 'all' for workflow_run trigger)
+          FILTER="${{ github.event.inputs.severity_filter }}"
+          if [ -z "$FILTER" ]; then
+            FILTER="all"
+          fi
+
+          echo "Severity filter: $FILTER"
+
+          if [ "$FILTER" = "critical_only" ]; then
+            cat all_alerts.json | jq '[.[] | select(.security_severity == "critical")]' > codeql_alerts.json
+          elif [ "$FILTER" = "high_and_critical" ]; then
+            cat all_alerts.json | jq '[.[] | select(.security_severity == "critical" or .security_severity == "high")]' > codeql_alerts.json
+          else
+            cp all_alerts.json codeql_alerts.json
+          fi
 
           ALERT_COUNT=$(cat codeql_alerts.json | jq 'length')
-          echo "Found $ALERT_COUNT open CodeQL alerts"
+          echo "Alerts to process after filter: $ALERT_COUNT"
           echo "alert_count=$ALERT_COUNT" >> $GITHUB_OUTPUT
 
-          # Pretty print for the prompt
-          cat codeql_alerts.json | jq '.' > alerts_formatted.json
+          # Print summary table for logs
+          echo ""
+          echo "=== ALERTS TO FIX ==="
+          cat codeql_alerts.json | jq -r '.[] | "[\(.security_severity // .severity // "unknown" | ascii_upcase)] Alert #\(.number) - \(.rule_name) in \(.file):\(.start_line)"'
+          echo "====================="
 
       - name: Skip if no alerts
         if: steps.get-alerts.outputs.alert_count == '0'
         run: |
-          echo "No open CodeQL alerts found. Nothing to fix."
-          exit 0
+          echo "✅ No open CodeQL alerts match the filter. Nothing to fix."
+
+      - name: Dry run - show alerts only
+        if: |
+          steps.get-alerts.outputs.alert_count != '0' &&
+          github.event.inputs.dry_run == 'true'
+        run: |
+          echo "🔍 DRY RUN MODE - Showing alerts without fixing"
+          echo ""
+          cat codeql_alerts.json | jq '.'
 
       - name: Run Claude to fix security issues
-        if: steps.get-alerts.outputs.alert_count != '0'
+        if: |
+          steps.get-alerts.outputs.alert_count != '0' &&
+          github.event.inputs.dry_run != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_tools: "Bash,Read,Write,Edit"
           prompt: |
-            You are a security engineer. Your ONLY task is to fix the open security vulnerabilities found by CodeQL.
+            You are a senior security engineer. Your ONLY task is to fix the open security vulnerabilities detected by CodeQL in this repository.
 
-            DO NOT:
-            - Do a general code review
-            - Suggest style improvements
-            - Refactor code unrelated to the security issues
-            - Add comments or documentation unrelated to the fixes
-            - Change logic that is not directly causing the vulnerability
+            STRICT RULES:
+            - DO NOT perform a general code review
+            - DO NOT suggest style improvements or refactoring
+            - DO NOT change any code that is not directly related to the listed vulnerabilities
+            - DO NOT add comments, documentation, or TODOs unrelated to the security fix
+            - DO NOT change variable names, formatting, or code structure beyond what is required
+            - ONLY touch the exact files and lines referenced in each alert
+            - Preserve the original code's logic, structure, and style as much as possible
 
-            DO:
-            - Fix each vulnerability listed below precisely and minimally
-            - Preserve the original code structure and style
-            - Use the safest, most idiomatic fix for each issue type
-            - After all fixes, commit directly to the current branch with a clear commit message
+            ALERTS TO FIX:
+            $(cat codeql_alerts.json)
 
-            Here are the open CodeQL security alerts to fix:
+            INSTRUCTIONS:
+            For each alert in the list above:
 
-            $(cat alerts_formatted.json)
+            1. Read the file at the path specified in the "file" field
+            2. Go to the line number in "start_line"
+            3. Read the "message" field to understand exactly what CodeQL flagged
+            4. Read the "rule_id" to understand the vulnerability class
+            5. Apply the minimal, correct, idiomatic fix
+            6. Move to the next alert
 
-            For each alert:
-            1. Open the file at the given path
-            2. Go to the line number specified
-            3. Understand the vulnerability (SQL injection, XSS, path traversal, hardcoded secret, etc.)
-            4. Apply the minimal correct fix
-            5. Move on to the next alert
+            COMMON FIX PATTERNS BY RULE:
+            - js/sql-injection, py/sql-injection → Use parameterized queries / prepared statements. Never concatenate user input into SQL strings.
+            - js/xss, js/reflected-xss → Escape output using safe APIs. Use textContent instead of innerHTML. Use DOMPurify if HTML is needed.
+            - js/path-injection, py/path-injection → Validate and normalize file paths. Use path.resolve() + check it starts with allowed base dir. Use allowlists.
+            - js/command-injection, py/command-injection → Avoid shell=True / exec with user input. Use spawn with argument arrays, never interpolate user input into shell strings.
+            - js/hardcoded-credentials, py/hardcoded-credentials → Move secrets to environment variables. Replace hardcoded value with process.env.VARIABLE_NAME or os.environ.get().
+            - js/prototype-pollution → Validate keys before assigning to objects. Block __proto__, constructor, prototype keys.
+            - js/insecure-randomness → Replace Math.random() with crypto.getRandomValues() or crypto.randomBytes() for security-sensitive uses.
+            - js/regex-injection → Escape user input before using in RegExp constructor.
+            - py/code-injection → Never use eval() or exec() on user input. Replace with safe alternatives.
+            - py/deserialization-of-user-controlled-data → Never unpickle untrusted data. Use JSON instead.
+            - java/sql-injection → Use PreparedStatement, never Statement with string concat.
+            - Any SSRF rule → Validate and allowlist URLs before making outbound requests.
 
-            Common fix patterns:
-            - SQL injection → use parameterized queries / prepared statements
-            - XSS → sanitize/escape output, use safe DOM APIs
-            - Path traversal → validate and normalize paths, use allowlists
-            - Hardcoded credentials → move to environment variables
-            - Insecure deserialization → validate input before deserializing
-            - Command injection → use safe APIs, avoid shell=True / exec with user input
+            AFTER ALL FIXES:
+            Commit all changes directly to the current branch using git. Use this exact commit message format:
 
-            When done fixing all issues, commit all changes directly to the branch with this commit message format:
-            "fix(security): resolve [N] CodeQL vulnerabilities
+            fix(security): resolve CodeQL vulnerabilities [automated]
 
-            Fixed issues:
-            - [brief description of each fix]
+            Fixed N security issue(s) detected by CodeQL:
 
-            Resolved CodeQL alerts: [list alert numbers]"
+            - Alert #[number]: [rule_name] in [file]:[line] — [one-line description of fix]
+            - Alert #[number]: [rule_name] in [file]:[line] — [one-line description of fix]
+            (repeat for each alert fixed)
 
-            Do not open a pull request. Commit directly.
+            Skipped alerts (if any, explain why — e.g. false positive, already fixed, needs manual review):
+            - Alert #[number]: [reason]
+
+            Co-authored-by: Claude Security Bot <claude-security-bot@users.noreply.github.com>
+
+            Use these bash commands to commit:
+              git add -A
+              git commit -m "[your commit message]"
+              git push origin HEAD
+
+      - name: Verify commit was made
+        if: steps.get-alerts.outputs.alert_count != '0' && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Recent commits ==="
+          git log --oneline -5
+
+          LAST_COMMIT=$(git log -1 --pretty=format:"%s")
+          echo "Last commit: $LAST_COMMIT"
+
+          if echo "$LAST_COMMIT" | grep -q "fix(security)"; then
+            echo "✅ Security fix commit confirmed"
+          else
+            echo "⚠️  Claude may not have committed. Check the logs above."
+          fi
+
+      - name: Create summary issue if fixes were made
+        if: steps.get-alerts.outputs.alert_count != '0' && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ALERT_COUNT="${{ steps.get-alerts.outputs.alert_count }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          COMMIT_SHA=$(git log -1 --pretty=format:"%H")
+          COMMIT_URL="https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
+
+          # Build alert list for issue body
+          ALERT_LIST=$(cat codeql_alerts.json | jq -r '.[] | "- Alert #\(.number): **\(.rule_name)** in `\(.file)`:\(.start_line) [\(.security_severity // .severity // "unknown")]"')
+
+          gh issue create \
+            --title "🔒 Claude auto-fixed $ALERT_COUNT CodeQL security alert(s)" \
+            --body "## Security Fixes Applied
+
+          Claude Security Bot automatically fixed **$ALERT_COUNT** CodeQL alert(s).
+
+          ### Alerts Fixed
+          $ALERT_LIST
+
+          ### Links
+          - 🔧 [Fix commit]($COMMIT_URL)
+          - 📋 [Workflow run]($RUN_URL)
+          - 🔍 [Security alerts](https://github.com/${{ github.repository }}/security/code-scanning)
+
+          ### Next Steps
+          1. Review the [fix commit]($COMMIT_URL) to verify the changes look correct
+          2. CodeQL will re-scan on next push and auto-close resolved alerts
+          3. Close this issue once you've reviewed the fixes
+
+          > *This issue was automatically created by the Claude Security Fixer workflow.*" \
+            --label "security" || echo "Note: Could not create issue (label may not exist). Check workflow run for details."

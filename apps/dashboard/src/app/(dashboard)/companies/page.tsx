@@ -23,6 +23,7 @@ import {
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
 import { formatDate, cn, sanitizeFilterValue } from '@/lib/utils';
+import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
@@ -52,25 +53,7 @@ const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
   'Instagram': { bg: 'bg-[var(--accent-red-subtle)]', text: 'text-[var(--accent-red)]' },
 };
 
-const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  'Warm': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
-  'Booked': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
-  'Replied': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
-  'Cold No Reply': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' },
-  'Client': { bg: 'bg-[var(--primary-subtle)]', text: 'text-[var(--primary)]' },
-  'Paid': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
-  'Excluded': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]' },
-};
-
-const STATUS_OPTIONS = [
-  'Cold No Reply',
-  'Replied',
-  'Warm',
-  'Booked',
-  'Paid',
-  'Client',
-  'Excluded'
-] as const;
+// Status is now a JSON array (computed from call outcomes) — no fixed options
 
 // Company row with inline edit
 function CompanyRow({
@@ -88,7 +71,6 @@ function CompanyRow({
     owner_name: company.owner_name || '',
     company_location: company.company_location || '',
     instagram_handle: company.instagram_handle || '',
-    status: company.status || 'Cold No Reply',
     email: company.email || '',
   });
 
@@ -103,7 +85,6 @@ function CompanyRow({
       owner_name: company.owner_name || '',
       company_location: company.company_location || '',
       instagram_handle: company.instagram_handle || '',
-      status: company.status || 'Cold No Reply',
       email: company.email || '',
     });
     setIsEditing(false);
@@ -146,15 +127,16 @@ function CompanyRow({
         )}
         {isColumnVisible('status') && (
           <td className="py-3 px-4">
-            <select
-              value={editData.status}
-              onChange={(e) => setEditData(p => ({ ...p, status: e.target.value as any }))}
-              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--card-bg)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] text-sm"
-            >
-              {STATUS_OPTIONS.map(status => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
+            <div className="flex flex-wrap gap-1">
+              {Array.isArray(company.status) && company.status.length > 0 ? company.status.map(s => {
+                const colors = getOutcomeColors(s);
+                return (
+                  <span key={s} className={cn("px-2 py-0.5 text-xs font-medium rounded-full", colors.bg, colors.text)}>
+                    {s}
+                  </span>
+                );
+              }) : <span className="text-[var(--muted)] text-xs">-</span>}
+            </div>
           </td>
         )}
         {isColumnVisible('email') && (
@@ -250,14 +232,17 @@ function CompanyRow({
       )}
       {isColumnVisible('status') && (
         <td className="py-3 px-4">
-          {company.status ? (
-            <span className={cn(
-              "inline-flex px-2 py-0.5 text-xs font-medium rounded-full",
-              STATUS_STYLES[company.status]?.bg || 'bg-gray-500/20',
-              STATUS_STYLES[company.status]?.text || 'text-gray-400'
-            )}>
-              {company.status}
-            </span>
+          {Array.isArray(company.status) && company.status.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {company.status.map(s => {
+                const colors = getOutcomeColors(s);
+                return (
+                  <span key={s} className={cn("inline-flex px-2 py-0.5 text-xs font-medium rounded-full", colors.bg, colors.text)}>
+                    {s}
+                  </span>
+                );
+              })}
+            </div>
           ) : <span className="text-[var(--muted)]">-</span>}
         </td>
       )}
@@ -347,7 +332,6 @@ function AddCompanyModal({
     google_maps_link: '',
     source: 'Manual',
     instagram_handle: '',
-    status: 'Cold No Reply',
     email: '',
     notes: '',
   });
@@ -387,7 +371,6 @@ function AddCompanyModal({
       google_maps_link: '',
       source: 'Manual',
       instagram_handle: '',
-      status: 'Cold No Reply',
       email: '',
       notes: '',
     });
@@ -432,15 +415,7 @@ function AddCompanyModal({
 
             <div>
               <label className="text-sm text-[var(--muted)] block mb-1">Status</label>
-              <select
-                value={formData.status}
-                onChange={(e) => setFormData(p => ({ ...p, status: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
-              >
-                {STATUS_OPTIONS.map(status => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
+              <p className="text-sm text-[var(--muted)] px-3 py-2">Auto-computed from calls</p>
             </div>
 
             <div>

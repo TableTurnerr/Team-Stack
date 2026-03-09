@@ -38,6 +38,7 @@ import {
   type ColdCall,
 } from '@/lib/types';
 import { cn, formatDate } from '@/lib/utils';
+import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
 import { CallLogForm } from '@/components/call-log-form';
@@ -222,6 +223,18 @@ export default function CompanyDetailPage() {
         summary: `Call: ${Array.isArray(data.call_outcome) ? data.call_outcome.join(', ') : data.call_outcome} - ${data.post_call_notes?.substring(0, 50)}...`,
         call_log: newCall.id
       });
+
+      // Recompute company status from all call logs
+      try {
+        const allLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+          filter: `company = "${company.id}"`,
+          sort: '-call_time',
+          fields: 'phone_number_record,call_time,call_outcome',
+        });
+        const statuses = computeCompanyStatuses(allLogs);
+        await pb.collection(COLLECTIONS.COMPANIES).update(company.id, { status: statuses });
+        setCompany(prev => prev ? { ...prev, status: statuses } : prev);
+      } catch { /* non-critical */ }
     } catch (error) {
       console.error('Failed to log call:', error);
     }
@@ -301,14 +314,16 @@ export default function CompanyDetailPage() {
           <div className="space-y-1">
             <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
               {company.company_name}
-              {company.status && (
-                <span className={cn(
-                  "px-2 py-0.5 text-xs font-bold rounded-full border",
-                  company.status === 'Warm' ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                    company.status === 'Replied' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                      "bg-[var(--card-hover)] text-[var(--muted)] border-[var(--card-border)]"
-                )}>
-                  {company.status}
+              {Array.isArray(company.status) && company.status.length > 0 && (
+                <span className="flex gap-1 flex-wrap">
+                  {company.status.map(s => {
+                    const colors = getOutcomeColors(s);
+                    return (
+                      <span key={s} className={cn("px-2 py-0.5 text-xs font-bold rounded-full border", colors.bg, colors.text, colors.border)}>
+                        {s}
+                      </span>
+                    );
+                  })}
                 </span>
               )}
             </h1>
@@ -454,23 +469,22 @@ export default function CompanyDetailPage() {
                     placeholder="Enter owner name..."
                     isEditing={isEditingAll}
                   />
-                  <InlineEditField
-                    id={`company_${id}_status`}
-                    label="CRM Status"
-                    value={company.status || 'Cold No Reply'}
-                    type="select"
-                    options={[
-                      { value: 'Cold No Reply', label: 'Cold No Reply' },
-                      { value: 'Replied', label: 'Replied' },
-                      { value: 'Warm', label: 'Warm' },
-                      { value: 'Booked', label: 'Booked' },
-                      { value: 'Paid', label: 'Paid' },
-                      { value: 'Client', label: 'Client' },
-                      { value: 'Excluded', label: 'Excluded' },
-                    ]}
-                    onSave={(v) => handleUpdateCompany('status', v)}
-                    isEditing={isEditingAll}
-                  />
+                  <div>
+                    <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-1 block">CRM Status</label>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.isArray(company.status) && company.status.length > 0 ? company.status.map(s => {
+                        const colors = getOutcomeColors(s);
+                        return (
+                          <span key={s} className={cn("px-2 py-0.5 text-xs font-medium rounded-full border", colors.bg, colors.text, colors.border)}>
+                            {s}
+                          </span>
+                        );
+                      }) : (
+                        <span className="text-sm text-[var(--muted)]">No calls yet</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-[var(--muted)] mt-1">Auto-computed from last call per phone number</p>
+                  </div>
                   <InlineEditField
                     id={`company_${id}_ig`}
                     label="Instagram Handle"
@@ -706,16 +720,14 @@ export default function CompanyDetailPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-1 flex-wrap">
-                            {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(oc => (
-                              <span key={oc} className={cn(
-                                "px-2 py-0.5 rounded-full text-[10px] font-bold",
-                                oc === 'Interested' ? "bg-green-500/10 text-green-400" :
-                                  oc === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                                    "bg-[var(--card-hover)] text-[var(--muted)]"
-                              )}>
-                                {oc}
-                              </span>
-                            ))}
+                            {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(oc => {
+                              const colors = getOutcomeColors(oc);
+                              return (
+                                <span key={oc} className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold", colors.bg, colors.text)}>
+                                  {oc}
+                                </span>
+                              );
+                            })}
                           </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-[var(--muted)] max-w-xs truncate">

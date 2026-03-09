@@ -405,8 +405,8 @@ export default function FollowUpsPage() {
                             <p className="text-sm font-semibold group-hover:text-[var(--primary)] transition-colors line-clamp-1">
                               {company.company_name}
                             </p>
-                            {company.status && (
-                              <p className="text-[10px] text-[var(--muted)]">{company.status}</p>
+                            {Array.isArray(company.status) && company.status.length > 0 && (
+                              <p className="text-[10px] text-[var(--muted)]">{company.status.join(', ')}</p>
                             )}
                           </div>
                           <ChevronRight size={12} className="text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />

@@ -23,7 +23,7 @@ export interface Company extends RecordModel {
   // NEW fields merged from leads
   instagram_handle?: string;
   email?: string;
-  status?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
+  status?: string[];
   first_contacted?: string;
   last_contacted?: string;
   notes?: string;
@@ -196,7 +196,7 @@ export interface CallLog extends RecordModel {
   owner_name_found?: string;
   receptionist_name?: string;
   post_call_notes?: string;
-  status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
+  status_changed_to?: string;
   has_recording?: boolean;
   session?: string; // Optional - null for standalone calls, populated for session-based calls
   cold_call?: string; // Optional link to AI transcript (cold_calls record)
@@ -286,6 +286,14 @@ export interface Interaction extends RecordModel {
     company?: Company;
     user?: User;
     call_log?: CallLog;
+  };
+}
+
+export interface CustomCallOutcome extends RecordModel {
+  name: string;
+  created_by?: string;
+  expand?: {
+    created_by?: User;
   };
 }
 
@@ -494,6 +502,8 @@ export const COLLECTIONS = {
   RECORDINGS: 'recordings',
   USER_PREFERENCES: 'user_preferences',
   COLD_CALLING_SESSIONS: 'cold_calling_sessions',
+
+  CUSTOM_CALL_OUTCOMES: 'custom_call_outcomes',
 
   // Financial collections
   BANK_ACCOUNTS: 'bank_accounts',

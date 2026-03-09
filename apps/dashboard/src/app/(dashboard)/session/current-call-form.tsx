@@ -4,48 +4,23 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Play, Pause, Download, Loader2, Minimize2, Maximize2 } from 'lucide-react';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording } from '@/lib/types';
+import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome } from '@/lib/types';
 import { cn, timeAgo, formatDateTime } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { Tooltip } from '@/components/ui/tooltip';
+import {
+    FORM_OUTCOMES,
+    HUNG_UP_PRIMARY,
+    HUNG_UP_OTHER,
+    CALLBACK_REASONS,
+    MAX_OUTCOMES,
+    NO_ANSWER,
+    getOutcomeColors,
+    type CallbackReason,
+} from '@/lib/call-outcomes';
 
-const OUTCOMES = [
-    'Interested',
-    'Not Interested',
-    'Callback',
-    'No Answer',
-    'Fumbled',
-    'Bad Lead',
-    'Send Email',
-    'Other',
-] as const;
-
-// The "Hung Up" group is rendered as a split button
-const HUNG_UP_PRIMARY = 'Hung Up (Rude Recep)' as const;
-const HUNG_UP_OTHER = 'Hung Up (Other)' as const;
-
-const CALLBACK_REASONS = [
-    'Callback (Recep hung up)',
-    'Callback (Owner hung up)',
-    'Callback (Audio Issue)',
-    'Callback (Other)',
-] as const;
-
-export type CallbackReason = typeof CALLBACK_REASONS[number];
-
-const OUTCOME_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-    'Interested': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]', border: 'border-[var(--success)]' },
-    'Not Interested': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]', border: 'border-[var(--error)]' },
-    'Callback': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]', border: 'border-[var(--warning)]' },
-    'No Answer': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]', border: 'border-[var(--muted)]' },
-    'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500', border: 'border-orange-500' },
-    'Bad Lead': { bg: 'bg-red-900/20', text: 'text-red-400', border: 'border-red-400' },
-    'Send Email': { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-400' },
-    'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]', border: 'border-[var(--info)]' },
-    'Hung Up (Rude Recep)': { bg: 'bg-red-500/10', text: 'text-red-500', border: 'border-red-500' },
-    'Hung Up (Other)': { bg: 'bg-red-400/10', text: 'text-red-400', border: 'border-red-400' },
-};
+export type { CallbackReason };
 
 export interface CallFormData {
     companyId: string;
@@ -135,9 +110,19 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [receptionistName, setReceptionistName] = useState('');
     const [ownerName, setOwnerName] = useState('');
     const [callOutcome, setCallOutcome] = useState<string[]>([]);
+    const [customOutcomes, setCustomOutcomes] = useState<string[]>([]);
+    const [showOtherInput, setShowOtherInput] = useState(false);
+    const [otherInputValue, setOtherInputValue] = useState('');
+    const otherInputRef = useRef<HTMLInputElement>(null);
 
-    const MAX_OUTCOMES = 3;
-    const NO_ANSWER = 'No Answer';
+    // Load custom outcomes from DB once
+    useEffect(() => {
+        pb.collection(COLLECTIONS.CUSTOM_CALL_OUTCOMES).getFullList<CustomCallOutcome>({
+            sort: 'name',
+        }).then(records => {
+            setCustomOutcomes(records.map(r => r.name));
+        }).catch(() => {});
+    }, []);
 
     /** Toggle an outcome tag respecting No Answer exclusivity and max-3 rules */
     const toggleOutcome = (outcome: string) => {
@@ -287,6 +272,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setReceptionistName('');
         setOwnerName('');
         setCallOutcome([]);
+        setShowOtherInput(false);
+        setOtherInputValue('');
         setPostCallNotes('');
         setOwnerReached(false);
         setPitchCompleted(false);
@@ -851,7 +838,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                 {/* Group-level summary tags (most recent call) */}
                                                 <div className="flex gap-1 flex-wrap overflow-hidden max-w-[150px]">
                                                     {(Array.isArray(calls[0]?.call_outcome) ? calls[0].call_outcome : calls[0]?.call_outcome ? [calls[0].call_outcome] : []).map(outcome => {
-                                                        const colors = OUTCOME_COLORS[outcome] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]', border: 'border-[var(--card-border)]' };
+                                                        const colors = getOutcomeColors(outcome);
                                                         return (
                                                             <span
                                                                 key={outcome}
@@ -903,7 +890,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                                     {/* Outcome tags for this specific call */}
                                                                     <div className="flex gap-1 flex-wrap">
                                                                         {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(outcome => {
-                                                                            const colors = OUTCOME_COLORS[outcome] || { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]', border: 'border-[var(--card-border)]' };
+                                                                            const colors = getOutcomeColors(outcome);
                                                                             return (
                                                                                 <span
                                                                                     key={outcome}
@@ -1133,8 +1120,104 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     )}
                 </label>
                 <div className="flex flex-wrap gap-1.5">
-                    {OUTCOMES.map(outcome => {
-                        const colors = OUTCOME_COLORS[outcome];
+                    {FORM_OUTCOMES.map(outcome => {
+                        if (outcome === 'Other +') {
+                            // "Other +" opens an inline input to type a custom outcome
+                            const otherPlusColors = getOutcomeColors('Other +');
+                            const isDisabled = hasNoAnswer || isAtMaxOutcomes;
+                            return (
+                                <div key="other-plus" className="relative">
+                                    <button
+                                        onClick={() => {
+                                            setShowOtherInput(v => !v);
+                                            setTimeout(() => otherInputRef.current?.focus(), 50);
+                                        }}
+                                        disabled={isDisabled}
+                                        className={cn(
+                                            'px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all',
+                                            showOtherInput
+                                                ? `${otherPlusColors.bg} ${otherPlusColors.text} ${otherPlusColors.border}`
+                                                : isDisabled
+                                                    ? 'bg-[var(--sidebar-bg)] text-[var(--muted)]/40 border-[var(--card-border)] opacity-40 cursor-not-allowed'
+                                                    : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+                                        )}
+                                    >
+                                        Other +
+                                    </button>
+                                    {showOtherInput && (
+                                        <div className="absolute left-0 top-full mt-1 z-30 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg shadow-lg p-2 min-w-[220px]">
+                                            <div className="flex gap-1.5 mb-1.5">
+                                                <input
+                                                    ref={otherInputRef}
+                                                    type="text"
+                                                    value={otherInputValue}
+                                                    onChange={e => setOtherInputValue(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' && otherInputValue.trim()) {
+                                                            const name = otherInputValue.trim();
+                                                            // Add custom outcome to DB (ignore duplicates)
+                                                            pb.collection(COLLECTIONS.CUSTOM_CALL_OUTCOMES).create({ name }).catch(() => {});
+                                                            if (!customOutcomes.includes(name)) {
+                                                                setCustomOutcomes(prev => [...prev, name]);
+                                                            }
+                                                            toggleOutcome(name);
+                                                            setOtherInputValue('');
+                                                            setShowOtherInput(false);
+                                                        }
+                                                        if (e.key === 'Escape') {
+                                                            setShowOtherInput(false);
+                                                            setOtherInputValue('');
+                                                        }
+                                                    }}
+                                                    placeholder="Type new outcome..."
+                                                    className="flex-1 px-2 py-1.5 rounded border border-[var(--card-border)] bg-[var(--sidebar-bg)] text-xs focus:outline-none focus:border-[var(--primary)]"
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        const name = otherInputValue.trim();
+                                                        if (!name) return;
+                                                        pb.collection(COLLECTIONS.CUSTOM_CALL_OUTCOMES).create({ name }).catch(() => {});
+                                                        if (!customOutcomes.includes(name)) {
+                                                            setCustomOutcomes(prev => [...prev, name]);
+                                                        }
+                                                        toggleOutcome(name);
+                                                        setOtherInputValue('');
+                                                        setShowOtherInput(false);
+                                                    }}
+                                                    className="px-2 py-1.5 rounded bg-[var(--primary)] text-white text-xs font-medium hover:bg-[var(--primary-hover)] transition-colors"
+                                                >
+                                                    Add
+                                                </button>
+                                            </div>
+                                            {customOutcomes.length > 0 && (
+                                                <div className="flex flex-wrap gap-1 pt-1 border-t border-[var(--card-border)]">
+                                                    {customOutcomes.map(co => {
+                                                        const coColors = getOutcomeColors(co);
+                                                        const coSelected = callOutcome.includes(co);
+                                                        return (
+                                                            <button
+                                                                key={co}
+                                                                onClick={() => { toggleOutcome(co); setShowOtherInput(false); }}
+                                                                disabled={!coSelected && isAtMaxOutcomes}
+                                                                className={cn(
+                                                                    'px-2 py-1 rounded text-[11px] font-medium border transition-all',
+                                                                    coSelected
+                                                                        ? `${coColors.bg} ${coColors.text} ${coColors.border}`
+                                                                        : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+                                                                )}
+                                                            >
+                                                                {co}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+                        const colors = getOutcomeColors(outcome);
                         const isSelected = callOutcome.includes(outcome);
                         const isDisabled = !isSelected && (hasNoAnswer || (outcome !== NO_ANSWER && isAtMaxOutcomes));
                         return (
@@ -1156,6 +1239,23 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         );
                     })}
 
+                    {/* Any selected custom outcomes shown as active pills */}
+                    {callOutcome.filter(o => !FORM_OUTCOMES.includes(o as any) && o !== HUNG_UP_PRIMARY && o !== HUNG_UP_OTHER).map(co => {
+                        const coColors = getOutcomeColors(co);
+                        return (
+                            <button
+                                key={co}
+                                onClick={() => toggleOutcome(co)}
+                                className={cn(
+                                    'px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all',
+                                    `${coColors.bg} ${coColors.text} ${coColors.border}`
+                                )}
+                            >
+                                {co} <X size={10} className="inline ml-0.5" />
+                            </button>
+                        );
+                    })}
+
                     {/* Hung Up split button */}
                     <div className="relative flex" ref={hungUpDropdownRef}>
                         {(() => {
@@ -1163,6 +1263,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                 : callOutcome.includes(HUNG_UP_OTHER) ? HUNG_UP_OTHER
                                     : null;
                             const hungUpDisabled = !activeHungUp && (hasNoAnswer || isAtMaxOutcomes);
+                            const hungColors = activeHungUp ? getOutcomeColors(activeHungUp) : null;
                             return (
                                 <>
                                     <button
@@ -1170,8 +1271,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                         disabled={hungUpDisabled}
                                         className={cn(
                                             'px-2.5 py-1.5 rounded-l-lg text-xs font-medium border-y border-l transition-all',
-                                            activeHungUp
-                                                ? `${OUTCOME_COLORS[activeHungUp].bg} ${OUTCOME_COLORS[activeHungUp].text} ${OUTCOME_COLORS[activeHungUp].border}`
+                                            hungColors
+                                                ? `${hungColors.bg} ${hungColors.text} ${hungColors.border}`
                                                 : hungUpDisabled
                                                     ? 'bg-[var(--sidebar-bg)] text-[var(--muted)]/40 border-[var(--card-border)] opacity-40 cursor-not-allowed'
                                                     : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'
@@ -1184,8 +1285,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                         disabled={hungUpDisabled}
                                         className={cn(
                                             'px-1.5 py-1.5 rounded-r-lg text-xs font-medium border transition-all border-l-0',
-                                            activeHungUp
-                                                ? `${OUTCOME_COLORS[activeHungUp].bg} ${OUTCOME_COLORS[activeHungUp].text} ${OUTCOME_COLORS[activeHungUp].border}`
+                                            hungColors
+                                                ? `${hungColors.bg} ${hungColors.text} ${hungColors.border}`
                                                 : hungUpDisabled
                                                     ? 'bg-[var(--sidebar-bg)] text-[var(--muted)]/40 border-[var(--card-border)] opacity-40 cursor-not-allowed'
                                                     : 'bg-[var(--sidebar-bg)] text-[var(--muted)] border-[var(--card-border)] hover:bg-[var(--card-hover)]'

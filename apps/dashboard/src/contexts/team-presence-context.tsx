@@ -198,3 +198,8 @@ export function useTeamPresence() {
     }
     return context;
 }
+
+/** Safe version that returns null when used outside TeamPresenceProvider */
+export function useTeamPresenceOptional() {
+    return useContext(TeamPresenceContext) ?? null;
+}

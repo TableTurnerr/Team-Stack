@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { Mic, ExternalLink, Trash2, CheckSquare, Loader2, PhoneIncoming, PhoneOutgoing, X, Download, Minimize2, Maximize2, Pause, Play } from 'lucide-react';
+import { Mic, ExternalLink, Trash2, Loader2, PhoneIncoming, PhoneOutgoing, X, Download, Minimize2, Maximize2, Pause, Play } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type Recording } from '@/lib/types';
 import Link from 'next/link';
-import { useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
+import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
 interface CallLogsNestedTableProps {
@@ -26,7 +27,7 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
 export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedTableProps) {
     const [callLogs, setCallLogs] = useState<CallLog[]>([]);
     const [loading, setLoading] = useState(true);
-    const [stagingIds, setStagingIds] = useState<Set<string>>(new Set());
+    const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
     const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
     const [playerLoading, setPlayerLoading] = useState<string | null>(null);
     const [playerMinimized, setPlayerMinimized] = useState(false);
@@ -34,8 +35,9 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     const [isHoveringMic, setIsHoveringMic] = useState(false);
     const audioRef = useRef<HTMLAudioElement>(null);
 
-    const adminMode = useAdminModeOptional();
-    const isAdminMode = adminMode?.isAdminMode ?? false;
+    const recycleBin = useRecycleBinOptional();
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
 
     const handlePlayRecording = async (log: CallLog) => {
         if (playerLoading === log.id) return;
@@ -91,26 +93,21 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
         fetchCallLogs();
     }, [sessionId, onLogsLoaded]);
 
-    const isStagedForDeletion = (logId: string) =>
-        isAdminMode && adminMode?.pendingDeletions.some(
-            d => d.targetId === logId && d.type === 'call_log'
-        );
-
-    const handleStageCallLog = async (log: CallLog) => {
-        if (!adminMode || stagingIds.has(log.id) || isStagedForDeletion(log.id)) return;
-        setStagingIds(prev => new Set([...prev, log.id]));
+    const handleDeleteCallLog = async (log: CallLog) => {
+        if (!recycleBin || deletingIds.has(log.id)) return;
+        setDeletingIds(prev => new Set([...prev, log.id]));
         try {
-            adminMode.addStagedDeletion({
-                type: 'call_log',
-                targetId: log.id,
-                targetLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} at ${new Date(log.call_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
-                associatedCallLogIds: [log.id],
-                deleteRecordings: false,
-                hasRecordings: log.has_recording || false,
+            await recycleBin.moveToTrash({
+                itemType: 'call_log',
+                originalId: log.id,
+                itemLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} at ${new Date(log.call_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+                itemData: log as unknown as Record<string, unknown>,
             });
             setCallLogs(prev => prev.filter(l => l.id !== log.id));
+        } catch (err) {
+            console.error('Failed to delete call log:', err);
         } finally {
-            setStagingIds(prev => {
+            setDeletingIds(prev => {
                 const next = new Set(prev);
                 next.delete(log.id);
                 return next;
@@ -137,11 +134,11 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     return (
         <>
         {playerRecording && (
-            <div 
+            <div
                 className={cn(
                     "fixed z-50 transition-all duration-300",
-                    playerMinimized 
-                        ? "bottom-4 right-4 w-auto" 
+                    playerMinimized
+                        ? "bottom-4 right-4 w-auto"
                         : "inset-0 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm"
                 )}
                 onClick={!playerMinimized ? closePlayer : undefined}
@@ -149,8 +146,8 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                 <div
                     className={cn(
                         "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl transition-all duration-300 overflow-hidden",
-                        playerMinimized 
-                            ? "w-64 p-3 flex flex-col gap-2" 
+                        playerMinimized
+                            ? "w-64 p-3 flex flex-col gap-2"
                             : "w-full max-w-md p-4 space-y-3"
                     )}
                     onClick={e => e.stopPropagation()}
@@ -158,7 +155,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                     <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                             {playerMinimized ? (
-                                <button 
+                                <button
                                     onClick={togglePlayback}
                                     onMouseEnter={() => setIsHoveringMic(true)}
                                     onMouseLeave={() => setIsHoveringMic(false)}
@@ -269,15 +266,14 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                         <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Outcome</th>
                         <th className="text-left px-4 py-2 font-medium text-[var(--muted)]">Notes</th>
                         <th className="text-center px-4 py-2 font-medium text-[var(--muted)]">Recording</th>
-                        {isAdminMode && (
+                        {isAdmin && (
                             <th className="text-center px-4 py-2 font-medium text-[var(--muted)]">Del</th>
                         )}
                     </tr>
                 </thead>
                 <tbody>
                     {callLogs.map((log) => {
-                        const isStaged = isStagedForDeletion(log.id);
-                        const isStaging = stagingIds.has(log.id);
+                        const isDeletingLog = deletingIds.has(log.id);
                         return (
                             <tr key={log.id} className="border-b border-[var(--card-border)] hover:bg-[var(--card-bg)] transition-colors">
                                 <td className="px-4 py-3 text-xs text-[var(--muted)] whitespace-nowrap">
@@ -354,30 +350,19 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                                         <span className="text-[var(--muted)] text-xs">-</span>
                                     )}
                                 </td>
-                                {isAdminMode && (
+                                {isAdmin && (
                                     <td className="px-4 py-3 text-center">
-                                        {isStaged ? (
-                                            <div className="p-1.5 rounded-lg text-green-400 inline-flex" title="Staged for deletion">
-                                                <CheckSquare size={14} />
-                                            </div>
-                                        ) : (
-                                            <button
-                                                onClick={() => handleStageCallLog(log)}
-                                                disabled={isStaging}
-                                                className={cn(
-                                                    "p-1.5 rounded-lg transition-all duration-150 inline-flex",
-                                                    isStaging
-                                                        ? "text-red-400 opacity-60"
-                                                        : "text-red-400/60 hover:bg-red-500/10 hover:text-red-400 hover:scale-110"
-                                                )}
-                                                title="Stage for deletion"
-                                            >
-                                                {isStaging
-                                                    ? <Loader2 size={14} className="animate-spin" />
-                                                    : <Trash2 size={14} />
-                                                }
-                                            </button>
-                                        )}
+                                        <button
+                                            onClick={() => handleDeleteCallLog(log)}
+                                            disabled={isDeletingLog}
+                                            className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 hover:scale-110 transition-all duration-150 inline-flex disabled:opacity-50"
+                                            title="Delete call log"
+                                        >
+                                            {isDeletingLog
+                                                ? <Loader2 size={14} className="animate-spin" />
+                                                : <Trash2 size={14} />
+                                            }
+                                        </button>
                                     </td>
                                 )}
                             </tr>

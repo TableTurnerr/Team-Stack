@@ -20,10 +20,9 @@ import {
   CheckCircle2,
   Zap,
   CalendarClock,
-  ShieldAlert,
-  CheckSquare,
   CalendarCheck,
   Trash2,
+  Send,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import {
@@ -37,6 +36,7 @@ import {
   type ColdCall,
 } from '@/lib/types';
 import { cn, formatDate } from '@/lib/utils';
+import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
 import { CallLogForm } from '@/components/call-log-form';
@@ -44,11 +44,13 @@ import { ZoomCallButton } from '@/components/zoom-call-button';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { useFollowUps } from '@/contexts/follow-up-context';
-import { useAdminModeOptional } from '@/contexts/admin-mode-context';
+import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
+import { useAuth } from '@/contexts/auth-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
 import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
+import { EmailActivityFeed } from '@/components/email/email-activity-feed';
 
-type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline';
+type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline' | 'email_activity';
 
 export default function CompanyDetailPage() {
   const { id } = useParams() as { id: string };
@@ -56,8 +58,9 @@ export default function CompanyDetailPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
   const { completeFollowUp } = useFollowUps();
-  const adminMode = useAdminModeOptional();
-  const isAdminMode = adminMode?.isAdminMode ?? false;
+  const recycleBin = useRecycleBinOptional();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
@@ -79,7 +82,6 @@ export default function CompanyDetailPage() {
   // Phone number modals
   const [editingPhone, setEditingPhone] = useState<PhoneNumber | null>(null);
   const [softDeletingPhone, setSoftDeletingPhone] = useState<PhoneNumber | null>(null);
-  const [isCompanyDeleteHovered, setIsCompanyDeleteHovered] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -220,6 +222,18 @@ export default function CompanyDetailPage() {
         summary: `Call: ${Array.isArray(data.call_outcome) ? data.call_outcome.join(', ') : data.call_outcome} - ${data.post_call_notes?.substring(0, 50)}...`,
         call_log: newCall.id
       });
+
+      // Recompute company status from all call logs
+      try {
+        const allLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+          filter: `company = "${company.id}"`,
+          sort: '-call_time',
+          fields: 'phone_number_record,call_time,call_outcome',
+        });
+        const statuses = computeCompanyStatuses(allLogs);
+        await pb.collection(COLLECTIONS.COMPANIES).update(company.id, { status: statuses });
+        setCompany(prev => prev ? { ...prev, status: statuses } : prev);
+      } catch { /* non-critical */ }
     } catch (error) {
       console.error('Failed to log call:', error);
     }
@@ -235,17 +249,62 @@ export default function CompanyDetailPage() {
     }
   };
 
-  const handleStageCallLog = (log: CallLog) => {
-    if (!adminMode) return;
-    adminMode.addStagedDeletion({
-      type: 'call_log',
-      targetId: log.id,
-      targetLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} – ${company?.company_name ?? ''}`,
-      associatedCallLogIds: [log.id],
-      deleteRecordings: false,
-      hasRecordings: log.has_recording || false,
-    });
-    setCallLogs(prev => prev.filter(l => l.id !== log.id));
+  const [isDeletingCallLog, setIsDeletingCallLog] = useState<string | null>(null);
+  const [isDeletingCompany, setIsDeletingCompany] = useState(false);
+
+  const handleDeleteCallLog = async (log: CallLog) => {
+    if (!recycleBin) return;
+    setIsDeletingCallLog(log.id);
+    try {
+      await recycleBin.moveToTrash({
+        itemType: 'call_log',
+        originalId: log.id,
+        itemLabel: `Call log – ${Array.isArray(log.call_outcome) ? log.call_outcome.join(', ') : log.call_outcome || 'Unknown'} – ${company?.company_name ?? ''}`,
+        itemData: log as unknown as Record<string, unknown>,
+      });
+      setCallLogs(prev => prev.filter(l => l.id !== log.id));
+    } catch (err) {
+      console.error('Failed to delete call log:', err);
+    } finally {
+      setIsDeletingCallLog(null);
+    }
+  };
+
+  const handleDeleteCompany = async () => {
+    if (!recycleBin || !company) return;
+    setIsDeletingCompany(true);
+    try {
+      // Collect related data for restoration
+      const relatedData: Record<string, unknown[]> = {};
+      if (phoneNumbers.length > 0) {
+        relatedData[COLLECTIONS.PHONE_NUMBERS] = phoneNumbers as unknown as Record<string, unknown>[];
+      }
+      if (callLogs.length > 0) {
+        relatedData[COLLECTIONS.CALL_LOGS] = callLogs as unknown as Record<string, unknown>[];
+      }
+
+      // Delete phone numbers first (to avoid FK issues)
+      for (const phone of phoneNumbers.filter(p => !p.disassociated)) {
+        try { await pb.collection(COLLECTIONS.PHONE_NUMBERS).delete(phone.id); } catch { /* continue */ }
+      }
+      // Delete call logs
+      for (const log of callLogs) {
+        try { await pb.collection(COLLECTIONS.CALL_LOGS).delete(log.id); } catch { /* continue */ }
+      }
+
+      await recycleBin.moveToTrash({
+        itemType: 'company',
+        originalId: company.id,
+        itemLabel: company.company_name,
+        itemData: company as unknown as Record<string, unknown>,
+        relatedData,
+      });
+      router.push('/companies');
+    } catch (err) {
+      console.error('Failed to delete company:', err);
+    } finally {
+      setIsDeletingCompany(false);
+    }
   };
 
   // Phone number handlers
@@ -299,14 +358,16 @@ export default function CompanyDetailPage() {
           <div className="space-y-1">
             <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
               {company.company_name}
-              {company.status && (
-                <span className={cn(
-                  "px-2 py-0.5 text-xs font-bold rounded-full border",
-                  company.status === 'Warm' ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                    company.status === 'Replied' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                      "bg-[var(--card-hover)] text-[var(--muted)] border-[var(--card-border)]"
-                )}>
-                  {company.status}
+              {Array.isArray(company.status) && company.status.length > 0 && (
+                <span className="flex gap-1 flex-wrap">
+                  {company.status.map(s => {
+                    const colors = getOutcomeColors(s);
+                    return (
+                      <span key={s} className={cn("px-2 py-0.5 text-xs font-bold rounded-full border", colors.bg, colors.text, colors.border)}>
+                        {s}
+                      </span>
+                    );
+                  })}
                 </span>
               )}
             </h1>
@@ -338,38 +399,17 @@ export default function CompanyDetailPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Admin mode: delete company button */}
-            {isAdminMode && (() => {
-              const isCompanyStagedForDeletion = adminMode?.pendingDeletions.some(
-                d => d.targetId === company.id && d.type === 'company'
-              );
-              return isCompanyStagedForDeletion ? (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/10 text-red-400/60 text-sm font-bold">
-                  <CheckSquare size={14} />
-                  Staged for Deletion
-                </div>
-              ) : (
-                <button
-                  onClick={() => {
-                    adminMode?.addStagedDeletion({
-                      type: 'company',
-                      targetId: company.id,
-                      targetLabel: company.company_name,
-                      associatedCallLogIds: callLogs.map(l => l.id),
-                      deleteRecordings: false,
-                      hasRecordings: callLogs.some(l => l.has_recording),
-                      associatedPhoneNumberIds: phoneNumbers.filter(p => !p.disassociated).map(p => p.id),
-                    });
-                  }}
-                  onMouseEnter={() => setIsCompanyDeleteHovered(true)}
-                  onMouseLeave={() => setIsCompanyDeleteHovered(false)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-500/40 bg-red-500/5 text-red-400 text-sm font-bold hover:bg-red-500/10 transition-all"
-                >
-                  {isCompanyDeleteHovered ? <CheckSquare size={14} /> : <ShieldAlert size={14} />}
-                  Delete Company
-                </button>
-              );
-            })()}
+            {/* Delete company button — admin only */}
+            {isAdmin && (
+              <button
+                onClick={handleDeleteCompany}
+                disabled={isDeletingCompany}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-red-500/30 bg-red-500/5 text-red-400 text-sm font-bold hover:bg-red-500/10 transition-all disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                {isDeletingCompany ? 'Deleting...' : 'Delete Company'}
+              </button>
+            )}
             <button
               onClick={() => {
                 setActiveTab('overview');
@@ -403,6 +443,7 @@ export default function CompanyDetailPage() {
           { id: 'follow_ups', label: 'Follow-Ups', icon: CalendarClock, count: followUps.length > 0 ? followUps.length : undefined },
           { id: 'notes', label: 'Pre-Call Notes', icon: StickyNote },
           { id: 'timeline', label: 'Timeline', icon: MessageSquare },
+          { id: 'email_activity', label: 'Email Activity', icon: Send },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -451,23 +492,22 @@ export default function CompanyDetailPage() {
                     placeholder="Enter owner name..."
                     isEditing={isEditingAll}
                   />
-                  <InlineEditField
-                    id={`company_${id}_status`}
-                    label="CRM Status"
-                    value={company.status || 'Cold No Reply'}
-                    type="select"
-                    options={[
-                      { value: 'Cold No Reply', label: 'Cold No Reply' },
-                      { value: 'Replied', label: 'Replied' },
-                      { value: 'Warm', label: 'Warm' },
-                      { value: 'Booked', label: 'Booked' },
-                      { value: 'Paid', label: 'Paid' },
-                      { value: 'Client', label: 'Client' },
-                      { value: 'Excluded', label: 'Excluded' },
-                    ]}
-                    onSave={(v) => handleUpdateCompany('status', v)}
-                    isEditing={isEditingAll}
-                  />
+                  <div>
+                    <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-1 block">CRM Status</label>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.isArray(company.status) && company.status.length > 0 ? company.status.map(s => {
+                        const colors = getOutcomeColors(s);
+                        return (
+                          <span key={s} className={cn("px-2 py-0.5 text-xs font-medium rounded-full border", colors.bg, colors.text, colors.border)}>
+                            {s}
+                          </span>
+                        );
+                      }) : (
+                        <span className="text-sm text-[var(--muted)]">No calls yet</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-[var(--muted)] mt-1">Auto-computed from last call per phone number</p>
+                  </div>
                   <InlineEditField
                     id={`company_${id}_ig`}
                     label="Instagram Handle"
@@ -617,7 +657,6 @@ export default function CompanyDetailPage() {
                   key={phone.id}
                   phoneNumber={phone}
                   recentCalls={callLogs.filter(c => c.phone_number_record === phone.id).slice(0, 3)}
-                  adminCallLogs={callLogs.filter(c => c.phone_number_record === phone.id)}
                   onEdit={(phoneId) => {
                     const p = phoneNumbers.find(ph => ph.id === phoneId);
                     if (p) setEditingPhone(p);
@@ -665,7 +704,7 @@ export default function CompanyDetailPage() {
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Summary</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">AI</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-right">Actions</th>
-                    {isAdminMode && (
+                    {isAdmin && (
                       <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-center">Del</th>
                     )}
                   </tr>
@@ -673,9 +712,6 @@ export default function CompanyDetailPage() {
                 <tbody className="divide-y divide-[var(--card-border)]">
                   {callLogs.map(call => {
                     const coldCall = call.expand?.cold_call as ColdCall | undefined;
-                    const isCallStaged = isAdminMode && adminMode?.pendingDeletions.some(
-                      d => d.targetId === call.id && d.type === 'call_log'
-                    );
                     return (
                       <tr key={call.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
                         <td className="px-6 py-4 text-sm font-medium">{formatDate(call.call_time)}</td>
@@ -703,16 +739,14 @@ export default function CompanyDetailPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-1 flex-wrap">
-                            {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(oc => (
-                              <span key={oc} className={cn(
-                                "px-2 py-0.5 rounded-full text-[10px] font-bold",
-                                oc === 'Interested' ? "bg-green-500/10 text-green-400" :
-                                  oc === 'No Answer' ? "bg-red-500/10 text-red-400" :
-                                    "bg-[var(--card-hover)] text-[var(--muted)]"
-                              )}>
-                                {oc}
-                              </span>
-                            ))}
+                            {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map(oc => {
+                              const colors = getOutcomeColors(oc);
+                              return (
+                                <span key={oc} className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold", colors.bg, colors.text)}>
+                                  {oc}
+                                </span>
+                              );
+                            })}
                           </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-[var(--muted)] max-w-xs truncate">
@@ -740,21 +774,19 @@ export default function CompanyDetailPage() {
                             View Details
                           </Link>
                         </td>
-                        {isAdminMode && (
+                        {isAdmin && (
                           <td className="px-6 py-4 text-center">
-                            {isCallStaged ? (
-                              <div className="p-1.5 rounded-lg text-green-400 inline-flex" title="Staged for deletion">
-                                <CheckSquare size={14} />
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handleStageCallLog(call)}
-                                className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 hover:scale-110 transition-all duration-150 inline-flex"
-                                title="Stage for deletion"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleDeleteCallLog(call)}
+                              disabled={isDeletingCallLog === call.id}
+                              className="p-1.5 rounded-lg text-red-400/60 hover:bg-red-500/10 hover:text-red-400 hover:scale-110 transition-all duration-150 inline-flex disabled:opacity-50"
+                              title="Delete call log"
+                            >
+                              {isDeletingCallLog === call.id
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <Trash2 size={14} />
+                              }
+                            </button>
                           </td>
                         )}
                       </tr>
@@ -964,6 +996,15 @@ export default function CompanyDetailPage() {
                   <p className="text-[var(--muted)] font-medium">No notes yet. Add one to prepare for your next call.</p>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'email_activity' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <h3 className="text-lg font-bold">Email Activity</h3>
+            <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-4">
+              <EmailActivityFeed companyId={id} />
             </div>
           </div>
         )}

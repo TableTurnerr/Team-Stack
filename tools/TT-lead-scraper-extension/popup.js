@@ -8,12 +8,23 @@ function pbGetSettings(cb) {
     });
 }
 
+// Extract user ID from PocketBase JWT token
+function pbGetUserIdFromToken(token) {
+    if (!token) return null;
+    try {
+        var parts = token.split('.');
+        if (parts.length !== 3) return null;
+        var payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return payload.id || null;
+    } catch (e) { return null; }
+}
+
 function pbCheckCompanyStatus(name, phones, cb) {
     pbGetSettings(function (pbUrl, pbToken) {
         if (!pbUrl) { cb({ status: 'new' }); return; }
         var headers = {};
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
-        var nameFilter = encodeURIComponent('name~"' + String(name || '').replace(/"/g, '') + '"');
+        var nameFilter = encodeURIComponent('company_name~"' + String(name || '').replace(/"/g, '') + '"');
         fetch(pbUrl + '/api/collections/companies/records?filter=' + nameFilter + '&perPage=1', { headers: headers })
             .then(function (r) { return r.json(); })
             .then(function (d) {
@@ -70,16 +81,17 @@ function pbSendToCrm(item, cb) {
         if (!pbUrl) { cb({ success: false, error: 'No PocketBase URL configured. Set it in \u2699 CRM Settings.' }); return; }
         var headers = { 'Content-Type': 'application/json' };
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
+        var userId = pbGetUserIdFromToken(pbToken);
         var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
         var companyBody = JSON.stringify({
-            name: item.title || '',
-            website: item.companyUrl || '',
-            address: item.address || '',
-            city: item.city || '',
-            industry: item.industry || '',
-            rating: item.rating || '',
-            maps_url: item.href || '',
-            note: item.note || ''
+            company_name: item.title || '',
+            company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
+            google_maps_link: item.href || '',
+            google_rating: item.rating || '',
+            google_reviews_count: (item.reviewCount || '').replace(/[()]/g, ''),
+            source: 'Google Maps',
+            notes: item.note || '',
+            status: ['Untouched']
         });
         fetch(pbUrl + '/api/collections/companies/records', { method: 'POST', headers: headers, body: companyBody })
             .then(function (r) {
@@ -88,14 +100,35 @@ function pbSendToCrm(item, cb) {
             })
             .then(function (compData) {
                 var companyId = compData.id;
-                if (!phones.length) { cb({ success: true, recordId: companyId }); return; }
-                var phonePromises = phones.map(function (pe) {
+                var followUp = [];
+
+                // Create company_notes record if note exists
+                if (item.note && userId) {
+                    followUp.push(fetch(pbUrl + '/api/collections/company_notes/records', {
+                        method: 'POST', headers: headers,
+                        body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
+                    }));
+                }
+
+                // Create interaction for activity timeline
+                var interactionBody = { company: companyId, channel: 'phone', direction: 'outbound', timestamp: new Date().toISOString(), summary: 'Lead added from Google Maps scraper extension' };
+                if (userId) interactionBody.user = userId;
+                followUp.push(fetch(pbUrl + '/api/collections/interactions/records', {
+                    method: 'POST', headers: headers,
+                    body: JSON.stringify(interactionBody)
+                }));
+
+                // Create phone number records
+                phones.forEach(function (pe) {
                     var num = String(pe.number || '').replace(/\D/g, '');
-                    if (!num) return Promise.resolve();
-                    var phoneBody = JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' });
-                    return fetch(pbUrl + '/api/collections/phone_numbers/records', { method: 'POST', headers: headers, body: phoneBody });
+                    if (!num) return;
+                    followUp.push(fetch(pbUrl + '/api/collections/phone_numbers/records', {
+                        method: 'POST', headers: headers,
+                        body: JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' })
+                    }));
                 });
-                Promise.all(phonePromises).then(function () { cb({ success: true, recordId: companyId }); });
+
+                Promise.all(followUp).then(function () { cb({ success: true, recordId: companyId }); });
             })
             .catch(function (e) { cb({ success: false, error: e.message || String(e) }); });
     });
@@ -166,10 +199,12 @@ document.addEventListener('DOMContentLoaded', function () {
             // Inject website scanner if on non-Maps page
             chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
                 var url = tabs[0] ? tabs[0].url : '';
-                if (url && !url.includes('google.com/maps')) {
+                if (url && !url.startsWith('chrome://') && !url.startsWith('edge://') && !url.startsWith('about:') && !url.includes('google.com/maps')) {
                     chrome.scripting.executeScript({
                         target: { tabId: tabs[0].id },
                         files: ['manual_mode_website.js']
+                    }, function () {
+                        if (chrome.runtime.lastError) { /* ignore — page may block injection */ }
                     });
                 }
             });
@@ -209,7 +244,11 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('manualAddBtn').addEventListener('click', function () {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, { type: 'MANUAL_ADD_OVERLAY' });
+                var u = tabs[0].url || '';
+                if (u.startsWith('chrome://') || u.startsWith('edge://') || u.startsWith('about:')) return;
+                chrome.tabs.sendMessage(tabs[0].id, { type: 'MANUAL_ADD_OVERLAY' }, function () {
+                    if (chrome.runtime.lastError) { /* receiver not ready — ignore */ }
+                });
             }
         });
     });

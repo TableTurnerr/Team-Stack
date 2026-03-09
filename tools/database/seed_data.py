@@ -287,7 +287,7 @@ class PocketBaseSeeder:
                     }
                     phone_rec = self.create_record('phone_numbers', phone_data)
                     self.id_maps['phone_numbers'][phone['phone_number']] = phone_rec['id']
-                    print(f"      → Added phone: ***{phone['phone_number'][-4:]}")
+                    print(f"      → Added phone record")
                     
             except Exception as e:
                 print(f"   ✗ Failed to create company {company['company_name']}: {e}")
@@ -367,7 +367,7 @@ Recipient: Call back next week when Lisa is here."""
                 
                 rec = self.create_record('cold_calls', call_data)
                 self.id_maps['cold_calls'][call['phone_number']] = rec['id']
-                print(f"   ✓ Created cold call: ***{call['phone_number'][-4:]} ({call['call_outcome']})")
+                print(f"   ✓ Created cold call ({call['call_outcome']})")
                 
                 # Create transcript
                 self.create_record('call_transcripts', {

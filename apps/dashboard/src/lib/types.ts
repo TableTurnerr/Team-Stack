@@ -23,7 +23,7 @@ export interface Company extends RecordModel {
   // NEW fields merged from leads
   instagram_handle?: string;
   email?: string;
-  status?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
+  status?: string[];
   first_contacted?: string;
   last_contacted?: string;
   notes?: string;
@@ -32,6 +32,9 @@ export interface Company extends RecordModel {
   // Ratings & Reviews
   google_rating?: string;
   google_reviews_count?: string;
+
+  // Email suppression
+  do_not_contact?: boolean;
 }
 
 
@@ -193,7 +196,7 @@ export interface CallLog extends RecordModel {
   owner_name_found?: string;
   receptionist_name?: string;
   post_call_notes?: string;
-  status_changed_to?: 'Cold No Reply' | 'Replied' | 'Warm' | 'Booked' | 'Paid' | 'Client' | 'Excluded';
+  status_changed_to?: string;
   has_recording?: boolean;
   session?: string; // Optional - null for standalone calls, populated for session-based calls
   cold_call?: string; // Optional link to AI transcript (cold_calls record)
@@ -283,6 +286,14 @@ export interface Interaction extends RecordModel {
     company?: Company;
     user?: User;
     call_log?: CallLog;
+  };
+}
+
+export interface CustomCallOutcome extends RecordModel {
+  name: string;
+  created_by?: string;
+  expand?: {
+    created_by?: User;
   };
 }
 
@@ -492,10 +503,45 @@ export const COLLECTIONS = {
   USER_PREFERENCES: 'user_preferences',
   COLD_CALLING_SESSIONS: 'cold_calling_sessions',
 
+  CUSTOM_CALL_OUTCOMES: 'custom_call_outcomes',
+
   // Financial collections
   BANK_ACCOUNTS: 'bank_accounts',
   BALANCE_ADJUSTMENTS: 'balance_adjustments',
   FIN_CATEGORIES: 'fin_categories',
   FIN_TRANSACTIONS: 'fin_transactions',
   RECURRING_TRANSACTIONS: 'recurring_transactions',
+
+  // Email marketing collections
+  EMAIL_TEMPLATES: 'email_templates',
+  EMAIL_CAMPAIGNS: 'email_campaigns',
+  EMAIL_LISTS: 'email_lists',
+  EMAIL_RECIPIENTS: 'email_recipients',
+  EMAIL_SEQUENCES: 'email_sequences',
+  EMAIL_SEQUENCE_STEPS: 'email_sequence_steps',
+  EMAIL_SEQUENCE_ENROLLMENTS: 'email_sequence_enrollments',
+  EMAIL_EVENTS: 'email_events',
+  EMAIL_UNSUBSCRIBES: 'email_unsubscribes',
+
+  // Recycle bin
+  RECYCLE_BIN: 'recycle_bin',
 } as const;
+
+export type RecycleBinItemType = 'company' | 'phone_number' | 'call_log' | 'session';
+
+export interface RecycleBinItem {
+  id: string;
+  item_type: RecycleBinItemType;
+  original_id: string;
+  item_label: string;
+  item_data: Record<string, unknown>;
+  related_data?: Record<string, unknown>;
+  deleted_by: string;
+  deleted_at: string;
+  expires_at: string;
+  created: string;
+  updated: string;
+  expand?: {
+    deleted_by?: User;
+  };
+}

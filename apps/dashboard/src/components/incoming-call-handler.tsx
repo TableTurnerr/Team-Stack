@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { PhoneIncoming, PhoneMissed, X, Building2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type ColdCallingSession, type CallLog } from '@/lib/types';
+import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
@@ -236,7 +237,7 @@ export function IncomingCallHandler() {
                 }
             }
 
-            // Update company metadata (non-blocking)
+            // Update company metadata + compute status (non-blocking)
             void (async () => {
                 try {
                     const companyUpdates: Record<string, unknown> = { last_contacted: new Date().toISOString() };
@@ -246,6 +247,15 @@ export function IncomingCallHandler() {
                     if (data.ownerReached && data.ownerName && !existingCompany.owner_name) {
                         companyUpdates.owner_name = data.ownerName;
                     }
+                    // Compute company status from last call per phone number
+                    try {
+                        const allLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                            filter: `company = "${data.companyId}"`,
+                            sort: '-call_time',
+                            fields: 'phone_number_record,call_time,call_outcome',
+                        });
+                        companyUpdates.status = computeCompanyStatuses(allLogs);
+                    } catch { /* non-critical */ }
                     await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
                 } catch { /* non-critical */ }
             })();

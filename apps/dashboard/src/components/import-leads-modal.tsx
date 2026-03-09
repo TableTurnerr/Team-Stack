@@ -832,7 +832,7 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
       source: row.source || undefined,
       instagram_handle: row.instagram_handle || undefined,
       email: row.email || undefined,
-      status: (row.status as Company['status']) || undefined,
+      status: row.status ? (Array.isArray(row.status) ? row.status : [row.status]) as string[] : undefined,
       first_contacted: row.first_contacted || undefined,
       last_contacted: row.last_contacted || undefined,
       notes: row.notes || undefined,

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Zap, ChevronDown, ChevronUp, Play, Pause, Square, Check, RotateCcw } from 'lucide-react';
+import { Zap, ChevronDown, ChevronUp, Play, Pause, Square, Check, RotateCcw, Database } from 'lucide-react';
+import { CRMImportModal, type CRMImportEntry } from '@/components/crm-import-modal';
 
 export interface DialerEntry {
     number: string;
@@ -79,6 +80,7 @@ export function PowerDialerPanel({
     const [expanded, setExpanded] = useState(true);
     const [inputMode, setInputMode] = useState(queue.length === 0);
     const [stopConfirming, setStopConfirming] = useState(false);
+    const [crmImportOpen, setCrmImportOpen] = useState(false);
     // When queue transitions from empty→non-empty (hydrated from localStorage), exit input mode
     const prevQueueLengthRef = useRef(queue.length);
     useEffect(() => {
@@ -137,6 +139,16 @@ export function PowerDialerPanel({
         setParsedPreview([]);
         setInputMode(true);
         setStopConfirming(false);
+    };
+
+    const handleCRMImport = (entries: CRMImportEntry[]) => {
+        if (entries.length > 0) {
+            onQueueLoad(entries);
+            setInputMode(false);
+            setRawInput('');
+            setParsedPreview([]);
+            localStorage.removeItem('power-dialer-raw-input');
+        }
     };
 
     const handleConfirmStop = () => {
@@ -237,6 +249,21 @@ export function PowerDialerPanel({
                     {/* ── INPUT MODE ── */}
                     {inputMode ? (
                         <div className="space-y-3">
+                            {/* Import from CRM button */}
+                            <button
+                                onClick={() => setCrmImportOpen(true)}
+                                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/5 text-blue-400 text-sm font-medium hover:bg-blue-500/10 hover:border-blue-500/50 active:scale-[0.98] transition-all"
+                            >
+                                <Database size={14} />
+                                Import from CRM
+                            </button>
+
+                            <div className="flex items-center gap-3">
+                                <div className="flex-1 h-px bg-[var(--card-border)]" />
+                                <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider">or paste manually</span>
+                                <div className="flex-1 h-px bg-[var(--card-border)]" />
+                            </div>
+
                             <div>
                                 <label className="block text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wider mb-2">
                                     Paste Phone Numbers
@@ -565,6 +592,13 @@ export function PowerDialerPanel({
                     )}
                 </div>
             )}
+
+            {/* CRM Import Modal */}
+            <CRMImportModal
+                open={crmImportOpen}
+                onClose={() => setCrmImportOpen(false)}
+                onImport={handleCRMImport}
+            />
         </div>
     );
 }

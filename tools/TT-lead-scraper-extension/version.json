@@ -1,5 +1,5 @@
 {
-  "version": "2.2",
-  "releaseNotes": "Results Tab overhaul with modern UI, integrated CRM status checking and phone management, site-specific overlay exceptions, and dark mode support for the popup UI.",
+  "version": "2.3",
+  "releaseNotes": "Overhauled CRM integration with support for new schema fields (company_name, company_location), automated pre-call note creation, activity timeline interaction logging, and improved phone record sync.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension"
 }

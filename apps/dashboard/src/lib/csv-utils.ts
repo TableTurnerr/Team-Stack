@@ -311,7 +311,7 @@ export function generateLeadsCSV(
       escapeCsvCell(company.source ?? ''),
       escapeCsvCell(company.instagram_handle ?? ''),
       escapeCsvCell(company.email ?? ''),
-      escapeCsvCell(company.status ?? ''),
+      escapeCsvCell(Array.isArray(company.status) ? company.status.join(', ') : (company.status ?? '')),
       escapeCsvCell(company.first_contacted ?? ''),
       escapeCsvCell(company.last_contacted ?? ''),
       escapeCsvCell(company.notes ?? ''),

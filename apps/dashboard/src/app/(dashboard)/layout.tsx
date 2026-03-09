@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/sidebar';
 import { useAuth } from '@/contexts/auth-context';
 import { Loader2 } from 'lucide-react';
+import { SidebarProvider, useSidebar } from '@/contexts/sidebar-context';
 
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
 import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
@@ -16,8 +17,8 @@ import { FollowUpProvider } from '@/contexts/follow-up-context';
 import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
-import { AdminModeProvider, useAdminModeOptional } from '@/contexts/admin-mode-context';
-import { AdminModeBanner } from '@/components/admin-mode-banner';
+import { RecycleBinProvider } from '@/contexts/recycle-bin-context';
+import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
 import { IncomingCallHandler } from '@/components/incoming-call-handler';
 
@@ -54,20 +55,15 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isSessionPage = pathname === '/session';
-  const adminMode = useAdminModeOptional();
-  const isAdminMode = adminMode?.isAdminMode ?? false;
 
   return (
-    <div className={isAdminMode
-      ? "flex min-h-screen bg-[var(--background)] ring-4 ring-red-500 ring-inset"
-      : "flex min-h-screen bg-[var(--background)]"
-    }>
+    <div className="flex min-h-screen bg-[var(--background)]">
       <Sidebar />
       <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
         <FloatingSaveBar />
         <ActiveSessionBanner />
-        <AdminModeBanner />
         <IncomingCallHandler />
+        <UndoDeleteToast />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[var(--background)]">
           <div className="container mx-auto px-4 py-8 lg:px-8 max-w-[1600px]">
             {children}
@@ -86,24 +82,26 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AuthGuard>
-      <ToastProvider>
-        <ZoomPhoneProvider>
-          <SessionProvider>
-            <TeamPresenceProvider>
-              <CallRecordingProvider>
-                <UnsavedChangesProvider>
-                  <FollowUpProvider>
-                    <AdminModeProvider>
-                      <DashboardLayoutContent>{children}</DashboardLayoutContent>
-                    </AdminModeProvider>
-                  </FollowUpProvider>
-                </UnsavedChangesProvider>
-              </CallRecordingProvider>
-            </TeamPresenceProvider>
-          </SessionProvider>
-        </ZoomPhoneProvider>
-      </ToastProvider>
-    </AuthGuard>
+    <SidebarProvider>
+      <AuthGuard>
+        <ToastProvider>
+          <ZoomPhoneProvider>
+            <SessionProvider>
+              <TeamPresenceProvider>
+                <CallRecordingProvider>
+                  <UnsavedChangesProvider>
+                    <FollowUpProvider>
+                      <RecycleBinProvider>
+                        <DashboardLayoutContent>{children}</DashboardLayoutContent>
+                      </RecycleBinProvider>
+                    </FollowUpProvider>
+                  </UnsavedChangesProvider>
+                </CallRecordingProvider>
+              </TeamPresenceProvider>
+            </SessionProvider>
+          </ZoomPhoneProvider>
+        </ToastProvider>
+      </AuthGuard>
+    </SidebarProvider>
   );
 }

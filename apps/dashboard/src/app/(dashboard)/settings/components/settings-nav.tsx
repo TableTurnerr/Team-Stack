@@ -11,7 +11,6 @@ import {
     Users,
     Plug,
     Database,
-    ShieldAlert,
 } from 'lucide-react';
 
 export type SettingsSection =
@@ -22,8 +21,7 @@ export type SettingsSection =
     | 'preferences'
     | 'team'
     | 'integrations'
-    | 'data-privacy'
-    | 'admin-mode';
+    | 'data-privacy';
 
 interface SettingsNavProps {
     activeSection: SettingsSection;
@@ -39,7 +37,6 @@ const sections = [
     { id: 'team' as const, label: 'Team Management', icon: Users, adminOnly: true },
     { id: 'integrations' as const, label: 'Integrations', icon: Plug, adminOnly: true },
     { id: 'data-privacy' as const, label: 'Data & Privacy', icon: Database, adminOnly: false },
-    { id: 'admin-mode' as const, label: 'Admin Mode', icon: ShieldAlert, adminOnly: true },
 ];
 
 export function SettingsNav({ activeSection, onSectionChange }: SettingsNavProps) {

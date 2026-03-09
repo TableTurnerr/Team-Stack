@@ -21,15 +21,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type ColdCall, type Company, type ColdCallingSession, type PhoneNumber, type User as UserType } from '@/lib/types';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-
-const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
-  'Interested': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
-  'Not Interested': { bg: 'bg-[var(--error-subtle)]', text: 'text-[var(--error)]' },
-  'Callback': { bg: 'bg-[var(--warning-subtle)]', text: 'text-[var(--warning)]' },
-  'No Answer': { bg: 'bg-[var(--card-hover)]', text: 'text-[var(--muted)]' },
-  'Fumbled': { bg: 'bg-orange-500/10', text: 'text-orange-500' },
-  'Other': { bg: 'bg-[var(--info-subtle)]', text: 'text-[var(--info)]' },
-};
+import { getOutcomeColors } from '@/lib/call-outcomes';
 
 function formatDuration(seconds?: number): string {
   if (!seconds || seconds === 0) return '-';
@@ -171,15 +163,14 @@ function CallLogDetail({ log }: { log: CallLog }) {
         </div>
         {log.call_outcome && (Array.isArray(log.call_outcome) ? log.call_outcome : [log.call_outcome]).length > 0 && (
           <div className="flex gap-1.5 flex-wrap">
-            {(Array.isArray(log.call_outcome) ? log.call_outcome : [log.call_outcome]).map(oc => (
-              <span key={oc} className={cn(
-                "px-3 py-1.5 rounded-lg text-sm font-semibold",
-                OUTCOME_COLORS[oc]?.bg || 'bg-gray-500/20',
-                OUTCOME_COLORS[oc]?.text || 'text-gray-400'
-              )}>
-                {oc}
-              </span>
-            ))}
+            {(Array.isArray(log.call_outcome) ? log.call_outcome : [log.call_outcome]).map(oc => {
+              const colors = getOutcomeColors(oc);
+              return (
+                <span key={oc} className={cn("px-3 py-1.5 rounded-lg text-sm font-semibold", colors.bg, colors.text)}>
+                  {oc}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>
@@ -428,15 +419,14 @@ function ColdCallDetail({ call }: { call: ColdCall }) {
             {call.created ? formatDate(call.created) : 'Unknown date'}
           </p>
         </div>
-        {call.call_outcome && (
-          <span className={cn(
-            "px-3 py-1.5 rounded-lg text-sm font-semibold",
-            OUTCOME_COLORS[call.call_outcome]?.bg || 'bg-gray-500/20',
-            OUTCOME_COLORS[call.call_outcome]?.text || 'text-gray-400'
-          )}>
-            {call.call_outcome}
-          </span>
-        )}
+        {call.call_outcome && (() => {
+          const colors = getOutcomeColors(call.call_outcome);
+          return (
+            <span className={cn("px-3 py-1.5 rounded-lg text-sm font-semibold", colors.bg, colors.text)}>
+              {call.call_outcome}
+            </span>
+          );
+        })()}
       </div>
 
       <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">

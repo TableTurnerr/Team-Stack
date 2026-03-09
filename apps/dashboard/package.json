@@ -1,6 +1,10 @@
 {
   "name": "dashboard",
+<<<<<<< HEAD
   "version": "1.3.1",
+=======
+  "version": "1.4.0",
+>>>>>>> 63891c4ef4c7aa151f406edc120a313e7761e226
   "private": true,
   "scripts": {
     "dev": "next dev",

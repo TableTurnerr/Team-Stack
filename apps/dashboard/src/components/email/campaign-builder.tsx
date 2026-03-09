@@ -186,7 +186,7 @@ export function CampaignBuilder({ campaignId, className }: CampaignBuilderProps)
         try {
           await fetch('/api/email-send/campaign', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pb.authStore.token}` },
             body: JSON.stringify({ campaignId: id }),
           });
         } catch {

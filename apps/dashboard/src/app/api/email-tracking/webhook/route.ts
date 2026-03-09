@@ -33,12 +33,15 @@ export async function POST(request: Request) {
 
   const rawBody = await request.text();
 
-  // Validate webhook signature if secret is configured
-  if (WEBHOOK_SECRET) {
-    const signature = request.headers.get('svix-signature') || request.headers.get('x-resend-signature');
-    if (!verifySignature(rawBody, signature, WEBHOOK_SECRET)) {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-    }
+  // Validate webhook signature — fail closed if secret is not configured
+  if (!WEBHOOK_SECRET) {
+    console.error('[email-tracking/webhook] RESEND_WEBHOOK_SECRET not configured — rejecting request');
+    return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
+  }
+
+  const signature = request.headers.get('svix-signature') || request.headers.get('x-resend-signature');
+  if (!verifySignature(rawBody, signature, WEBHOOK_SECRET)) {
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
   let payload: ResendWebhookPayload;

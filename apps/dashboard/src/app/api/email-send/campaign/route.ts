@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { authenticateRequest } from '@/lib/api-auth';
 
 const PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -7,11 +8,23 @@ const EMAIL_FROM_ADDRESS = process.env.EMAIL_FROM_ADDRESS || 'crm@tableturnerr.c
 const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'Tableturnerr CRM';
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
+// PocketBase record IDs are 15-character alphanumeric strings
+const PB_ID_RE = /^[a-zA-Z0-9]{15}$/;
+
+function isValidPbId(id: string): boolean {
+  return typeof id === 'string' && PB_ID_RE.test(id);
+}
+
 interface CampaignSendRequest {
   campaignId: string;
 }
 
 export async function POST(request: Request) {
+  const user = await authenticateRequest(request);
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   if (!PB_URL) {
     return NextResponse.json({ error: 'PocketBase URL not configured' }, { status: 500 });
   }
@@ -27,8 +40,8 @@ export async function POST(request: Request) {
   }
 
   const { campaignId } = body;
-  if (!campaignId) {
-    return NextResponse.json({ error: 'Missing campaignId' }, { status: 400 });
+  if (!campaignId || !isValidPbId(campaignId)) {
+    return NextResponse.json({ error: 'Missing or invalid campaignId' }, { status: 400 });
   }
 
   try {
@@ -197,7 +210,8 @@ async function resolveAudience(
   audienceListId: string | null,
   exclusionListId: string | null
 ): Promise<Record<string, string>[]> {
-  if (!audienceListId) return [];
+  if (!audienceListId || !isValidPbId(audienceListId)) return [];
+  if (exclusionListId && !isValidPbId(exclusionListId)) return [];
 
   // Fetch the audience list
   const listRes = await fetch(
@@ -213,6 +227,7 @@ async function resolveAudience(
     // Static list: fetch companies by IDs
     const ids: string[] = typeof list.company_ids === 'string' ? JSON.parse(list.company_ids) : list.company_ids;
     for (const id of ids) {
+      if (!isValidPbId(id)) continue;
       try {
         const res = await fetch(`${PB_URL}/api/collections/companies/records/${id}`, { cache: 'no-store' });
         if (res.ok) companies.push(await res.json());
@@ -276,23 +291,27 @@ async function resolveAudience(
   return companies;
 }
 
+function sanitizeFilterValue(val: unknown): string {
+  return String(val).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 function buildDynamicFilter(filterConfig: Record<string, unknown>): string {
   const conditions: string[] = [];
 
   if (filterConfig.status) {
-    conditions.push(`status = '${filterConfig.status}'`);
+    conditions.push(`status = '${sanitizeFilterValue(filterConfig.status)}'`);
   }
   if (filterConfig.source) {
-    conditions.push(`source = '${filterConfig.source}'`);
+    conditions.push(`source = '${sanitizeFilterValue(filterConfig.source)}'`);
   }
   if (filterConfig.has_email) {
     conditions.push(`email != ''`);
   }
   if (filterConfig.date_from) {
-    conditions.push(`created >= '${filterConfig.date_from}'`);
+    conditions.push(`created >= '${sanitizeFilterValue(filterConfig.date_from)}'`);
   }
   if (filterConfig.date_to) {
-    conditions.push(`created <= '${filterConfig.date_to}'`);
+    conditions.push(`created <= '${sanitizeFilterValue(filterConfig.date_to)}'`);
   }
 
   // Always exclude do_not_contact

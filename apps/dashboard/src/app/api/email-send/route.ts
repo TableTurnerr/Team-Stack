@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { authenticateRequest } from '@/lib/api-auth';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM_ADDRESS = process.env.EMAIL_FROM_ADDRESS || 'crm@tableturnerr.com';
@@ -13,6 +14,11 @@ interface SendRequest {
 }
 
 export async function POST(request: Request) {
+  const user = await authenticateRequest(request);
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   if (!RESEND_API_KEY) {
     return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 });
   }
@@ -30,8 +36,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing required fields: to, subject, html' }, { status: 400 });
   }
 
-  // Basic email validation
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+  // Basic email validation (atomic groups via possessive-style to avoid ReDoS)
+  if (!/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(to)) {
     return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
   }
 

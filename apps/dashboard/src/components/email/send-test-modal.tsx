@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X, Send, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { pb } from '@/lib/pocketbase';
 
 interface SendTestModalProps {
   open: boolean;
@@ -29,7 +30,7 @@ export function SendTestModal({ open, onClose, subject, html, previewText }: Sen
     try {
       const res = await fetch('/api/email-send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pb.authStore.token}` },
         body: JSON.stringify({
           to: email.trim(),
           subject: subject || '(No subject)',

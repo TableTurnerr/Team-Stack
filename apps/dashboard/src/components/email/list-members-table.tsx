@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, Mail, Building2, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getOutcomeColors } from '@/lib/call-outcomes';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import type { Company } from '@/lib/types';
@@ -17,15 +18,7 @@ interface ListMembersTableProps {
   className?: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  'Cold No Reply': 'bg-blue-500/10 text-blue-500',
-  'Replied': 'bg-emerald-500/10 text-emerald-500',
-  'Warm': 'bg-orange-500/10 text-orange-500',
-  'Booked': 'bg-purple-500/10 text-purple-500',
-  'Paid': 'bg-green-500/10 text-green-500',
-  'Client': 'bg-teal-500/10 text-teal-500',
-  'Excluded': 'bg-red-500/10 text-red-500',
-};
+// Status is now a JSON array — colors come from shared getOutcomeColors()
 
 export function ListMembersTable({ listType, companyIds, filterRules, className }: ListMembersTableProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -133,10 +126,17 @@ export function ListMembersTable({ listType, companyIds, filterRules, className 
                   </div>
 
                   <div className="col-span-2">
-                    {company.status && (
-                      <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', STATUS_COLORS[company.status] ?? 'bg-[var(--card-hover)] text-[var(--muted)]')}>
-                        {company.status}
-                      </span>
+                    {Array.isArray(company.status) && company.status.length > 0 && (
+                      <div className="flex gap-1 flex-wrap">
+                        {company.status.map(s => {
+                          const colors = getOutcomeColors(s);
+                          return (
+                            <span key={s} className={cn('px-2 py-0.5 rounded-full text-xs font-medium', colors.bg, colors.text)}>
+                              {s}
+                            </span>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
 

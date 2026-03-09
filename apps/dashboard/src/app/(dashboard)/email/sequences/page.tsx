@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Loader2, Play, Pause, Mail, Search, MoreVertical, Trash2, Copy } from 'lucide-react';
+import { Plus, Loader2, Play, Pause, Mail, Search, MoreVertical, Trash2, Copy, ArrowLeft } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { EMAIL_COLLECTIONS, type EmailSequence, type SequenceStatus } from '@/lib/email-types';
 import { cn } from '@/lib/utils';
@@ -128,9 +128,17 @@ export default function SequencesPage() {
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight">Sequences</h1>
-          <p className="text-sm text-[var(--muted)] mt-1">Automated drip campaigns that send emails over time</p>
+        <div className="flex items-start gap-3">
+          <a
+            href="/email"
+            className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors mt-1"
+          >
+            <ArrowLeft size={20} />
+          </a>
+          <div>
+            <h1 className="text-3xl font-black tracking-tight">Sequences</h1>
+            <p className="text-sm text-[var(--muted)] mt-1">Automated drip campaigns that send emails over time</p>
+          </div>
         </div>
         <button
           onClick={handleCreateSequence}

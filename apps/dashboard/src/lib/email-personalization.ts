@@ -31,7 +31,7 @@ const VARIABLE_MAP: Record<string, (c: Company) => string | undefined> = {
   Owner_Name: (c) => c.owner_name,
   Email: (c) => c.email,
   Location: (c) => c.company_location,
-  Status: (c) => c.status,
+  Status: (c) => Array.isArray(c.status) ? c.status.join(', ') : undefined,
   Source: (c) => c.source,
   Instagram: (c) => c.instagram_handle,
   Google_Rating: (c) => c.google_rating,

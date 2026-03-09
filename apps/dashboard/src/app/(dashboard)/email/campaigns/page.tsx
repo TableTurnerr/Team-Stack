@@ -6,7 +6,7 @@ import { pb } from '@/lib/pocketbase';
 import { EMAIL_COLLECTIONS, type EmailCampaign, type CampaignStatus } from '@/lib/email-types';
 import {
   RefreshCw, Plus, Send, Mail, Clock, CheckCircle2,
-  Pause, XCircle, BarChart3, Users, MousePointerClick, Eye
+  Pause, XCircle, BarChart3, Users, MousePointerClick, Eye, ArrowLeft
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDateTime, sanitizeFilterValue } from '@/lib/utils';
@@ -73,14 +73,22 @@ export default function CampaignsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Send size={24} />
-            Campaigns
-          </h1>
-          <p className="text-sm text-[var(--muted)] mt-1">
-            Create and manage your email campaigns
-          </p>
+        <div className="flex items-start gap-3">
+          <a
+            href="/email"
+            className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors mt-1"
+          >
+            <ArrowLeft size={20} />
+          </a>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+              <Send size={24} />
+              Campaigns
+            </h1>
+            <p className="text-sm text-[var(--muted)] mt-1">
+              Create and manage your email campaigns
+            </p>
+          </div>
         </div>
         <a
           href="/email/campaigns/new"

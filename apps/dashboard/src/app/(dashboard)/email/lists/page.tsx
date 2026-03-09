@@ -4,12 +4,13 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { pb } from '@/lib/pocketbase';
 import { EMAIL_COLLECTIONS, type EmailList } from '@/lib/email-types';
-import { RefreshCw, List, Plus, Users, Trash2, Edit2, ShieldBan, Filter as FilterIcon, Database } from 'lucide-react';
+import { RefreshCw, List, Plus, Users, Trash2, Edit2, ShieldBan, Filter as FilterIcon, Database, Search, X, Building2, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDateTime, sanitizeFilterValue } from '@/lib/utils';
 import { SearchInput } from '@/components/search-input';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
+import { COLLECTIONS, type Company } from '@/lib/types';
 
 export default function ListsPage() {
   const { isAuthenticated } = useAuth();
@@ -23,6 +24,11 @@ export default function ListsPage() {
   const [newListName, setNewListName] = useState('');
   const [newListType, setNewListType] = useState<'static' | 'dynamic' | 'suppression'>('dynamic');
   const [creating, setCreating] = useState(false);
+  const [companySearch, setCompanySearch] = useState('');
+  const [companyResults, setCompanyResults] = useState<Company[]>([]);
+  const [searchingCompanies, setSearchingCompanies] = useState(false);
+  const [selectedCompanies, setSelectedCompanies] = useState<Company[]>([]);
+  const [searchTimeout, setSearchTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -37,7 +43,7 @@ export default function ListsPage() {
           filters.push(`list_type = "${sanitizeFilterValue(typeFilter)}"`);
         }
         const result = await pb.collection(EMAIL_COLLECTIONS.EMAIL_LISTS).getFullList({
-          filter: filters.length > 0 ? filters.join(' && ') : undefined,
+          filter: filters.length > 0 ? filters.join(' && ') : '',
           sort: '-created',
           expand: 'created_by',
         });
@@ -65,20 +71,60 @@ export default function ListsPage() {
     }
   };
 
+  const handleCompanySearch = (query: string) => {
+    setCompanySearch(query);
+    if (searchTimeout) clearTimeout(searchTimeout);
+    if (!query.trim()) {
+      setCompanyResults([]);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      setSearchingCompanies(true);
+      try {
+        const result = await pb.collection(COLLECTIONS.COMPANIES).getList(1, 10, {
+          filter: `company_name ~ "${sanitizeFilterValue(query)}"`,
+          sort: 'company_name',
+        });
+        const companies = result.items as unknown as Company[];
+        // Filter out already-selected companies
+        const selectedIds = new Set(selectedCompanies.map(c => c.id));
+        setCompanyResults(companies.filter(c => !selectedIds.has(c.id)));
+      } catch (err) {
+        console.error('Failed to search companies:', err);
+      } finally {
+        setSearchingCompanies(false);
+      }
+    }, 300);
+    setSearchTimeout(timeout);
+  };
+
+  const addCompany = (company: Company) => {
+    setSelectedCompanies(prev => [...prev, company]);
+    setCompanyResults(prev => prev.filter(c => c.id !== company.id));
+    setCompanySearch('');
+    setCompanyResults([]);
+  };
+
+  const removeCompany = (companyId: string) => {
+    setSelectedCompanies(prev => prev.filter(c => c.id !== companyId));
+  };
+
   const handleCreate = async () => {
     if (!newListName.trim()) return;
     setCreating(true);
     try {
+      const companyIds = selectedCompanies.map(c => c.id);
       const created = await pb.collection(EMAIL_COLLECTIONS.EMAIL_LISTS).create({
         name: newListName.trim(),
         list_type: newListType,
         filter_json: newListType === 'dynamic' ? {} : undefined,
-        company_ids: newListType === 'static' ? [] : undefined,
-        cached_count: 0,
+        company_ids: newListType === 'static' || newListType === 'suppression' ? companyIds : undefined,
+        cached_count: newListType === 'static' || newListType === 'suppression' ? companyIds.length : 0,
         created_by: pb.authStore.model?.id,
       });
       setLists(prev => [created as unknown as EmailList, ...prev]);
       setNewListName('');
+      setSelectedCompanies([]);
       setShowCreateModal(false);
     } catch (err) {
       console.error('Failed to create list:', err);
@@ -105,7 +151,14 @@ export default function ListsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div className="flex items-start gap-3">
+          <a
+            href="/email"
+            className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors mt-1"
+          >
+            <ArrowLeft size={20} />
+          </a>
+          <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Users size={24} />
             Audience Lists
@@ -113,6 +166,7 @@ export default function ListsPage() {
           <p className="text-sm text-[var(--muted)] mt-1">
             Manage your email audience segments and suppression lists
           </p>
+          </div>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -215,8 +269,8 @@ export default function ListsPage() {
       {/* Create Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowCreateModal(false)} />
-          <div className="relative bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setShowCreateModal(false); setSelectedCompanies([]); setCompanySearch(''); setCompanyResults([]); }} />
+          <div className="relative bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl w-full max-w-lg p-6 space-y-4">
             <h2 className="text-lg font-semibold">Create New List</h2>
 
             <div>
@@ -239,7 +293,7 @@ export default function ListsPage() {
                   return (
                     <button
                       key={type}
-                      onClick={() => setNewListType(type)}
+                      onClick={() => { setNewListType(type); setSelectedCompanies([]); setCompanySearch(''); setCompanyResults([]); }}
                       className={cn(
                         'flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-colors text-sm capitalize',
                         newListType === type
@@ -260,9 +314,86 @@ export default function ListsPage() {
               </p>
             </div>
 
+            {/* Company Search — shown for static & suppression lists */}
+            {(newListType === 'static' || newListType === 'suppression') && (
+              <div>
+                <label className="text-sm text-[var(--muted)] block mb-1">Add Companies</label>
+                <div className="relative">
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent">
+                    <Search size={14} className="text-[var(--muted)] shrink-0" />
+                    <input
+                      type="text"
+                      value={companySearch}
+                      onChange={(e) => handleCompanySearch(e.target.value)}
+                      placeholder="Search companies by name..."
+                      className="w-full bg-transparent text-sm focus:outline-none"
+                    />
+                    {searchingCompanies && <RefreshCw size={14} className="animate-spin text-[var(--muted)] shrink-0" />}
+                  </div>
+
+                  {/* Search Results Dropdown */}
+                  {companyResults.length > 0 && (
+                    <div className="absolute z-30 top-full mt-1 w-full bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                      {companyResults.map(company => (
+                        <button
+                          key={company.id}
+                          onClick={() => addCompany(company)}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--card-hover)] transition-colors text-left"
+                        >
+                          <Building2 size={14} className="text-[var(--muted)] shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">{company.company_name}</p>
+                            <p className="text-xs text-[var(--muted)] truncate">
+                              {[company.email, company.company_location].filter(Boolean).join(' · ') || 'No details'}
+                            </p>
+                          </div>
+                          <Plus size={14} className="text-[var(--primary)] shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {companySearch.trim() && !searchingCompanies && companyResults.length === 0 && (
+                    <div className="absolute z-30 top-full mt-1 w-full bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl px-3 py-3">
+                      <p className="text-xs text-[var(--muted)] text-center">No companies found</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Companies */}
+                {selectedCompanies.length > 0 && (
+                  <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto">
+                    {selectedCompanies.map(company => (
+                      <div
+                        key={company.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[var(--card-hover)] border border-[var(--card-border)]"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Building2 size={14} className="text-[var(--muted)] shrink-0" />
+                          <span className="text-sm truncate">{company.company_name}</span>
+                          {company.email && (
+                            <span className="text-xs text-[var(--muted)] truncate hidden sm:inline">{company.email}</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => removeCompany(company.id)}
+                          className="p-1 rounded hover:bg-[var(--error-subtle)] text-[var(--muted)] hover:text-[var(--error)] transition-colors shrink-0"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-[var(--muted)] pt-1">
+                      {selectedCompanies.length} {selectedCompanies.length === 1 ? 'company' : 'companies'} selected
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3 justify-end pt-2">
               <button
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => { setShowCreateModal(false); setSelectedCompanies([]); setCompanySearch(''); setCompanyResults([]); }}
                 className="px-4 py-2 text-sm rounded-lg btn-ghost border border-[var(--card-border)]"
               >
                 Cancel

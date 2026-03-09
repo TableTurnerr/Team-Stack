@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { pb } from '@/lib/pocketbase';
 import { useAuth } from '@/contexts/auth-context';
 import { EMAIL_COLLECTIONS, type EmailTemplate } from '@/lib/email-types';
-import { Plus, FileText } from 'lucide-react';
+import { Plus, FileText, ArrowLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { SearchInput } from '@/components/search-input';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
@@ -81,9 +81,17 @@ export default function TemplatesPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Templates</h1>
-          <p className="text-sm text-[var(--muted)] mt-1">Reusable email designs for your campaigns</p>
+        <div className="flex items-start gap-3">
+          <a
+            href="/email"
+            className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors mt-1"
+          >
+            <ArrowLeft size={20} />
+          </a>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Templates</h1>
+            <p className="text-sm text-[var(--muted)] mt-1">Reusable email designs for your campaigns</p>
+          </div>
         </div>
         <button
           onClick={() => router.push('/email/templates/new')}

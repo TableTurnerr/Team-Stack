@@ -320,7 +320,6 @@ input[type="time"],
 textarea {
   background-color: transparent;
   color: var(--foreground);
-  border: 1px solid var(--card-border);
   transition: border-color 0.15s ease;
 }
 
@@ -336,13 +335,13 @@ input[type="datetime-local"]:focus,
 input[type="time"]:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--foreground);
+  border-color: var(--muted);
 }
 
 /* Remove default ring styles from Tailwind */
 .focus\:ring-1:focus,
 .focus\:ring-2:focus {
-  --tw-ring-color: var(--foreground) !important;
+  --tw-ring-color: var(--muted) !important;
 }
 
 /* Required field asterisk styling */

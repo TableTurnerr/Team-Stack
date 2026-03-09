@@ -286,9 +286,13 @@ export function SuppressionManager({ className }: SuppressionManagerProps) {
                         <p className="text-sm text-[var(--muted)] truncate">{company.email || '—'}</p>
                       </div>
                       <div className="col-span-2">
-                        {company.status && (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--card-hover)] text-[var(--muted)]">
-                            {company.status}
+                        {Array.isArray(company.status) && company.status.length > 0 && (
+                          <span className="flex flex-wrap gap-1">
+                            {company.status.map((s) => (
+                              <span key={s} className="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--card-hover)] text-[var(--muted)]">
+                                {s}
+                              </span>
+                            ))}
                           </span>
                         )}
                       </div>

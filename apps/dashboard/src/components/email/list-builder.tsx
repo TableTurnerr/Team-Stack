@@ -21,7 +21,7 @@ interface ListBuilderProps {
 }
 
 const FILTER_FIELDS = [
-  { key: 'status', label: 'Status', type: 'select', options: ['Cold No Reply', 'Replied', 'Warm', 'Booked', 'Paid', 'Client', 'Excluded'] },
+  // Status is now a JSON array (auto-computed from calls) — not filterable via PB select query
   { key: 'source', label: 'Source', type: 'text' },
   { key: 'company_location', label: 'Location', type: 'text' },
   { key: 'email', label: 'Has Email', type: 'boolean' },
@@ -59,7 +59,7 @@ function getFieldType(fieldKey: string): string {
 
 function getFieldOptions(fieldKey: string): string[] | undefined {
   const field = FILTER_FIELDS.find(f => f.key === fieldKey);
-  return field && 'options' in field ? [...field.options] : undefined;
+  return field && 'options' in field ? [...(field as { options: readonly string[] }).options] : undefined;
 }
 
 export function buildPocketBaseFilter(filters: FilterRule[]): string {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ArrowLeft } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { EMAIL_COLLECTIONS, type EmailCampaign, type EmailEvent } from '@/lib/email-types';
 import { cn } from '@/lib/utils';
@@ -89,11 +89,19 @@ export default function EmailAnalyticsPage() {
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight">Email Analytics</h1>
-          <p className="text-sm text-[var(--muted)] mt-1">
-            {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''} sent in the last {period} days
-          </p>
+        <div className="flex items-start gap-3">
+          <a
+            href="/email"
+            className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors mt-1"
+          >
+            <ArrowLeft size={20} />
+          </a>
+          <div>
+            <h1 className="text-3xl font-black tracking-tight">Email Analytics</h1>
+            <p className="text-sm text-[var(--muted)] mt-1">
+              {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''} sent in the last {period} days
+            </p>
+          </div>
         </div>
         <div className="flex rounded-lg border border-[var(--card-border)] p-0.5 gap-0.5 bg-[var(--card-bg)]">
           {([7, 14, 30] as PeriodOption[]).map(p => (

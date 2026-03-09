@@ -9,6 +9,17 @@ function pbGetSettings_maps(cb) {
     });
 }
 
+// Extract user ID from PocketBase JWT token
+function pbGetUserIdFromToken_maps(token) {
+    if (!token) return null;
+    try {
+        var parts = token.split('.');
+        if (parts.length !== 3) return null;
+        var payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return payload.id || null;
+    } catch (e) { return null; }
+}
+
 function pbCheckDuplicate_maps(name, phone, cb) {
     pbGetSettings_maps(function (pbUrl, pbToken) {
         if (!pbUrl) { cb(false); return; }
@@ -35,13 +46,15 @@ function pbSendToCrm_maps(item, cb) {
         if (!pbUrl) { cb({ success: false, error: 'Not connected to CRM. Click "Connect to TableTurnerr CRM" in the extension popup.' }); return; }
         var headers = { 'Content-Type': 'application/json' };
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
+        var userId = pbGetUserIdFromToken_maps(pbToken);
         var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
         var companyBody = JSON.stringify({
             company_name: item.title || '',
             company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
             google_maps_link: item.href || '',
             source: 'Google Maps',
-            notes: item.note || ''
+            notes: item.note || '',
+            status: ['Untouched']
         });
         fetch(pbUrl + '/api/collections/companies/records', { method: 'POST', headers: headers, body: companyBody })
             .then(function (r) {
@@ -50,14 +63,35 @@ function pbSendToCrm_maps(item, cb) {
             })
             .then(function (compData) {
                 var companyId = compData.id;
-                if (!phones.length) { cb({ success: true, recordId: companyId }); return; }
-                var phonePromises = phones.map(function (pe) {
+                var followUp = [];
+
+                // Create company_notes record if note exists
+                if (item.note && userId) {
+                    followUp.push(fetch(pbUrl + '/api/collections/company_notes/records', {
+                        method: 'POST', headers: headers,
+                        body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
+                    }));
+                }
+
+                // Create interaction for activity timeline
+                var interactionBody = { company: companyId, channel: 'phone', direction: 'outbound', timestamp: new Date().toISOString(), summary: 'Lead added from Google Maps scraper extension' };
+                if (userId) interactionBody.user = userId;
+                followUp.push(fetch(pbUrl + '/api/collections/interactions/records', {
+                    method: 'POST', headers: headers,
+                    body: JSON.stringify(interactionBody)
+                }));
+
+                // Create phone number records
+                phones.forEach(function (pe) {
                     var num = String(pe.number || '').replace(/\D/g, '');
-                    if (!num) return Promise.resolve();
-                    var phoneBody = JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' });
-                    return fetch(pbUrl + '/api/collections/phone_numbers/records', { method: 'POST', headers: headers, body: phoneBody });
+                    if (!num) return;
+                    followUp.push(fetch(pbUrl + '/api/collections/phone_numbers/records', {
+                        method: 'POST', headers: headers,
+                        body: JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' })
+                    }));
                 });
-                Promise.all(phonePromises).then(function () { cb({ success: true, recordId: companyId }); });
+
+                Promise.all(followUp).then(function () { cb({ success: true, recordId: companyId }); });
             })
             .catch(function (e) { cb({ success: false, error: e.message || String(e) }); });
     });

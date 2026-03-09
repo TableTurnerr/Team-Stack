@@ -32,6 +32,9 @@ export interface Company extends RecordModel {
   // Ratings & Reviews
   google_rating?: string;
   google_reviews_count?: string;
+
+  // Email suppression
+  do_not_contact?: boolean;
 }
 
 
@@ -498,4 +501,15 @@ export const COLLECTIONS = {
   FIN_CATEGORIES: 'fin_categories',
   FIN_TRANSACTIONS: 'fin_transactions',
   RECURRING_TRANSACTIONS: 'recurring_transactions',
+
+  // Email marketing collections
+  EMAIL_TEMPLATES: 'email_templates',
+  EMAIL_CAMPAIGNS: 'email_campaigns',
+  EMAIL_LISTS: 'email_lists',
+  EMAIL_RECIPIENTS: 'email_recipients',
+  EMAIL_SEQUENCES: 'email_sequences',
+  EMAIL_SEQUENCE_STEPS: 'email_sequence_steps',
+  EMAIL_SEQUENCE_ENROLLMENTS: 'email_sequence_enrollments',
+  EMAIL_EVENTS: 'email_events',
+  EMAIL_UNSUBSCRIBES: 'email_unsubscribes',
 } as const;

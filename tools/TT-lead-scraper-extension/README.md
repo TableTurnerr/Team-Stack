@@ -119,9 +119,9 @@ Filters scraped results to include only restaurants and food-related businesses,
 2. Update `releaseNotes` in `version.json`.
 3. Create distribution zip:
    ```bash
-   zip -r TT-lead-scraper-v2.0.zip . -x "*.git*"
+   zip -r TT-lead-scraper-v2.3.zip . -x "*.git*"
    ```
-4. Create a GitHub release with tag `v2.0` and upload the zip.
+4. Create a GitHub release with tag `v2.3` and upload the zip.
 
 ---
 

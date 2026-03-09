@@ -14,8 +14,10 @@
 1. **Lead Acquisition** → Scrape restaurants from Google Maps or Instagram
 2. **Cold Calling** → Record calls, auto-transcribe with AI, track outcomes
 3. **Instagram Outreach** → Automated DM campaigns via actor accounts
-4. **Pipeline Management** → Track status from Cold → Warm → Booked → Client
-5. **System Audio Recording** → Capture full system audio for desktop app calls
+4. **Email Marketing** → Campaigns, sequences, templates, A/B testing, analytics
+5. **Financial Tracking** → Bank accounts, transactions, budgets, cash flow
+6. **Pipeline Management** → Track status from Cold → Warm → Booked → Client
+7. **System Audio Recording** → Capture full system audio for desktop app calls
 
 ---
 
@@ -41,28 +43,27 @@ CRM-Tableturnerr/
 │   └── hubspot/                   # 🔗 HubSpot CRM migration context & mapping
 │
 ├── tools/
+│   ├── TT-lead-scraper-extension/ # 🗺️ Chrome extension for Google Maps lead scraping
+│   │   ├── manifest.json          # Extension config (Manifest V3)
+│   │   ├── popup.js               # Extension popup logic
+│   │   └── background.js          # Service worker
+│   │
 │   ├── audio-recorder/            # 🎙️ PyQt desktop app with hotkey recording
 │   │   ├── recorder.py            # Main GUI application
 │   │   └── installer.nsi          # NSIS installer script
+│   │
+│   ├── call-recorder-v2/          # 🎤 .NET/WPF call recording application
 │   │
 │   ├── transcriber/               # 🧠 Gemini AI transcription service
 │   │   ├── transcribe_calls.py    # Main transcription script
 │   │   └── pocketbase_service.py  # DB integration
 │   │
-│   ├── google-maps-easy-scrape/   # 🗺️ Chrome extension for lead scraping
-│   │   ├── manifest.json          # Extension config (Manifest V3)
-│   │   ├── popup.js               # Extension popup logic
-│   │   └── background.js          # Service worker
-│   │
-│   ├── database/                  # 🗄️ Seeding and migration scripts
-│   └── call-recorder-v2/          # 🎤 Alternative recording implementation
+│   └── database/                  # 🗄️ Seeding and migration scripts
 │
-├── antigravity-docs/              # 📚 AI agent implementation docs
 └── [Root Config Files]
     ├── package.json               # pnpm workspace root
     ├── pnpm-workspace.yaml        # Workspace package definitions
     ├── SETUP_GUIDE.md             # Detailed setup instructions
-    ├── UPCOMING.md                # Feature roadmap
     └── .env.info.example          # Environment variable reference
 ```
 
@@ -96,17 +97,29 @@ erDiagram
     users ||--o{ cold_calls : "claims"
     users ||--o{ notes : "creates"
     users ||--o{ event_logs : "triggers"
-    
+    users ||--o{ fin_transactions : "creates"
+
     companies ||--o{ cold_calls : "receives"
     companies ||--o{ event_logs : "has"
-    
+    companies ||--o{ email_recipients : "receives"
+    companies ||--o{ interactions : "has"
+
     cold_calls ||--o| call_transcripts : "has"
-    
+
     insta_actors ||--o{ outreach_logs : "sends"
-    event_logs ||--o{ outreach_logs : "contains"
+
+    email_campaigns ||--o{ email_recipients : "targets"
+    email_sequences ||--o{ email_sequence_steps : "contains"
+    email_sequences ||--o{ email_sequence_enrollments : "enrolls"
+    email_templates ||--o{ email_campaigns : "used_by"
+
+    bank_accounts ||--o{ fin_transactions : "has"
+    fin_categories ||--o{ fin_transactions : "categorizes"
 ```
 
 ### Collection Reference
+
+**CRM Core:**
 
 | Collection | Purpose | Key Fields |
 |------------|---------|------------|
@@ -114,16 +127,44 @@ erDiagram
 | `companies` | Restaurant entities | `company_name`, `owner_name`, `phone_numbers`, `status`, `source` |
 | `cold_calls` | Call records | `company`, `call_outcome`, `interest_level`, `phone_number`, `claimed_by` |
 | `call_transcripts` | AI transcriptions | `call` (relation), `transcript` |
+| `cold_calling_sessions` | Live session state | Session tracking for cold calling workflow |
+| `interactions` | Multi-channel activity | `company`, `channel`, `direction`, `notes` |
+| `follow_ups` | Scheduled follow-ups | `company`, `due_date`, `status`, `notes` |
+| `notes` | Rich text notes | `title`, `note_text` (Tiptap JSON), `is_archived`, `is_deleted` |
+| `recordings` | Call recordings | Audio file storage and metadata |
+| `phone_numbers` | Phone directory | Phone number management |
 | `insta_actors` | Instagram accounts | `username`, `owner` (relation), `status` (Active/Suspended) |
 | `event_logs` | Audit trail | `event_type`, `actor`, `user`, `company`, `source` |
 | `outreach_logs` | Message tracking | `event` (relation), `message_text`, `sent_at` |
 | `goals` | KPI targets | `metric`, `target_value`, `frequency`, `status` |
 | `rules` | Rate limiting | `type`, `metric`, `limit_value`, `time_window_sec` |
 | `alerts` | Notifications | `target_user`, `entity_type`, `message`, `is_dismissed` |
-| `notes` | Markdown notes | `title`, `note_text`, `is_archived`, `is_deleted` |
-| `leads` | ⚠️ Deprecated | Merged into `companies` |
 
-> **Schema Location**: `packages/pocketbase-client/pb_db_schema.json`
+**Email Marketing:**
+
+| Collection | Purpose | Key Fields |
+|------------|---------|------------|
+| `email_campaigns` | Campaign orchestration | `name`, `template`, `status`, `audience_list`, `counters` |
+| `email_templates` | Reusable email designs | `name`, `subject`, `html_body`, `json_body`, `category` |
+| `email_lists` | Audience segments | `name`, `list_type` (static/dynamic/suppression), `filter_json` |
+| `email_recipients` | Per-recipient send status | `campaign`, `company`, `status`, `tracking_id`, `open_count` |
+| `email_sequences` | Drip campaign definitions | `name`, `status`, `trigger_type`, `trigger_config` |
+| `email_sequence_steps` | Steps within a sequence | `sequence`, `step_order`, `template`, `delay_days` |
+| `email_sequence_enrollments` | Per-company enrollment | `sequence`, `company`, `status`, `current_step` |
+| `email_events` | Granular event log | `recipient`, `event_type`, `event_data` |
+| `email_unsubscribes` | Suppression registry | `company`, `email_address`, `reason`, `source` |
+
+**Financial:**
+
+| Collection | Purpose | Key Fields |
+|------------|---------|------------|
+| `bank_accounts` | Bank account tracking | Account details and balances |
+| `balance_adjustments` | Manual balance corrections | Adjustment records |
+| `fin_categories` | Transaction categories | Category hierarchy |
+| `fin_transactions` | Financial transactions | `bank_account`, `type`, `amount`, `category`, `status`, `date` |
+| `recurring_transactions` | Recurring entries | Scheduled recurring transaction rules |
+
+> **Schema Location**: `packages/pocketbase-client/pb_db_schema.json` (35+ collections total)
 
 ---
 
@@ -134,10 +175,15 @@ Modern Next.js 15 web application with:
 - **Route Groups**: `(dashboard)/` contains all authenticated routes
   - `/companies` - Company CRUD with inline editing and hierarchy support
   - `/cold-calls` - Call log with transcript viewer and recording download
-  - `/leads` - Legacy leads view
+  - `/session` - Live cold calling session with power dialer
+  - `/session-logs` - Session history with CSV export
+  - `/email` - Email marketing (campaigns, templates, lists, sequences, analytics)
+  - `/financial` - Financial tracking (accounts, transactions, budgets, cash flow)
+  - `/follow-ups` - Scheduled follow-up management
+  - `/leads` - Lead management
   - `/actors` - Instagram actor management
   - `/recordings` - Bulk audio upload
-  - `/notes` - Markdown note editor
+  - `/notes` - Rich text notes (Tiptap block editor)
   - `/goals` - KPI tracking
   - `/settings` - App configuration
   - `/team` - User management
@@ -150,6 +196,9 @@ Modern Next.js 15 web application with:
   - `zoom-call-button.tsx` - Click-to-call via Zoom Phone
   - `zoom-phone-context.tsx` - Zoom Phone state management
   - `power-dialer-panel.tsx` - Automated sequential dialing from a queue
+  - `block-editor/` - Tiptap 3 rich text editor with slash commands
+  - `email/` - 18 email marketing components (campaign builder, sequence builder, template editor, etc.)
+  - `financial/` - Financial dashboard components (cash flow charts, expense breakdowns, transaction management)
 
 - **Zoom Phone Integration**:
   - Embedded Smart Embed dialer with postMessage API
@@ -176,11 +225,11 @@ Python service for AI transcription:
 - **Entry Point**: `transcribe_calls.py`
 - **Requires**: `GEMINI_API_KEY` environment variable
 
-### Google Maps Scraper (`tools/google-maps-easy-scrape`)
-Chrome extension (Manifest V3):
-- **Modes**: Automated list scraping, Manual single-add
+### Lead Scraper Extension (`tools/TT-lead-scraper-extension`)
+Chrome extension (Manifest V3) for Google Maps restaurant scraping:
+- **Modes**: Automated list scraping, Manual single-add with overlay
+- **Features**: CRM integration, dark mode, keyboard shortcuts, auto-connect
 - **Output**: Direct PocketBase upload or CSV export
-- **Key Files**: `popup.js`, `background.js`, `manifest.json`
 
 ---
 
@@ -304,7 +353,6 @@ Test coverage: auth, overview, companies, cold calls, session lifecycle, session
 | Document | Purpose |
 |----------|---------|
 | [SETUP_GUIDE.md](SETUP_GUIDE.md) | Detailed installation, seeding, and deployment |
-| [UPCOMING.md](UPCOMING.md) | Feature roadmap (Instagram scraper, AI enrichment) |
 | [packages/hubspot/HUBSPOT_CONTEXT.md](packages/hubspot/HUBSPOT_CONTEXT.md) | HubSpot CRM migration mapping |
 
 ---

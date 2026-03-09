@@ -29,7 +29,7 @@
 ### Verify Installation
 ```bash
 node --version    # Should be v18+
-pnpm --version    # Should be v8+
+pnpm --version    # Should be v9+
 python --version  # Should be 3.10+
 ```
 
@@ -54,12 +54,11 @@ The database structure is defined in the shared package.
 1. Open PocketBase Admin UI (`http://localhost:8090/_/`).
 2. Go to **Settings** → **Import Collections**.
 3. Click **Load from JSON file**.
-4. Select: `packages/pocketbase-client/pb_schema.json`.
-   *(Note: If this file is missing, check `packages/pocketbase-client/pb_db_schema.json`)*
+4. Select: `packages/pocketbase-client/pb_db_schema.json`.
 5. Click **Review** then **Confirm and import**.
 
 ### Verified Collections
-You should see: `users`, `companies`, `leads`, `cold_calls`, `call_transcripts`, `insta_actors`, `event_logs`, `outreach_logs`, `notes`, `alerts`, `goals`, `rules`.
+You should see 35+ collections including: `users`, `companies`, `cold_calls`, `call_transcripts`, `cold_calling_sessions`, `insta_actors`, `event_logs`, `outreach_logs`, `notes`, `alerts`, `goals`, `rules`, `interactions`, `follow_ups`, `phone_numbers`, `recordings`, `company_notes`, `user_preferences`, `call_logs`, `bank_accounts`, `balance_adjustments`, `fin_categories`, `fin_transactions`, `recurring_transactions`, `email_campaigns`, `email_templates`, `email_lists`, `email_recipients`, `email_sequences`, `email_sequence_steps`, `email_sequence_enrollments`, `email_events`, `email_unsubscribes`.
 
 ---
 
@@ -334,4 +333,4 @@ Recommended architecture:
 - **Fix**: Run the seeder script (Step 4).
 
 ---
-*Last updated: February 2026*
+*Last updated: March 2026*

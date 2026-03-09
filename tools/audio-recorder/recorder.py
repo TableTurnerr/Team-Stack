@@ -1909,7 +1909,7 @@ class RecorderApp:
         try:
             self.recorder.save(str(filepath), audio)
             self.status_label.config(text=f"Saved: {filepath.name}", foreground="green")
-            print(f"Recording saved: {filepath.name}")
+            print("Recording saved successfully")
             # Track last saved file and show delete button
             self.last_saved_file = filepath
             self.delete_btn.pack(side=tk.LEFT, padx=(5, 0))

@@ -10,6 +10,7 @@ import { ListBuilder, type FilterRule } from '@/components/email/list-builder';
 import { ListMembersTable } from '@/components/email/list-members-table';
 import { SuppressionManager } from '@/components/email/suppression-manager';
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
+import Link from 'next/link';
 
 export default function ListDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -69,9 +70,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     return (
       <div className="flex flex-col items-center justify-center py-16 text-[var(--muted)]">
         <p className="text-lg font-medium">List not found</p>
-        <a href="/email/lists" className="text-sm text-[var(--primary)] mt-2 hover:underline">
+        <Link
+          href="/email/lists"
+          className="text-sm text-[var(--primary)] mt-2 hover:underline"
+        >
           Back to lists
-        </a>
+        </Link>
       </div>
     );
   }
@@ -84,12 +88,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
-          <a
+          <Link
             href="/email/lists"
             className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors"
           >
             <ArrowLeft size={20} />
-          </a>
+          </Link>
           <div className="flex items-center gap-3">
             <div className={cn(
               'p-2.5 rounded-lg',

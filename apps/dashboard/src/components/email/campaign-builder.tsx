@@ -9,6 +9,7 @@ import { EMAIL_COLLECTIONS, type EmailTemplate, type EmailList, type ABWinnerMet
 import { AudiencePicker } from './audience-picker';
 import { SchedulePicker } from './schedule-picker';
 import { ABTestSetup } from './ab-test-setup';
+import Link from 'next/link';
 
 interface CampaignBuilderProps {
   campaignId?: string;
@@ -311,7 +312,7 @@ export function CampaignBuilder({ campaignId, className }: CampaignBuilderProps)
               <h2 className="text-lg font-semibold">Select Template</h2>
               <p className="text-sm text-[var(--muted)] mt-1">
                 Choose a template for your campaign or{' '}
-                <a href="/email/templates/new" className="text-[var(--primary)] hover:underline">create a new one</a>
+                <Link href="/email/templates/new" className="text-[var(--primary)] hover:underline">create a new one</Link>
               </p>
             </div>
 
@@ -323,9 +324,9 @@ export function CampaignBuilder({ campaignId, className }: CampaignBuilderProps)
               <div className="flex flex-col items-center justify-center py-12 text-[var(--muted)]">
                 <FileText size={32} className="mb-2 opacity-50" />
                 <p className="text-sm">No templates available</p>
-                <a href="/email/templates/new" className="text-sm text-[var(--primary)] mt-2 hover:underline">
+                <Link href="/email/templates/new" className="text-sm text-[var(--primary)] mt-2 hover:underline">
                   Create your first template
-                </a>
+                </Link>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

@@ -20,6 +20,7 @@ import { StatsCard } from '@/components/stats-card';
 import { SearchInput } from '@/components/search-input';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
+import Link from 'next/link';
 
 const STATUS_CONFIG: Record<CampaignStatus, { icon: typeof Mail; color: string; label: string }> = {
   draft: { icon: Mail, color: 'bg-[var(--card-hover)] text-[var(--muted)]', label: 'Draft' },
@@ -116,9 +117,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     return (
       <div className="flex flex-col items-center justify-center py-16 text-[var(--muted)]">
         <p className="text-lg font-medium">Campaign not found</p>
-        <a href="/email/campaigns" className="text-sm text-[var(--primary)] mt-2 hover:underline">
+        <Link
+          href="/email/campaigns"
+          className="text-sm text-[var(--primary)] mt-2 hover:underline"
+        >
           Back to campaigns
-        </a>
+        </Link>
       </div>
     );
   }
@@ -141,12 +145,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="flex items-start gap-3">
-          <a
+          <Link
             href="/email/campaigns"
             className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors mt-1"
           >
             <ArrowLeft size={20} />
-          </a>
+          </Link>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold tracking-tight">{campaign.name}</h1>
@@ -178,13 +182,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
           {campaign.status === 'draft' && (
-            <a
+            <Link
               href={`/email/campaigns/new?edit=${campaign.id}`}
               className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg btn-ghost border border-[var(--card-border)]"
             >
               <Edit2 size={14} />
               Edit
-            </a>
+            </Link>
           )}
           {campaign.status === 'paused' && (
             <button

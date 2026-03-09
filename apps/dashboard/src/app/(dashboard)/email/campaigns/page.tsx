@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { formatDateTime, sanitizeFilterValue } from '@/lib/utils';
 import { SearchInput } from '@/components/search-input';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
+import Link from 'next/link';
 
 const STATUS_TABS: { key: string; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -74,12 +75,12 @@ export default function CampaignsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-start gap-3">
-          <a
+          <Link
             href="/email"
             className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors mt-1"
           >
             <ArrowLeft size={20} />
-          </a>
+          </Link>
           <div>
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
               <Send size={24} />
@@ -90,13 +91,13 @@ export default function CampaignsPage() {
             </p>
           </div>
         </div>
-        <a
+        <Link
           href="/email/campaigns/new"
           className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg btn-primary"
         >
           <Plus size={16} />
           New Campaign
-        </a>
+        </Link>
       </div>
 
       {/* Filters */}
@@ -134,13 +135,13 @@ export default function CampaignsPage() {
           <Mail size={48} className="mb-3 opacity-50" />
           <p className="text-lg font-medium">No campaigns found</p>
           <p className="text-sm mt-1">Create your first campaign to start reaching your audience</p>
-          <a
+          <Link
             href="/email/campaigns/new"
             className="mt-4 flex items-center gap-2 px-4 py-2 text-sm rounded-lg btn-primary"
           >
             <Plus size={16} />
             Create Campaign
-          </a>
+          </Link>
         </div>
       ) : (
         <div className="space-y-3">
@@ -155,7 +156,7 @@ export default function CampaignsPage() {
               : null;
 
             return (
-              <a
+              <Link
                 key={campaign.id}
                 href={`/email/campaigns/${campaign.id}`}
                 className="block bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5 card-interactive"
@@ -227,7 +228,7 @@ export default function CampaignsPage() {
                     </div>
                   ) : null}
                 </div>
-              </a>
+              </Link>
             );
           })}
         </div>

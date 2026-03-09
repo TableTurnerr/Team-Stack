@@ -1,0 +1,113 @@
+name: Claude Security Fixer
+
+on:
+  workflow_run:
+    workflows: ["CodeQL"]
+    types: [completed]
+  workflow_dispatch:  # Allow manual trigger anytime
+
+jobs:
+  fix-security-issues:
+    # Only run if CodeQL found something (or manually triggered)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      security-events: read
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch open CodeQL alerts
+        id: get-alerts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching open CodeQL alerts..."
+
+          gh api \
+            "repos/${{ github.repository }}/code-scanning/alerts?state=open&tool_name=CodeQL&per_page=100" \
+            --jq '
+              [.[] | {
+                number: .number,
+                rule_id: .rule.id,
+                rule_name: .rule.name,
+                severity: .rule.severity,
+                security_severity: .rule.security_severity_level,
+                description: .rule.description,
+                file: .most_recent_instance.location.path,
+                start_line: .most_recent_instance.location.start_line,
+                end_line: .most_recent_instance.location.end_line,
+                message: .most_recent_instance.message.text,
+                html_url: .html_url
+              }]
+            ' > codeql_alerts.json
+
+          ALERT_COUNT=$(cat codeql_alerts.json | jq 'length')
+          echo "Found $ALERT_COUNT open CodeQL alerts"
+          echo "alert_count=$ALERT_COUNT" >> $GITHUB_OUTPUT
+
+          # Pretty print for the prompt
+          cat codeql_alerts.json | jq '.' > alerts_formatted.json
+
+      - name: Skip if no alerts
+        if: steps.get-alerts.outputs.alert_count == '0'
+        run: |
+          echo "No open CodeQL alerts found. Nothing to fix."
+          exit 0
+
+      - name: Run Claude to fix security issues
+        if: steps.get-alerts.outputs.alert_count != '0'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a security engineer. Your ONLY task is to fix the open security vulnerabilities found by CodeQL.
+
+            DO NOT:
+            - Do a general code review
+            - Suggest style improvements
+            - Refactor code unrelated to the security issues
+            - Add comments or documentation unrelated to the fixes
+            - Change logic that is not directly causing the vulnerability
+
+            DO:
+            - Fix each vulnerability listed below precisely and minimally
+            - Preserve the original code structure and style
+            - Use the safest, most idiomatic fix for each issue type
+            - After all fixes, commit directly to the current branch with a clear commit message
+
+            Here are the open CodeQL security alerts to fix:
+
+            $(cat alerts_formatted.json)
+
+            For each alert:
+            1. Open the file at the given path
+            2. Go to the line number specified
+            3. Understand the vulnerability (SQL injection, XSS, path traversal, hardcoded secret, etc.)
+            4. Apply the minimal correct fix
+            5. Move on to the next alert
+
+            Common fix patterns:
+            - SQL injection → use parameterized queries / prepared statements
+            - XSS → sanitize/escape output, use safe DOM APIs
+            - Path traversal → validate and normalize paths, use allowlists
+            - Hardcoded credentials → move to environment variables
+            - Insecure deserialization → validate input before deserializing
+            - Command injection → use safe APIs, avoid shell=True / exec with user input
+
+            When done fixing all issues, commit all changes directly to the branch with this commit message format:
+            "fix(security): resolve [N] CodeQL vulnerabilities
+
+            Fixed issues:
+            - [brief description of each fix]
+
+            Resolved CodeQL alerts: [list alert numbers]"
+
+            Do not open a pull request. Commit directly.

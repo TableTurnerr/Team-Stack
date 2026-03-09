@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { pb } from '@/lib/pocketbase';
 import { useToast } from '@/components/ui/toast';
 import { PasswordInput } from '@/components/ui/password-input';
-import { Loader2, CheckCircle, Shield, Key, ExternalLink } from 'lucide-react';
+import { Loader2, CheckCircle, Shield, Key, ExternalLink, MessageSquare, XCircle } from 'lucide-react';
 
 export function AccountSection() {
     const { user } = useAuth();
@@ -18,11 +18,32 @@ export function AccountSection() {
     });
     const [isChangingPassword, setIsChangingPassword] = useState(false);
 
+    const [discordUserId, setDiscordUserId] = useState(user?.discord_user_id || '');
+    const [isSavingDiscord, setIsSavingDiscord] = useState(false);
+
     const validatePassword = (password: string): string | null => {
         if (password.length < 8) return 'Password must be at least 8 characters';
         if (!/\d/.test(password)) return 'Password must contain at least one number';
         if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) return 'Password must contain at least one special character';
         return null;
+    };
+
+    const handleSaveDiscordId = async () => {
+        if (!user?.id) return;
+        const trimmed = discordUserId.trim();
+        if (trimmed && !/^\d+$/.test(trimmed)) {
+            addToast('error', 'Discord User ID must be numeric (e.g. 123456789012345678)');
+            return;
+        }
+        setIsSavingDiscord(true);
+        try {
+            await pb.collection('users').update(user.id, { discord_user_id: trimmed });
+            addToast('success', trimmed ? 'Discord account linked' : 'Discord account unlinked');
+        } catch (error: any) {
+            addToast('error', error?.message || 'Failed to save Discord User ID');
+        } finally {
+            setIsSavingDiscord(false);
+        }
     };
 
     const handlePasswordChange = async (e: React.FormEvent) => {
@@ -140,6 +161,55 @@ export function AccountSection() {
                         <CheckCircle size={16} />
                         <span className="text-sm">Connected</span>
                     </div>
+                </div>
+            </div>
+
+            <hr className="border-[var(--card-border)]" />
+
+            {/* Discord Account */}
+            <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                    <MessageSquare size={18} className="text-[#5865F2]" />
+                    <h3 className="font-medium">Discord Account</h3>
+                    {user?.discord_user_id && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#5865F2]/15 text-[#5865F2] font-medium">
+                            Linked
+                        </span>
+                    )}
+                </div>
+
+                <p className="text-sm text-[var(--muted)]">
+                    Link your Discord account so the CRM bot can @mention you directly in Discord notifications.
+                    To find your User ID: open Discord, go to Settings → Advanced → enable Developer Mode,
+                    then right-click your username and select &ldquo;Copy User ID&rdquo;.
+                </p>
+
+                <div className="flex gap-2 max-w-md">
+                    <input
+                        type="text"
+                        value={discordUserId}
+                        onChange={(e) => setDiscordUserId(e.target.value)}
+                        placeholder="e.g. 123456789012345678"
+                        className="flex-1 px-3 py-2 text-sm rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:border-[var(--primary)] font-mono"
+                    />
+                    <button
+                        onClick={handleSaveDiscordId}
+                        disabled={isSavingDiscord}
+                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg btn-primary disabled:opacity-50"
+                    >
+                        {isSavingDiscord && <Loader2 size={14} className="animate-spin" />}
+                        Save
+                    </button>
+                    {user?.discord_user_id && (
+                        <button
+                            onClick={() => { setDiscordUserId(''); handleSaveDiscordId(); }}
+                            disabled={isSavingDiscord}
+                            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg btn-ghost border border-[var(--card-border)] disabled:opacity-50"
+                            title="Unlink Discord"
+                        >
+                            <XCircle size={14} />
+                        </button>
+                    )}
                 </div>
             </div>
 

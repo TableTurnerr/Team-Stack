@@ -58,7 +58,12 @@ CRM-Tableturnerr/
 │   │   ├── transcribe_calls.py    # Main transcription script
 │   │   └── pocketbase_service.py  # DB integration
 │   │
-│   └── database/                  # 🗄️ Seeding and migration scripts
+│   ├── database/                  # 🗄️ Seeding and migration scripts
+│   │
+│   └── discord-bot/               # 🤖 Discord DM notification bot
+│       ├── src/index.ts           # Entry — boots client, auths PB, starts scheduler
+│       ├── src/scheduler.ts       # Cron jobs for due/overdue follow-ups
+│       └── src/notifications/    # Follow-up and alert polling logic
 │
 └── [Root Config Files]
     ├── package.json               # pnpm workspace root
@@ -225,6 +230,14 @@ Python service for AI transcription:
 - **Entry Point**: `transcribe_calls.py`
 - **Requires**: `GEMINI_API_KEY` environment variable
 
+### Discord Bot (`tools/discord-bot`)
+Node.js/TypeScript background worker:
+- **Follow-up reminders**: DMs the assigned user when a follow-up is due (blue embed)
+- **Overdue alerts**: DMs the assigned user for any past-due pending follow-ups every 30 min (yellow embed)
+- **User preferences**: Respects per-user DND windows and notification toggle stored in `user_preferences` collection
+- **Auth**: Admin PocketBase auth with automatic token refresh on 401
+- **Entry Point**: `src/index.ts`
+
 ### Lead Scraper Extension (`tools/TT-lead-scraper-extension`)
 Chrome extension (Manifest V3) for Google Maps restaurant scraping:
 - **Modes**: Automated list scraping, Manual single-add with overlay
@@ -274,6 +287,11 @@ PB_ADMIN_PASSWORD=your_password
 # Gemini AI (transcriber only)
 GEMINI_API_KEY=your_api_key
 GEMINI_MODEL=gemini-2.5-flash
+
+# Discord bot (tools/discord-bot only)
+DISCORD_BOT_TOKEN=your_bot_token
+CRM_BASE_URL=https://crm.tableturnerr.com
+POLL_INTERVAL_MINUTES=5
 ```
 
 ### Zoom Phone Settings (localStorage)

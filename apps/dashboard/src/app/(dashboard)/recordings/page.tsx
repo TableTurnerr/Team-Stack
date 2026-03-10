@@ -13,6 +13,9 @@ import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
 import { ZoomCallButton } from '@/components/zoom-call-button';
+import { TableContainer, IndexCell, HeaderIndexCell, ResizableTh, useResizableColumns, TablePagination, TableEmptyState } from '@/components/ui/data-table';
+import { RelativeTime } from '@/components/relative-time';
+import { useUserPreferences } from '@/hooks/use-user-preferences';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -53,6 +56,7 @@ const formatPhoneNumber = (phone: string | undefined | null) => {
 
 export default function RecordingsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { preferences } = useUserPreferences();
   const isAdmin = user?.role === 'admin';
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
@@ -379,6 +383,17 @@ export default function RecordingsPage() {
   // Column visibility
   const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('recordings', RECORDING_COLUMNS);
 
+  const { widths, resize, getWidth } = useResizableColumns('recordings', [
+    { key: 'recording_date', initialWidth: 130 },
+    { key: 'duration', initialWidth: 90 },
+    { key: 'created', initialWidth: 120 },
+    { key: 'phone_number', initialWidth: 180 },
+    { key: 'note', initialWidth: 200 },
+    { key: 'file', initialWidth: 120 },
+    { key: 'uploader', initialWidth: 100 },
+    { key: 'actions', initialWidth: 80 },
+  ]);
+
   const fetchRecordings = useCallback(async () => {
     if (!isAuthenticated) return;
 
@@ -433,22 +448,18 @@ export default function RecordingsPage() {
     }
   }, [page, isAuthenticated, searchTerm]);
 
-  const getRecordingDisplayDate = (recording: Recording) => {
+  /** Extract the best available date string for a recording (ISO or PB date). Returns null if none found. */
+  const getRecordingDateISO = (recording: Recording): string | null => {
     const pattern = /recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})/;
     const match = recording.file?.match(pattern);
     if (match) {
       const [, date, time] = match;
       const [day, month, year] = date.split('-');
       const formattedTime = time.replace(/-/g, ':');
-      // Construct an ISO-like string that new Date() can reliably parse, adding +05:00 offset
-      const isoDate = `${year}-${month}-${day}T${formattedTime}+05:00`;
-      return formatDateTime(isoDate);
+      return `${year}-${month}-${day}T${formattedTime}+05:00`;
     }
-
-    if (recording.recording_date) {
-      return formatDateTime(recording.recording_date);
-    }
-    return 'N/A';
+    if (recording.recording_date) return recording.recording_date;
+    return null;
   };
 
   const clearFilters = () => {
@@ -630,200 +641,202 @@ export default function RecordingsPage() {
       )}
 
       {/* Recordings Table */}
-      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
+      <TableContainer>
         {recordings.length === 0 ? (
-          <div className="p-16 text-center">
-            <div className="w-12 h-12 rounded-full bg-[var(--sidebar-bg)] flex items-center justify-center mx-auto mb-4">
-              <Mic size={24} className="text-[var(--muted)]" />
-            </div>
-            <p className="text-sm font-medium">No recordings found</p>
-            <p className="text-xs text-[var(--muted)] mt-1">
-              {isAdmin ? 'Upload a recording to get started' : 'Contact an admin to upload recordings'}
-            </p>
-          </div>
+          <TableEmptyState
+            icon={<Mic size={24} className="text-[var(--muted)]" />}
+            title="No recordings found"
+            description={isAdmin ? 'Upload a recording to get started' : 'Contact an admin to upload recordings'}
+          />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
-                <tr>
-                  {isAdmin && (
-                    <th className="py-3 px-4 w-10">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.size === recordings.length && recordings.length > 0}
-                        onChange={toggleSelectAll}
-                        className="rounded border-[var(--card-border)] text-[var(--foreground)] focus:ring-[var(--foreground)]"
-                      />
-                    </th>
-                  )}
-                  {isColumnVisible('recording_date') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Date</th>}
-                  {isColumnVisible('duration') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Duration</th>}
-                  {isColumnVisible('created') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Uploaded</th>}
-                  {isColumnVisible('phone_number') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
-                  {isColumnVisible('note') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Note</th>}
-                  {isColumnVisible('file') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recording</th>}
-                  {isColumnVisible('uploader') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Uploader</th>}
-                  <th className="text-right py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--card-border)]">
-                {recordings.map((recording, i) => (
-                  <tr key={recording.id} className="hover:bg-[var(--sidebar-bg)] transition-colors group">
-                    {isAdmin && (
-                      <td className="py-3 px-4">
-                        <div className="relative w-5 h-5 flex items-center justify-center">
-                          <span className={cn(
-                            "text-xs text-[var(--muted)] transition-opacity",
-                            (selectedIds.has(recording.id) || showFilters) ? "opacity-0" : "group-hover:opacity-0"
-                          )}>
-                            {(page - 1) * perPage + i + 1}
-                          </span>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(recording.id)}
-                            onChange={() => toggleSelectOne(recording.id)}
-                            className={cn(
-                              "absolute inset-0 opacity-0 transition-opacity",
-                              (selectedIds.has(recording.id) || showFilters) ? "opacity-100" : "group-hover:opacity-100"
-                            )}
-                          />
-                        </div>
-                      </td>
-                    )}
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full" style={{ tableLayout: 'fixed' }}>
+                <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
+                  <tr>
+                    <HeaderIndexCell
+                      allSelected={selectedIds.size === recordings.length && recordings.length > 0}
+                      someSelected={selectedIds.size > 0 && selectedIds.size < recordings.length}
+                      onToggleAll={toggleSelectAll}
+                    />
                     {isColumnVisible('recording_date') && (
-                      <td className="py-3 px-4 whitespace-nowrap text-sm">
-                        {getRecordingDisplayDate(recording)}
-                      </td>
+                      <ResizableTh width={getWidth('recording_date')} onResize={(w) => resize('recording_date', w)}>Date</ResizableTh>
                     )}
                     {isColumnVisible('duration') && (
-                      <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
-                        {recording.duration ? formatDuration(recording.duration) : 'N/A'}
-                      </td>
+                      <ResizableTh width={getWidth('duration')} onResize={(w) => resize('duration', w)}>Duration</ResizableTh>
                     )}
                     {isColumnVisible('created') && (
-                      <td className="py-3 px-4 whitespace-nowrap text-sm text-[var(--muted)]">
-                        {formatDate(recording.created)}
-                      </td>
+                      <ResizableTh width={getWidth('created')} onResize={(w) => resize('created', w)}>Uploaded</ResizableTh>
                     )}
                     {isColumnVisible('phone_number') && (
-                      <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
-                        {recording.expand?.phone_number_record ? (
-                          <div className="flex items-center gap-1">
-                            <div className="flex flex-col">
-                              <span className="font-bold text-[var(--foreground)]">
-                                {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
-                              </span>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                {recording.expand.phone_number_record.label && (
-                                  <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
-                                    {recording.expand.phone_number_record.label}
-                                  </span>
-                                )}
-                                {recording.expand.company && (
-                                  <Link
-                                    href={`/companies/${recording.company}`}
-                                    className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
-                                  >
-                                    {recording.expand.company.company_name}
-                                  </Link>
-                                )}
-                              </div>
-                            </div>
-                            <ZoomCallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
-                            {recording.phone_number && (
-                              <ZoomCallButton phoneNumber={recording.phone_number} />
-                            )}
-                          </div>
-                        )}
-                      </td>
+                      <ResizableTh width={getWidth('phone_number')} onResize={(w) => resize('phone_number', w)}>Phone</ResizableTh>
                     )}
                     {isColumnVisible('note') && (
-                      <td className="py-3 px-4 text-sm max-w-xs group relative">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate" title={recording.note}>{recording.note || 'N/A'}</span>
-                            <button
-                              onClick={() => openEdit(recording)}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
-                              title="Edit note"
-                            >
-                              <Pencil size={12} />
-                            </button>
+                      <ResizableTh width={getWidth('note')} onResize={(w) => resize('note', w)}>Note</ResizableTh>
+                    )}
+                    {isColumnVisible('file') && (
+                      <ResizableTh width={getWidth('file')} onResize={(w) => resize('file', w)}>Recording</ResizableTh>
+                    )}
+                    {isColumnVisible('uploader') && (
+                      <ResizableTh width={getWidth('uploader')} onResize={(w) => resize('uploader', w)}>Uploader</ResizableTh>
+                    )}
+                    <ResizableTh width={getWidth('actions')} resizable={false} align="right">Actions</ResizableTh>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--card-border)]">
+                  {recordings.map((recording, i) => (
+                    <tr key={recording.id} className="hover:bg-[var(--sidebar-bg)] transition-colors group">
+                      <IndexCell
+                        index={(page - 1) * perPage + i + 1}
+                        selected={selectedIds.has(recording.id)}
+                        onSelect={() => toggleSelectOne(recording.id)}
+                        forceCheckbox={selectedIds.size > 0}
+                      />
+                      {isColumnVisible('recording_date') && (
+                        <td className="py-3 px-4 whitespace-nowrap text-sm">
+                          {(() => {
+                            const d = getRecordingDateISO(recording);
+                            return d ? <RelativeTime date={d} timezones={preferences?.timezones} className="text-sm" /> : 'N/A';
+                          })()}
+                        </td>
+                      )}
+                      {isColumnVisible('duration') && (
+                        <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
+                          {recording.duration ? formatDuration(recording.duration) : 'N/A'}
+                        </td>
+                      )}
+                      {isColumnVisible('created') && (
+                        <td className="py-3 px-4 whitespace-nowrap text-sm">
+                          <RelativeTime date={recording.created} timezones={preferences?.timezones} className="text-sm text-[var(--muted)]" />
+                        </td>
+                      )}
+                      {isColumnVisible('phone_number') && (
+                        <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
+                          {recording.expand?.phone_number_record ? (
+                            <div className="flex items-center gap-1">
+                              <div className="flex flex-col">
+                                <span className="font-bold text-[var(--foreground)]">
+                                  {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
+                                </span>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  {recording.expand.phone_number_record.label && (
+                                    <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
+                                      {recording.expand.phone_number_record.label}
+                                    </span>
+                                  )}
+                                  {recording.expand.company && (
+                                    <Link
+                                      href={`/companies/${recording.company}`}
+                                      className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
+                                    >
+                                      {recording.expand.company.company_name}
+                                    </Link>
+                                  )}
+                                </div>
+                              </div>
+                              <ZoomCallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
+                              {recording.phone_number && (
+                                <ZoomCallButton phoneNumber={recording.phone_number} />
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      {isColumnVisible('note') && (
+                        <td className="py-3 px-4 text-sm max-w-xs group relative">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate" title={recording.note}>{recording.note || 'N/A'}</span>
+                              <button
+                                onClick={() => openEdit(recording)}
+                                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-all"
+                                title="Edit note"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </div>
+                            {recording.call_log && (
+                              <Link
+                                href={`/cold-calls/${recording.call_log}`}
+                                className="text-[10px] text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
+                              >
+                                <History size={10} />
+                                View Transcript
+                              </Link>
+                            )}
                           </div>
-                          {recording.call_log && (
-                            <Link
-                              href={`/cold-calls/${recording.call_log}`}
-                              className="text-[10px] text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
+                        </td>
+                      )}
+                      {isColumnVisible('file') && (
+                        <td className="py-3 px-4">
+                          {recording.file ? (
+                            <button
+                              onClick={() => handlePlayRecording(recording)}
+                              className={cn(
+                                "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all group",
+                                playingRecording?.id === recording.id
+                                  ? "bg-[var(--primary)]/10 border-[var(--primary)] text-[var(--primary)]"
+                                  : "bg-[var(--sidebar-bg)] border-[var(--card-border)] text-[var(--foreground)] hover:bg-[var(--card-hover)] hover:border-[var(--primary)]"
+                              )}
                             >
-                              <History size={10} />
-                              View Transcript
-                            </Link>
+                              <Headphones size={14} className={cn(
+                                "transition-colors",
+                                playingRecording?.id === recording.id ? "text-[var(--primary)]" : "text-[var(--muted)] group-hover:text-[var(--primary)]"
+                              )} />
+                              <span>{playingRecording?.id === recording.id ? 'Playing...' : 'Listen'}</span>
+                            </button>
+                          ) : (
+                            <span className="text-xs text-[var(--muted)]">No file</span>
+                          )}
+                        </td>
+                      )}
+                      {isColumnVisible('uploader') && (
+                        <td className="py-3 px-4 text-sm whitespace-nowrap">
+                          {recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A'}
+                        </td>
+                      )}
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {recording.file && (
+                            <a
+                              href={pb.files.getUrl(recording, recording.file)}
+                              download
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors"
+                              title="Download recording"
+                            >
+                              <Download size={16} className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors" />
+                            </a>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDelete(recording.id)}
+                              className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
+                              title="Delete recording"
+                            >
+                              <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
+                            </button>
                           )}
                         </div>
                       </td>
-                    )}
-                    {isColumnVisible('file') && (
-                      <td className="py-3 px-4">
-                        {recording.file ? (
-                          <button
-                            onClick={() => handlePlayRecording(recording)}
-                            className={cn(
-                              "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all group",
-                              playingRecording?.id === recording.id
-                                ? "bg-[var(--primary)]/10 border-[var(--primary)] text-[var(--primary)]"
-                                : "bg-[var(--sidebar-bg)] border-[var(--card-border)] text-[var(--foreground)] hover:bg-[var(--card-hover)] hover:border-[var(--primary)]"
-                            )}
-                          >
-                            <Headphones size={14} className={cn(
-                              "transition-colors",
-                              playingRecording?.id === recording.id ? "text-[var(--primary)]" : "text-[var(--muted)] group-hover:text-[var(--primary)]"
-                            )} />
-                            <span>{playingRecording?.id === recording.id ? 'Playing...' : 'Listen'}</span>
-                          </button>
-                        ) : (
-                          <span className="text-xs text-[var(--muted)]">No file</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="py-3 px-4 text-sm whitespace-nowrap">
-                      {isColumnVisible('uploader') && (recording.expand?.uploader?.name || recording.expand?.uploader?.email || recording.uploader || 'N/A')}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {recording.file && (
-                          <a
-                            href={pb.files.getUrl(recording, recording.file)}
-                            download
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors"
-                            title="Download recording"
-                          >
-                            <Download size={16} className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors" />
-                          </a>
-                        )}
-                        {isAdmin && (
-                          <button
-                            onClick={() => handleDelete(recording.id)}
-                            className="p-2 rounded-lg hover:bg-[var(--error-subtle)] transition-colors"
-                            title="Delete recording"
-                          >
-                            <Trash2 size={16} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+            />
+          </>
         )}
-      </div>
+      </TableContainer>
 
       {/* Floating Recording Player */}
       {playingRecording && (
@@ -949,30 +962,6 @@ export default function RecordingsPage() {
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-[var(--muted)]">
-            Page {page} of {totalPages}
-          </span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)] transition-colors"
-            >
-              Previous
-            </button>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)] transition-colors"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

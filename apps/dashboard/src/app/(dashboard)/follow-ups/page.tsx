@@ -26,6 +26,14 @@ import { cn } from '@/lib/utils';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { formatDateTimeInTimezone } from '@/lib/timezone-utils';
+import {
+  TableContainer,
+  IndexCell,
+  HeaderIndexCell,
+  ResizableTh,
+  useResizableColumns,
+  TableEmptyState,
+} from '@/components/ui/data-table';
 
 type StatusFilter = 'overdue' | 'upcoming' | 'completed' | 'dismissed';
 
@@ -75,6 +83,16 @@ export default function FollowUpsPage() {
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
+
+  const { getWidth, resize } = useResizableColumns('follow-ups', [
+    { key: 'company', initialWidth: 200 },
+    { key: 'scheduled', initialWidth: 150 },
+    { key: 'assigned_to', initialWidth: 130 },
+    { key: 'phone', initialWidth: 130 },
+    { key: 'notes', initialWidth: 180 },
+    { key: 'status', initialWidth: 100 },
+    { key: 'actions', initialWidth: 120 },
+  ]);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -331,41 +349,31 @@ export default function FollowUpsPage() {
       )}
 
       {/* ── Table ── */}
-      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl overflow-hidden">
+      <TableContainer>
         {filtered.length === 0 ? (
-          <div className="py-20 text-center">
-            <CalendarClock size={48} className="mx-auto text-[var(--card-border)] mb-4" />
-            <p className="text-[var(--muted)] font-medium">
-              {search ? 'No follow-ups match your search.' : `No ${activeTab} follow-ups.`}
-            </p>
-          </div>
+          <TableEmptyState
+            icon={<CalendarClock size={24} className="text-[var(--muted)]" />}
+            title={search ? 'No follow-ups match your search.' : `No ${activeTab} follow-ups.`}
+            description={search ? 'Try adjusting your search terms.' : `You have no ${activeTab} follow-ups right now.`}
+          />
         ) : (
-          <table className="w-full text-left">
+          <table className="w-full text-left" style={{ tableLayout: 'fixed' }}>
             <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
               <tr>
-                <th className="pl-5 pr-2 py-3.5">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    ref={el => { if (el) el.indeterminate = someSelected; }}
-                    onChange={toggleSelectAll}
-                    className="w-3.5 h-3.5 rounded accent-[var(--primary)] cursor-pointer"
-                    title="Select all"
-                  />
-                </th>
-                <th className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">Company</th>
-                <th className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">Scheduled</th>
-                <th className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)] hidden md:table-cell">Assigned To</th>
-                <th className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)] hidden lg:table-cell">Phone</th>
-                <th className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)] hidden lg:table-cell">Notes</th>
-                <th className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">Status</th>
+                <HeaderIndexCell allSelected={allSelected} someSelected={someSelected} onToggleAll={toggleSelectAll} />
+                <ResizableTh width={getWidth('company')} onResize={(w) => resize('company', w)}>Company</ResizableTh>
+                <ResizableTh width={getWidth('scheduled')} onResize={(w) => resize('scheduled', w)}>Scheduled</ResizableTh>
+                <ResizableTh width={getWidth('assigned_to')} onResize={(w) => resize('assigned_to', w)} className="hidden md:table-cell">Assigned To</ResizableTh>
+                <ResizableTh width={getWidth('phone')} onResize={(w) => resize('phone', w)} className="hidden lg:table-cell">Phone</ResizableTh>
+                <ResizableTh width={getWidth('notes')} onResize={(w) => resize('notes', w)} className="hidden lg:table-cell">Notes</ResizableTh>
+                <ResizableTh width={getWidth('status')} onResize={(w) => resize('status', w)}>Status</ResizableTh>
                 {(activeTab === 'overdue' || activeTab === 'upcoming') && (
-                  <th className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)] text-right">Actions</th>
+                  <ResizableTh width={getWidth('actions')} onResize={(w) => resize('actions', w)} resizable={false} align="right">Actions</ResizableTh>
                 )}
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--card-border)]">
-              {filtered.map(fu => {
+              {filtered.map((fu, idx) => {
                 const isOverdue = fu.status === 'pending' && new Date(fu.scheduled_time) < now;
                 const company = fu.expand?.company;
                 const assignee = fu.expand?.assigned_to;
@@ -381,18 +389,16 @@ export default function FollowUpsPage() {
                       selectedIds.has(fu.id) && 'bg-[var(--primary-subtle)]/40'
                     )}
                   >
-                    {/* Checkbox */}
-                    <td className="pl-5 pr-2 py-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(fu.id)}
-                        onChange={() => toggleSelect(fu.id)}
-                        className="w-3.5 h-3.5 rounded accent-[var(--primary)] cursor-pointer"
-                      />
-                    </td>
+                    {/* Index / Checkbox */}
+                    <IndexCell
+                      index={idx + 1}
+                      selected={selectedIds.has(fu.id)}
+                      onSelect={() => toggleSelect(fu.id)}
+                      forceCheckbox={selectedIds.size > 0}
+                    />
 
                     {/* Company */}
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-4">
                       {company ? (
                         <Link
                           href={`/companies/${fu.company}?tab=follow_ups`}
@@ -401,7 +407,7 @@ export default function FollowUpsPage() {
                           <div className="w-7 h-7 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] flex items-center justify-center flex-shrink-0">
                             <Building2 size={12} className="text-[var(--muted)]" />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <p className="text-sm font-semibold group-hover:text-[var(--primary)] transition-colors line-clamp-1">
                               {company.company_name}
                             </p>
@@ -409,7 +415,7 @@ export default function FollowUpsPage() {
                               <p className="text-[10px] text-[var(--muted)]">{company.status.join(', ')}</p>
                             )}
                           </div>
-                          <ChevronRight size={12} className="text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
+                          <ChevronRight size={12} className="text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity ml-auto flex-shrink-0" />
                         </Link>
                       ) : (
                         <span className="text-sm text-[var(--muted)] italic">Unknown company</span>
@@ -417,7 +423,7 @@ export default function FollowUpsPage() {
                     </td>
 
                     {/* Scheduled */}
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-4">
                       <FollowUpTimeDisplay
                         scheduledTime={fu.scheduled_time}
                         clientTimezone={fu.client_timezone}
@@ -429,7 +435,7 @@ export default function FollowUpsPage() {
                     </td>
 
                     {/* Assigned to */}
-                    <td className="px-5 py-4 hidden md:table-cell">
+                    <td className="px-4 py-4 hidden md:table-cell">
                       {assignee ? (
                         <div className="flex items-center gap-1.5">
                           <div className="w-6 h-6 rounded-full bg-[var(--primary)] flex items-center justify-center flex-shrink-0">
@@ -447,7 +453,7 @@ export default function FollowUpsPage() {
                     </td>
 
                     {/* Phone */}
-                    <td className="px-5 py-4 hidden lg:table-cell">
+                    <td className="px-4 py-4 hidden lg:table-cell">
                       {phone ? (
                         <div>
                           <p className="text-xs font-mono font-semibold">{phone.phone_number}</p>
@@ -459,7 +465,7 @@ export default function FollowUpsPage() {
                     </td>
 
                     {/* Notes */}
-                    <td className="px-5 py-4 hidden lg:table-cell max-w-[200px]">
+                    <td className="px-4 py-4 hidden lg:table-cell max-w-[200px]">
                       {fu.notes ? (
                         <p className="text-xs text-[var(--muted)] line-clamp-2">{fu.notes}</p>
                       ) : (
@@ -468,7 +474,7 @@ export default function FollowUpsPage() {
                     </td>
 
                     {/* Status */}
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-4">
                       {statusBadge(fu.status, isOverdue)}
                       {fu.status === 'completed' && fu.completed_at && (
                         <p className="text-[10px] text-[var(--muted)] mt-1">
@@ -479,7 +485,7 @@ export default function FollowUpsPage() {
 
                     {/* Actions */}
                     {(activeTab === 'overdue' || activeTab === 'upcoming') && (
-                      <td className="px-5 py-4 text-right">
+                      <td className="px-4 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => handleComplete(fu)}
@@ -508,7 +514,7 @@ export default function FollowUpsPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </TableContainer>
 
       {filtered.length > 0 && (
         <p className="text-xs text-[var(--muted)] text-center pb-4">

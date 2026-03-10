@@ -10,6 +10,15 @@ import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import {
+  TableContainer,
+  IndexCell,
+  HeaderIndexCell,
+  ResizableTh,
+  useResizableColumns,
+  useTableSelection,
+  TableEmptyState,
+} from '@/components/ui/data-table';
 
 // Column definitions for actors table
 const ACTORS_COLUMNS: ColumnDefinition[] = [
@@ -18,6 +27,15 @@ const ACTORS_COLUMNS: ColumnDefinition[] = [
   { key: 'owner', label: 'Owner', defaultVisible: true },
   { key: 'activity', label: 'Activity', defaultVisible: true },
   { key: 'last_activity', label: 'Last Active', defaultVisible: true },
+];
+
+const RESIZABLE_COLUMNS = [
+  { key: 'index', initialWidth: 48, minWidth: 40 },
+  { key: 'username', initialWidth: 220, minWidth: 140 },
+  { key: 'status', initialWidth: 140, minWidth: 100 },
+  { key: 'owner', initialWidth: 160, minWidth: 100 },
+  { key: 'activity', initialWidth: 160, minWidth: 100 },
+  { key: 'last_activity', initialWidth: 160, minWidth: 100 },
 ];
 
 interface ActorStats {
@@ -42,6 +60,12 @@ export default function ActorsPage() {
 
   // Column visibility
   const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('actors', ACTORS_COLUMNS);
+
+  // Row selection
+  const selection = useTableSelection(actors);
+
+  // Resizable columns
+  const { resize, getWidth } = useResizableColumns('actors', RESIZABLE_COLUMNS);
 
   useEffect(() => {
     if (isAuthenticated) fetchActors();
@@ -118,44 +142,93 @@ export default function ActorsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
+      <TableContainer>
         {actors.length === 0 ? (
-          <div className="p-16 text-center">
-            <div className="w-12 h-12 rounded-full bg-[var(--accent-red-subtle)] flex items-center justify-center mx-auto mb-4">
-              <Instagram size={24} className="text-[var(--accent-red)]" />
-            </div>
-            <p className="text-sm font-medium">No actors found</p>
-            <p className="text-xs text-[var(--muted)] mt-1">Add Instagram accounts to start outreach</p>
-          </div>
+          <TableEmptyState
+            icon={<Instagram size={24} className="text-[var(--accent-red)]" />}
+            title="No actors found"
+            description="Add Instagram accounts to start outreach"
+          />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-[var(--table-header)] border-b border-[var(--table-border)]">
+            <table className="w-full" style={{ tableLayout: 'fixed' }}>
+              <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                 <tr>
-                  {isColumnVisible('username') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Account</th>}
-                  {isColumnVisible('status') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Status</th>}
-                  {isColumnVisible('owner') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Owner</th>}
-                  {isColumnVisible('activity') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Activity</th>}
-                  {isColumnVisible('last_activity') && <th className="text-left py-3 px-5 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Last Active</th>}
+                  <HeaderIndexCell
+                    allSelected={selection.allSelected}
+                    someSelected={selection.someSelected}
+                    onToggleAll={selection.toggleAll}
+                  />
+                  {isColumnVisible('username') && (
+                    <ResizableTh
+                      width={getWidth('username')}
+                      onResize={(w) => resize('username', w)}
+                      minWidth={140}
+                    >
+                      Account
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('status') && (
+                    <ResizableTh
+                      width={getWidth('status')}
+                      onResize={(w) => resize('status', w)}
+                      minWidth={100}
+                    >
+                      Status
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('owner') && (
+                    <ResizableTh
+                      width={getWidth('owner')}
+                      onResize={(w) => resize('owner', w)}
+                      minWidth={100}
+                    >
+                      Owner
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('activity') && (
+                    <ResizableTh
+                      width={getWidth('activity')}
+                      onResize={(w) => resize('activity', w)}
+                      minWidth={100}
+                    >
+                      Activity
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('last_activity') && (
+                    <ResizableTh
+                      width={getWidth('last_activity')}
+                      onResize={(w) => resize('last_activity', w)}
+                      minWidth={100}
+                    >
+                      Last Active
+                    </ResizableTh>
+                  )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--table-border)]">
-                {actors.map((actor) => {
+              <tbody className="divide-y divide-[var(--card-border)]">
+                {actors.map((actor, idx) => {
                   const statusStyle = getStatusStyle(actor.status || 'Active');
                   return (
-                    <tr key={actor.id} className="hover:bg-[var(--table-row-hover)] transition-colors">
+                    <tr key={actor.id} className="border-b border-[var(--card-border)] hover:bg-[var(--table-row-hover)] transition-colors">
+                      <IndexCell
+                        index={idx + 1}
+                        selected={selection.isSelected(actor.id)}
+                        onSelect={() => selection.toggle(actor.id)}
+                        forceCheckbox={selection.hasSelection}
+                      />
                       {isColumnVisible('username') && (
-                        <td className="py-3.5 px-5">
+                        <td className="py-3.5 px-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-[var(--accent-red-subtle)] flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-full bg-[var(--accent-red-subtle)] flex items-center justify-center shrink-0">
                               <Instagram size={18} className="text-[var(--accent-red)]" />
                             </div>
-                            <span className="text-sm font-medium">@{actor.username}</span>
+                            <span className="text-sm font-medium truncate">@{actor.username}</span>
                           </div>
                         </td>
                       )}
                       {isColumnVisible('status') && (
-                        <td className="py-3.5 px-5">
+                        <td className="py-3.5 px-4">
                           <span className={cn(
                             'px-2 py-1 rounded text-xs font-medium',
                             statusStyle.bg,
@@ -166,24 +239,24 @@ export default function ActorsPage() {
                         </td>
                       )}
                       {isColumnVisible('owner') && (
-                        <td className="py-3.5 px-5">
+                        <td className="py-3.5 px-4">
                           <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
-                            <UserIcon size={14} />
-                            {actor.ownerName}
+                            <UserIcon size={14} className="shrink-0" />
+                            <span className="truncate">{actor.ownerName}</span>
                           </div>
                         </td>
                       )}
                       {isColumnVisible('activity') && (
-                        <td className="py-3.5 px-5">
+                        <td className="py-3.5 px-4">
                           <div className="flex items-center gap-1.5 text-sm">
-                            <Activity size={14} className="text-[var(--primary)]" />
+                            <Activity size={14} className="text-[var(--primary)] shrink-0" />
                             <span className="font-medium">{actor.stats.dmsSent}</span>
                             <span className="text-[var(--muted)]">DMs sent</span>
                           </div>
                         </td>
                       )}
                       {isColumnVisible('last_activity') && (
-                        <td className="py-3.5 px-5">
+                        <td className="py-3.5 px-4">
                           <span className="text-sm text-[var(--muted)]">
                             {actor.last_activity ? format(new Date(actor.last_activity), 'MMM d, HH:mm') : '-'}
                           </span>
@@ -196,7 +269,7 @@ export default function ActorsPage() {
             </table>
           </div>
         )}
-      </div>
+      </TableContainer>
     </div>
   );
 }

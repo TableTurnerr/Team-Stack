@@ -105,7 +105,8 @@ export default function SessionPage() {
         submitOldestDeferredRecording,
         discardOldestDeferredRecording,
         error: recorderError,
-        setPhoneNumber: setContextPhoneNumber
+        setPhoneNumber: setContextPhoneNumber,
+        deferredSegments,
     } = useCallRecording();
 
     // Timer
@@ -586,6 +587,9 @@ export default function SessionPage() {
         if (powerDialerDelayRef.current >= 0) return; // positive/zero delay is handled in handleSaveCall
         if (session?.paused_at) return;
 
+        // Don't stack more than 2 unsubmitted calls — wait for the user to submit one
+        if (deferredSegments.length >= 2) return;
+
         const nextIdx = powerDialerIndexRef.current + 1;
         if (nextIdx >= powerDialerQueueRef.current.length) {
             // Queue exhausted after this call; will be marked done when user submits the last form
@@ -601,7 +605,7 @@ export default function SessionPage() {
             // handleDial is captured via ref to always use the latest version
             handleDialRef.current(entry.number, entry.company);
         }, delayMs);
-    }, [callStatus, session?.paused_at]);
+    }, [callStatus, session?.paused_at, deferredSegments.length]);
 
     // Cleanup power dialer timer on unmount
     useEffect(() => {

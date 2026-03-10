@@ -698,7 +698,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
     const hasPhoneNumber = !!phoneNumber;
     const hasOutcome = callOutcome.length > 0;
-    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving && !isCallLive;
+    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving && (!isCallLive || hasUnsavedCall);
 
     const handleCallbackSelect = (reason: CallbackReason) => {
         setShowCallbackDropdown(false);
@@ -718,9 +718,21 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         )}>
             {/* Header with unsaved indicator */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
-                <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
-                    Current Call
-                </h3>
+                <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
+                        {hasUnsavedCall ? 'Previous Call' : 'Current Call'}
+                    </h3>
+                    {hasUnsavedCall && isCallLive && (
+                        <span className="text-[10px] font-medium text-[var(--warning)] bg-[var(--warning-subtle)] px-1.5 py-0.5 rounded">
+                            Not the live call
+                        </span>
+                    )}
+                    {hasUnsavedCall && deferredSegments.length > 1 && (
+                        <span className="text-[10px] font-semibold text-[var(--info)] bg-[var(--info-subtle)] px-1.5 py-0.5 rounded">
+                            {deferredSegments.length} calls queued
+                        </span>
+                    )}
+                </div>
                 {hasUnsavedCall && (
                     <div className="flex items-center gap-2 flex-wrap">
                         <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--warning-subtle)] border border-[var(--warning)]/30">
@@ -1510,7 +1522,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     )}
                 >
                     <Save size={16} />
-                    {saving ? 'Saving...' : isCallLive ? 'Call in Progress...' : hasUnsavedCall ? 'Submit Call Log' : 'Save Call & Next'}
+                    {saving ? 'Saving...' : hasUnsavedCall ? `Submit Previous Call${deferredSegments.length > 1 ? ` (1/${deferredSegments.length})` : ''}` : isCallLive ? 'Call in Progress...' : 'Save Call & Next'}
                 </button>
             </div>
 

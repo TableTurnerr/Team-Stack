@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Loader2,
   ArrowRight,
+  Headphones,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pb } from '@/lib/pocketbase';
@@ -31,13 +32,14 @@ interface SearchResult {
 
 // Static pages for feature/page search
 const PAGES: SearchResult[] = [
+  { id: 'p-cold-calls', type: 'page', title: 'Cold Calls', subtitle: 'Calling', href: '/cold-calls', icon: Phone },
+  { id: 'p-session', type: 'page', title: 'Call Session', subtitle: 'Active calling', href: '/session', icon: Headphones },
+  { id: 'p-recordings', type: 'page', title: 'Recordings', subtitle: 'Call recordings', href: '/recordings', icon: Mic },
+  { id: 'p-notes', type: 'page', title: 'Notes', subtitle: 'All notes', href: '/notes', icon: StickyNote },
   { id: 'p-financial', type: 'page', title: 'Financial Overview', subtitle: 'Dashboard', href: '/financial', icon: TrendingUp },
   { id: 'p-team', type: 'page', title: 'Team Overview', subtitle: 'Dashboard', href: '/team', icon: Users },
   { id: 'p-follow-ups', type: 'page', title: 'Follow-Ups', subtitle: 'Task management', href: '/follow-ups', icon: CalendarClock },
   { id: 'p-companies', type: 'page', title: 'Companies', subtitle: 'CRM', href: '/companies', icon: Building2 },
-  { id: 'p-cold-calls', type: 'page', title: 'Cold Calls', subtitle: 'Calling', href: '/cold-calls', icon: Phone },
-  { id: 'p-recordings', type: 'page', title: 'Recordings', subtitle: 'Call recordings', href: '/recordings', icon: Mic },
-  { id: 'p-notes', type: 'page', title: 'Notes', subtitle: 'All notes', href: '/notes', icon: StickyNote },
   { id: 'p-email', type: 'page', title: 'Email Marketing', subtitle: 'Campaigns & templates', href: '/email', icon: Mail },
 ];
 
@@ -220,14 +222,15 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    const items = query ? results : PAGES;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((prev) => Math.min(prev + 1, results.length - 1));
+      setSelectedIndex((prev) => Math.min(prev + 1, items.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && results[selectedIndex]) {
-      handleSelect(results[selectedIndex]);
+    } else if (e.key === 'Enter' && items[selectedIndex]) {
+      handleSelect(items[selectedIndex]);
     }
   };
 

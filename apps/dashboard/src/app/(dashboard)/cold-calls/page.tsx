@@ -22,6 +22,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog } from '@/lib/types';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
@@ -29,6 +30,17 @@ import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { ZoomCallButton } from '@/components/zoom-call-button';
 import { PhoneNumbersTab } from '@/components/phone-numbers-tab';
+import { RelativeTime } from '@/components/relative-time';
+import {
+  TableContainer,
+  IndexCell,
+  HeaderIndexCell,
+  ResizableTh,
+  useResizableColumns,
+  useTableSelection,
+  TablePagination,
+  TableEmptyState,
+} from '@/components/ui/data-table';
 
 // ─── Column Definitions ──────────────────────────────────────────────────────
 
@@ -55,7 +67,7 @@ const OUTCOME_FILTER_OPTIONS = [
   'Bad Lead', 'Send Email', 'Hung Up (Rude Recep)', 'Hung Up (Other)', 'Missed Call',
 ];
 
-function SortHeader({
+function SortLabel({
   label,
   field,
   currentSort,
@@ -68,17 +80,15 @@ function SortHeader({
 }) {
   const isActive = currentSort.field === field;
   return (
-    <th
-      className="text-left py-3 px-4 font-medium text-[var(--muted)] cursor-pointer hover:text-[var(--foreground)] transition-colors"
+    <div
+      className="flex items-center gap-1 cursor-pointer"
       onClick={() => onSort(field)}
     >
-      <div className="flex items-center gap-1">
-        {label}
-        {isActive && (
-          currentSort.dir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-        )}
-      </div>
-    </th>
+      {label}
+      {isActive && (
+        currentSort.dir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+      )}
+    </div>
   );
 }
 
@@ -98,6 +108,7 @@ type TabType = 'call_logs' | 'phone_numbers';
 
 export default function ColdCallsPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { preferences } = useUserPreferences();
   const [activeTab, setActiveTab] = useState<TabType>('call_logs');
 
   // Call Logs state
@@ -119,6 +130,25 @@ export default function ColdCallsPage() {
 
   // Column visibility
   const callLogCols = useColumnVisibility('cold-calls-logs', CALL_LOG_COLUMNS);
+
+  // Selection & resizable columns
+  const selection = useTableSelection(callLogs);
+  const { widths: colWidths, resize: resizeCol } = useResizableColumns('cold-calls', [
+    { key: 'call_time', initialWidth: 130 },
+    { key: 'company', initialWidth: 160 },
+    { key: 'phone', initialWidth: 140 },
+    { key: 'recipient', initialWidth: 130 },
+    { key: 'call_outcome', initialWidth: 150 },
+    { key: 'duration', initialWidth: 90 },
+    { key: 'performance', initialWidth: 100 },
+    { key: 'session', initialWidth: 130 },
+    { key: 'ai_transcript', initialWidth: 70 },
+    { key: 'caller', initialWidth: 100 },
+    { key: 'notes', initialWidth: 150 },
+    { key: 'actions', initialWidth: 60 },
+  ]);
+
+  const pageOffset = (callLogsPage - 1) * perPage;
 
   // ─── Fetch Call Logs ─────────────────────────────────────────────────────
 
@@ -382,6 +412,11 @@ export default function ColdCallsPage() {
             page={callLogsPage}
             totalPages={callLogsTotalPages}
             onPageChange={setCallLogsPage}
+            selection={selection}
+            colWidths={colWidths}
+            resizeCol={resizeCol}
+            pageOffset={pageOffset}
+            timezones={preferences?.timezones}
           />
         )
       ) : (
@@ -402,6 +437,11 @@ function CallLogsTable({
   page,
   totalPages,
   onPageChange,
+  selection,
+  colWidths,
+  resizeCol,
+  pageOffset,
+  timezones,
 }: {
   logs: CallLog[];
   sort: { field: string; dir: 'asc' | 'desc' };
@@ -411,43 +451,95 @@ function CallLogsTable({
   page: number;
   totalPages: number;
   onPageChange: (page: number) => void;
+  selection: ReturnType<typeof useTableSelection<CallLog>>;
+  colWidths: Record<string, number>;
+  resizeCol: (key: string, newWidth: number) => void;
+  pageOffset: number;
+  timezones?: { timezone: string; label: string }[];
 }) {
   return (
-    <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
+    <TableContainer>
       {logs.length === 0 ? (
-        <div className="p-16 text-center">
-          <div className="w-12 h-12 rounded-full bg-[var(--info-subtle)] flex items-center justify-center mx-auto mb-4">
-            <Phone size={24} className="text-[var(--info)]" />
-          </div>
-          <p className="text-sm font-medium">No call logs found</p>
-          <p className="text-xs text-[var(--muted)] mt-1">
-            {hasActiveFilters
-              ? 'Try adjusting your filters'
-              : 'Calls made during sessions will appear here'}
-          </p>
-        </div>
+        <TableEmptyState
+          icon={<Phone size={24} className="text-[var(--info)]" />}
+          title="No call logs found"
+          description={hasActiveFilters
+            ? 'Try adjusting your filters'
+            : 'Calls made during sessions will appear here'}
+        />
       ) : (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full" style={{ tableLayout: 'fixed' }}>
               <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                 <tr>
-                  {isColumnVisible('call_time') && <SortHeader label="Date" field="call_time" currentSort={sort} onSort={onSort} />}
-                  {isColumnVisible('company') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Company</th>}
-                  {isColumnVisible('phone') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Phone</th>}
-                  {isColumnVisible('recipient') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Recipient</th>}
-                  {isColumnVisible('call_outcome') && <SortHeader label="Outcome" field="call_outcome" currentSort={sort} onSort={onSort} />}
-                  {isColumnVisible('duration') && <SortHeader label="Duration" field="duration" currentSort={sort} onSort={onSort} />}
-                  {isColumnVisible('performance') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Performance</th>}
-                  {isColumnVisible('session') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Session</th>}
-                  {isColumnVisible('ai_transcript') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">AI</th>}
-                  {isColumnVisible('caller') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Caller</th>}
-                  {isColumnVisible('notes') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Notes</th>}
-                  <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
+                  <HeaderIndexCell
+                    allSelected={selection.allSelected}
+                    someSelected={selection.someSelected}
+                    onToggleAll={selection.toggleAll}
+                  />
+                  {isColumnVisible('call_time') && (
+                    <ResizableTh width={colWidths.call_time} onResize={(w) => resizeCol('call_time', w)}>
+                      <SortLabel label="Date" field="call_time" currentSort={sort} onSort={onSort} />
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('company') && (
+                    <ResizableTh width={colWidths.company} onResize={(w) => resizeCol('company', w)}>
+                      Company
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('phone') && (
+                    <ResizableTh width={colWidths.phone} onResize={(w) => resizeCol('phone', w)}>
+                      Phone
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('recipient') && (
+                    <ResizableTh width={colWidths.recipient} onResize={(w) => resizeCol('recipient', w)}>
+                      Recipient
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('call_outcome') && (
+                    <ResizableTh width={colWidths.call_outcome} onResize={(w) => resizeCol('call_outcome', w)}>
+                      <SortLabel label="Outcome" field="call_outcome" currentSort={sort} onSort={onSort} />
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('duration') && (
+                    <ResizableTh width={colWidths.duration} onResize={(w) => resizeCol('duration', w)}>
+                      <SortLabel label="Duration" field="duration" currentSort={sort} onSort={onSort} />
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('performance') && (
+                    <ResizableTh width={colWidths.performance} onResize={(w) => resizeCol('performance', w)}>
+                      Performance
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('session') && (
+                    <ResizableTh width={colWidths.session} onResize={(w) => resizeCol('session', w)}>
+                      Session
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('ai_transcript') && (
+                    <ResizableTh width={colWidths.ai_transcript} onResize={(w) => resizeCol('ai_transcript', w)}>
+                      AI
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('caller') && (
+                    <ResizableTh width={colWidths.caller} onResize={(w) => resizeCol('caller', w)}>
+                      Caller
+                    </ResizableTh>
+                  )}
+                  {isColumnVisible('notes') && (
+                    <ResizableTh width={colWidths.notes} onResize={(w) => resizeCol('notes', w)}>
+                      Notes
+                    </ResizableTh>
+                  )}
+                  <ResizableTh width={colWidths.actions} onResize={(w) => resizeCol('actions', w)} resizable={false}>
+                    Actions
+                  </ResizableTh>
                 </tr>
               </thead>
               <tbody>
-                {logs.map((log) => {
+                {logs.map((log, idx) => {
                   const phoneNum = log.expand?.phone_number_record?.phone_number || '';
                   const session = log.expand?.session;
                   const coldCall = log.expand?.cold_call;
@@ -457,9 +549,19 @@ function CallLogsTable({
                       key={log.id}
                       className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors"
                     >
+                      <IndexCell
+                        index={pageOffset + idx + 1}
+                        selected={selection.isSelected(log.id)}
+                        onSelect={() => selection.toggle(log.id)}
+                        forceCheckbox={selection.hasSelection}
+                      />
                       {isColumnVisible('call_time') && (
                         <td className="py-3 px-4">
-                          <span className="text-sm">{log.call_time ? formatDate(log.call_time) : '-'}</span>
+                          {log.call_time ? (
+                            <RelativeTime date={log.call_time} timezones={timezones} className="text-sm" />
+                          ) : (
+                            <span className="text-sm">-</span>
+                          )}
                         </td>
                       )}
                       {isColumnVisible('company') && (
@@ -608,29 +710,13 @@ function CallLogsTable({
             </table>
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between p-4 border-t border-[var(--card-border)]">
-              <span className="text-sm text-[var(--muted)]">Page {page} of {totalPages}</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onPageChange(Math.max(1, page - 1))}
-                  disabled={page === 1}
-                  className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)]"
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                  disabled={page === totalPages}
-                  className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)]"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={onPageChange}
+          />
         </>
       )}
-    </div>
+    </TableContainer>
   );
 }

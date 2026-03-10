@@ -35,7 +35,7 @@ import {
   type FollowUp,
   type ColdCall,
 } from '@/lib/types';
-import { cn, formatDate } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
@@ -47,14 +47,18 @@ import { useFollowUps } from '@/contexts/follow-up-context';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
+import { RelativeTime } from '@/components/relative-time';
+import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
 import { EmailActivityFeed } from '@/components/email/email-activity-feed';
+import { CompanyTimeline } from '@/components/company-timeline';
 
 type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline' | 'email_activity';
 
 export default function CompanyDetailPage() {
   const { id } = useParams() as { id: string };
   const router = useRouter();
+  const { preferences } = useUserPreferences();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [loading, setLoading] = useState(true);
   const { completeFollowUp } = useFollowUps();
@@ -598,7 +602,7 @@ export default function CompanyDetailPage() {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-[var(--muted)]">Last Contact</span>
-                    <span className="text-sm font-bold">{company.last_contacted ? formatDate(company.last_contacted) : 'Never'}</span>
+                    {company.last_contacted ? <RelativeTime date={company.last_contacted} timezones={preferences?.timezones} className="text-sm font-bold" /> : <span className="text-sm font-bold">Never</span>}
                   </div>
                 </div>
               </div>
@@ -621,7 +625,7 @@ export default function CompanyDetailPage() {
                   {notes.slice(0, 2).map(note => (
                     <div key={note.id} className="text-sm p-3 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
                       <p className="line-clamp-3 text-[var(--foreground)] font-medium leading-relaxed">{note.content}</p>
-                      <p className="text-[10px] text-[var(--muted)] mt-2 font-bold">{formatDate(note.created)}</p>
+                      <p className="text-[10px] text-[var(--muted)] mt-2 font-bold"><RelativeTime date={note.created} timezones={preferences?.timezones} className="text-[10px]" /></p>
                     </div>
                   ))}
                   {notes.length === 0 && (
@@ -714,7 +718,7 @@ export default function CompanyDetailPage() {
                     const coldCall = call.expand?.cold_call as ColdCall | undefined;
                     return (
                       <tr key={call.id} className="hover:bg-[var(--sidebar-bg)] transition-colors">
-                        <td className="px-6 py-4 text-sm font-medium">{formatDate(call.call_time)}</td>
+                        <td className="px-6 py-4 text-sm font-medium"><RelativeTime date={call.call_time} timezones={preferences?.timezones} className="text-sm font-medium" /></td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-1">
                             <div>
@@ -749,8 +753,8 @@ export default function CompanyDetailPage() {
                             })}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-[var(--muted)] max-w-xs truncate">
-                          {call.post_call_notes}
+                        <td className="px-6 py-4 text-sm text-[var(--muted)] max-w-xs truncate" title={call.post_call_notes || ''}>
+                          {call.post_call_notes || '-'}
                         </td>
                         <td className="px-6 py-4">
                           {coldCall ? (
@@ -893,7 +897,7 @@ export default function CompanyDetailPage() {
                   <div key={fu.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 opacity-60">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 size={14} className="text-[var(--success)]" />
-                      <span className="text-sm font-medium">{formatDate(fu.scheduled_time)}</span>
+                      <RelativeTime date={fu.scheduled_time} timezones={preferences?.timezones} className="text-sm font-medium" />
                       <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] font-semibold uppercase">
                         {fu.status}
                       </span>
@@ -977,7 +981,7 @@ export default function CompanyDetailPage() {
                       <div>
                         <p className="text-xs text-[var(--muted)] font-bold uppercase tracking-wider">{note.note_type.replace('_', ' ')}</p>
                         <div className="flex items-center gap-2">
-                          <p className="text-[10px] text-[var(--muted)]">{formatDate(note.created)}</p>
+                          <p className="text-[10px] text-[var(--muted)]"><RelativeTime date={note.created} timezones={preferences?.timezones} className="text-[10px]" /></p>
                           {note.expand?.created_by && (
                             <span className="text-[10px] text-[var(--muted)] flex items-center gap-1">
                               • by <span className="font-bold text-[var(--foreground)]">{note.expand.created_by.name}</span>
@@ -1010,44 +1014,15 @@ export default function CompanyDetailPage() {
         )}
 
         {activeTab === 'timeline' && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <h3 className="text-lg font-bold">Activity Timeline</h3>
-            <div className="space-y-8 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:ml-[2.5rem] before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-[var(--card-border)] before:to-transparent">
-              {interactions.map((interaction) => (
-                <div key={interaction.id} className="relative flex gap-6 md:gap-8 group">
-                  <div className="absolute left-0 inset-0 flex justify-center w-10 md:w-20">
-                    <div className="h-full w-0.5 bg-[var(--card-border)] group-last:bg-[linear-gradient(to_bottom,var(--card-border)_50%,transparent_50%)]"></div>
-                  </div>
-                  <div className="relative z-10 flex-none w-10 h-10 md:w-16 md:h-16 flex items-center justify-center">
-                    <div className="w-8 h-8 rounded-full bg-[var(--card-bg)] border border-[var(--card-border)] flex items-center justify-center text-[var(--muted)] shadow-sm">
-                      {interaction.channel === 'phone' ? <Phone size={14} /> :
-                        interaction.channel === 'instagram' ? <Instagram size={14} /> :
-                          <Mail size={14} />}
-                    </div>
-                  </div>
-                  <div className="flex-auto pb-8">
-                    <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-4 shadow-sm hover:border-[var(--sidebar-border)] transition-all">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs font-bold text-[var(--muted)] uppercase tracking-widest">{interaction.channel} interaction</span>
-                        <time className="text-[10px] text-[var(--muted)]">{formatDate(interaction.timestamp)}</time>
-                      </div>
-                      <p className="text-sm font-medium">{interaction.summary}</p>
-                      {interaction.expand?.user && (
-                        <p className="mt-3 text-[10px] text-[var(--muted)] flex items-center gap-1">
-                          By <span className="text-[var(--foreground)] font-bold">{interaction.expand.user.name}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {interactions.length === 0 && (
-                <div className="py-24 text-center">
-                  <MessageSquare size={48} className="mx-auto text-[var(--card-border)] mb-4" />
-                  <p className="text-[var(--muted)]">No activity recorded yet.</p>
-                </div>
-              )}
-            </div>
+            <CompanyTimeline
+              company={company}
+              callLogs={callLogs}
+              followUps={allFollowUps}
+              notes={notes}
+              interactions={interactions}
+            />
           </div>
         )}
       </div>

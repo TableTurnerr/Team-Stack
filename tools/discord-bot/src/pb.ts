@@ -15,7 +15,7 @@ export const pb = new PocketBase(POCKETBASE_URL);
 pb.autoCancellation(false);
 
 export async function authAdmin(): Promise<void> {
-  await pb.admins.authWithPassword(POCKETBASE_ADMIN_EMAIL, POCKETBASE_ADMIN_PASSWORD);
+  await pb.collection('_superusers').authWithPassword(POCKETBASE_ADMIN_EMAIL, POCKETBASE_ADMIN_PASSWORD);
   console.log('[PocketBase] Admin authenticated.');
 }
 

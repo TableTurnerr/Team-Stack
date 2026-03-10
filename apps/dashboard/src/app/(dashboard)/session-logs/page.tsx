@@ -5,13 +5,41 @@ import { History, Download, RefreshCw, Loader2, Filter } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { SessionLogRow } from './session-log-row';
+import {
+    TableContainer,
+    HeaderIndexCell,
+    ResizableTh,
+    useResizableColumns,
+    useTableSelection,
+    TableEmptyState,
+} from '@/components/ui/data-table';
+import { useUserPreferences } from '@/hooks/use-user-preferences';
+
+const COLUMN_CONFIG = [
+    { key: 'expand' },
+    { key: 'started', initialWidth: 180, minWidth: 120 },
+    { key: 'duration', initialWidth: 100, minWidth: 80 },
+    { key: 'dials', initialWidth: 80, minWidth: 60 },
+    { key: 'pickups', initialWidth: 80, minWidth: 60 },
+    { key: 'pickup_pct', initialWidth: 120, minWidth: 90 },
+    { key: 'owner', initialWidth: 80, minWidth: 60 },
+    { key: 'pitch', initialWidth: 80, minWidth: 60 },
+    { key: 'appt', initialWidth: 80, minWidth: 60 },
+    { key: 'user', initialWidth: 80, minWidth: 60 },
+    { key: 'status', initialWidth: 100, minWidth: 80 },
+    { key: 'actions' },
+];
 
 export default function SessionLogsPage() {
+    const { preferences } = useUserPreferences();
     const [sessions, setSessions] = useState<ColdCallingSession[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
     const [showFilters, setShowFilters] = useState(false);
+
+    const selection = useTableSelection(sessions);
+    const { resize, getWidth } = useResizableColumns('session-logs', COLUMN_CONFIG);
 
     const fetchSessions = useCallback(async () => {
         try {
@@ -198,54 +226,60 @@ export default function SessionLogsPage() {
 
             {/* Sessions Table */}
             {sessions.length === 0 ? (
-                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-12">
-                    <div className="text-center space-y-4">
-                        <div className="w-16 h-16 rounded-2xl bg-[var(--muted)]/10 flex items-center justify-center mx-auto">
-                            <History size={32} className="text-[var(--muted)]" />
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-semibold mb-1">No sessions found</h3>
-                            <p className="text-sm text-[var(--muted)]">
-                                {statusFilter !== 'all'
-                                    ? `No ${statusFilter} sessions. Try changing the filter.`
-                                    : 'Start a call session to see it appear here.'}
-                            </p>
-                        </div>
-                    </div>
-                </div>
+                <TableContainer>
+                    <TableEmptyState
+                        icon={<History size={24} className="text-[var(--muted)]" />}
+                        title="No sessions found"
+                        description={
+                            statusFilter !== 'all'
+                                ? `No ${statusFilter} sessions. Try changing the filter.`
+                                : 'Start a call session to see it appear here.'
+                        }
+                    />
+                </TableContainer>
             ) : (
-                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
+                <TableContainer>
                     <div className="overflow-x-auto">
-                        <table className="w-full">
+                        <table className="w-full" style={{ tableLayout: 'fixed' }}>
                             <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                                 <tr>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide w-10"></th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Started</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Duration</th>
-                                    <th className="px-4 py-3 text-center text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Dials</th>
-                                    <th className="px-4 py-3 text-center text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Pickups</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Pickup %</th>
-                                    <th className="px-4 py-3 text-center text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Owner</th>
-                                    <th className="px-4 py-3 text-center text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Pitch</th>
-                                    <th className="px-4 py-3 text-center text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Appt</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">User</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Status</th>
-                                    <th className="px-4 py-3 w-10"></th>
+                                    <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider w-10"></th>
+                                    <HeaderIndexCell
+                                        allSelected={selection.allSelected}
+                                        someSelected={selection.someSelected}
+                                        onToggleAll={selection.toggleAll}
+                                    />
+                                    <ResizableTh width={getWidth('started')} onResize={(w) => resize('started', w)}>Started</ResizableTh>
+                                    <ResizableTh width={getWidth('duration')} onResize={(w) => resize('duration', w)}>Duration</ResizableTh>
+                                    <ResizableTh width={getWidth('dials')} onResize={(w) => resize('dials', w)} align="center">Dials</ResizableTh>
+                                    <ResizableTh width={getWidth('pickups')} onResize={(w) => resize('pickups', w)} align="center">Pickups</ResizableTh>
+                                    <ResizableTh width={getWidth('pickup_pct')} onResize={(w) => resize('pickup_pct', w)}>Pickup %</ResizableTh>
+                                    <ResizableTh width={getWidth('owner')} onResize={(w) => resize('owner', w)} align="center">Owner</ResizableTh>
+                                    <ResizableTh width={getWidth('pitch')} onResize={(w) => resize('pitch', w)} align="center">Pitch</ResizableTh>
+                                    <ResizableTh width={getWidth('appt')} onResize={(w) => resize('appt', w)} align="center">Appt</ResizableTh>
+                                    <ResizableTh width={getWidth('user')} onResize={(w) => resize('user', w)}>User</ResizableTh>
+                                    <ResizableTh width={getWidth('status')} onResize={(w) => resize('status', w)}>Status</ResizableTh>
+                                    <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider w-10"></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {sessions.map((session) => (
+                                {sessions.map((session, i) => (
                                     <SessionLogRow
                                         key={session.id}
                                         session={session}
+                                        index={i + 1}
+                                        selected={selection.isSelected(session.id)}
+                                        onSelect={() => selection.toggle(session.id)}
+                                        hasSelection={selection.hasSelection}
                                         onUpdate={handleUpdateSession}
                                         onDelete={handleDeleteSession}
+                                        timezones={preferences?.timezones}
                                     />
                                 ))}
                             </tbody>
                         </table>
                     </div>
-                </div>
+                </TableContainer>
             )}
         </div>
     );

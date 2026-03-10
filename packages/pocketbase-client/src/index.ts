@@ -16,6 +16,7 @@ export interface User extends RecordModel {
     role: 'admin' | 'operator' | 'member';
     status: 'online' | 'offline' | 'suspended';
     last_activity?: string;
+    discord_user_id?: string;
 }
 
 export interface Company extends RecordModel {

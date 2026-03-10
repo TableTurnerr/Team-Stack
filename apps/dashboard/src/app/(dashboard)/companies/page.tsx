@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
-import { formatDate, cn, sanitizeFilterValue } from '@/lib/utils';
+import { cn, sanitizeFilterValue } from '@/lib/utils';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
@@ -31,6 +31,19 @@ import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { ExportLeadsModal } from '@/components/export-leads-modal';
 import { ImportLeadsModal } from '@/components/import-leads-modal';
+import { RelativeTime } from '@/components/relative-time';
+import { useUserPreferences } from '@/hooks/use-user-preferences';
+import {
+  TableContainer,
+  IndexCell,
+  HeaderIndexCell,
+  ResizableTh,
+  useResizableColumns,
+  useTableSelection,
+  TablePagination,
+  TableEmptyState,
+  SelectionToolbar,
+} from '@/components/ui/data-table';
 
 // Column definitions for companies table
 const COMPANY_COLUMNS: ColumnDefinition[] = [
@@ -59,11 +72,21 @@ const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
 function CompanyRow({
   company,
   onEdit,
-  isColumnVisible
+  isColumnVisible,
+  index,
+  selected,
+  onSelect,
+  hasSelection,
+  timezones,
 }: {
   company: Company;
   onEdit: (id: string, data: Partial<Company>) => void;
   isColumnVisible: (key: string) => boolean;
+  index: number;
+  selected: boolean;
+  onSelect: () => void;
+  hasSelection: boolean;
+  timezones?: { timezone: string; label: string }[];
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
@@ -93,6 +116,9 @@ function CompanyRow({
   if (isEditing) {
     return (
       <tr className="border-b border-[var(--card-border)] bg-[var(--sidebar-bg)]">
+        <td className="py-3 px-4 w-12">
+          <span className="text-xs tabular-nums text-[var(--muted)]">{index}</span>
+        </td>
         {isColumnVisible('company_name') && (
           <td className="py-3 px-4">
             <input
@@ -174,9 +200,11 @@ function CompanyRow({
         )}
         {isColumnVisible('last_contacted') && (
           <td className="py-3 px-4">
-            <span className="text-sm text-[var(--muted)]">
-              {company.last_contacted ? formatDate(company.last_contacted) : '-'}
-            </span>
+            {company.last_contacted ? (
+              <RelativeTime date={company.last_contacted} timezones={timezones} className="text-sm text-[var(--muted)]" />
+            ) : (
+              <span className="text-sm text-[var(--muted)]">-</span>
+            )}
           </td>
         )}
         <td className="py-3 px-4">
@@ -201,6 +229,12 @@ function CompanyRow({
 
   return (
     <tr className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors">
+      <IndexCell
+        index={index}
+        selected={selected}
+        onSelect={onSelect}
+        forceCheckbox={hasSelection}
+      />
       {isColumnVisible('company_name') && (
         <td className="py-3 px-4">
           <Link href={`/companies/${company.id}`} className="font-medium hover:text-[var(--primary)] transition-colors">
@@ -288,9 +322,11 @@ function CompanyRow({
       )}
       {isColumnVisible('last_contacted') && (
         <td className="py-3 px-4">
-          <span className="text-sm text-[var(--muted)]">
-            {company.last_contacted ? formatDate(company.last_contacted) : '-'}
-          </span>
+          {company.last_contacted ? (
+            <RelativeTime date={company.last_contacted} timezones={timezones} className="text-sm text-[var(--muted)]" />
+          ) : (
+            <span className="text-sm text-[var(--muted)]">-</span>
+          )}
         </td>
       )}
       <td className="py-3 px-4">
@@ -559,6 +595,7 @@ function AddCompanyModal({
 
 export default function CompaniesPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { preferences } = useUserPreferences();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -575,6 +612,22 @@ export default function CompaniesPage() {
 
   // Column visibility
   const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('companies', COMPANY_COLUMNS);
+
+  // Table selection
+  const selection = useTableSelection(companies);
+
+  // Resizable columns
+  const { getWidth, resize } = useResizableColumns('companies', [
+    { key: 'company_name', initialWidth: 200 },
+    { key: 'owner_name', initialWidth: 150 },
+    { key: 'instagram_handle', initialWidth: 150 },
+    { key: 'status', initialWidth: 150 },
+    { key: 'email', initialWidth: 180 },
+    { key: 'company_location', initialWidth: 150 },
+    { key: 'source', initialWidth: 100 },
+    { key: 'last_contacted', initialWidth: 130 },
+    { key: 'actions', initialWidth: 100 },
+  ]);
 
   const fetchCompanies = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -709,75 +762,83 @@ export default function CompaniesPage() {
         </div>
       )}
 
+      {/* Selection Toolbar */}
+      <SelectionToolbar count={selection.count} totalCount={companies.length} />
+
       {/* Table */}
-      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
+      <TableContainer>
         {companies.length === 0 ? (
-          <div className="p-16 text-center">
-            <div className="w-12 h-12 rounded-full bg-[var(--primary-subtle)] flex items-center justify-center mx-auto mb-4">
-              <Building2 size={24} className="text-[var(--primary)]" />
-            </div>
-            <p className="text-sm font-medium">No companies found</p>
-            <p className="text-xs text-[var(--muted)] mt-1">
-              {searchTerm ? 'Try a different search term' : 'Add your first company to get started'}
-            </p>
-          </div>
+          <TableEmptyState
+            icon={<Building2 size={24} className="text-[var(--primary)]" />}
+            title="No companies found"
+            description={searchTerm ? 'Try a different search term' : 'Add your first company to get started'}
+          />
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full" style={{ tableLayout: 'fixed' }}>
                 <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                   <tr>
-                    {isColumnVisible('company_name') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Company Name</th>}
-                    {isColumnVisible('owner_name') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Owner</th>}
-                    {isColumnVisible('instagram_handle') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Instagram</th>}
-                    {isColumnVisible('status') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Status</th>}
-                    {isColumnVisible('email') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Email</th>}
-                    {isColumnVisible('company_location') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Location</th>}
-                    {isColumnVisible('source') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Source</th>}
-                    {isColumnVisible('last_contacted') && <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Last Contact</th>}
-                    <th className="text-left py-3 px-4 font-medium text-[var(--muted)]">Actions</th>
+                    <HeaderIndexCell
+                      allSelected={selection.allSelected}
+                      someSelected={selection.someSelected}
+                      onToggleAll={selection.toggleAll}
+                    />
+                    {isColumnVisible('company_name') && (
+                      <ResizableTh width={getWidth('company_name')} onResize={(w) => resize('company_name', w)}>Company Name</ResizableTh>
+                    )}
+                    {isColumnVisible('owner_name') && (
+                      <ResizableTh width={getWidth('owner_name')} onResize={(w) => resize('owner_name', w)}>Owner</ResizableTh>
+                    )}
+                    {isColumnVisible('instagram_handle') && (
+                      <ResizableTh width={getWidth('instagram_handle')} onResize={(w) => resize('instagram_handle', w)}>Instagram</ResizableTh>
+                    )}
+                    {isColumnVisible('status') && (
+                      <ResizableTh width={getWidth('status')} onResize={(w) => resize('status', w)}>Status</ResizableTh>
+                    )}
+                    {isColumnVisible('email') && (
+                      <ResizableTh width={getWidth('email')} onResize={(w) => resize('email', w)}>Email</ResizableTh>
+                    )}
+                    {isColumnVisible('company_location') && (
+                      <ResizableTh width={getWidth('company_location')} onResize={(w) => resize('company_location', w)}>Location</ResizableTh>
+                    )}
+                    {isColumnVisible('source') && (
+                      <ResizableTh width={getWidth('source')} onResize={(w) => resize('source', w)}>Source</ResizableTh>
+                    )}
+                    {isColumnVisible('last_contacted') && (
+                      <ResizableTh width={getWidth('last_contacted')} onResize={(w) => resize('last_contacted', w)}>Last Contact</ResizableTh>
+                    )}
+                    <ResizableTh width={getWidth('actions')} resizable={false}>Actions</ResizableTh>
                   </tr>
                 </thead>
                 <tbody>
-                  {companies.map((company) => (
+                  {companies.map((company, idx) => (
                     <CompanyRow
                       key={company.id}
                       company={company}
                       onEdit={handleEdit}
                       isColumnVisible={isColumnVisible}
+                      index={(page - 1) * perPage + idx + 1}
+                      selected={selection.isSelected(company.id)}
+                      onSelect={() => selection.toggle(company.id)}
+                      hasSelection={selection.hasSelection}
+                      timezones={preferences?.timezones}
                     />
                   ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between p-4 border-t border-[var(--card-border)]">
-                <span className="text-sm text-[var(--muted)]">
-                  Page {page} of {totalPages}
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                    className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)]"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                    disabled={page === totalPages}
-                    className="px-3 py-1 rounded-md border border-[var(--card-border)] disabled:opacity-50 hover:bg-[var(--sidebar-bg)]"
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            )}
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              totalItems={totalItems}
+              perPage={perPage}
+              onPageChange={setPage}
+            />
           </>
         )}
-      </div>
+      </TableContainer>
 
       {/* Add Company Modal */}
       <AddCompanyModal

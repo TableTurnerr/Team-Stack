@@ -30,6 +30,7 @@ import { StandaloneCallInterface } from './standalone-call-interface';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { useFollowUps } from '@/contexts/follow-up-context';
+import { useToast } from '@/components/ui/toast';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
@@ -76,7 +77,8 @@ export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
     const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
-    const { createFollowUp } = useFollowUps();
+    const { createFollowUp, completeFollowUp } = useFollowUps();
+    const { addToast } = useToast();
 
     // Loading combined
     const loading = sessionLoading;
@@ -103,9 +105,12 @@ export default function SessionPage() {
         discardRecording,
         enterDeferredMode,
         submitOldestDeferredRecording,
+        submitDeferredRecording,
         discardOldestDeferredRecording,
+        discardDeferredRecording,
         error: recorderError,
-        setPhoneNumber: setContextPhoneNumber
+        setPhoneNumber: setContextPhoneNumber,
+        deferredSegments,
     } = useCallRecording();
 
     // Timer
@@ -475,12 +480,13 @@ export default function SessionPage() {
                 callEndTimeRef.current = null; // new call starting
 
                 // Increment dial count only once when ringing starts (and only for session mode)
+                // Uses PocketBase atomic increment to prevent race conditions with concurrent updates
                 if (session && !dialCountIncremented) {
                     console.log('[Session Page] Incrementing dial count for session:', session.id);
                     setDialCountIncremented(true);
                     pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
-                        total_dials: (session.total_dials || 0) + 1
-                    }).then(updatedSession => {
+                        'total_dials+': 1
+                    } as any).then(updatedSession => {
                         console.log('[Session Page] Dial count updated:', updatedSession.total_dials);
                         setSession(updatedSession);
                     }).catch(err => console.error('Failed to increment dial count:', err));
@@ -502,23 +508,25 @@ export default function SessionPage() {
                 setConnectTime(Date.now());
 
                 // If the call skipped the ringing phase, increment dial count now
+                // Uses PocketBase atomic increment to prevent race conditions
                 if (session && !dialCountIncremented) {
                     console.log('[Session Page] Incrementing dial count at connect (no ringing phase):', session.id);
                     setDialCountIncremented(true);
                     pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
-                        total_dials: (session.total_dials || 0) + 1
-                    }).then(updatedSession => {
+                        'total_dials+': 1
+                    } as any).then(updatedSession => {
                         console.log('[Session Page] Dial count updated at connect:', updatedSession.total_dials);
                         setSession(updatedSession);
                     }).catch(err => console.error('Failed to increment dial count at connect:', err));
                 }
 
                 // Increment pickup count when call is connected (only for session mode)
+                // Uses PocketBase atomic increment to prevent race conditions
                 if (session && !pickupCountIncremented) {
                     setPickupCountIncremented(true);
                     pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
-                        total_pickups: (session.total_pickups || 0) + 1
-                    }).then(updatedSession => {
+                        'total_pickups+': 1
+                    } as any).then(updatedSession => {
                         setSession(updatedSession);
                     }).catch(err => console.error('Failed to increment pickup count:', err));
                 }
@@ -586,6 +594,9 @@ export default function SessionPage() {
         if (powerDialerDelayRef.current >= 0) return; // positive/zero delay is handled in handleSaveCall
         if (session?.paused_at) return;
 
+        // Don't stack more than 2 unsubmitted calls — wait for the user to submit one
+        if (deferredSegments.length >= 2) return;
+
         const nextIdx = powerDialerIndexRef.current + 1;
         if (nextIdx >= powerDialerQueueRef.current.length) {
             // Queue exhausted after this call; will be marked done when user submits the last form
@@ -601,7 +612,7 @@ export default function SessionPage() {
             // handleDial is captured via ref to always use the latest version
             handleDialRef.current(entry.number, entry.company);
         }, delayMs);
-    }, [callStatus, session?.paused_at]);
+    }, [callStatus, session?.paused_at, deferredSegments.length]);
 
     // Cleanup power dialer timer on unmount
     useEffect(() => {
@@ -1118,9 +1129,15 @@ export default function SessionPage() {
         // Determine if this call involved callbacks
         const hasCallbacks = (data.callbackEvents?.length ?? 0) > 0;
 
-        // For No Answer, discard this call's recording immediately (pop oldest from queue)
+        // For No Answer, discard recording(s) immediately.
+        // For calls with callback legs, discard ALL segments (not just oldest)
+        // to prevent orphaned callback recordings from attaching to the next call.
         if (data.callOutcome.includes('No Answer')) {
-            discardOldestDeferredRecording();
+            if (hasCallbacks) {
+                discardDeferredRecording();
+            } else {
+                discardOldestDeferredRecording();
+            }
             setContextPhoneNumber('');
         }
 
@@ -1230,10 +1247,15 @@ export default function SessionPage() {
                     is_callback: hasCallbacks ? true : undefined,
                 }, { expand: 'company,phone_number_record' });
 
-                // Submit this call's recording (pops oldest segment from queue).
-                // Each call's form submission claims exactly one recording via FIFO ordering.
+                // Submit this call's recording.
+                // For calls with callback legs, merge ALL queued segments into one recording
+                // (each callback re-dial creates a separate segment). For normal calls,
+                // pop only the oldest segment so other calls' recordings stay in the queue.
                 if (!data.callOutcome.includes('No Answer')) {
-                    submitOldestDeferredRecording(callLog.id).then(recordingId => {
+                    const submitFn = hasCallbacks
+                        ? submitDeferredRecording    // merge all segments (callback legs)
+                        : submitOldestDeferredRecording; // pop one segment (normal call)
+                    submitFn(callLog.id).then(recordingId => {
                         if (recordingId) {
                             pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
                                 has_recording: true,
@@ -1259,13 +1281,16 @@ export default function SessionPage() {
                 // Background: session perf + company metadata + follow-up + session refresh
                 void Promise.allSettled([
                     (async () => {
-                        const sessionUpdates: Partial<ColdCallingSession> = {};
-                        if (data.ownerReached) sessionUpdates.owner_reached = (session.owner_reached || 0) + 1;
-                        if (data.pitchCompleted) sessionUpdates.pitch_completed = (session.pitch_completed || 0) + 1;
-                        if (data.appointmentSet) sessionUpdates.appointment_set = (session.appointment_set || 0) + 1;
-                        if (hasCallbacks) sessionUpdates.total_callbacks = (session.total_callbacks || 0) + 1;
-                        if (data.callOutcome.includes('No Answer') && capturedPickupIncremented && (session.total_pickups || 0) > 0) {
-                            sessionUpdates.total_pickups = Math.max(0, (session.total_pickups || 0) - 1);
+                        // Use PocketBase atomic increment/decrement operators to prevent
+                        // race conditions when multiple calls update the session concurrently.
+                        const sessionUpdates: Record<string, number> = {};
+                        if (data.ownerReached) sessionUpdates['owner_reached+'] = 1;
+                        if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
+                        if (data.appointmentSet) sessionUpdates['appointment_set+'] = 1;
+                        if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
+                        if (data.callOutcome.includes('No Answer') && capturedPickupIncremented) {
+                            // Atomically decrement — PB's min:0 constraint prevents going negative
+                            sessionUpdates['total_pickups-'] = 1;
                         }
                         if (Object.keys(sessionUpdates).length > 0) {
                             await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, sessionUpdates);
@@ -1310,15 +1335,30 @@ export default function SessionPage() {
                             });
                         } catch (err) { console.error('Failed to create follow-up:', err); }
                     })() : Promise.resolve(),
+                    // Complete follow-ups the user chose to resolve in the call form
+                    data.completeFollowUpIds?.length ? (async () => {
+                        try {
+                            for (const fuId of data.completeFollowUpIds!) {
+                                await completeFollowUp(fuId);
+                            }
+                            addToast('success', `Completed ${data.completeFollowUpIds!.length} follow-up${data.completeFollowUpIds!.length > 1 ? 's' : ''} for ${data.companyName}`);
+                        } catch { /* non-critical */ }
+                    })() : Promise.resolve(),
                 ]);
             } catch (err) {
                 console.error('Failed to save call:', err);
             }
         })();
-    }, [session, user, discardOldestDeferredRecording, submitOldestDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp]);
+    }, [session, user, discardOldestDeferredRecording, discardDeferredRecording, submitOldestDeferredRecording, submitDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp, completeFollowUp, addToast]);
 
     const handleDiscardCall = useCallback(() => {
-        discardOldestDeferredRecording();
+        // Discard ALL segments if callbacks exist (multiple recording segments queued),
+        // otherwise just discard the oldest one
+        if (callbackEvents.length > 0) {
+            discardDeferredRecording();
+        } else {
+            discardOldestDeferredRecording();
+        }
         setContextPhoneNumber('');
 
         setHasUnsavedCall(false);
@@ -1339,7 +1379,7 @@ export default function SessionPage() {
             clearTimeout(powerDialerTimerRef.current);
             powerDialerTimerRef.current = null;
         }
-    }, [discardOldestDeferredRecording, setContextPhoneNumber]);
+    }, [callbackEvents, discardOldestDeferredRecording, discardDeferredRecording, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------
     // Power dialer handlers
@@ -1411,9 +1451,22 @@ export default function SessionPage() {
     ) => {
         if (!session) return;
         try {
+            // Compute delta from current session value and use atomic increment/decrement.
+            // This prevents race conditions when the user clicks rapidly or when concurrent
+            // updates (e.g., from handleSaveCall) modify the same counter.
+            const currentValue = session[field] || 0;
+            const delta = value - currentValue;
+            const atomicUpdate: Record<string, number> = {};
+            if (delta > 0) {
+                atomicUpdate[`${field}+`] = delta;
+            } else if (delta < 0) {
+                atomicUpdate[`${field}-`] = Math.abs(delta);
+            } else {
+                return; // No change needed
+            }
             const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(
                 session.id,
-                { [field]: value }
+                atomicUpdate
             );
             setSession(updatedSession);
         } catch (err) {

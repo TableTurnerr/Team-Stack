@@ -281,6 +281,23 @@ interface NavCategory {
 
 const navCategories: NavCategory[] = [
   {
+    key: 'cold-calls',
+    label: 'Cold Calls',
+    icon: Phone,
+    children: [
+      { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
+      { href: '/session', label: 'Call Session', icon: Headphones },
+      { href: '/recordings', label: 'Recordings', icon: Mic },
+      { href: '/session-logs', label: 'Session Logs', icon: History },
+    ],
+  },
+  {
+    key: 'notes',
+    label: 'Notes',
+    icon: StickyNote,
+    href: '/notes',
+  },
+  {
     key: 'overview',
     label: 'Overview',
     icon: LayoutDashboard,
@@ -302,27 +319,10 @@ const navCategories: NavCategory[] = [
     href: '/companies',
   },
   {
-    key: 'cold-calls',
-    label: 'Cold Calls',
-    icon: Phone,
-    children: [
-      { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
-      { href: '/session', label: 'Call Session', icon: Headphones },
-      { href: '/recordings', label: 'Recordings', icon: Mic },
-      { href: '/session-logs', label: 'Session Logs', icon: History },
-    ],
-  },
-  {
     key: 'email',
     label: 'Email Marketing',
     icon: Mail,
     href: '/email',
-  },
-  {
-    key: 'notes',
-    label: 'Notes',
-    icon: StickyNote,
-    href: '/notes',
   },
   {
     key: 'recycle-bin',

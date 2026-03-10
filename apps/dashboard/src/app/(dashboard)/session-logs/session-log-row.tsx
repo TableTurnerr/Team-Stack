@@ -13,11 +13,18 @@ import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
 import { Tooltip } from '@/components/ui/tooltip';
+import { IndexCell } from '@/components/ui/data-table';
+import { RelativeTime } from '@/components/relative-time';
 
 interface SessionLogRowProps {
     session: ColdCallingSession;
+    index: number;
+    selected: boolean;
+    onSelect: () => void;
+    hasSelection: boolean;
     onUpdate: (session: ColdCallingSession) => void;
     onDelete?: (id: string) => void;
+    timezones?: { timezone: string; label: string }[];
 }
 
 function formatDuration(seconds: number): string {
@@ -40,7 +47,7 @@ function formatDateTime(dateString: string): string {
     });
 }
 
-export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProps) {
+export function SessionLogRow({ session, index, selected, onSelect, hasSelection, onUpdate, onDelete, timezones }: SessionLogRowProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [actualCallCount, setActualCallCount] = useState<number | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -180,10 +187,11 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                         )}
                     </button>
                 </td>
+                <IndexCell index={index} selected={selected} onSelect={onSelect} forceCheckbox={hasSelection} />
                 <td className="px-4 py-3">
                     <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">{formatDateTime(session.started_at)}</span>
+                            <RelativeTime date={session.started_at} timezones={timezones} className="text-sm font-medium" />
                             {session.is_test && (
                                 <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30 tracking-wide">
                                     TEST
@@ -191,7 +199,7 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
                             )}
                         </div>
                         <span className="text-xs text-[var(--muted)]">
-                            {session.ended_at ? `Ended: ${formatDateTime(session.ended_at)}` : 'Active'}
+                            {session.ended_at ? <><span>Ended: </span><RelativeTime date={session.ended_at} timezones={timezones} className="text-xs text-[var(--muted)]" /></> : 'Active'}
                         </span>
                         {testDeleteError && (
                             <span className="text-[10px] text-[var(--error)]">Delete failed — try again</span>
@@ -329,7 +337,7 @@ export function SessionLogRow({ session, onUpdate, onDelete }: SessionLogRowProp
             {/* Expanded row showing call logs and notes */}
             {isExpanded && (
                 <tr>
-                    <td colSpan={12} className="p-0">
+                    <td colSpan={13} className="p-0">
                         <div className="bg-[var(--card-bg)] border-t border-b border-[var(--card-border)]">
                             {/* Session Notes */}
                             <div className="px-6 py-4 border-b border-[var(--card-border)]">

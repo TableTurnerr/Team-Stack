@@ -1,5 +1,5 @@
 {
-  "version": "2.3",
-  "releaseNotes": "Overhauled CRM integration with support for new schema fields (company_name, company_location), automated pre-call note creation, activity timeline interaction logging, and improved phone record sync.",
+  "version": "2.6",
+  "releaseNotes": "Fixed phone_number field mapping to CRM. Added CRM send confirmation modal. Auto-add to local list on CRM send. Fixed website scanner CRM phone data. Multi-location Excel export. Note deduplication.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension"
 }

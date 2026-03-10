@@ -78,6 +78,7 @@ export function FollowUpProvider({ children }: { children: ReactNode }) {
     const followUp = await pb.collection(COLLECTIONS.FOLLOW_UPS).create<FollowUp>({
       ...data,
       created_by: user?.id,
+      assigned_to: data.assigned_to || user?.id,
       status: 'pending',
     });
 

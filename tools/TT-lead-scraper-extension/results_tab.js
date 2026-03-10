@@ -31,7 +31,7 @@ function pbCheckCompanyStatus(name, phones, cb) {
                 if (d.totalItems === 0) {
                     var phoneNums = (Array.isArray(phones) ? phones : []).map(function (p) { return String(p.number || '').replace(/\D/g, ''); }).filter(Boolean);
                     if (!phoneNums.length) { cb({ status: 'new' }); return; }
-                    var phoneFilter = encodeURIComponent(phoneNums.map(function (n) { return 'number="' + n + '"'; }).join('||'));
+                    var phoneFilter = encodeURIComponent(phoneNums.map(function (n) { return 'phone_number="' + n + '"'; }).join('||'));
                     fetch(pbUrl + '/api/collections/phone_numbers/records?filter=' + phoneFilter + '&perPage=1', { headers: headers })
                         .then(function (r2) { return r2.json(); })
                         .then(function (d2) { cb({ status: d2.totalItems > 0 ? 'exists_same_phone' : 'new' }); })
@@ -41,7 +41,7 @@ function pbCheckCompanyStatus(name, phones, cb) {
                 var companyId = d.items[0].id;
                 var phoneNums = (Array.isArray(phones) ? phones : []).map(function (p) { return String(p.number || '').replace(/\D/g, ''); }).filter(Boolean);
                 if (!phoneNums.length) { cb({ status: 'exists_same_phone', companyId: companyId }); return; }
-                var phoneFilter = encodeURIComponent('company="' + companyId + '"&&(' + phoneNums.map(function (n) { return 'number="' + n + '"'; }).join('||') + ')');
+                var phoneFilter = encodeURIComponent('company="' + companyId + '"&&(' + phoneNums.map(function (n) { return 'phone_number="' + n + '"'; }).join('||') + ')');
                 fetch(pbUrl + '/api/collections/phone_numbers/records?filter=' + phoneFilter + '&perPage=1', { headers: headers })
                     .then(function (r2) { return r2.json(); })
                     .then(function (d2) {
@@ -65,7 +65,7 @@ function pbAddPhoneToCompany(companyId, phones, cb) {
         var phonePromises = phoneList.map(function (pe) {
             var num = String(pe.number || '').replace(/\D/g, '');
             if (!num) return Promise.resolve();
-            var phoneBody = JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' });
+            var phoneBody = JSON.stringify({ phone_number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' });
             return fetch(pbUrl + '/api/collections/phone_numbers/records', { method: 'POST', headers: headers, body: phoneBody });
         });
         Promise.all(phonePromises)
@@ -100,12 +100,27 @@ function pbSendToCrm(item, cb) {
                 var companyId = compData.id;
                 var followUp = [];
 
-                // Create company_notes record if note exists
+                // Create company_notes record if note exists (with dedup check)
                 if (item.note && userId) {
-                    followUp.push(fetch(pbUrl + '/api/collections/company_notes/records', {
-                        method: 'POST', headers: headers,
-                        body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
-                    }));
+                    var noteCheckFilter = encodeURIComponent('company="' + companyId + '"&&note_type="pre_call"&&content="' + String(item.note).replace(/"/g, '') + '"');
+                    followUp.push(
+                        fetch(pbUrl + '/api/collections/company_notes/records?filter=' + noteCheckFilter + '&perPage=1', { headers: headers })
+                            .then(function (r) { return r.json(); })
+                            .then(function (d) {
+                                if (d.totalItems === 0) {
+                                    return fetch(pbUrl + '/api/collections/company_notes/records', {
+                                        method: 'POST', headers: headers,
+                                        body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
+                                    });
+                                }
+                            })
+                            .catch(function () {
+                                return fetch(pbUrl + '/api/collections/company_notes/records', {
+                                    method: 'POST', headers: headers,
+                                    body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
+                                });
+                            })
+                    );
                 }
 
                 // Create interaction for activity timeline
@@ -122,7 +137,7 @@ function pbSendToCrm(item, cb) {
                     if (!num) return;
                     followUp.push(fetch(pbUrl + '/api/collections/phone_numbers/records', {
                         method: 'POST', headers: headers,
-                        body: JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' })
+                        body: JSON.stringify({ phone_number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' })
                     }));
                 });
 
@@ -164,6 +179,55 @@ function formatPhoneDisplay(normalized) {
 // ============================================================================
 // End of Phone Normalization Helpers
 // ============================================================================
+
+// ============================================================================
+// CRM Confirmation Modal (results tab)
+// ============================================================================
+function escapeHtmlModal(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function showCrmConfirmation(item, onConfirm) {
+    var existing = document.getElementById('gmes-crm-confirm-modal');
+    if (existing) existing.remove();
+
+    var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
+    var phonesDisplay = phones.map(function (p) {
+        return formatPhoneDisplay(p.number || '') + (p.label ? ' (' + p.label + ')' : '') +
+            (p.location_name ? ' — ' + p.location_name : '') +
+            (p.location_address ? ', ' + p.location_address : '');
+    }).join('<br>') || '<em>None</em>';
+
+    var modal = document.createElement('div');
+    modal.id = 'gmes-crm-confirm-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Poppins,sans-serif;';
+    modal.innerHTML =
+        '<div style="background:#fff;border-radius:14px;padding:0;max-width:520px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.25);border:1.5px solid #e2e5eb;">' +
+        '<div style="background:linear-gradient(135deg,#1557b0 0%,#1a73e8 60%,#4285f4 100%);padding:14px 18px;color:white;font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>' +
+        'Confirm CRM Send</div>' +
+        '<div style="padding:16px 18px;max-height:50vh;overflow-y:auto;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;">' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Company</td><td style="padding:6px 0;color:#202124;">' + escapeHtmlModal(item.title || 'Unknown') + '</td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Location</td><td style="padding:6px 0;color:#202124;">' + escapeHtmlModal((item.address || '') + (item.city ? ', ' + item.city : '') || 'N/A') + '</td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Phone(s)</td><td style="padding:6px 0;color:#202124;">' + phonesDisplay + '</td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Rating</td><td style="padding:6px 0;color:#202124;">' + escapeHtmlModal(item.rating || '0') + ' \u2605 ' + escapeHtmlModal((item.reviewCount || '').replace(/[()]/g, '')) + ' reviews</td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Website</td><td style="padding:6px 0;color:#202124;word-break:break-all;">' + escapeHtmlModal(item.companyUrl || 'N/A') + '</td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Note</td><td style="padding:6px 0;color:#202124;white-space:pre-wrap;">' + escapeHtmlModal(item.note || 'None') + '</td></tr>' +
+        '</table></div>' +
+        '<div style="padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #e2e5eb;">' +
+        '<button id="gmes-confirm-cancel" style="padding:8px 18px;border:1.5px solid #e2e5eb;border-radius:8px;background:#fff;color:#3c4043;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button>' +
+        '<button id="gmes-confirm-send" style="padding:8px 18px;border:none;border-radius:8px;background:#1a73e8;color:white;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Confirm &amp; Send</button>' +
+        '</div></div>';
+
+    document.body.appendChild(modal);
+    document.getElementById('gmes-confirm-cancel').addEventListener('click', function () { modal.remove(); });
+    modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
+    document.getElementById('gmes-confirm-send').addEventListener('click', function () {
+        modal.remove();
+        onConfirm();
+    });
+}
 
 document.addEventListener('DOMContentLoaded', function () {
     const table = document.getElementById('resultsTable');
@@ -300,45 +364,47 @@ document.addEventListener('DOMContentLoaded', function () {
                             });
                         }
                         btn.addEventListener('click', () => {
-                            if (item.crmExistingId) {
-                                btn.disabled = true;
-                                btn.textContent = 'Adding\u2026';
-                                const addPhones = Array.isArray(item.phones) && item.phones.length
-                                    ? item.phones
-                                    : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
-                                pbAddPhoneToCompany(item.crmExistingId, addPhones, (result) => {
-                                    if (result.success) {
-                                        item.crmPhoneAdded = true;
-                                        td.innerHTML = '';
-                                        td.textContent = '\u2713 Phone Added';
-                                        td.style.color = '#34a853';
-                                        td.style.fontWeight = '600';
-                                        chrome.storage.local.set({ gmes_results: allItems });
-                                    } else {
-                                        btn.disabled = false;
-                                        btn.textContent = 'Add New Phone +';
-                                        alert('Failed to add phone: ' + (result.error || 'Unknown error'));
-                                    }
-                                });
-                            } else {
-                                btn.disabled = true;
-                                btn.textContent = 'Sending\u2026';
-                                pbSendToCrm(item, (result) => {
-                                    if (result.success) {
-                                        item.crmSynced = true;
-                                        if (result.recordId) item.crmId = result.recordId;
-                                        td.innerHTML = '';
-                                        td.textContent = '\u2713 Synced';
-                                        td.style.color = '#34a853';
-                                        td.style.fontWeight = '600';
-                                        chrome.storage.local.set({ gmes_results: allItems });
-                                    } else {
-                                        btn.disabled = false;
-                                        btn.textContent = 'Retry';
-                                        alert('CRM sync failed: ' + (result.error || 'Unknown error'));
-                                    }
-                                });
-                            }
+                            showCrmConfirmation(item, () => {
+                                if (item.crmExistingId) {
+                                    btn.disabled = true;
+                                    btn.textContent = 'Adding\u2026';
+                                    const addPhones = Array.isArray(item.phones) && item.phones.length
+                                        ? item.phones
+                                        : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
+                                    pbAddPhoneToCompany(item.crmExistingId, addPhones, (result) => {
+                                        if (result.success) {
+                                            item.crmPhoneAdded = true;
+                                            td.innerHTML = '';
+                                            td.textContent = '\u2713 Phone Added';
+                                            td.style.color = '#34a853';
+                                            td.style.fontWeight = '600';
+                                            chrome.storage.local.set({ gmes_results: allItems });
+                                        } else {
+                                            btn.disabled = false;
+                                            btn.textContent = 'Add New Phone +';
+                                            alert('Failed to add phone: ' + (result.error || 'Unknown error'));
+                                        }
+                                    });
+                                } else {
+                                    btn.disabled = true;
+                                    btn.textContent = 'Sending\u2026';
+                                    pbSendToCrm(item, (result) => {
+                                        if (result.success) {
+                                            item.crmSynced = true;
+                                            if (result.recordId) item.crmId = result.recordId;
+                                            td.innerHTML = '';
+                                            td.textContent = '\u2713 Synced';
+                                            td.style.color = '#34a853';
+                                            td.style.fontWeight = '600';
+                                            chrome.storage.local.set({ gmes_results: allItems });
+                                        } else {
+                                            btn.disabled = false;
+                                            btn.textContent = 'Retry';
+                                            alert('CRM sync failed: ' + (result.error || 'Unknown error'));
+                                        }
+                                    });
+                                }
+                            });
                         });
                         td.appendChild(btn);
                     }
@@ -364,31 +430,56 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // Export functionality - HTML-based .xls for link preservation
+    // Multi-location: items with multiple phones get expanded into separate rows,
+    // repeating the company name so each phone/location has its own row.
     exportBtn.addEventListener('click', () => {
         try {
-            const headers = Array.from(table.querySelectorAll('thead th'));
-            const rows = Array.from(table.querySelectorAll('tbody tr'));
+            const headerLabels = ['Title', 'Note', 'Closed Status', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Location Name', 'Location Address', 'Industry', 'Expensiveness', 'City', 'Address', 'Website', 'Insta Search', 'Google Maps Link', 'CRM Status'];
 
             let html = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
             html += '<table border="1" style="border-collapse:collapse;">';
-
-            // Headers
             html += '<thead><tr>';
-            headers.forEach(h => { html += '<th>' + (h.innerText || '') + '</th>'; });
-            html += '</tr></thead>';
+            headerLabels.forEach(h => { html += '<th>' + h + '</th>'; });
+            html += '</tr></thead><tbody>';
 
-            // Body
-            html += '<tbody>';
-            rows.forEach(tr => {
-                html += '<tr>';
-                const cols = Array.from(tr.querySelectorAll('td'));
-                cols.forEach(td => {
-                    // Use innerText to get the plain text (URLs) and remove anchor tags for the sheet
-                    const cellText = td.innerText || '';
-                    html += '<td>' + cellText + '</td>';
+            const seen = new Set();
+            allItems.forEach(item => {
+                const key = item.href || (item.title + '|' + item.address);
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+
+                const phones = Array.isArray(item.phones) && item.phones.length
+                    ? item.phones
+                    : (item.phone ? [{ number: item.phone, label: 'Main', location_name: '', location_address: '' }] : [{ number: '', label: '', location_name: '', location_address: '' }]);
+
+                const crmStatus = item.crmSynced ? 'Synced' : (item.crmPhoneAdded ? 'Phone Added' : '');
+                const websiteUrl = item.companyUrl && !item.companyUrl.startsWith('https://www.google.com/maps')
+                    ? item.companyUrl
+                    : 'https://www.google.com/search?q=' + encodeURIComponent((item.title || '') + ' ' + (item.city || '') + ' Website');
+
+                phones.forEach(p => {
+                    html += '<tr>';
+                    html += '<td>' + escapeHtmlModal(item.title || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.note || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.closedStatus || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.rating || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal((item.reviewCount || '').replace(/[()]/g, '')) + '</td>';
+                    html += '<td>' + escapeHtmlModal(p.number ? formatPhoneDisplay(p.number) : '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(p.label || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(p.location_name || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(p.location_address || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.industry || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.expensiveness || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.city || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.address || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(websiteUrl) + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.instaSearch || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(item.href || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(crmStatus) + '</td>';
+                    html += '</tr>';
                 });
-                html += '</tr>';
             });
+
             html += '</tbody></table></body></html>';
 
             const blob = new Blob([html], { type: 'application/vnd.ms-excel' });

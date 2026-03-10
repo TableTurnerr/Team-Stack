@@ -1,5 +1,5 @@
 {
-  "version": "2.4",
-  "releaseNotes": "Enhanced update notifications with 'Don't remind me' option and rate-limiting. Improved state management for notification URLs.",
+  "version": "2.6",
+  "releaseNotes": "Fixed phone_number field mapping to CRM. Added CRM send confirmation modal. Auto-add to local list on CRM send. Fixed website scanner CRM phone data. Multi-location Excel export. Note deduplication.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension"
 }

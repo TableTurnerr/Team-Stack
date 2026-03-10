@@ -31,7 +31,7 @@ function pbCheckDuplicate_maps(name, phone, cb) {
             .then(function (d) {
                 if (d.totalItems > 0) { cb(true); return; }
                 if (!phone) { cb(false); return; }
-                var phoneFilter = encodeURIComponent('number="' + String(phone).replace(/\D/g, '') + '"');
+                var phoneFilter = encodeURIComponent('phone_number="' + String(phone).replace(/\D/g, '') + '"');
                 fetch(pbUrl + '/api/collections/phone_numbers/records?filter=' + phoneFilter + '&perPage=1', { headers: headers })
                     .then(function (r2) { return r2.json(); })
                     .then(function (d2) { cb(d2.totalItems > 0); })
@@ -65,12 +65,27 @@ function pbSendToCrm_maps(item, cb) {
                 var companyId = compData.id;
                 var followUp = [];
 
-                // Create company_notes record if note exists
+                // Create company_notes record if note exists (with dedup check)
                 if (item.note && userId) {
-                    followUp.push(fetch(pbUrl + '/api/collections/company_notes/records', {
-                        method: 'POST', headers: headers,
-                        body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
-                    }));
+                    var noteCheckFilter = encodeURIComponent('company="' + companyId + '"&&note_type="pre_call"&&content="' + String(item.note).replace(/"/g, '') + '"');
+                    followUp.push(
+                        fetch(pbUrl + '/api/collections/company_notes/records?filter=' + noteCheckFilter + '&perPage=1', { headers: headers })
+                            .then(function (r) { return r.json(); })
+                            .then(function (d) {
+                                if (d.totalItems === 0) {
+                                    return fetch(pbUrl + '/api/collections/company_notes/records', {
+                                        method: 'POST', headers: headers,
+                                        body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
+                                    });
+                                }
+                            })
+                            .catch(function () {
+                                return fetch(pbUrl + '/api/collections/company_notes/records', {
+                                    method: 'POST', headers: headers,
+                                    body: JSON.stringify({ company: companyId, note_type: 'pre_call', content: item.note, created_by: userId })
+                                });
+                            })
+                    );
                 }
 
                 // Create interaction for activity timeline
@@ -87,7 +102,7 @@ function pbSendToCrm_maps(item, cb) {
                     if (!num) return;
                     followUp.push(fetch(pbUrl + '/api/collections/phone_numbers/records', {
                         method: 'POST', headers: headers,
-                        body: JSON.stringify({ number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' })
+                        body: JSON.stringify({ phone_number: num, company: companyId, label: pe.label || 'Main', location_name: pe.location_name || '', location_address: pe.location_address || '' })
                     }));
                 });
 
@@ -96,6 +111,55 @@ function pbSendToCrm_maps(item, cb) {
             .catch(function (e) { cb({ success: false, error: e.message || String(e) }); });
     });
 }
+// ============================================================================
+// CRM Confirmation Modal (maps overlay)
+// ============================================================================
+function showCrmConfirmation_maps(item, onConfirm) {
+    var existing = document.getElementById('gmes-crm-confirm-modal');
+    if (existing) existing.remove();
+
+    function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+    var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
+    var phonesDisplay = phones.map(function (p) {
+        var d = String(p.number || '').replace(/\D/g, '');
+        if (d.length === 11 && d[0] === '1') d = d.slice(1);
+        var fmt = d.length === 10 ? '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6) : (p.number || '');
+        return esc(fmt) + (p.label ? ' (' + esc(p.label) + ')' : '') +
+            (p.location_name ? ' — ' + esc(p.location_name) : '');
+    }).join('<br>') || '<em>None</em>';
+
+    var modal = document.createElement('div');
+    modal.id = 'gmes-crm-confirm-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,system-ui,sans-serif;';
+    modal.innerHTML =
+        '<div style="background:#fff;border-radius:14px;padding:0;max-width:440px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.25);">' +
+        '<div style="background:linear-gradient(135deg,#1557b0 0%,#1a73e8 60%,#4285f4 100%);padding:13px 16px;color:white;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;">' +
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>' +
+        'Confirm CRM Send</div>' +
+        '<div style="padding:14px 16px;max-height:50vh;overflow-y:auto;font-size:13px;">' +
+        '<table style="width:100%;border-collapse:collapse;">' +
+        '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Company</td><td style="padding:5px 0;color:#202124;">' + esc(item.title || 'Unknown') + '</td></tr>' +
+        '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Location</td><td style="padding:5px 0;color:#202124;">' + esc((item.address || '') + (item.city ? ', ' + item.city : '') || 'N/A') + '</td></tr>' +
+        '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Phone(s)</td><td style="padding:5px 0;color:#202124;">' + phonesDisplay + '</td></tr>' +
+        '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Rating</td><td style="padding:5px 0;color:#202124;">' + esc(item.rating || '0') + ' \u2605 ' + esc((item.reviewCount || '').replace(/[()]/g, '')) + '</td></tr>' +
+        '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Website</td><td style="padding:5px 0;color:#202124;word-break:break-all;">' + esc(item.companyUrl || 'N/A') + '</td></tr>' +
+        '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Note</td><td style="padding:5px 0;color:#202124;white-space:pre-wrap;">' + esc(item.note || 'None') + '</td></tr>' +
+        '</table></div>' +
+        '<div style="padding:10px 16px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #e8eaed;">' +
+        '<button id="gmes-confirm-cancel" style="padding:8px 16px;border:1.5px solid #e2e5eb;border-radius:8px;background:#fff;color:#3c4043;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button>' +
+        '<button id="gmes-confirm-send" style="padding:8px 16px;border:none;border-radius:8px;background:#1a73e8;color:white;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Confirm &amp; Send</button>' +
+        '</div></div>';
+
+    document.body.appendChild(modal);
+    document.getElementById('gmes-confirm-cancel').addEventListener('click', function () { modal.remove(); });
+    modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
+    document.getElementById('gmes-confirm-send').addEventListener('click', function () {
+        modal.remove();
+        onConfirm();
+    });
+}
+
 // ============================================================================
 // End of PocketBase CRM Helpers
 // ============================================================================
@@ -966,25 +1030,33 @@ function pbSendToCrm_maps(item, cb) {
                     crmStatusDiv.style.color = '#34a853';
                     crmStatusDiv.style.display = 'block';
                 } else {
-                    crmBtn.style.display = 'block';
+                    crmBtn.style.display = 'flex';
                     crmBtn.addEventListener('click', () => {
-                        crmBtn.disabled = true;
-                        crmBtn.textContent = 'Sending to CRM…';
                         const freshItem = scrapeCurrentPlace();
                         const noteInput = document.getElementById('gmes-note-input');
                         if (noteInput) freshItem.note = noteInput.value.trim();
-                        pbSendToCrm_maps(freshItem, (result) => {
-                            if (result.success) {
-                                crmBtn.style.display = 'none';
-                                crmStatusDiv.textContent = '✓ Synced to CRM';
-                                crmStatusDiv.style.background = '#e8f5e9';
-                                crmStatusDiv.style.color = '#34a853';
-                                crmStatusDiv.style.display = 'block';
-                            } else {
-                                crmBtn.disabled = false;
-                                crmBtn.textContent = 'Retry CRM Sync';
-                                alert('CRM sync failed: ' + (result.error || 'Unknown error'));
-                            }
+
+                        // Show confirmation modal
+                        showCrmConfirmation_maps(freshItem, () => {
+                            crmBtn.disabled = true;
+                            crmBtn.textContent = 'Sending to CRM…';
+                            pbSendToCrm_maps(freshItem, (result) => {
+                                if (result.success) {
+                                    crmBtn.style.display = 'none';
+                                    crmStatusDiv.textContent = '✓ Synced to CRM';
+                                    crmStatusDiv.style.background = '#e8f5e9';
+                                    crmStatusDiv.style.color = '#34a853';
+                                    crmStatusDiv.style.display = 'block';
+                                    // Auto-add to local list
+                                    freshItem.crmSynced = true;
+                                    freshItem.crmId = result.recordId;
+                                    chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: freshItem });
+                                } else {
+                                    crmBtn.disabled = false;
+                                    crmBtn.textContent = 'Retry CRM Sync';
+                                    alert('CRM sync failed: ' + (result.error || 'Unknown error'));
+                                }
+                            });
                         });
                     });
                 }

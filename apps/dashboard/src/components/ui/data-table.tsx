@@ -148,7 +148,7 @@ export function ResizableTh({
     document.body.style.userSelect = 'none';
   }, [minWidth, onResize]);
 
-  /** Double-click: auto-fit column width to content */
+  /** Double-click: auto-fit column width to hug visible content */
   const handleDoubleClick = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -157,24 +157,29 @@ export function ResizableTh({
     const table = thRef.current.closest('table');
     if (!table) return;
 
-    // Find column index
     const headerRow = thRef.current.parentElement;
     if (!headerRow) return;
     const colIndex = Array.from(headerRow.children).indexOf(thRef.current);
 
-    // Measure all body cells in this column
-    let maxContent = 0;
+    // Temporarily switch table to auto layout and clear this column's fixed width
+    // so cells can shrink-wrap to their visible content.
+    const prevLayout = table.style.tableLayout;
+    const prevThWidth = thRef.current.style.width;
+    table.style.tableLayout = 'auto';
+    thRef.current.style.width = 'auto';
+
+    // Measure the natural width of the header and each body cell
+    let maxContent = thRef.current.offsetWidth;
     const bodyCells = table.querySelectorAll(`tbody tr td:nth-child(${colIndex + 1})`);
     bodyCells.forEach((cell) => {
-      // scrollWidth gives the full content width even if truncated
-      const el = cell as HTMLElement;
-      maxContent = Math.max(maxContent, el.scrollWidth);
+      maxContent = Math.max(maxContent, (cell as HTMLElement).offsetWidth);
     });
 
-    // Also consider header content
-    maxContent = Math.max(maxContent, thRef.current.scrollWidth);
+    // Restore original layout immediately
+    table.style.tableLayout = prevLayout;
+    thRef.current.style.width = prevThWidth;
 
-    const fitted = Math.min(AUTO_FIT_MAX, Math.max(minWidth, maxContent + AUTO_FIT_PAD));
+    const fitted = Math.min(AUTO_FIT_MAX, Math.max(minWidth, maxContent));
     onResize(fitted);
   }, [minWidth, onResize]);
 

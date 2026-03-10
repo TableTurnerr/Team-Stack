@@ -5,6 +5,7 @@ import { startScheduler } from './scheduler';
 import { handleClear } from './commands/clear';
 import { handleFollowups } from './commands/followups';
 import { handleHelp } from './commands/help';
+import { handleTest } from './commands/test';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
@@ -57,6 +58,8 @@ client.on('messageCreate', async (message: Message) => {
     await handleFollowups(message);
   } else if (content.startsWith('/clear')) {
     await handleClear(message);
+  } else if (content.startsWith('/test')) {
+    await handleTest(message);
   }
 });
 

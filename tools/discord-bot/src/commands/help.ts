@@ -57,6 +57,30 @@ const commands: CommandInfo[] = [
       '**In servers:** Bulk-deletes all messages (requires Manage Messages permission).\n\n' +
       'Count must be between 1 and 100. Messages older than 14 days cannot be bulk-deleted by Discord.',
   },
+  {
+    name: 'test',
+    summary: 'Test follow-up notifications without waiting for the cron job.',
+    usage: '/test <due|overdue|embed|fake|channel>',
+    examples: [
+      '/test due',
+      '/test overdue',
+      '/test embed',
+      '/test embed overdue',
+      '/test fake',
+      '/test fake overdue',
+      '/test channel',
+    ],
+    details:
+      'Manually trigger or preview follow-up notifications.\n\n' +
+      '**Subcommands:**\n' +
+      '`due` — Run the due follow-ups cron job immediately. Real records will be processed and marked.\n' +
+      '`overdue` — Run the overdue follow-ups cron job immediately. Real records will be processed and marked.\n' +
+      '`embed` — Preview a sample "due" embed in the current channel (no DB changes).\n' +
+      '`embed overdue` — Preview a sample "overdue" embed in the current channel (no DB changes).\n' +
+      '`fake` — Send a fake due notification to the follow-ups channel with your @mention (no DB changes).\n' +
+      '`fake overdue` — Same as above but with the overdue style.\n' +
+      '`channel` — Send a test embed to the follow-ups notification channel to verify connectivity.',
+  },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

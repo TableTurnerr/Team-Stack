@@ -1,24 +1,30 @@
-import { Client } from 'discord.js';
+import { Client, TextChannel } from 'discord.js';
 import { pb, withAuth } from '../pb';
-import { buildFollowUpEmbed, FollowUpRecord } from '../embeds/follow-up';
-import { sendDM } from '../utils/send-dm';
-import { isInDND, NotificationSettings } from '../utils/dnd';
+import { buildFollowUpEmbed, FollowUpRecord, TimezoneEntry } from '../embeds/follow-up';
 
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MINUTES ?? '5', 10);
+const FOLLOW_UP_CHANNEL_ID = '1478787441513992273';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function getUserPrefs(userId: string): Promise<NotificationSettings> {
+interface UserTimezoneInfo {
+  localTimezone?: string;
+  savedTimezones: TimezoneEntry[];
+}
+
+async function getUserTimezoneInfo(userId: string): Promise<UserTimezoneInfo> {
   try {
     const result = await withAuth(() =>
       pb.collection('user_preferences').getFirstListItem(`user="${userId}"`)
     );
-    return (result.notification_settings as NotificationSettings) ?? {};
+    const savedTimezones = Array.isArray(result.timezones) ? result.timezones as TimezoneEntry[] : [];
+    const workflow = result.workflow_preferences as { cold_calling_timezone?: string } | undefined;
+    const localTimezone = workflow?.cold_calling_timezone;
+    return { localTimezone, savedTimezones };
   } catch {
-    // No preferences record → use defaults (all notifications on, DND off)
-    return {};
+    return { savedTimezones: [] };
   }
 }
 
@@ -29,33 +35,32 @@ async function processRecord(
 ): Promise<void> {
   try {
     const user = record.expand?.assigned_to;
-    if (!user) {
-      console.warn(`[follow-ups] Record ${record.id} has no expanded assigned_to — skipping.`);
+    const discordUserId: string = user?.discord_user_id ?? '';
+    const userName: string = user?.name ?? 'Unassigned';
+
+    // Fetch the user's local timezone and saved timezones
+    const tzInfo = user?.id ? await getUserTimezoneInfo(user.id) : { savedTimezones: [] };
+
+    const embed = buildFollowUpEmbed(
+      record as FollowUpRecord,
+      overdue,
+      userName,
+      discordUserId,
+      tzInfo.localTimezone,
+      tzInfo.savedTimezones
+    );
+
+    // Send to the follow-ups channel
+    const channel = await client.channels.fetch(FOLLOW_UP_CHANNEL_ID);
+    if (!channel || !(channel instanceof TextChannel)) {
+      console.error(`[follow-ups] Could not fetch channel ${FOLLOW_UP_CHANNEL_ID}`);
       return;
     }
 
-    const discordUserId: string = user.discord_user_id ?? '';
-    if (!discordUserId.trim()) {
-      console.log(`[follow-ups] User ${user.id} (${user.name}) has no discord_user_id — skipping.`);
-      return;
-    }
-
-    const prefs = await getUserPrefs(user.id);
-
-    // Respect the follow_up_reminders toggle (default: true)
-    if (prefs.follow_up_reminders === false) {
-      console.log(`[follow-ups] User ${user.name} has follow_up_reminders disabled — skipping.`);
-      return;
-    }
-
-    // Respect DND window
-    if (isInDND(prefs)) {
-      console.log(`[follow-ups] User ${user.name} is in DND — skipping.`);
-      return;
-    }
-
-    const embed = buildFollowUpEmbed(record as FollowUpRecord, overdue);
-    await sendDM(client, discordUserId, embed);
+    // Mention the assigned user if they have a discord ID
+    const mentionContent = discordUserId.trim() ? `<@${discordUserId}>` : undefined;
+    await channel.send({ content: mentionContent, embeds: [embed] });
+    console.log(`[follow-ups] Sent to channel for ${userName} — record ${record.id}`);
 
     // Mark the record so we don't notify again
     const patch = overdue ? { overdue_notified: true } : { reminder_sent: true };
@@ -70,7 +75,7 @@ async function processRecord(
 // Cron job: due follow-ups
 // ---------------------------------------------------------------------------
 
-export async function checkDueFollowUps(client: Client): Promise<void> {
+export async function checkDueFollowUps(client: Client): Promise<number> {
   console.log('[follow-ups] Checking due follow-ups...');
 
   const now        = new Date();
@@ -91,8 +96,10 @@ export async function checkDueFollowUps(client: Client): Promise<void> {
     for (const record of records) {
       await processRecord(client, record, false);
     }
+    return records.length;
   } catch (err: any) {
     console.error(`[follow-ups] checkDueFollowUps error: ${err?.message ?? err}`);
+    return 0;
   }
 }
 
@@ -100,7 +107,7 @@ export async function checkDueFollowUps(client: Client): Promise<void> {
 // Cron job: overdue follow-ups
 // ---------------------------------------------------------------------------
 
-export async function checkOverdueFollowUps(client: Client): Promise<void> {
+export async function checkOverdueFollowUps(client: Client): Promise<number> {
   console.log('[follow-ups] Checking overdue follow-ups...');
 
   const now = new Date();
@@ -118,7 +125,9 @@ export async function checkOverdueFollowUps(client: Client): Promise<void> {
     for (const record of records) {
       await processRecord(client, record, true);
     }
+    return records.length;
   } catch (err: any) {
     console.error(`[follow-ups] checkOverdueFollowUps error: ${err?.message ?? err}`);
+    return 0;
   }
 }

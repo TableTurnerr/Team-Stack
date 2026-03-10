@@ -1,11 +1,11 @@
 ---
 name: commit-changes
-description: Automates the process of committing changes with optional version bumps (patch/major/none), smart grouping of related changes into multiple commits, and scraper extension support.
+description: Automates the process of committing changes with status audits (versions & features), optional version bumps (patch/major/none), smart grouping of related changes into multiple commits, and scraper extension support.
 ---
 
 # Commit Changes Skill
 
-This skill automates the workflow for committing changes in the TableTurnerr CRM repository, ensuring logical grouping of related changes, consistent versioning, and accurate commit messages.
+This skill automates the workflow for committing changes in the TableTurnerr CRM repository, ensuring logical grouping of related changes, consistent versioning, and accurate commit messages through interactive status reports.
 
 ## Prerequisites
 
@@ -15,7 +15,20 @@ This skill automates the workflow for committing changes in the TableTurnerr CRM
 
 ## Workflow
 
-### 1. Analyze and Group Changes
+### 1. Status Audit (New)
+
+Before analyzing changes, the agent MUST report the current state of the workspace.
+
+1. **Check Versions**: Run the status report script to see what versions everything is currently on.
+   ```bash
+   cmd /c "node .gemini/skills/commit-changes/scripts/get_status.js"
+   ```
+2. **Report & Inquire**: 
+   - Display the current versions to the user.
+   - **ASK the user**: "What primary features or fixes are included in this commit session?"
+   - **ASK the user**: "Are these the correct starting versions, or do we need to sync anything first?"
+
+### 2. Analyze and Group Changes
 
 Run `git status` and `git diff` to identify all changed files. Group these files into **logical sets** based on the objective or nature of the changes.
 

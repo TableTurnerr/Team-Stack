@@ -99,10 +99,11 @@ export function IncomingCallHandler() {
         lookupIncomingNumber(incomingCallerNumber);
 
         // Increment session total_incoming only (inbound calls are not dials)
+        // Uses PocketBase atomic increment to prevent race conditions with stale session state
         if (session) {
             pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
-                total_incoming: (session.total_incoming || 0) + 1,
-            }).then(updated => {
+                'total_incoming+': 1,
+            } as any).then(updated => {
                 setSession(updated);
                 dialIncrementedRef.current = true;
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
@@ -235,12 +236,13 @@ export function IncomingCallHandler() {
             });
 
             // Update session performance metrics
+            // Uses PocketBase atomic increment operators to prevent race conditions
             if (activeSession) {
-                const sessionUpdates: Partial<ColdCallingSession> = {};
-                if (data.ownerReached) sessionUpdates.owner_reached = (activeSession.owner_reached || 0) + 1;
-                if (data.pitchCompleted) sessionUpdates.pitch_completed = (activeSession.pitch_completed || 0) + 1;
-                if (data.appointmentSet) sessionUpdates.appointment_set = (activeSession.appointment_set || 0) + 1;
-                if (hasCallbacks) sessionUpdates.total_callbacks = (activeSession.total_callbacks || 0) + 1;
+                const sessionUpdates: Record<string, number> = {};
+                if (data.ownerReached) sessionUpdates['owner_reached+'] = 1;
+                if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
+                if (data.appointmentSet) sessionUpdates['appointment_set+'] = 1;
+                if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
                 if (Object.keys(sessionUpdates).length > 0) {
                     const updated = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(activeSession.id, sessionUpdates);
                     setSession(updated);

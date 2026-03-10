@@ -12,6 +12,7 @@ interface User {
     role: 'admin' | 'member';
     status: 'online' | 'offline' | 'suspended';
     last_activity?: string;
+    discord_user_id?: string;
 }
 
 interface AuthContextType {

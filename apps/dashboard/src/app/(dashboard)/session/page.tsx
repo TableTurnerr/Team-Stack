@@ -30,6 +30,7 @@ import { StandaloneCallInterface } from './standalone-call-interface';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { useFollowUps } from '@/contexts/follow-up-context';
+import { useToast } from '@/components/ui/toast';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
@@ -76,7 +77,8 @@ export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
     const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
-    const { createFollowUp } = useFollowUps();
+    const { createFollowUp, completeFollowUp } = useFollowUps();
+    const { addToast } = useToast();
 
     // Loading combined
     const loading = sessionLoading;
@@ -1314,12 +1316,21 @@ export default function SessionPage() {
                             });
                         } catch (err) { console.error('Failed to create follow-up:', err); }
                     })() : Promise.resolve(),
+                    // Complete follow-ups the user chose to resolve in the call form
+                    data.completeFollowUpIds?.length ? (async () => {
+                        try {
+                            for (const fuId of data.completeFollowUpIds!) {
+                                await completeFollowUp(fuId);
+                            }
+                            addToast('success', `Completed ${data.completeFollowUpIds!.length} follow-up${data.completeFollowUpIds!.length > 1 ? 's' : ''} for ${data.companyName}`);
+                        } catch { /* non-critical */ }
+                    })() : Promise.resolve(),
                 ]);
             } catch (err) {
                 console.error('Failed to save call:', err);
             }
         })();
-    }, [session, user, discardOldestDeferredRecording, submitOldestDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp]);
+    }, [session, user, discardOldestDeferredRecording, submitOldestDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp, completeFollowUp, addToast]);
 
     const handleDiscardCall = useCallback(() => {
         discardOldestDeferredRecording();

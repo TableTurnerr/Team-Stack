@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   CalendarClock,
@@ -18,10 +18,13 @@ import {
   Ban,
   ClipboardCheck,
   Zap,
+  UserCog,
+  ChevronDown,
   type LucideIcon,
 } from 'lucide-react';
+import Image from 'next/image';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type FollowUp } from '@/lib/types';
+import { COLLECTIONS, type FollowUp, type User as UserType } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
@@ -33,6 +36,7 @@ import {
   ResizableTh,
   useResizableColumns,
   TableEmptyState,
+  SelectionToolbar,
 } from '@/components/ui/data-table';
 
 type StatusFilter = 'overdue' | 'upcoming' | 'completed' | 'dismissed';
@@ -83,6 +87,10 @@ export default function FollowUpsPage() {
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<UserType[]>([]);
+  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+  const assigneeDropdownRef = useRef<HTMLDivElement>(null);
 
   const { getWidth, resize } = useResizableColumns('follow-ups', [
     { key: 'company', initialWidth: 200 },
@@ -110,6 +118,24 @@ export default function FollowUpsPage() {
     setLoading(true);
     fetchAll().finally(() => setLoading(false));
   }, [fetchAll]);
+
+  // Fetch team members for bulk reassign
+  useEffect(() => {
+    pb.collection(COLLECTIONS.USERS).getFullList<UserType>({ filter: 'status != "suspended"' })
+      .then(setTeamMembers)
+      .catch(() => {});
+  }, []);
+
+  // Close assignee dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(e.target as Node)) {
+        setAssigneeDropdownOpen(false);
+      }
+    };
+    if (assigneeDropdownOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [assigneeDropdownOpen]);
 
   // Clear selection when tab or search changes
   useEffect(() => {
@@ -209,6 +235,39 @@ export default function FollowUpsPage() {
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const handleBulkReassign = async (userId: string | null) => {
+    if (selectedIds.size === 0) return;
+    setBulkAssigning(true);
+    setAssigneeDropdownOpen(false);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map(id =>
+          pb.collection(COLLECTIONS.FOLLOW_UPS).update(id, { assigned_to: userId ?? '' })
+        )
+      );
+      // Update local state
+      setAllFollowUps(prev =>
+        prev.map(f =>
+          selectedIds.has(f.id)
+            ? {
+                ...f,
+                assigned_to: userId ?? '',
+                expand: {
+                  ...f.expand,
+                  assigned_to: userId ? teamMembers.find(m => m.id === userId) : undefined,
+                },
+              }
+            : f
+        )
+      );
+      setSelectedIds(new Set());
+    } catch (err) {
+      console.error('Failed to bulk reassign:', err);
+    } finally {
+      setBulkAssigning(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -218,7 +277,7 @@ export default function FollowUpsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6 animate-in fade-in duration-500">
 
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -323,29 +382,91 @@ export default function FollowUpsPage() {
         </div>
       </div>
 
-      {/* ── PowerDialer toolbar ── */}
+      {/* ── Selection toolbar + PowerDialer ── */}
       {filtered.length > 0 && (
-        <div className="flex items-center justify-between gap-3 px-1">
-          <p className="text-xs text-[var(--muted)]">
-            {selectedIds.size > 0
-              ? `${selectedIds.size} selected`
-              : `${filtered.length} follow-up${filtered.length !== 1 ? 's' : ''} in view`}
-          </p>
-          <button
-            onClick={handleCopyForPowerDialer}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all',
-              copied
-                ? 'bg-green-500/15 text-green-400 border border-green-500/30'
-                : 'bg-[var(--primary-subtle)] text-[var(--primary)] border border-[var(--primary)]/20 hover:bg-[var(--primary)] hover:text-white'
-            )}
-          >
-            {copied
-              ? <><ClipboardCheck size={14} /> Copied!</>
-              : <><Zap size={14} /> {selectedIds.size > 0 ? `Copy ${selectedIds.size} for PowerDialer` : 'Copy All for PowerDialer'}</>
-            }
-          </button>
-        </div>
+        <>
+          <SelectionToolbar count={selectedIds.size} totalCount={filtered.length}>
+            {/* Bulk reassign */}
+            <div className="relative" ref={assigneeDropdownRef}>
+              <button
+                onClick={() => setAssigneeDropdownOpen(!assigneeDropdownOpen)}
+                disabled={bulkAssigning}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] text-xs font-medium hover:bg-[var(--card-hover)] transition-all disabled:opacity-50"
+              >
+                {bulkAssigning ? <Loader2 size={12} className="animate-spin" /> : <UserCog size={12} />}
+                Change Assignee
+                <ChevronDown size={10} />
+              </button>
+              {assigneeDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl z-50 py-1 max-h-64 overflow-y-auto">
+                  <button
+                    onClick={() => handleBulkReassign(null)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-left"
+                  >
+                    <User size={12} className="text-[var(--muted)]" />
+                    <span>All team</span>
+                  </button>
+                  {teamMembers.map(member => (
+                    <button
+                      key={member.id}
+                      onClick={() => handleBulkReassign(member.id)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-left"
+                    >
+                      <div className="w-5 h-5 rounded-full bg-[var(--primary)] flex items-center justify-center flex-shrink-0 relative overflow-hidden">
+                        {member.avatar ? (
+                          <Image src={pb.files.getUrl(member, member.avatar, { thumb: '40x40' })} alt={member.name || ''} fill sizes="20px" className="object-cover" />
+                        ) : (
+                          <span className="text-white text-[8px] font-bold">
+                            {member.name?.charAt(0).toUpperCase() ?? member.email?.charAt(0).toUpperCase() ?? 'U'}
+                          </span>
+                        )}
+                      </div>
+                      <span>{member.name || member.email}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* PowerDialer copy */}
+            <button
+              onClick={handleCopyForPowerDialer}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                copied
+                  ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+                  : 'bg-[var(--card-bg)] border border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+              )}
+            >
+              {copied
+                ? <><ClipboardCheck size={12} /> Copied!</>
+                : <><Zap size={12} /> Copy for PowerDialer</>
+              }
+            </button>
+          </SelectionToolbar>
+
+          {!selectedIds.size && (
+            <div className="flex items-center justify-between gap-3 px-1">
+              <p className="text-xs text-[var(--muted)]">
+                {filtered.length} follow-up{filtered.length !== 1 ? 's' : ''} in view
+              </p>
+              <button
+                onClick={handleCopyForPowerDialer}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all',
+                  copied
+                    ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+                    : 'bg-[var(--primary-subtle)] text-[var(--primary)] border border-[var(--primary)]/20 hover:bg-[var(--primary)] hover:text-white'
+                )}
+              >
+                {copied
+                  ? <><ClipboardCheck size={14} /> Copied!</>
+                  : <><Zap size={14} /> Copy All for PowerDialer</>
+                }
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* ── Table ── */}
@@ -438,10 +559,14 @@ export default function FollowUpsPage() {
                     <td className="px-4 py-4 hidden md:table-cell">
                       {assignee ? (
                         <div className="flex items-center gap-1.5">
-                          <div className="w-6 h-6 rounded-full bg-[var(--primary)] flex items-center justify-center flex-shrink-0">
-                            <span className="text-white text-[9px] font-bold">
-                              {assignee.name?.charAt(0).toUpperCase() ?? assignee.email?.charAt(0).toUpperCase() ?? 'U'}
-                            </span>
+                          <div className="w-6 h-6 rounded-full bg-[var(--primary)] flex items-center justify-center flex-shrink-0 relative overflow-hidden">
+                            {assignee.avatar ? (
+                              <Image src={pb.files.getUrl(assignee, assignee.avatar, { thumb: '48x48' })} alt={assignee.name || ''} fill sizes="24px" className="object-cover" />
+                            ) : (
+                              <span className="text-white text-[9px] font-bold">
+                                {assignee.name?.charAt(0).toUpperCase() ?? assignee.email?.charAt(0).toUpperCase() ?? 'U'}
+                              </span>
+                            )}
                           </div>
                           <span className="text-sm">{assignee.name || assignee.email}</span>
                         </div>
@@ -486,24 +611,22 @@ export default function FollowUpsPage() {
                     {/* Actions */}
                     {(activeTab === 'overdue' || activeTab === 'upcoming') && (
                       <td className="px-4 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => handleComplete(fu)}
                             disabled={isActioning}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white text-xs font-medium transition-all disabled:opacity-50"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white transition-all disabled:opacity-50"
                             title="Mark as completed"
                           >
-                            {isActioning ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                            Done
+                            {isActioning ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
                           </button>
                           <button
                             onClick={() => handleDismiss(fu)}
                             disabled={isActioning}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--card-hover)] text-[var(--muted)] hover:bg-red-500/10 hover:text-red-400 text-xs font-medium transition-all disabled:opacity-50"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg bg-[var(--card-hover)] text-[var(--muted)] hover:bg-red-500/10 hover:text-red-400 transition-all disabled:opacity-50"
                             title="Dismiss"
                           >
-                            <XCircle size={12} />
-                            Dismiss
+                            <XCircle size={15} />
                           </button>
                         </div>
                       </td>

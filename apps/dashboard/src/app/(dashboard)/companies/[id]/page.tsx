@@ -238,6 +238,7 @@ export default function CompanyDetailPage() {
         await pb.collection(COLLECTIONS.COMPANIES).update(company.id, { status: statuses });
         setCompany(prev => prev ? { ...prev, status: statuses } : prev);
       } catch { /* non-critical */ }
+
     } catch (error) {
       console.error('Failed to log call:', error);
     }

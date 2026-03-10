@@ -12,6 +12,8 @@ import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
+import { useFollowUps } from '@/contexts/follow-up-context';
+import { useToast } from '@/components/ui/toast';
 
 interface StandaloneCallInterfaceProps {
     onExit: () => void;
@@ -54,6 +56,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         startRecording,
         setPhoneNumber: setContextPhoneNumber
     } = useCallRecording();
+    const { completeFollowUp } = useFollowUps();
+    const { addToast } = useToast();
 
     const [currentPhoneNumber, setCurrentPhoneNumber] = useState('');
     const [savingCall, setSavingCall] = useState(false);
@@ -264,6 +268,18 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
             } catch (err) {
                 // ignore
+            }
+
+            // Complete follow-ups the user chose to resolve in the call form
+            if (data.completeFollowUpIds?.length) {
+                void (async () => {
+                    try {
+                        for (const fuId of data.completeFollowUpIds!) {
+                            await completeFollowUp(fuId);
+                        }
+                        addToast('success', `Completed ${data.completeFollowUpIds!.length} follow-up${data.completeFollowUpIds!.length > 1 ? 's' : ''} for ${data.companyName}`);
+                    } catch { /* non-critical */ }
+                })();
             }
 
             // Show last call preview

@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Play, Pause, Download, Loader2, Minimize2, Maximize2 } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Play, Pause, Download, Loader2, Minimize2, Maximize2, CheckCircle2 } from 'lucide-react';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome } from '@/lib/types';
+import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp } from '@/lib/types';
 import { cn, timeAgo, formatDateTime } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
@@ -39,6 +39,7 @@ export interface CallFormData {
     additionalPhoneNumber?: string;
     additionalPhoneNote?: string;
     email?: string;
+    completeFollowUpIds?: string[];
 }
 
 export interface CallFormDraft {
@@ -259,6 +260,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
     const [companyLookupState, setCompanyLookupState] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle');
 
+    // Pending follow-ups for the selected company
+    const [pendingFollowUps, setPendingFollowUps] = useState<FollowUp[]>([]);
+    const [completeFollowUps, setCompleteFollowUps] = useState(true); // default: complete them on save
+
     // Follow-up scheduling
     const [showFollowUp, setShowFollowUp] = useState(false);
     const [followUpData, setFollowUpData] = useState<{ scheduledTime: string; timezone: string; notes: string } | null>(null);
@@ -281,6 +286,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setNoneSelected(true);
         setShowFollowUp(false);
         setFollowUpData(null);
+        setPendingFollowUps([]);
+        setCompleteFollowUps(true);
         setAutoFetchedCompany(null);
         setPhoneNumberRecord(null);
         setPhoneExistsForOtherCompany(false);
@@ -510,6 +517,19 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         });
     }, [autoFetchedCompany]);
 
+    // Fetch pending follow-ups for the matched company
+    useEffect(() => {
+        const companyId = autoFetchedCompany?.id || selectedCompany?.id;
+        if (!companyId) {
+            setPendingFollowUps([]);
+            return;
+        }
+        pb.collection(COLLECTIONS.FOLLOW_UPS).getFullList<FollowUp>({
+            filter: `status = "pending" && company = "${companyId}"`,
+            sort: 'scheduled_time',
+        }).then(setPendingFollowUps).catch(() => setPendingFollowUps([]));
+    }, [autoFetchedCompany?.id, selectedCompany?.id]);
+
     // Reset pulse trigger when call ends so next call can re-trigger
     useEffect(() => {
         if (!isCallLive) {
@@ -665,6 +685,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
                 additionalPhoneNote: additionalPhoneNote.trim() || undefined,
                 email: email.trim() || undefined,
+                completeFollowUpIds: completeFollowUps && pendingFollowUps.length > 0
+                    ? pendingFollowUps.map(f => f.id)
+                    : undefined,
             });
 
             resetForm();
@@ -673,7 +696,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         } finally {
             isSavingRef.current = false;
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, resetForm]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, completeFollowUps, pendingFollowUps, resetForm]);
 
     const hasDraftValues =
         companySearch.trim().length > 0 ||
@@ -1461,6 +1484,43 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     </div>
                 )}
             </div>
+
+            {/* Pending follow-ups banner */}
+            {pendingFollowUps.length > 0 && (
+                <div className="border-t border-[var(--card-border)] pt-3">
+                    <div className={cn(
+                        "rounded-lg px-3 py-2.5 border transition-colors",
+                        completeFollowUps
+                            ? "bg-[var(--success-subtle)] border-[var(--success)]/30"
+                            : "bg-[var(--warning-subtle)] border-[var(--warning)]/30"
+                    )}>
+                        <label className="flex items-start gap-2.5 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={completeFollowUps}
+                                onChange={e => setCompleteFollowUps(e.target.checked)}
+                                className="mt-0.5 rounded accent-[var(--success)]"
+                            />
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 text-sm font-medium text-[var(--foreground)]">
+                                    <CheckCircle2 size={14} className={completeFollowUps ? "text-[var(--success)]" : "text-[var(--warning)]"} />
+                                    <span>
+                                        {pendingFollowUps.length === 1
+                                            ? 'Complete pending follow-up'
+                                            : `Complete ${pendingFollowUps.length} pending follow-ups`
+                                        }
+                                    </span>
+                                </div>
+                                {pendingFollowUps.map(fu => (
+                                    <p key={fu.id} className="text-xs text-[var(--muted)] mt-1 truncate">
+                                        {fu.notes || 'No notes'} &middot; {new Date(fu.scheduled_time) < new Date() ? 'Overdue' : `Due ${timeAgo(fu.scheduled_time)}`}
+                                    </p>
+                                ))}
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            )}
 
             {/* Follow-up scheduling */}
             <div className="border-t border-[var(--card-border)] pt-3">

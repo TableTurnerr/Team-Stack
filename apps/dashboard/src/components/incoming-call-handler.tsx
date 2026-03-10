@@ -9,11 +9,15 @@ import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
 import { CurrentCallForm, type CallFormData } from '@/app/(dashboard)/session/current-call-form';
+import { useFollowUps } from '@/contexts/follow-up-context';
+import { useToast } from '@/components/ui/toast';
 
 export function IncomingCallHandler() {
     const { callStatus, callDirection, incomingCallerNumber } = useZoomPhone();
     const { session, setSession, isStandaloneMode } = useSession();
     const { user } = useAuth();
+    const { completeFollowUp } = useFollowUps();
+    const { addToast } = useToast();
 
     // Only show incoming call notifications to the user who is in an active session (or standalone mode)
     const isActiveForCalls = !!(session || isStandaloneMode);
@@ -266,13 +270,25 @@ export function IncomingCallHandler() {
                 } catch { /* non-critical */ }
             })();
 
+            // Complete follow-ups the user chose to resolve in the call form
+            if (data.completeFollowUpIds?.length) {
+                void (async () => {
+                    try {
+                        for (const fuId of data.completeFollowUpIds!) {
+                            await completeFollowUp(fuId);
+                        }
+                        addToast('success', `Completed ${data.completeFollowUpIds!.length} follow-up${data.completeFollowUpIds!.length > 1 ? 's' : ''} for ${data.companyName}`);
+                    } catch { /* non-critical */ }
+                })();
+            }
+
             dismissForm();
         } catch (err) {
             console.error('[IncomingCallHandler] Failed to save incoming call:', err);
         } finally {
             setIsSaving(false);
         }
-    }, [user, session, matchedPhoneRecord, isSaving, setSession, dismissForm]);
+    }, [user, session, matchedPhoneRecord, isSaving, setSession, dismissForm, completeFollowUp, addToast]);
 
     const handleOpenLogFromMissed = useCallback(() => {
         setShowMissedBanner(false);

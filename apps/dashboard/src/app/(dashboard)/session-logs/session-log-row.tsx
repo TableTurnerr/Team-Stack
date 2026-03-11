@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { ChevronDown, ChevronRight, Clock, User, Trash2, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, User, Trash2, Loader2, SlidersHorizontal } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type Recording, type FollowUp } from '@/lib/types';
+import { ManualAdjustmentModal } from '@/app/(dashboard)/session/manual-adjustment-modal';
 import { PerformanceCounterInline } from '@/components/performance-counter-inline';
 import { CallLogsNestedTable } from './call-logs-nested-table';
 import { InlineEditField } from '@/components/inline-edit-field';
@@ -51,6 +52,8 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
     const [isExpanded, setIsExpanded] = useState(false);
     const [actualCallCount, setActualCallCount] = useState<number | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+
+    const [showManualAdjustment, setShowManualAdjustment] = useState(false);
 
     // Test session deletion state
     const [confirmTestDelete, setConfirmTestDelete] = useState(false);
@@ -339,9 +342,18 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                 <tr>
                     <td colSpan={13} className="p-0">
                         <div className="bg-[var(--card-bg)] border-t border-b border-[var(--card-border)]">
-                            {/* Session Notes */}
+                            {/* Session Notes + Manual Adjustment */}
                             <div className="px-6 py-4 border-b border-[var(--card-border)]">
-                                <h4 className="text-sm font-medium mb-2">Session Notes</h4>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h4 className="text-sm font-medium">Session Notes</h4>
+                                    <button
+                                        onClick={() => setShowManualAdjustment(true)}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] bg-[var(--sidebar-bg)] border border-[var(--card-border)] hover:border-[var(--primary)]/30 rounded-lg transition-colors"
+                                    >
+                                        <SlidersHorizontal size={12} />
+                                        Manual Adjustment
+                                    </button>
+                                </div>
                                 <InlineEditField
                                     value={session.session_notes || ''}
                                     onSave={handleUpdateNotes}
@@ -367,6 +379,16 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                 </tr>
             )}
 
+            {showManualAdjustment && (
+                <ManualAdjustmentModal
+                    session={session}
+                    onApplied={(updatedSession) => {
+                        onUpdate(updatedSession);
+                        setShowManualAdjustment(false);
+                    }}
+                    onClose={() => setShowManualAdjustment(false)}
+                />
+            )}
         </>
     );
 }

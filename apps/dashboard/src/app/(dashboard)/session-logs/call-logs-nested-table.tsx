@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { Mic, ExternalLink, Trash2, Loader2, PhoneIncoming, PhoneOutgoing, X, Download, Minimize2, Maximize2, Pause, Play } from 'lucide-react';
+import { Mic, ExternalLink, Trash2, Loader2, PhoneIncoming, PhoneOutgoing, X, Download, Minimize2, Maximize2, Pause, Play, SlidersHorizontal } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type CallLog, type Recording } from '@/lib/types';
+import { COLLECTIONS, type CallLog, type Recording, type ColdCallingSession, type ManualAdjustment } from '@/lib/types';
 import Link from 'next/link';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
@@ -26,6 +26,7 @@ const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
 
 export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedTableProps) {
     const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+    const [manualAdjustments, setManualAdjustments] = useState<ManualAdjustment[]>([]);
     const [loading, setLoading] = useState(true);
     const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
     const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
@@ -74,15 +75,21 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
     };
 
     useEffect(() => {
-        const fetchCallLogs = async () => {
+        const fetchData = async () => {
             try {
-                const logs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
-                    filter: `session = "${sessionId}"`,
-                    sort: '-call_time',
-                    expand: 'company,phone_number_record',
-                });
+                const [logs, sessionRecord] = await Promise.all([
+                    pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                        filter: `session = "${sessionId}"`,
+                        sort: '-call_time',
+                        expand: 'company,phone_number_record',
+                    }),
+                    pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getOne<ColdCallingSession>(sessionId).catch(() => null),
+                ]);
                 setCallLogs(logs);
                 onLogsLoaded?.(logs.length);
+                if (sessionRecord?.manual_adjustments && Array.isArray(sessionRecord.manual_adjustments)) {
+                    setManualAdjustments(sessionRecord.manual_adjustments);
+                }
             } catch (err) {
                 console.error('Failed to fetch call logs:', err);
             } finally {
@@ -90,7 +97,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
             }
         };
 
-        fetchCallLogs();
+        fetchData();
     }, [sessionId, onLogsLoaded]);
 
     const handleDeleteCallLog = async (log: CallLog) => {
@@ -123,7 +130,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
         );
     }
 
-    if (callLogs.length === 0) {
+    if (callLogs.length === 0 && manualAdjustments.length === 0) {
         return (
             <div className="text-center py-8 text-[var(--muted)] text-sm">
                 No calls recorded in this session
@@ -368,6 +375,32 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                             </tr>
                         );
                     })}
+                    {manualAdjustments.map((adj, idx) => (
+                        <tr key={`adj-${idx}`} className="border-b border-[var(--card-border)] bg-[var(--info-subtle)]/30">
+                            <td className="px-4 py-3 text-xs text-[var(--muted)] whitespace-nowrap">
+                                {new Date(adj.timestamp).toLocaleTimeString('en-US', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                })}
+                            </td>
+                            <td colSpan={isAdmin ? 7 : 6} className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-[var(--info-subtle)] text-[var(--info)]">
+                                        <SlidersHorizontal size={11} />
+                                        Manual Adjustment
+                                    </span>
+                                    <span className="text-xs text-[var(--muted)]">
+                                        {adj.changes.map(c => `${c.field}: ${c.from} → ${c.to}`).join(', ')}
+                                    </span>
+                                    {adj.reason && (
+                                        <span className="text-xs text-[var(--muted)] italic ml-1">
+                                            — {adj.reason}
+                                        </span>
+                                    )}
+                                </div>
+                            </td>
+                        </tr>
+                    ))}
                 </tbody>
             </table>
         </div>

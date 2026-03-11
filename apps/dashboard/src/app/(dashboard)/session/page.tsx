@@ -33,6 +33,7 @@ import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useToast } from '@/components/ui/toast';
+import { Tooltip } from '@/components/ui/tooltip';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);

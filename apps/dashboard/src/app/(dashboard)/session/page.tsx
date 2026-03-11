@@ -1296,6 +1296,11 @@ export default function SessionPage() {
                         if (data.callOutcome.includes('No Answer') && capturedPickupIncremented) {
                             // Atomically decrement — PB's min:0 constraint prevents going negative
                             sessionUpdates['total_pickups-'] = 1;
+                        } else if (!data.callOutcome.includes('No Answer') && !capturedPickupIncremented) {
+                            // Fallback: if the call was NOT marked "No Answer" but the
+                            // connected-state pickup detection missed it, count it now.
+                            // This ensures pickups = dials − no-answer calls.
+                            sessionUpdates['total_pickups+'] = 1;
                         }
                         if (Object.keys(sessionUpdates).length > 0) {
                             await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, sessionUpdates);

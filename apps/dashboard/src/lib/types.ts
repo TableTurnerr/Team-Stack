@@ -218,6 +218,18 @@ export interface CallLog extends RecordModel {
   };
 }
 
+export interface ManualAdjustmentChange {
+  field: string;
+  from: number;
+  to: number;
+}
+
+export interface ManualAdjustment {
+  timestamp: string;
+  changes: ManualAdjustmentChange[];
+  reason?: string;
+}
+
 export interface ColdCallingSession extends RecordModel {
   user: string;
   started_at: string;
@@ -237,6 +249,8 @@ export interface ColdCallingSession extends RecordModel {
   total_callbacks?: number;
   /** Count of incoming/received calls in this session */
   total_incoming?: number;
+  /** History of manual counter adjustments */
+  manual_adjustments?: ManualAdjustment[] | null;
   expand?: {
     user?: User;
   };
@@ -438,6 +452,7 @@ export interface FinTransaction extends RecordModel {
   created_by: string;
   is_recurring?: boolean;
   recurring_id?: string;
+  refund_of?: string;
   expand?: {
     bank_account?: BankAccount;
     category?: FinCategory;
@@ -462,6 +477,7 @@ export interface RecurringTransaction extends RecordModel {
   initial_amount?: number;
   renewal_amount?: number;
   initial_applied?: boolean;
+  amount_history?: Array<{ amount: number; date: string; note?: string }>;
   is_active?: boolean;
   created_by: string;
   expand?: {

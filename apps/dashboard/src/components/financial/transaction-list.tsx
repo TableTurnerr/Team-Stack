@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import {
   ArrowUpRight, ArrowDownLeft, Clock, FileText, Tag, ExternalLink, Trash2,
   ChevronDown, ChevronUp, Loader2, Link2, RefreshCw, Copy, Check, Pencil,
-  CheckCircle2, AlertCircle, Hash,
+  CheckCircle2, AlertCircle, Hash, RotateCcw, CopyPlus,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
@@ -20,6 +20,8 @@ interface TransactionListProps {
   categories: FinCategory[];
   onRefresh: () => void;
   onEdit?: (txn: FinTransaction) => void;
+  onDuplicate?: (txn: FinTransaction) => void;
+  onRefund?: (txn: FinTransaction) => void;
 }
 
 function CopyButton({ text, label }: { text: string; label?: string }) {
@@ -43,12 +45,13 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   );
 }
 
-export function TransactionList({ transactions, accounts, categories, onRefresh, onEdit }: TransactionListProps) {
+export function TransactionList({ transactions, accounts, categories, onRefresh, onEdit, onDuplicate, onRefund }: TransactionListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [clearing, setClearing] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkClearing, setBulkClearing] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   function getAccount(id: string) { return accounts.find(a => a.id === id); }
@@ -142,6 +145,38 @@ export function TransactionList({ transactions, accounts, categories, onRefresh,
     }
   }
 
+  async function handleBulkClear() {
+    const ids = Array.from(selected);
+    const pendingTxns = transactions.filter(t => ids.includes(t.id) && t.status === 'pending');
+    if (pendingTxns.length === 0) return;
+    if (!confirm(`Mark ${pendingTxns.length} pending transaction${pendingTxns.length > 1 ? 's' : ''} as cleared?`)) return;
+    setBulkClearing(true);
+    try {
+      const balanceDeltas = new Map<string, number>();
+      for (const txn of pendingTxns) {
+        const delta = txn.type === 'income' ? txn.amount : -(txn.amount + (txn.fee_amount ?? 0));
+        balanceDeltas.set(txn.bank_account, (balanceDeltas.get(txn.bank_account) ?? 0) + delta);
+      }
+
+      for (const [accId, delta] of balanceDeltas) {
+        const acc = accounts.find(a => a.id === accId);
+        if (acc) {
+          await pb.collection(COLLECTIONS.BANK_ACCOUNTS).update(accId, { balance: acc.balance + delta });
+        }
+      }
+
+      await Promise.all(pendingTxns.map(txn =>
+        pb.collection(COLLECTIONS.FIN_TRANSACTIONS).update(txn.id, { status: 'cleared' })
+      ));
+      setSelected(new Set());
+      onRefresh();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBulkClearing(false);
+    }
+  }
+
   if (transactions.length === 0) {
     return (
       <div className="text-center py-12 text-[var(--muted)]">
@@ -158,6 +193,7 @@ export function TransactionList({ transactions, accounts, categories, onRefresh,
   const selectedTxns = transactions.filter(t => selected.has(t.id));
   const selectedIncome = selectedTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const selectedExpense = selectedTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount + (t.fee_amount ?? 0), 0);
+  const selectedPendingCount = selectedTxns.filter(t => t.status === 'pending').length;
 
   return (
     <div className="space-y-1">
@@ -182,6 +218,16 @@ export function TransactionList({ transactions, accounts, categories, onRefresh,
             >
               Clear
             </button>
+            {selectedPendingCount > 0 && (
+              <button
+                onClick={handleBulkClear}
+                disabled={bulkClearing}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[var(--success)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {bulkClearing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                Clear {selectedPendingCount} pending
+              </button>
+            )}
             <button
               onClick={handleBulkDelete}
               disabled={bulkDeleting}
@@ -500,6 +546,14 @@ export function TransactionList({ transactions, accounts, categories, onRefresh,
                     </a>
                   )}
 
+                  {/* Refund indicator */}
+                  {txn.refund_of && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-[var(--info,var(--primary))] bg-[var(--info-subtle,var(--card-hover))] px-2.5 py-1.5 rounded-lg">
+                      <RotateCcw size={11} />
+                      Refund of #{txn.refund_of.slice(0, 8)}
+                    </div>
+                  )}
+
                   {/* Actions */}
                   <div className="flex items-center justify-between pt-2 border-t border-[var(--card-border)]">
                     {txn.status === 'pending' ? (
@@ -513,6 +567,24 @@ export function TransactionList({ transactions, accounts, categories, onRefresh,
                       </button>
                     ) : <div />}
                     <div className="flex items-center gap-2">
+                      {onDuplicate && (
+                        <button
+                          onClick={() => onDuplicate(txn)}
+                          title="Duplicate this transaction"
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-[var(--card-border)] rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
+                        >
+                          <CopyPlus size={12} />Duplicate
+                        </button>
+                      )}
+                      {onRefund && txn.status === 'cleared' && !txn.refund_of && (
+                        <button
+                          onClick={() => onRefund(txn)}
+                          title="Create a refund/reversal"
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-[var(--warning)]/30 rounded-lg text-[var(--warning)] hover:bg-[var(--warning-subtle,var(--card-hover))] transition-colors"
+                        >
+                          <RotateCcw size={12} />Refund
+                        </button>
+                      )}
                       {onEdit && (
                         <button
                           onClick={() => onEdit(txn)}

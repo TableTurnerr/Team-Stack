@@ -1836,6 +1836,16 @@
             },
             {
                 "hidden": false,
+                "id": "json_manual_adjustments",
+                "maxSize": 50000,
+                "name": "manual_adjustments",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
                 "onCreate": true,
@@ -4526,6 +4536,20 @@
                 "type": "text"
             },
             {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_txn_refund_of",
+                "max": 50,
+                "min": 0,
+                "name": "refund_of",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
                 "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
@@ -5892,6 +5916,16 @@
                 "required": false,
                 "system": false,
                 "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "json_rec_amount_history",
+                "maxSize": 0,
+                "name": "amount_history",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
             },
             {
                 "hidden": false,

@@ -523,6 +523,8 @@ export default function FinancialPage() {
   const [txnAccountFilter, setTxnAccountFilter] = useState<string>('all');
   const [txnCategoryFilter, setTxnCategoryFilter] = useState<string>('all');
   const [txnSortBy, setTxnSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
+  const [txnDateFrom, setTxnDateFrom] = useState('');
+  const [txnDateTo, setTxnDateTo] = useState('');
 
   const fetchAll = useCallback(async () => {
     if (!user?.id) return;
@@ -739,6 +741,10 @@ export default function FinancialPage() {
         const matchesSplit = t.category_splits?.some(sp => sp.category_id === txnCategoryFilter);
         if (!matchesPrimary && !matchesSplit) return false;
       }
+      // Date range filter
+      const txnDate = t.date.split(' ')[0];
+      if (txnDateFrom && txnDate < txnDateFrom) return false;
+      if (txnDateTo && txnDate > txnDateTo) return false;
       if (txnSearch) {
         const q = txnSearch.toLowerCase();
         const cat = categories.find(c => c.id === t.category);
@@ -746,13 +752,15 @@ export default function FinancialPage() {
         const splitCatNames = t.category_splits
           ? t.category_splits.map(sp => categories.find(c => c.id === sp.category_id)?.name ?? '').join(' ').toLowerCase()
           : '';
-        // Also allow searching by ID prefix
+        // Also allow searching by ID prefix and amount
+        const amountStr = t.amount.toString();
         if (
           !(t.description?.toLowerCase().includes(q)) &&
           !(cat?.name.toLowerCase().includes(q)) &&
           !(acc?.name.toLowerCase().includes(q)) &&
           !splitCatNames.includes(q) &&
           !t.id.toLowerCase().startsWith(q) &&
+          !amountStr.startsWith(q) &&
           !(Array.isArray(t.tags) && t.tags.some(tag => tag.toLowerCase().includes(q)))
         ) return false;
       }
@@ -767,7 +775,7 @@ export default function FinancialPage() {
         default: return b.date.localeCompare(a.date); // date-desc
       }
     });
-  }, [transactions, txnTypeFilter, txnStatusFilter, txnAccountFilter, txnCategoryFilter, txnSearch, txnSortBy, categories, accounts]);
+  }, [transactions, txnTypeFilter, txnStatusFilter, txnAccountFilter, txnCategoryFilter, txnSearch, txnSortBy, txnDateFrom, txnDateTo, categories, accounts]);
 
   // Aggregated stats for the filtered set (converted to primary currency)
   const filteredStats = useMemo(() => {
@@ -1097,7 +1105,7 @@ export default function FinancialPage() {
                 </div>
               </div>
 
-              {/* Filter row 2: Account + Category + Sort */}
+              {/* Filter row 2: Account + Category + Date Range + Sort */}
               <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={txnAccountFilter}
@@ -1115,6 +1123,23 @@ export default function FinancialPage() {
                   <option value="all">All categories</option>
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="date"
+                    value={txnDateFrom}
+                    onChange={e => setTxnDateFrom(e.target.value)}
+                    className="px-2 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                    title="From date"
+                  />
+                  <span className="text-[10px] text-[var(--muted)]">to</span>
+                  <input
+                    type="date"
+                    value={txnDateTo}
+                    onChange={e => setTxnDateTo(e.target.value)}
+                    className="px-2 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+                    title="To date"
+                  />
+                </div>
                 <select
                   value={txnSortBy}
                   onChange={e => setTxnSortBy(e.target.value as typeof txnSortBy)}
@@ -1125,9 +1150,9 @@ export default function FinancialPage() {
                   <option value="amount-desc">Highest amount</option>
                   <option value="amount-asc">Lowest amount</option>
                 </select>
-                {(txnAccountFilter !== 'all' || txnCategoryFilter !== 'all' || txnTypeFilter !== 'all' || txnStatusFilter !== 'all' || txnSearch) && (
+                {(txnAccountFilter !== 'all' || txnCategoryFilter !== 'all' || txnTypeFilter !== 'all' || txnStatusFilter !== 'all' || txnSearch || txnDateFrom || txnDateTo) && (
                   <button
-                    onClick={() => { setTxnAccountFilter('all'); setTxnCategoryFilter('all'); setTxnTypeFilter('all'); setTxnStatusFilter('all'); setTxnSearch(''); setTxnSortBy('date-desc'); }}
+                    onClick={() => { setTxnAccountFilter('all'); setTxnCategoryFilter('all'); setTxnTypeFilter('all'); setTxnStatusFilter('all'); setTxnSearch(''); setTxnSortBy('date-desc'); setTxnDateFrom(''); setTxnDateTo(''); }}
                     className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors px-2 py-1.5 border border-[var(--card-border)] rounded-lg hover:bg-[var(--card-hover)]"
                   >
                     Clear filters
@@ -1168,6 +1193,51 @@ export default function FinancialPage() {
                 categories={categories}
                 onRefresh={fetchAll}
                 onEdit={txn => { setEditTransaction(txn); setShowAddTxn(true); }}
+                onDuplicate={txn => {
+                  // Create a duplicate pre-filled with today's date
+                  const dup = {
+                    ...txn,
+                    id: '',
+                    date: new Date().toISOString().split('T')[0] + ' 00:00:00',
+                    status: 'cleared' as const,
+                    is_recurring: false,
+                    recurring_id: undefined,
+                    refund_of: undefined,
+                    receipt_file: undefined,
+                  };
+                  setEditTransaction(dup as FinTransaction);
+                  setShowAddTxn(true);
+                }}
+                onRefund={async (txn) => {
+                  if (!confirm(`Create a refund for this ${txn.type === 'income' ? 'income' : 'expense'} of ${CURRENCY_SYMBOLS[txn.currency]}${txn.amount}?`)) return;
+                  try {
+                    const refundType = txn.type === 'income' ? 'expense' : 'income';
+                    await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).create({
+                      bank_account: txn.bank_account,
+                      type: refundType,
+                      amount: txn.amount,
+                      currency: txn.currency,
+                      fee_amount: null,
+                      category: txn.category || null,
+                      category_splits: txn.category_splits && txn.category_splits.length > 1 ? txn.category_splits : null,
+                      tags: txn.tags ? JSON.stringify(txn.tags) : null,
+                      description: `Refund: ${txn.description || txn.type}`,
+                      status: 'cleared',
+                      date: new Date().toISOString().split('T')[0] + ' 00:00:00',
+                      created_by: user.id,
+                      refund_of: txn.id,
+                    });
+                    // Update balance
+                    const acc = accounts.find(a => a.id === txn.bank_account);
+                    if (acc) {
+                      const delta = refundType === 'income' ? txn.amount : -(txn.amount);
+                      await pb.collection(COLLECTIONS.BANK_ACCOUNTS).update(acc.id, { balance: acc.balance + delta });
+                    }
+                    fetchAll();
+                  } catch (e) {
+                    console.error('Refund failed:', e);
+                  }
+                }}
               />
 
               {/* PartnerStack rewards inline */}

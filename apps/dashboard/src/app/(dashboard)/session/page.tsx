@@ -14,6 +14,7 @@ import {
     Copy,
     Check,
     ExternalLink,
+    SlidersHorizontal,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences } from '@/lib/types';
@@ -25,12 +26,14 @@ import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
+import { ManualAdjustmentModal } from './manual-adjustment-modal';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useToast } from '@/components/ui/toast';
+import { Tooltip } from '@/components/ui/tooltip';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
@@ -163,6 +166,7 @@ export default function SessionPage() {
     const [testSessionCleanupId, setTestSessionCleanupId] = useState<string | null>(null);
     const [cleaningUp, setCleaningUp] = useState(false);
     const [cleanupError, setCleanupError] = useState('');
+    const [showManualAdjustment, setShowManualAdjustment] = useState(false);
     const [testNumbersCopied, setTestNumbersCopied] = useState(false);
 
     const TEST_CALL_NUMBER_POOL = [
@@ -621,13 +625,11 @@ export default function SessionPage() {
         };
     }, []);
 
-    // Reset count incremented flags when current phone number changes (new call)
-    useEffect(() => {
-        if (currentPhoneNumber) {
-            setDialCountIncremented(false);
-            setPickupCountIncremented(false);
-        }
-    }, [currentPhoneNumber]);
+    // NOTE: dialCountIncremented / pickupCountIncremented are reset in
+    // handleSaveCall, handleSkipCall, and handleCallback — the only places
+    // where a new call cycle truly begins. Do NOT reset them on
+    // currentPhoneNumber changes, as that causes double-counting when the
+    // phone number syncs mid-call (e.g. from activeCallNumber).
 
     // Sync currentPhoneNumber from zoom context when a call is initiated from docked dialer.
     // Handles both ringing and instantly-answered calls that skip straight to 'connected'.
@@ -999,8 +1001,11 @@ export default function SessionPage() {
     // ---------------------------------------------------------------------------
     // Pause session
     // ---------------------------------------------------------------------------
+    const isInCall = callStatus === 'ringing' || callStatus === 'connected';
+
     const pauseSession = useCallback(async () => {
         if (!session || session.paused_at) return;
+        if (callStatus === 'ringing' || callStatus === 'connected') return;
         try {
             setPausing(true);
             const updated = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
@@ -1012,7 +1017,7 @@ export default function SessionPage() {
         } finally {
             setPausing(false);
         }
-    }, [session, setSession]);
+    }, [session, setSession, callStatus]);
 
     // ---------------------------------------------------------------------------
     // Resume session
@@ -1378,6 +1383,29 @@ export default function SessionPage() {
         if (powerDialerTimerRef.current) {
             clearTimeout(powerDialerTimerRef.current);
             powerDialerTimerRef.current = null;
+        }
+
+        // Advance power dialer to the next entry (same logic as save, but no API call)
+        if (powerDialerActiveRef.current && powerDialerDelayRef.current >= 0) {
+            const nextIdx = powerDialerIndexRef.current + 1;
+            setPowerDialerIndex(nextIdx);
+            if (nextIdx >= powerDialerQueueRef.current.length) {
+                setPowerDialerActive(false);
+            } else if (!powerDialerPausedRef.current) {
+                const delayMs = powerDialerDelayRef.current * 1000;
+                const nextEntry = powerDialerQueueRef.current[nextIdx];
+                powerDialerTimerRef.current = setTimeout(() => {
+                    handleDialRef.current(nextEntry.number, nextEntry.company);
+                }, delayMs);
+            }
+        }
+        if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current < 0) {
+            powerDialerNegSubmitCountRef.current += 1;
+            if (powerDialerNegSubmitCountRef.current >= powerDialerQueueRef.current.length) {
+                setPowerDialerIndex(powerDialerQueueRef.current.length);
+                setPowerDialerActive(false);
+                powerDialerNegSubmitCountRef.current = 0;
+            }
         }
     }, [callbackEvents, discardOldestDeferredRecording, discardDeferredRecording, setContextPhoneNumber]);
 
@@ -1894,14 +1922,26 @@ export default function SessionPage() {
                                 {pausing ? 'Resuming...' : 'Resume Session'}
                             </button>
                         ) : (
-                            <button
-                                onClick={pauseSession}
-                                disabled={pausing}
-                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--warning-subtle)] text-[var(--warning)] font-medium text-sm border border-[var(--warning)]/30 hover:bg-[var(--warning)] hover:text-white transition-all disabled:opacity-50"
-                            >
-                                {pausing ? <Loader2 size={16} className="animate-spin" /> : <Pause size={16} />}
-                                {pausing ? 'Pausing...' : 'Pause Session'}
-                            </button>
+                            isInCall ? (
+                                <Tooltip content="Cannot pause during a call">
+                                    <button
+                                        disabled
+                                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--warning-subtle)] text-[var(--warning)] font-medium text-sm border border-[var(--warning)]/30 transition-all opacity-50 cursor-not-allowed"
+                                    >
+                                        <Pause size={16} />
+                                        Pause Session
+                                    </button>
+                                </Tooltip>
+                            ) : (
+                                <button
+                                    onClick={pauseSession}
+                                    disabled={pausing}
+                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--warning-subtle)] text-[var(--warning)] font-medium text-sm border border-[var(--warning)]/30 hover:bg-[var(--warning)] hover:text-white transition-all disabled:opacity-50"
+                                >
+                                    {pausing ? <Loader2 size={16} className="animate-spin" /> : <Pause size={16} />}
+                                    {pausing ? 'Pausing...' : 'Pause Session'}
+                                </button>
+                            )
                         )}
                         <button
                             onClick={() => endSession()}
@@ -2041,6 +2081,13 @@ export default function SessionPage() {
                             appointmentSet={session.appointment_set || 0}
                             onUpdate={handlePerformanceUpdate}
                         />
+                        <button
+                            onClick={() => setShowManualAdjustment(true)}
+                            className="w-full text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[var(--primary)]/30 rounded-xl px-4 py-2.5 transition-colors flex items-center justify-center gap-1.5"
+                        >
+                            <SlidersHorizontal size={13} />
+                            Manual Adjustment
+                        </button>
                         <LastCallPreview
                             callLog={lastCallLog}
                             companyName={lastCallCompanyName}
@@ -2055,6 +2102,19 @@ export default function SessionPage() {
     return (
         <>
             {renderContent()}
+
+            {/* Manual adjustment modal */}
+            {showManualAdjustment && session && (
+                <ManualAdjustmentModal
+                    session={session}
+                    onApplied={(updatedSession) => {
+                        setSession(updatedSession);
+                        setShowManualAdjustment(false);
+                        addToast('success', 'Manual adjustment applied');
+                    }}
+                    onClose={() => setShowManualAdjustment(false)}
+                />
+            )}
 
             {/* Test session cleanup modal */}
             {showTestCleanupModal && (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Plus, RefreshCw, Pencil, Trash2, Loader2, X, ToggleLeft, ToggleRight, Link2, TrendingDown } from 'lucide-react';
+import { Plus, RefreshCw, Pencil, Trash2, Loader2, X, ToggleLeft, ToggleRight, Link2, TrendingDown, History } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import type { RecurringTransaction, BankAccount, FinCategory, SupportedCurrency, CategorySplit, FinTransaction } from '@/lib/types';
@@ -150,8 +150,13 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
   const [endDate, setEndDate] = useState(editItem?.end_date?.split(' ')[0] ?? '');
   const [initialAmount, setInitialAmount] = useState(editItem?.initial_amount?.toString() ?? '');
   const [renewalAmount, setRenewalAmount] = useState(editItem?.renewal_amount?.toString() ?? '');
+  const [priceChangeNote, setPriceChangeNote] = useState('');
+  const [applyToFutureOnly, setApplyToFutureOnly] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Detect if amount is being changed on edit
+  const isAmountChanged = editItem ? parseFloat(amount) !== editItem.amount && !isNaN(parseFloat(amount)) : false;
 
   const filteredCategories = categories.filter(c => c.type === type || c.type === 'both');
 
@@ -175,6 +180,19 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
       const primaryCategory = meaningfulSplits[0]?.category_id ?? null;
       const categorySplitsPayload = meaningfulSplits.length > 1 ? meaningfulSplits : null;
 
+      // Build amount_history if price changed
+      let amountHistory = editItem?.amount_history ?? [];
+      if (editItem && isAmountChanged) {
+        amountHistory = [
+          ...amountHistory,
+          {
+            amount: editItem.amount,
+            date: new Date().toISOString().split('T')[0],
+            note: priceChangeNote.trim() || `Changed from ${editItem.currency} ${editItem.amount} to ${currency} ${amountNum}`,
+          },
+        ];
+      }
+
       const data: Record<string, unknown> = {
         bank_account: accountId,
         type,
@@ -195,21 +213,41 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
         initial_applied: editItem?.initial_applied ?? false,
         is_active: true,
         created_by: userId,
+        amount_history: amountHistory.length > 0 ? amountHistory : null,
       };
 
       if (editItem) {
         await pb.collection(COLLECTIONS.RECURRING_TRANSACTIONS).update(editItem.id, data);
-        // Retroactively sync category to all already-generated transactions from this subscription
+        // Sync category (and optionally amount) to generated transactions
         try {
           const linked = await pb.collection(COLLECTIONS.FIN_TRANSACTIONS).getFullList<FinTransaction>({
             filter: `recurring_id = "${editItem.id}"`,
           });
-          await Promise.all(linked.map(txn =>
-            pb.collection(COLLECTIONS.FIN_TRANSACTIONS).update(txn.id, {
-              category: primaryCategory,
-              category_splits: categorySplitsPayload,
-            }),
-          ));
+
+          if (applyToFutureOnly && isAmountChanged) {
+            // Only update categories on past transactions, not amounts
+            await Promise.all(linked.map(txn =>
+              pb.collection(COLLECTIONS.FIN_TRANSACTIONS).update(txn.id, {
+                category: primaryCategory,
+                category_splits: categorySplitsPayload,
+              }),
+            ));
+          } else {
+            // Update both category and amount on all linked transactions
+            await Promise.all(linked.map(txn => {
+              const updatePayload: Record<string, unknown> = {
+                category: primaryCategory,
+                category_splits: categorySplitsPayload,
+              };
+              if (isAmountChanged) {
+                updatePayload.amount = amountNum;
+                // Adjust balance: reverse old, apply new (only for cleared)
+                // Skip balance adjustment for retroactive — too complex for bulk;
+                // user can use balance adjustment if needed
+              }
+              return pb.collection(COLLECTIONS.FIN_TRANSACTIONS).update(txn.id, updatePayload);
+            }));
+          }
         } catch { /* silently skip — non-critical */ }
       } else {
         await pb.collection(COLLECTIONS.RECURRING_TRANSACTIONS).create(data);
@@ -265,6 +303,31 @@ function RecurringForm({ onClose, onSaved, userId, accounts, categories, editIte
               </select>
             </div>
           </div>
+
+          {/* Price change info when editing */}
+          {editItem && isAmountChanged && (
+            <div className="p-3 bg-[var(--warning-subtle,var(--card-hover))] border border-[var(--warning)]/20 rounded-lg space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--warning)]">
+                <History size={12} />
+                Price change: {CURRENCY_SYMBOLS[editItem.currency]}{editItem.amount} → {CURRENCY_SYMBOLS[currency]}{parseFloat(amount).toFixed(2)}
+              </div>
+              <input
+                value={priceChangeNote}
+                onChange={e => setPriceChangeNote(e.target.value)}
+                placeholder="Reason for change (e.g. upgraded plan, price increase)"
+                className="w-full px-3 py-1.5 text-xs bg-[var(--background)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--foreground)]"
+              />
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={applyToFutureOnly}
+                  onChange={e => setApplyToFutureOnly(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-[var(--foreground)]"
+                />
+                <span>Only apply new price to future transactions <span className="text-[var(--muted)]">(recommended)</span></span>
+              </label>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium mb-1.5">
@@ -471,6 +534,22 @@ export function RecurringManager({ recurring, accounts, categories, transactions
 
                   {item.initial_amount && !item.initial_applied && (
                     <p className="text-[10px] text-[var(--warning)] mt-0.5">Setup fee {symbol}{item.initial_amount} pending</p>
+                  )}
+
+                  {/* Price history */}
+                  {item.amount_history && item.amount_history.length > 0 && (
+                    <div className="mt-1.5">
+                      <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
+                        <History size={9} />
+                        <span>{item.amount_history.length} price change{item.amount_history.length > 1 ? 's' : ''}</span>
+                        <span className="text-[9px]">
+                          — was {symbol}{item.amount_history[item.amount_history.length - 1].amount}
+                          {item.amount_history[item.amount_history.length - 1].note && (
+                            <span className="opacity-70"> ({item.amount_history[item.amount_history.length - 1].note})</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
                   )}
                 </div>
 

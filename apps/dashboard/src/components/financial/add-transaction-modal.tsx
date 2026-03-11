@@ -128,7 +128,7 @@ function CategorySplitEditor({
 export function AddTransactionModal({
   onClose, onSaved, userId, accounts, categories, defaultType = 'expense', editTransaction,
 }: AddTransactionModalProps) {
-  const isEditMode = !!editTransaction;
+  const isEditMode = !!editTransaction?.id;
 
   const [type, setType] = useState<'income' | 'expense'>(editTransaction?.type ?? defaultType);
   const [accountId, setAccountId] = useState(editTransaction?.bank_account ?? accounts[0]?.id ?? '');
@@ -310,8 +310,8 @@ export function AddTransactionModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--card-border)] shrink-0">
           <div>
-            <h2 className="text-base font-semibold">{isEditMode ? 'Edit Transaction' : 'Log Transaction'}</h2>
-            {isEditMode && (
+            <h2 className="text-base font-semibold">{isEditMode ? 'Edit Transaction' : editTransaction ? 'Duplicate Transaction' : 'Log Transaction'}</h2>
+            {isEditMode && editTransaction && (
               <p className="text-[11px] text-[var(--muted)] font-mono mt-0.5">ID: {editTransaction.id}</p>
             )}
           </div>

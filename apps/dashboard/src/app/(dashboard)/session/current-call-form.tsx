@@ -743,14 +743,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
-                        {hasUnsavedCall ? 'Previous Call' : 'Current Call'}
+                        {hasUnsavedCall && isCallLive ? 'Last Call' : 'Current Call'}
                     </h3>
-                    {hasUnsavedCall && isCallLive && (
-                        <span className="text-[10px] font-medium text-[var(--warning)] bg-[var(--warning-subtle)] px-1.5 py-0.5 rounded">
-                            Not the live call
-                        </span>
-                    )}
-                    {hasUnsavedCall && deferredSegments.length > 1 && (
+                    {hasUnsavedCall && isCallLive && deferredSegments.length > 1 && (
                         <span className="text-[10px] font-semibold text-[var(--info)] bg-[var(--info-subtle)] px-1.5 py-0.5 rounded">
                             {deferredSegments.length} calls queued
                         </span>
@@ -1582,7 +1577,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     )}
                 >
                     <Save size={16} />
-                    {saving ? 'Saving...' : hasUnsavedCall ? `Submit Previous Call${deferredSegments.length > 1 ? ` (1/${deferredSegments.length})` : ''}` : isCallLive ? 'Call in Progress...' : 'Save Call & Next'}
+                    {saving ? 'Saving...' : hasUnsavedCall && isCallLive ? `Save Last Call${deferredSegments.length > 1 ? ` (1/${deferredSegments.length})` : ''}` : hasUnsavedCall ? 'Save Call' : isCallLive ? 'Call in Progress...' : 'Save Call & Next'}
                 </button>
             </div>
 

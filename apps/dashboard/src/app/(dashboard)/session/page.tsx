@@ -1103,15 +1103,13 @@ export default function SessionPage() {
         // Pass company suggestion from power dialer to the form
         setSuggestedCompanyName(companyName || '');
 
-        // Enter deferred mode so recordings accumulate in memory (enables callback merging)
-        // and start recording immediately when dialing IF session is active
-        if (isSessionActive) {
-            enterDeferredMode();
-            startRecording();
-        }
+        // NOTE: Do NOT start recording here — recording will begin automatically
+        // when Zoom confirms the call is ringing/connected (via callStatus effects).
+        // Starting recording before Zoom confirms causes false recording states
+        // when the iframe fails to process the dial command.
 
         dialNumber(phoneNumber);
-    }, [dialNumber, isSessionActive, startRecording, enterDeferredMode, setContextPhoneNumber, isDialing, callStatus, session?.paused_at]);
+    }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at]);
 
     // Ref so power dialer timers always call the latest handleDial (avoids stale closures)
     const handleDialRef = useRef(handleDial);

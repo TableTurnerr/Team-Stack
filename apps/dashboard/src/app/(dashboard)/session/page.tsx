@@ -1148,7 +1148,19 @@ export default function SessionPage() {
 
         // ── INSTANT UI RESET ── user can start the next call right away
         setLastCallCompanyName(data.companyName);
-        setCurrentPhoneNumber('');
+        // Use functional update to preserve the NEXT call's phone number.
+        // In negative-delay power dialer mode, handleDial already set
+        // currentPhoneNumber to the next call's number before the user
+        // submitted this form. Clearing it unconditionally loses that number,
+        // and the activeCallNumber sync effect won't restore it because
+        // callStatus has already transitioned to 'idle'.
+        const savedDigits = data.phoneNumber.replace(/\D/g, '').slice(-10);
+        setCurrentPhoneNumber(prev => {
+            const prevDigits = prev?.replace(/\D/g, '').slice(-10) || '';
+            if (!prev || prevDigits === savedDigits) return '';
+            // Phone number belongs to a different (newer) call — preserve it
+            return prev;
+        });
         setHasUnsavedCall(false);
         setCallDraft(null);
         setCallbackEvents([]);
@@ -1374,7 +1386,16 @@ export default function SessionPage() {
         setHasUnsavedCall(false);
         setCallDraft(null);
         setCallbackEvents([]);
-        setCurrentPhoneNumber('');
+        // Use functional update to preserve the NEXT call's phone number.
+        // In negative-delay power dialer mode, handleDial already set
+        // currentPhoneNumber to the next call's number before the user
+        // discarded this form. Clearing it unconditionally loses that number.
+        const discardedDigits = currentPhoneNumber?.replace(/\D/g, '').slice(-10) || '';
+        setCurrentPhoneNumber(prev => {
+            const prevDigits = prev?.replace(/\D/g, '').slice(-10) || '';
+            if (!prev || prevDigits === discardedDigits) return '';
+            return prev;
+        });
         setPinnedFormPhoneNumber('');
         setRingStartTime(null);
         setConnectTime(null);
@@ -1412,7 +1433,7 @@ export default function SessionPage() {
                 powerDialerNegSubmitCountRef.current = 0;
             }
         }
-    }, [callbackEvents, discardOldestDeferredRecording, discardDeferredRecording, setContextPhoneNumber]);
+    }, [callbackEvents, currentPhoneNumber, discardOldestDeferredRecording, discardDeferredRecording, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------
     // Power dialer handlers

@@ -199,13 +199,20 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         }
     };
 
+    // Find the deferred segment that belongs to THIS form's phone number.
+    // Each segment stores the phone it was captured for; match on last 10 digits
+    // to avoid format mismatches (+1, parens, dashes, etc.).
+    const normalizePhone = (p: string) => p?.replace(/\D/g, '').slice(-10) || '';
+    const formDigits = normalizePhone(phoneNumber);
+    const matchingSegment = formDigits
+        ? deferredSegments.find(s => normalizePhone(s.phone) === formDigits)
+        : null;
+
     const handlePlayUnsubmitted = () => {
-        if (deferredSegments.length === 0) return;
-        
-        // Use the oldest segment in the queue (or current one)
-        const segment = deferredSegments[0];
-        const url = URL.createObjectURL(segment.blob);
-        
+        if (!matchingSegment) return;
+
+        const url = URL.createObjectURL(matchingSegment.blob);
+
         setPlayerRecording(null); // Clear PocketBase player
         setPlayerBlob(url);
         setPlayerMinimized(false);
@@ -758,7 +765,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             <span className="text-[10px] font-semibold text-[var(--warning)] uppercase tracking-wider">
                                 Recorded but unsubmitted
                             </span>
-                            {deferredSegments.length > 0 && (
+                            {matchingSegment && (
                                 <button
                                     type="button"
                                     onClick={handlePlayUnsubmitted}

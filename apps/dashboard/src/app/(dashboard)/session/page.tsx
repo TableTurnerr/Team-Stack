@@ -245,6 +245,8 @@ export default function SessionPage() {
     const [autoHangupEnabled, setAutoHangupEnabled] = useState(false);
     const [autoHangupSeconds, setAutoHangupSeconds] = useState(15);
     const powerDialerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Tracks whether the power dialer was auto-paused by a session pause
+    const powerDialerAutoPausedRef = useRef(false);
     // Counts form submissions in negative-delay mode to detect when all calls are logged
     const powerDialerNegSubmitCountRef = useRef(0);
 
@@ -1022,6 +1024,15 @@ export default function SessionPage() {
                 paused_at: new Date().toISOString(),
             });
             setSession(updated);
+            // Auto-pause the power dialer when session is paused
+            if (powerDialerActiveRef.current && !powerDialerPausedRef.current) {
+                setPowerDialerPaused(true);
+                powerDialerAutoPausedRef.current = true;
+                if (powerDialerTimerRef.current) {
+                    clearTimeout(powerDialerTimerRef.current);
+                    powerDialerTimerRef.current = null;
+                }
+            }
         } catch (err) {
             console.error('Failed to pause session:', err);
         } finally {
@@ -1042,6 +1053,11 @@ export default function SessionPage() {
                 total_paused_sec: (session.total_paused_sec ?? 0) + pausedDuration,
             });
             setSession(updated);
+            // Auto-resume the power dialer only if it was auto-paused by session pause
+            if (powerDialerAutoPausedRef.current) {
+                setPowerDialerPaused(false);
+                powerDialerAutoPausedRef.current = false;
+            }
         } catch (err) {
             console.error('Failed to resume session:', err);
         } finally {
@@ -1472,6 +1488,7 @@ export default function SessionPage() {
 
     const handlePowerDialerPause = useCallback(() => {
         setPowerDialerPaused(true);
+        powerDialerAutoPausedRef.current = false; // Manual pause clears auto-pause flag
         if (powerDialerTimerRef.current) {
             clearTimeout(powerDialerTimerRef.current);
             powerDialerTimerRef.current = null;
@@ -1480,6 +1497,7 @@ export default function SessionPage() {
 
     const handlePowerDialerResume = useCallback(() => {
         setPowerDialerPaused(false);
+        powerDialerAutoPausedRef.current = false; // Manual resume clears auto-pause flag
         // Next dial fires naturally on the next form-submit (positive delay) or call-end (negative delay)
     }, []);
 

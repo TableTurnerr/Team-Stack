@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Phone, PhoneCall, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, ChevronLeft, Power, Loader2, Delete } from 'lucide-react';
+import { Phone, PhoneCall, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, ChevronLeft, Power, Loader2, Delete, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useSession } from '@/contexts/session-context';
@@ -54,7 +54,7 @@ interface ZoomPhoneDialerProps {
 
 export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = false }: ZoomPhoneDialerProps = {}) {
     const router = useRouter();
-    const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey, customDialerNumber, activeCallNumber } = useZoomPhone();
+    const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey, customDialerNumber, activeCallNumber, refreshDialer } = useZoomPhone();
     const { session, setSession } = useSession();
 
     const [yPosition, setYPosition] = useState(DEFAULT_Y);
@@ -523,6 +523,14 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                                 <span className="text-[10px] text-[var(--muted)] italic">
                                     {isCallActive ? 'Hover for Zoom controls' : 'Hover to Dial'}
                                 </span>
+                                <button
+                                    type="button"
+                                    onClick={refreshDialer}
+                                    className="inline-flex items-center justify-center rounded-full w-5 h-5 border border-[var(--card-border)] text-[var(--muted)] hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-all"
+                                    title="Refresh Zoom dialer"
+                                >
+                                    <RefreshCw size={10} />
+                                </button>
                                 {!isCallActive && (
                                     <button
                                         type="button"
@@ -576,6 +584,13 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                             )}
                         </div>
                         <div className="flex items-center gap-1">
+                            <button
+                                onClick={refreshDialer}
+                                className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                                title="Refresh Zoom dialer"
+                            >
+                                <RefreshCw size={12} />
+                            </button>
                             <button
                                 onClick={() => setIsMinimized(!isMinimized)}
                                 className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"

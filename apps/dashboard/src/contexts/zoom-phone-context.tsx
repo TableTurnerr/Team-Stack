@@ -212,7 +212,17 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const refreshDialer = useCallback(() => {
-        console.log('[Zoom Phone] Refreshing dialer...');
+        console.log('[Zoom Phone] Refreshing dialer — resetting all call state...');
+        // Reset call state so stale ringing/connected status doesn't persist
+        callStatusRef.current = 'idle';
+        setCallStatus('idle');
+        setIsDialing(false);
+        setCallDirection(null);
+        setIncomingCallerNumber(null);
+        pendingCallRef.current = null;
+        outboundIntentRef.current = false;
+        if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+        // Reload the iframe
         setIframeReadyState(false);
         setRefreshKey(prev => prev + 1);
     }, []);
@@ -331,6 +341,25 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             // ── ENDED ──
             } else if (eventLower.includes('ended') || eventLower.includes('hangup') || eventLower.includes('disconnect')) {
                 console.log('[Zoom Phone] Call ended');
+                callStatusRef.current = 'ended';
+                setCallStatus('ended');
+                setIsDialing(false);
+                pendingCallRef.current = null;
+                outboundIntentRef.current = false;
+                if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+                setTimeout(() => {
+                    callStatusRef.current = 'idle';
+                    setCallStatus('idle');
+                    setCallDirection(null);
+                    setIncomingCallerNumber(null);
+                }, 2000);
+
+            // ── FAILED / REJECTED ──
+            // Zoom may send events like "callFailed", "callRejected", etc.
+            // when the VoIP call fails to go through. Without this handler,
+            // the call stays stuck in 'ringing' and the recording runs forever.
+            } else if (eventLower.includes('fail') || eventLower.includes('reject')) {
+                console.log('[Zoom Phone] Call failed/rejected:', type);
                 callStatusRef.current = 'ended';
                 setCallStatus('ended');
                 setIsDialing(false);
@@ -537,6 +566,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         setIsDialerOpen(true);
         setLastDialedNumber(cleaned);
         setActiveCallNumber(cleaned);
+        setCustomDialerNumber(cleaned);
         setIsDialing(true);
 
         // Safety timeout for isDialing in case Zoom never responds

@@ -2,6 +2,10 @@
  * 03-companies.spec.ts
  * Full CRUD + UI tests for the Companies page.
  *
+ * Removed tests:
+ *   - 'zoom call button is visible for companies with phone numbers' — conditional assertions, just checked row visible
+ *   - 'refresh button reloads data' — marginal value, duplicate pattern
+ *
  * Strategy:
  *   beforeAll  → create a test company via PocketBase API
  *   tests      → search, filter, sort, inline-edit, column toggle, detail page
@@ -15,7 +19,6 @@ let testCompanyId: string;
 
 test.describe('Companies Page', () => {
   test.beforeAll(async () => {
-    // Seed a test company via API so we have known data to work with
     const record = await createRecord<{ id: string }>('companies', {
       company_name: TEST_COMPANY.name,
       owner_name: TEST_COMPANY.owner,
@@ -30,9 +33,8 @@ test.describe('Companies Page', () => {
   });
 
   test.afterAll(async () => {
-    // Delete all TEST_PW_ companies
     const deleted = await cleanupByPrefix('companies', 'company_name', TEST_PREFIX);
-    console.log(`🧹 Cleaned up ${deleted} test companies.`);
+    console.log(`Cleaned up ${deleted} test companies.`);
   });
 
   // ─── Page Load ───────────────────────────────────────────────────────────────
@@ -41,10 +43,7 @@ test.describe('Companies Page', () => {
     await page.goto('/companies');
     await waitForTableLoad(page);
 
-    // Heading should include "Companies" or "Leads"
     await expect(page.locator('h1').first()).toBeVisible();
-
-    // Table should exist
     const table = page.locator('table, [role="table"]').first();
     await expect(table).toBeVisible();
   });
@@ -53,7 +52,6 @@ test.describe('Companies Page', () => {
     await page.goto('/companies');
     await waitForTableLoad(page);
 
-    // Standard company columns should be visible
     for (const header of ['Company', 'Owner', 'Status', 'Source']) {
       await expect(page.locator('th, [role="columnheader"]').filter({ hasText: new RegExp(header, 'i') }).first()).toBeVisible();
     }
@@ -68,12 +66,10 @@ test.describe('Companies Page', () => {
     const searchInput = page.locator('input[placeholder*="earch"]').first();
     await expect(searchInput).toBeVisible();
 
-    // Search for our test company
     await searchInput.fill(TEST_COMPANY.name);
-    await page.waitForTimeout(600); // debounce
+    await page.waitForTimeout(600);
     await waitForTableLoad(page);
 
-    // Test company row should appear
     await expect(page.locator('td, [role="cell"]').filter({ hasText: TEST_COMPANY.name }).first()).toBeVisible({ timeout: 10_000 });
   });
 
@@ -87,10 +83,8 @@ test.describe('Companies Page', () => {
     await page.waitForTimeout(600);
     await waitForTableLoad(page);
 
-    // Should show no results or empty message
     const noResults = page.locator('text=/no result|no compan|empty|nothing found/i');
     const rowCount = await page.locator('tbody tr, [role="row"]').count();
-    // Either empty state or 0 data rows (header row doesn't count)
     const hasEmpty = await noResults.count() > 0;
     expect(hasEmpty || rowCount <= 1).toBeTruthy();
   });
@@ -107,7 +101,6 @@ test.describe('Companies Page', () => {
     await page.waitForTimeout(600);
     await waitForTableLoad(page);
 
-    // List should be populated again
     const rows = page.locator('tbody tr, [role="row"]').filter({ hasNot: page.locator('th') });
     await expect(rows.first()).toBeVisible();
   });
@@ -118,16 +111,13 @@ test.describe('Companies Page', () => {
     await page.goto('/companies');
     await waitForTableLoad(page);
 
-    // Look for a status filter (select, button with "Filter", or dropdown)
     const filterEl = page.locator('select, button').filter({ hasText: /status|filter/i }).first();
     if (await filterEl.count() > 0) {
       await filterEl.click();
       await page.waitForTimeout(300);
-      // Options like Warm, Booked, etc. should appear
       const warmOption = page.locator('text=/Warm|Booked|Replied|Excluded/i').first();
       await expect(warmOption).toBeVisible({ timeout: 5_000 });
     }
-    // If no filter UI present, test passes (filter may be integrated differently)
   });
 
   // ─── Column Visibility ────────────────────────────────────────────────────────
@@ -136,26 +126,22 @@ test.describe('Companies Page', () => {
     await page.goto('/companies');
     await waitForTableLoad(page);
 
-    // Column selector button (usually has "Columns" text or an icon)
     const colBtn = page.locator('button').filter({ hasText: /column/i }).first();
     if (await colBtn.count() > 0) {
       await colBtn.click();
       await page.waitForTimeout(300);
 
-      // A dropdown/popover should appear with column checkboxes
-      const checkboxes = page.locator('input[type="checkbox"]');
-      await expect(checkboxes.first()).toBeVisible({ timeout: 5_000 });
+      // Column selector uses custom button toggles (not native checkboxes)
+      const toggleBtns = page.locator('button').filter({ hasText: /email|status|location|company name/i });
+      await expect(toggleBtns.first()).toBeVisible({ timeout: 5_000 });
 
-      // Toggle Email column (off by default)
-      const emailCheckbox = page.locator('label').filter({ hasText: /email/i }).first();
-      if (await emailCheckbox.count() > 0) {
-        await emailCheckbox.click();
+      const emailToggle = page.locator('button').filter({ hasText: /email/i }).first();
+      if (await emailToggle.count() > 0) {
+        await emailToggle.click();
         await page.waitForTimeout(200);
-        // Toggle back
-        await emailCheckbox.click();
+        await emailToggle.click();
       }
 
-      // Close popover
       await page.keyboard.press('Escape');
     }
   });
@@ -170,11 +156,8 @@ test.describe('Companies Page', () => {
     if (await companyHeader.count() > 0) {
       await companyHeader.click();
       await page.waitForTimeout(500);
-      // After click, sort indicator (arrow icon) should appear
-      // Just verify the click doesn't crash the page
       await expect(page.locator('table, [role="table"]').first()).toBeVisible();
 
-      // Click again to reverse sort
       await companyHeader.click();
       await page.waitForTimeout(300);
       await expect(page.locator('table, [role="table"]').first()).toBeVisible();
@@ -187,39 +170,31 @@ test.describe('Companies Page', () => {
     await page.goto('/companies');
     await waitForTableLoad(page);
 
-    // Search for our test company
     const searchInput = page.locator('input[placeholder*="earch"]').first();
     await searchInput.fill(TEST_COMPANY.name);
     await page.waitForTimeout(600);
     await waitForTableLoad(page);
 
-    // Find the company name cell and click edit
     const companyCell = page.locator('td, [role="cell"]').filter({ hasText: TEST_COMPANY.name }).first();
     await expect(companyCell).toBeVisible({ timeout: 10_000 });
 
-    // Hover to reveal inline edit button
     await companyCell.hover();
     await page.waitForTimeout(200);
 
-    // Look for a pencil/edit icon button in or near the cell
     const editBtn = companyCell.locator('button, [role="button"]').first();
     if (await editBtn.count() > 0) {
       await editBtn.click();
       await page.waitForTimeout(300);
 
-      // An input field should appear
       const editInput = page.locator('input[type="text"]').first();
       if (await editInput.count() > 0 && await editInput.isVisible()) {
         const newName = `${TEST_COMPANY.name} EDITED`;
         await editInput.clear();
         await editInput.fill(newName);
-
-        // Save with Enter or Save button
         await editInput.press('Enter');
         await page.waitForTimeout(1000);
 
-        // Verify the updated name appears (or revert)
-        // Then revert to original name
+        // Revert
         await companyCell.hover();
         const revertBtn = companyCell.locator('button').first();
         if (await revertBtn.count() > 0) {
@@ -234,7 +209,6 @@ test.describe('Companies Page', () => {
         }
       }
     }
-    // Test passes regardless — we're checking the interaction doesn't crash
   });
 
   test('inline edit status works', async ({ page }) => {
@@ -246,19 +220,17 @@ test.describe('Companies Page', () => {
     await page.waitForTimeout(600);
     await waitForTableLoad(page);
 
-    // Look for a status badge/dropdown in the row
     const statusCell = page.locator('td').filter({ hasText: /Cold No Reply|Warm|Replied|Booked|Paid|Client|Excluded/i }).first();
     if (await statusCell.count() > 0) {
       await statusCell.click();
       await page.waitForTimeout(300);
 
-      // A status dropdown or select should appear
       const warmOption = page.locator('[role="option"], option, button').filter({ hasText: /Warm/i }).first();
       if (await warmOption.count() > 0) {
         await warmOption.click();
         await page.waitForTimeout(1000);
 
-        // Revert to original
+        // Revert
         await statusCell.click();
         await page.waitForTimeout(300);
         const originalOption = page.locator('[role="option"], option, button').filter({ hasText: /Cold No Reply/i }).first();
@@ -281,54 +253,12 @@ test.describe('Companies Page', () => {
     await page.waitForTimeout(600);
     await waitForTableLoad(page);
 
-    // Look for a link or arrow to the detail page
-    const detailLink = page.locator(`a[href*="/companies/${testCompanyId}"], a[href*="/companies/"]`).first();
+    const detailLink = page.locator(`a[href*="/companies/${testCompanyId}"]`).first();
     if (await detailLink.count() > 0) {
       await detailLink.click();
       await page.waitForURL(/\/companies\/.+/, { timeout: 25_000 });
       await expect(page).toHaveURL(/\/companies\/.+/);
-      // Detail page should show company info
       await expect(page.locator('body')).toContainText(TEST_COMPANY.name, { timeout: 25_000 });
-    }
-  });
-
-  // ─── Zoom Call Button ─────────────────────────────────────────────────────────
-
-  test('zoom call button is visible for companies with phone numbers', async ({ page }) => {
-    await page.goto('/companies');
-    await waitForTableLoad(page);
-
-    const searchInput = page.locator('input[placeholder*="earch"]').first();
-    await searchInput.fill(TEST_COMPANY.name);
-    await page.waitForTimeout(600);
-    await waitForTableLoad(page);
-
-    // Phone/call button should be visible in the row (may need hover)
-    const row = page.locator('tr, [role="row"]').filter({ hasText: TEST_COMPANY.name }).first();
-    if (await row.count() > 0) {
-      await row.hover();
-      // Look for a phone/call button
-      const callBtn = row.locator('button').filter({ hasText: /call|phone|dial/i }).first();
-      // Just verify the row is visible — call button may depend on data
-      await expect(row).toBeVisible();
-    }
-  });
-
-  // ─── Refresh ─────────────────────────────────────────────────────────────────
-
-  test('refresh button reloads data', async ({ page }) => {
-    await page.goto('/companies');
-    await waitForTableLoad(page);
-
-    const refreshBtn = page.locator('button').filter({ has: page.locator('svg') }).filter({ hasText: /^$/ }).first();
-    // Try finding a button with refresh-related aria label
-    const refreshByLabel = page.locator('button[aria-label*="refresh" i], button[title*="refresh" i]').first();
-    const btn = (await refreshByLabel.count() > 0) ? refreshByLabel : refreshBtn;
-
-    if (await btn.count() > 0) {
-      await btn.click();
-      await waitForTableLoad(page);
-      await expect(page.locator('table, [role="table"]').first()).toBeVisible();
     }
   });
 });

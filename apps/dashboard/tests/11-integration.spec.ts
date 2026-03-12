@@ -3,17 +3,25 @@
  * Cross-component integration tests.
  *
  * These tests verify that data flows correctly between components:
- *   1. Session → Call Log:         A session's dial count matches call logs count
- *   2. Call Log → Recording:       A call log with has_recording=true has a linked recording
- *   3. Call Log → Follow-Up:       Scheduling a follow-up from a call log creates a follow-up record
- *   4. Company → Call History:     Company detail shows related call logs
- *   5. Session → Session Logs:     Ending a session makes it appear in /session-logs
- *   6. Call Log → AI Transcript:   Call log can link to a cold_call (AI transcript) record
- *   7. Phone Number → Call Log:    Phone number total_calls count reflects actual call log count
+ *   1. Call Log → Cold Calls page display
+ *   2. Company → Call History in detail page
+ *   3. Call Log → Recording linkage (API-level)
+ *   4. Call Log → has_recording field integrity (API-level)
+ *   5. Callback outcome → Company list display
+ *
+ * Removed tests (all had no meaningful assertions beyond "no Application error"):
+ *   - 'session appears in session logs after completion' — just checked no error
+ *   - 'follow-up context is visible' — just checked no error
+ *   - 'call log in cold calls table shows session link' — just checked column header
+ *   - 'session logs reflect owner_reached count' — extremely loose assertion (/1/)
+ *   - 'phone number shows call history' — just checked no error
+ *   - 'recordings page contains integration test recording' — just checked no error
+ *   - 'recordings page renders linked recording with view-transcript link' — just checked no error
  *
  * Strategy:
  *   All test data is seeded via PocketBase API.
  *   The UI is used to verify correct display and cross-linking.
+ *   API-level tests verify data integrity directly.
  *   Cleanup happens in afterAll.
  */
 import { test, expect } from '@playwright/test';
@@ -78,7 +86,7 @@ test.describe('Integration: Data Flow Between Components', () => {
       phone_number_record: phoneId,
       ...(sessionId ? { session: sessionId } : {}),
       call_time: new Date(Date.now() - 3650_000).toISOString(),
-      call_outcome: 'Callback',
+      call_outcome: ['Callback'],
       interest_level: 6,
       post_call_notes: `[${TEST_PREFIX}] Integration call log - callback scheduled`,
       owner_reached: true,
@@ -98,7 +106,7 @@ test.describe('Integration: Data Flow Between Components', () => {
         company: companyId,
         phone_number_record: phoneId,
         created_by: userId,
-        scheduled_time: new Date(Date.now() + 86400_000).toISOString(), // tomorrow
+        scheduled_time: new Date(Date.now() + 86400_000).toISOString(),
         client_timezone: 'America/New_York',
         notes: `[${TEST_PREFIX}] Follow-up from integration test`,
         status: 'pending',
@@ -119,40 +127,15 @@ test.describe('Integration: Data Flow Between Components', () => {
   });
 
   test.afterAll(async () => {
-    // Delete in dependency order
     if (followUpId) await deleteRecord('follow_ups', followUpId);
     if (recordingId) await deleteRecord('recordings', recordingId);
     if (callLogId) await deleteRecord('call_logs', callLogId);
     if (sessionId) await deleteRecord('cold_calling_sessions', sessionId);
     if (phoneId) await deleteRecord('phone_numbers', phoneId);
     if (companyId) await deleteRecord('companies', companyId);
-    console.log('🧹 Cleaned up integration test data.');
   });
 
-  // ─── 1. Session → Call Logs ───────────────────────────────────────────────────
-
-  test('session appears in session logs after completion', async ({ page }) => {
-    if (!sessionId) { test.skip(); return; }
-
-    await page.goto('/session-logs');
-    await waitForTableLoad(page);
-
-    // Switch to Completed tab
-    const completedTab = page.locator('button, [role="tab"]').filter({ hasText: /completed/i }).first();
-    if (await completedTab.count() > 0) {
-      await completedTab.click();
-      await page.waitForTimeout(500);
-      await waitForTableLoad(page);
-    }
-
-    // Session with 3 dials should be visible
-    const sessionEntry = page.locator('tr, [class*="card"], [class*="row"]')
-      .filter({ hasText: /3|integration/i }).first();
-    // At minimum verify no crash and page loads correctly
-    await expect(page.locator('body')).not.toContainText('Application error');
-  });
-
-  // ─── 2. Call Log shows in Cold Calls page ─────────────────────────────────────
+  // ─── UI Integration Tests ─────────────────────────────────────────────────────
 
   test('integration call log appears in /cold-calls', async ({ page }) => {
     await page.goto('/cold-calls');
@@ -165,77 +148,25 @@ test.describe('Integration: Data Flow Between Components', () => {
 
     const rows = page.locator('tbody tr, [role="row"]')
       .filter({ hasText: /integration/i });
-    // Should find at least our test call log
     await expect(rows.first()).toBeVisible({ timeout: 10_000 });
   });
-
-  // ─── 3. Company → Call History in Company Detail ──────────────────────────────
 
   test('company detail page shows related call logs', async ({ page }) => {
     await page.goto(`/companies/${companyId}`);
     await waitForTableLoad(page);
 
-    // Detail page should load without error
     await expect(page.locator('body')).not.toContainText('Application error');
     await expect(page.locator('body')).not.toContainText('This page could not be found');
-
-    // Should show the company name
     await expect(page.locator('body')).toContainText('Integration Restaurant');
   });
 
-  // ─── 4. Call Log → Recording Linkage ─────────────────────────────────────────
-
-  test('call log detail page shows linked recording when available', async ({ page }) => {
+  test('call log detail page loads with correct company', async ({ page }) => {
     await page.goto(`/cold-calls/${callLogId}`);
     await waitForTableLoad(page);
 
-    // Detail page should load
     await expect(page.locator('body')).not.toContainText('Application error');
-    // The call log detail page should show the company name
     await expect(page.locator('body')).toContainText('Integration Restaurant');
   });
-
-  // ─── 5. Follow-Up Appears for Company ────────────────────────────────────────
-
-  test('follow-up context is visible (scheduled follow-up exists for call)', async ({ page }) => {
-    if (!followUpId) { test.skip(); return; }
-
-    // Navigate to the cold calls page and search for our call
-    await page.goto('/cold-calls');
-    await waitForTableLoad(page);
-
-    const searchInput = page.locator('input[placeholder*="earch"]').first();
-    await searchInput.fill('Integration Restaurant');
-    await page.waitForTimeout(600);
-    await waitForTableLoad(page);
-
-    // Follow-up indicator may show as a calendar icon or badge
-    const followUpIndicator = page.locator('[class*="follow"], [aria-label*="follow"]').first();
-    // Just verify the call log row exists and page is not crashing
-    await expect(page.locator('body')).not.toContainText('Application error');
-  });
-
-  // ─── 6. Call Log → Session Linkage ───────────────────────────────────────────
-
-  test('call log in cold calls table shows session link', async ({ page }) => {
-    if (!sessionId) { test.skip(); return; }
-
-    await page.goto('/cold-calls');
-    await waitForTableLoad(page);
-
-    const searchInput = page.locator('input[placeholder*="earch"]').first();
-    await searchInput.fill('Integration Restaurant');
-    await page.waitForTimeout(600);
-    await waitForTableLoad(page);
-
-    // Session column should show a link or badge for our session
-    const sessionCol = page.locator('th, [role="columnheader"]').filter({ hasText: /session/i }).first();
-    if (await sessionCol.count() > 0) {
-      await expect(sessionCol).toBeVisible();
-    }
-  });
-
-  // ─── 7. Outcome from call log matches company status (Callback flow) ──────────
 
   test('call with Callback outcome is reflected in company list', async ({ page }) => {
     await page.goto('/companies');
@@ -248,72 +179,13 @@ test.describe('Integration: Data Flow Between Components', () => {
 
     const companyRow = page.locator('tr, [role="row"]').filter({ hasText: /Integration Restaurant/i }).first();
     await expect(companyRow).toBeVisible({ timeout: 10_000 });
-
-    // Last Contact column should be updated (company was contacted)
-    const lastContactCell = companyRow.locator('td').nth(8); // position depends on column order
-    await expect(companyRow).toBeVisible();
   });
 
-  // ─── 8. Performance counters reflect call log flags ───────────────────────────
+  // ─── API-Level Data Integrity Tests ───────────────────────────────────────────
 
-  test('session logs reflect owner_reached count from call logs', async ({ page }) => {
-    if (!sessionId) { test.skip(); return; }
+  test('recording has call_log relation set correctly', async () => {
+    if (!recordingId || !callLogId) return;
 
-    await page.goto('/session-logs');
-    await waitForTableLoad(page);
-
-    // Our session should show owner_reached = 1 from our call log
-    const sessionRow = page.locator('tr, [class*="card"]').filter({ hasText: /1/ }).first();
-    await expect(page.locator('body')).not.toContainText('Application error');
-  });
-
-  // ─── 9. Phone number call count reflects call logs ────────────────────────────
-
-  test('phone number shows call history', async ({ page }) => {
-    await page.goto('/cold-calls');
-    await waitForTableLoad(page);
-
-    // Switch to Phone Numbers tab
-    const phoneTab = page.locator('[role="tab"], button').filter({ hasText: /phone number/i }).first();
-    if (await phoneTab.count() > 0) {
-      await phoneTab.click();
-      await page.waitForTimeout(500);
-      await waitForTableLoad(page);
-
-      // Search for our test phone number
-      const searchInput = page.locator('input[placeholder*="earch"]').first();
-      if (await searchInput.count() > 0) {
-        await searchInput.fill('555-9999');
-        await page.waitForTimeout(600);
-      }
-
-      await expect(page.locator('body')).not.toContainText('Application error');
-    }
-  });
-
-  // ─── 10. Recordings page shows the linked recording ──────────────────────────
-
-  test('recordings page contains integration test recording', async ({ page }) => {
-    await page.goto('/recordings');
-    await waitForTableLoad(page);
-
-    // Our test recording should appear in the list
-    // It has note: "[TEST_PW_] Integration test recording"
-    await expect(page.locator('body')).not.toContainText('Application error');
-    // Recordings are shown as cards or rows; just verify page loads
-  });
-
-  // ─── 11. Recording is linked to call log (session recording save flow) ────────
-
-  test('recording has call_log relation set (session saves recordings correctly)', async () => {
-    // Verify via API that our test recording is linked to the call log.
-    // This is the core invariant that the session recording save flow must satisfy.
-    if (!recordingId || !callLogId) {
-      // If seeding failed, skip rather than fail
-      return;
-    }
-
-    const { fetchRecords } = await import('./helpers/pb-client');
     const recordings = await fetchRecords<{ id: string; call_log: string; note: string }>(
       'recordings',
       `id = "${recordingId}"`,
@@ -325,9 +197,6 @@ test.describe('Integration: Data Flow Between Components', () => {
   });
 
   test('call log has_recording is false before session submits recording', async () => {
-    // Verify the seed call log starts with has_recording=false.
-    // The session page sets it to true after submitDeferredRecording resolves —
-    // this test verifies the field is readable and the seed is clean.
     if (!callLogId) return;
 
     const callLogs = await fetchRecords<{ id: string; has_recording?: boolean }>(
@@ -337,27 +206,88 @@ test.describe('Integration: Data Flow Between Components', () => {
     );
 
     expect(callLogs.length).toBe(1);
-    // Seeded with has_recording: false — should not have been changed
     expect(callLogs[0].has_recording).toBeFalsy();
   });
 
-  test('recordings page renders linked recording with view-transcript link', async ({ page }) => {
-    if (!recordingId) return;
-
-    await page.goto('/recordings');
-    await waitForTableLoad(page);
-
-    // The recordings table should render without errors
-    await expect(page.locator('body')).not.toContainText('Application error');
-
-    // There should be a table showing recordings
-    const table = page.locator('table');
-    if (await table.count() > 0) {
-      await expect(table.first()).toBeVisible();
+  test('follow-up record is linked to correct call log and company', async () => {
+    if (!followUpId) {
+      test.skip();
+      return;
     }
 
-    // If the test recording has a call_log linked, "View Transcript" should appear somewhere on the page
-    // (it may be paginated, so we only assert page health here)
-    await expect(page.locator('body')).not.toContainText('Unhandled Runtime Error');
+    const followUps = await fetchRecords<{
+      id: string;
+      call_log: string;
+      company: string;
+      phone_number_record: string;
+      status: string;
+    }>(
+      'follow_ups',
+      `id = "${followUpId}"`,
+      'id,call_log,company,phone_number_record,status'
+    );
+
+    expect(followUps.length).toBe(1);
+    expect(followUps[0].call_log).toBe(callLogId);
+    expect(followUps[0].company).toBe(companyId);
+    expect(followUps[0].phone_number_record).toBe(phoneId);
+    expect(followUps[0].status).toBe('pending');
+  });
+
+  test('call log has correct relational fields set', async () => {
+    if (!callLogId) return;
+
+    const callLogs = await fetchRecords<{
+      id: string;
+      company: string;
+      phone_number_record: string;
+      session?: string;
+      call_outcome: string;
+      owner_reached: boolean;
+      pitch_completed: boolean;
+    }>(
+      'call_logs',
+      `id = "${callLogId}"`,
+      'id,company,phone_number_record,session,call_outcome,owner_reached,pitch_completed'
+    );
+
+    expect(callLogs.length).toBe(1);
+    const log = callLogs[0];
+    expect(log.company).toBe(companyId);
+    expect(log.phone_number_record).toBe(phoneId);
+    if (sessionId) expect(log.session).toBe(sessionId);
+    expect(log.call_outcome).toContain('Callback');
+    expect(log.owner_reached).toBe(true);
+    expect(log.pitch_completed).toBe(false);
+  });
+
+  test('session has correct aggregate counters', async () => {
+    if (!sessionId) {
+      test.skip();
+      return;
+    }
+
+    const sessions = await fetchRecords<{
+      id: string;
+      total_dials: number;
+      total_pickups: number;
+      owner_reached: number;
+      pitch_completed: number;
+      appointment_set: number;
+      status: string;
+    }>(
+      'cold_calling_sessions',
+      `id = "${sessionId}"`,
+      'id,total_dials,total_pickups,owner_reached,pitch_completed,appointment_set,status'
+    );
+
+    expect(sessions.length).toBe(1);
+    const session = sessions[0];
+    expect(session.status).toBe('completed');
+    expect(session.total_dials).toBe(3);
+    expect(session.total_pickups).toBe(2);
+    expect(session.owner_reached).toBe(1);
+    expect(session.pitch_completed).toBe(1);
+    expect(session.appointment_set).toBe(0);
   });
 });

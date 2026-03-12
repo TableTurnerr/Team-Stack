@@ -20,6 +20,7 @@ import {
 import { cn } from '@/lib/utils';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
+import { extractPlainText } from '@/components/block-editor/helpers';
 
 interface SearchResult {
   id: string;
@@ -90,7 +91,7 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
   // Global keyboard shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
         e.preventDefault();
         if (!open) onClose(); // This triggers the parent to open
       }
@@ -159,7 +160,7 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
       }
 
       for (const n of notes.items) {
-        const text = (n as any).note_text || '';
+        const text = extractPlainText((n as any).note_text || '');
         const preview = text.length > 80 ? text.slice(0, 80) + '...' : text;
         searchResults.push({
           id: n.id,

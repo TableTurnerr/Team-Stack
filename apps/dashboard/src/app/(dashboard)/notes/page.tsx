@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { pb } from '@/lib/pocketbase';
 import { Note, COLLECTIONS, User } from '@/lib/types';
 import { format } from 'date-fns';
-import { Plus, Archive, Trash2, RotateCcw, FileText, X, StickyNote, Expand } from 'lucide-react';
+import { Plus, Archive, Trash2, RotateCcw, PenLine, X, StickyNote, Expand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
@@ -30,6 +30,36 @@ export default function NotesPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [currentNote, setCurrentNote] = useState<Partial<Note>>({});
   const [viewingNote, setViewingNote] = useState<Note | null>(null);
+  const [saveFlash, setSaveFlash] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const currentNoteRef = useRef(currentNote);
+  currentNoteRef.current = currentNote;
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  const DRAFT_KEY = 'notes_editor_draft';
+
+  // Restore draft from localStorage on mount
+  useEffect(() => {
+    try {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft) as { note: Partial<Note>; editing: boolean };
+        if (parsed.editing && (parsed.note.title || parsed.note.note_text)) {
+          setCurrentNote(parsed.note);
+          setIsEditing(true);
+        }
+      }
+    } catch { /* ignore corrupt draft */ }
+  }, []);
+
+  // Persist draft to localStorage whenever editor state changes
+  useEffect(() => {
+    if (isEditing) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ note: currentNote, editing: true }));
+    } else {
+      localStorage.removeItem(DRAFT_KEY);
+    }
+  }, [isEditing, currentNote]);
 
   useEffect(() => {
     if (isAuthenticated) fetchNotes();
@@ -63,28 +93,72 @@ export default function NotesPage() {
     return false;
   });
 
-  async function handleSave() {
+  const handleSave = useCallback(async () => {
+    const note = currentNoteRef.current;
+    const userId = pb.authStore.model?.id;
+    if (!userId) {
+      alert('You must be logged in to save notes.');
+      return;
+    }
     try {
-      const data = {
-        title: currentNote.title || 'Untitled',
-        note_text: currentNote.note_text || '',
-        created_by: pb.authStore.model?.id,
-        is_archived: currentNote.is_archived || false,
-        is_deleted: currentNote.is_deleted || false,
-      };
-
-      if (currentNote.id) {
-        await pb.collection(COLLECTIONS.NOTES).update(currentNote.id, data);
+      if (note.id) {
+        await pb.collection(COLLECTIONS.NOTES).update(note.id, {
+          title: note.title || 'Untitled',
+          note_text: note.note_text || '',
+          is_archived: note.is_archived || false,
+          is_deleted: note.is_deleted || false,
+        });
       } else {
-        await pb.collection(COLLECTIONS.NOTES).create(data);
+        const created = await pb.collection(COLLECTIONS.NOTES).create({
+          title: note.title || 'Untitled',
+          note_text: note.note_text || '',
+          created_by: userId,
+          is_archived: note.is_archived || false,
+          is_deleted: note.is_deleted || false,
+        });
+        // Update currentNote with the new ID so subsequent saves update instead of creating duplicates
+        setCurrentNote((prev) => ({ ...prev, id: created.id }));
       }
-      setIsEditing(false);
-      setCurrentNote({});
+      // Stay in editor — just refresh the list in background
       fetchNotes();
+      setIsDirty(false);
+      // Brief flash to confirm save
+      setSaveFlash(true);
+      setTimeout(() => setSaveFlash(false), 1500);
     } catch (e) {
       alert('Error saving note: ' + e);
     }
-  }
+  }, []);
+
+  // Ctrl+S to save
+  useEffect(() => {
+    if (!isEditing) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isEditing, handleSave]);
+
+  // "/" to focus search when not editing
+  useEffect(() => {
+    if (isEditing) return;
+    const handler = (e: KeyboardEvent) => {
+      // Skip if user is already typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      if (e.key === '/') {
+        e.preventDefault();
+        const input = searchContainerRef.current?.querySelector('input');
+        input?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isEditing]);
 
   async function handleStatusChange(id: string, updates: Partial<Note>) {
     try {
@@ -118,22 +192,32 @@ export default function NotesPage() {
             placeholder="Untitled"
             className="text-2xl font-bold bg-transparent border-none focus:outline-none focus:ring-0 w-full placeholder:text-[var(--muted)]"
             value={currentNote.title || ''}
-            onChange={(e) => setCurrentNote({ ...currentNote, title: e.target.value })}
+            onChange={(e) => { setCurrentNote({ ...currentNote, title: e.target.value }); setIsDirty(true); }}
             autoFocus={!currentNote.id}
           />
-          <div className="flex gap-2 shrink-0 self-end sm:self-auto">
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+            {saveFlash && (
+              <span className="text-xs text-[var(--success)] font-medium animate-pulse">Saved</span>
+            )}
             <button
-              onClick={() => { setIsEditing(false); setCurrentNote({}); }}
+              onClick={() => { setIsEditing(false); setCurrentNote({}); localStorage.removeItem(DRAFT_KEY); }}
               className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-[var(--card-hover)] transition-colors"
             >
-              Cancel
+              Close
             </button>
             <button
               onClick={handleSave}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors"
+              disabled={!isDirty}
+              className={cn(
+                "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                isDirty
+                  ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90"
+                  : "bg-[var(--muted)]/30 text-[var(--muted)] cursor-not-allowed opacity-50"
+              )}
             >
               Save
             </button>
+            <span className="text-[10px] text-[var(--muted)] hidden sm:inline">Ctrl+S</span>
           </div>
         </div>
 
@@ -141,7 +225,7 @@ export default function NotesPage() {
         <div className="flex-1 overflow-y-auto">
           <BlockEditor
             content={currentNote.note_text || ''}
-            onChange={(value) => setCurrentNote((prev) => ({ ...prev, note_text: value }))}
+            onChange={(value) => { setCurrentNote((prev) => ({ ...prev, note_text: value })); setIsDirty(true); }}
             autoFocus={!!currentNote.id}
             editable
           />
@@ -200,11 +284,12 @@ export default function NotesPage() {
                 onClick={() => {
                   setCurrentNote(viewingNote);
                   setIsEditing(true);
+                  setIsDirty(false);
                   setViewingNote(null);
                 }}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors text-sm font-medium"
               >
-                <FileText size={14} />
+                <PenLine size={14} />
                 Edit Note
               </button>
             </div>
@@ -219,7 +304,7 @@ export default function NotesPage() {
           <p className="text-sm text-[var(--muted)] mt-1">Team notes and documentation</p>
         </div>
         <button
-          onClick={() => { setCurrentNote({}); setIsEditing(true); }}
+          onClick={() => { setCurrentNote({}); setIsEditing(true); setIsDirty(false); }}
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors"
         >
           <Plus size={16} />
@@ -245,13 +330,14 @@ export default function NotesPage() {
             </button>
           ))}
         </div>
-        <div className="relative flex-1 w-full sm:max-w-sm">
+        <div ref={searchContainerRef} className="relative flex-1 w-full sm:max-w-sm">
           <SearchInput
             placeholder="Search notes…"
             onSearch={setSearch}
             defaultValue={search}
             key={search}
             className="w-full sm:max-w-sm"
+            hintLabel="/"
           />
         </div>
       </div>
@@ -301,24 +387,24 @@ export default function NotesPage() {
                     <div className="flex gap-1">
                       <button
                         onClick={() => setViewingNote(note)}
-                        className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                        className="p-1.5 rounded-md hover:bg-[var(--info-subtle)] text-[var(--muted)] hover:text-[var(--info)] transition-colors"
                         title="View"
                       >
                         <Expand size={14} />
                       </button>
                       <button
-                        onClick={() => { setCurrentNote(note); setIsEditing(true); }}
-                        className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                        onClick={() => { setCurrentNote(note); setIsEditing(true); setIsDirty(false); }}
+                        className="p-1.5 rounded-md hover:bg-[var(--primary-subtle)] text-[var(--muted)] hover:text-[var(--primary)] transition-colors"
                         title="Edit"
                       >
-                        <FileText size={14} />
+                        <PenLine size={14} />
                       </button>
 
                       {tab === 'active' && (
                         <>
                           <button
                             onClick={() => handleStatusChange(note.id, { is_archived: true })}
-                            className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                            className="p-1.5 rounded-md hover:bg-[var(--warning-subtle)] text-[var(--muted)] hover:text-[var(--warning)] transition-colors"
                             title="Archive"
                           >
                             <Archive size={14} />
@@ -337,7 +423,7 @@ export default function NotesPage() {
                         <>
                           <button
                             onClick={() => handleStatusChange(note.id, { is_archived: false })}
-                            className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                            className="p-1.5 rounded-md hover:bg-[var(--success-subtle)] text-[var(--muted)] hover:text-[var(--success)] transition-colors"
                             title="Unarchive"
                           >
                             <RotateCcw size={14} />
@@ -356,7 +442,7 @@ export default function NotesPage() {
                         <>
                           <button
                             onClick={() => handleStatusChange(note.id, { is_deleted: false })}
-                            className="p-1.5 rounded-md hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                            className="p-1.5 rounded-md hover:bg-[var(--success-subtle)] text-[var(--muted)] hover:text-[var(--success)] transition-colors"
                             title="Restore"
                           >
                             <RotateCcw size={14} />

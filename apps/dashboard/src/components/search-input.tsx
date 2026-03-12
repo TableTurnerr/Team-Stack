@@ -9,6 +9,7 @@ interface SearchInputProps {
     defaultValue?: string;
     value?: string;
     onChange?: (value: string) => void;
+    hintLabel?: string;
 }
 
 export function SearchInput({
@@ -17,7 +18,8 @@ export function SearchInput({
     className,
     defaultValue = '',
     value: controlledValue,
-    onChange
+    onChange,
+    hintLabel = 'ENTER',
 }: SearchInputProps) {
     const isControlled = controlledValue !== undefined;
     const [internalValue, setInternalValue] = useState(defaultValue);
@@ -81,7 +83,7 @@ export function SearchInput({
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                 <span className="text-[10px] text-[var(--muted)] font-mono border border-[var(--card-border)] bg-[var(--card-bg)] px-1.5 py-0.5 rounded opacity-70">
-                    ENTER
+                    {hintLabel}
                 </span>
             </div>
         </div>

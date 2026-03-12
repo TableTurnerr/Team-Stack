@@ -20,6 +20,7 @@ import {
   ListOrdered,
   CheckSquare,
   Minus,
+  Code,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -100,6 +101,14 @@ const COMMANDS: CommandItem[] = [
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
   },
+  {
+    title: 'Markdown',
+    description: 'Write in Markdown syntax',
+    keywords: ['md', 'markdown', 'code', 'raw'],
+    icon: <Code size={15} />,
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).setCodeBlock({ language: 'markdown' }).run(),
+  },
 ];
 
 function filterCommands(query: string): CommandItem[] {
@@ -131,23 +140,29 @@ export const SlashMenu = forwardRef<SlashMenuHandle, SlashMenuProps>(
     useEffect(() => setSelectedIndex(0), [items]);
 
     useImperativeHandle(ref, () => ({
-      onKeyDown({ event }) {
+      onKeyDown({ event }: { event: KeyboardEvent }) {
         if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          event.stopPropagation();
           setSelectedIndex((i) => (i - 1 + items.length) % items.length);
           return true;
         }
         if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          event.stopPropagation();
           setSelectedIndex((i) => (i + 1) % items.length);
           return true;
         }
         if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
           const item = items[selectedIndex];
           if (item) command(item);
           return true;
         }
         return false;
       },
-    }));
+    }), [items, selectedIndex, command]);
 
     if (items.length === 0) {
       return (
@@ -247,9 +262,14 @@ export const SlashCommandExtension = Extension.create({
 
             onKeyDown(props: SuggestionKeyDownProps) {
               if (props.event.key === 'Escape') {
+                props.event.preventDefault();
                 component.destroy();
                 component.element.remove();
                 return true;
+              }
+              // Forward arrow/enter keys to the menu component
+              if (['ArrowUp', 'ArrowDown', 'Enter'].includes(props.event.key)) {
+                return component.ref?.onKeyDown(props) ?? false;
               }
               return component.ref?.onKeyDown(props) ?? false;
             },

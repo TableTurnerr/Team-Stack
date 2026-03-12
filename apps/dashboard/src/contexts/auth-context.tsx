@@ -35,12 +35,14 @@ export function isUserOnline(user: { status: string; last_activity?: string }): 
 }
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const TOKEN_REFRESH_INTERVAL_MS = 5 * 60_000; // Refresh JWT every 5 minutes
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const router = useRouter();
     const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const tokenRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const userRef = useRef<User | null>(null);
 
     // Keep userRef in sync so event handlers always see the latest user
@@ -59,6 +61,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         last_activity: model.last_activity,
     });
 
+    // ── Token refresh: keep JWT alive ──
+    const refreshToken = async () => {
+        if (!pb.authStore.isValid) return false;
+        try {
+            await pb.collection('users').authRefresh();
+            return true;
+        } catch {
+            // Token is expired/invalid — force logout
+            pb.authStore.clear();
+            setUser(null);
+            stopHeartbeat();
+            return false;
+        }
+    };
+
     // ── Heartbeat: update last_activity every 30s ──
     const startHeartbeat = (userId: string) => {
         stopHeartbeat();
@@ -71,12 +88,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 // silently ignore — network blip
             }
         }, HEARTBEAT_INTERVAL_MS);
+
+        // Periodic token refresh to prevent JWT expiry
+        tokenRefreshRef.current = setInterval(refreshToken, TOKEN_REFRESH_INTERVAL_MS);
     };
 
     const stopHeartbeat = () => {
         if (heartbeatRef.current) {
             clearInterval(heartbeatRef.current);
             heartbeatRef.current = null;
+        }
+        if (tokenRefreshRef.current) {
+            clearInterval(tokenRefreshRef.current);
+            tokenRefreshRef.current = null;
         }
     };
 
@@ -103,12 +127,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return () => window.removeEventListener('beforeunload', handleUnload);
     }, []);
 
-    // ── visibilitychange: update last_activity when tab becomes visible again ──
+    // ── visibilitychange: refresh token + update last_activity when tab becomes visible ──
     useEffect(() => {
         const handleVisibility = async () => {
             const currentUser = userRef.current;
             if (!currentUser?.id) return;
             if (document.visibilityState === 'visible') {
+                // Refresh token first — it may have expired while tab was hidden
+                const tokenValid = await refreshToken();
+                if (!tokenValid) return;
                 try {
                     await pb.collection('users').update(currentUser.id, {
                         status: 'online',
@@ -120,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         document.addEventListener('visibilitychange', handleVisibility);
         return () => document.removeEventListener('visibilitychange', handleVisibility);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Initialize auth state from PocketBase's authStore
@@ -127,13 +155,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const initAuth = async () => {
             if (pb.authStore.isValid && pb.authStore.model) {
                 try {
-                    // Refresh user data from server to get latest role and status
-                    const freshUser = await pb.collection('users').getOne(pb.authStore.model.id);
-                    const mapped = mapUser(freshUser);
+                    // Refresh the token on init to get a fresh JWT + latest user data
+                    const authData = await pb.collection('users').authRefresh();
+                    const mapped = mapUser(authData.record);
                     setUser(mapped);
                     startHeartbeat(mapped.id);
                 } catch (error) {
-                    console.error('Failed to refresh user data:', error);
+                    console.error('Failed to refresh auth on init:', error);
                     pb.authStore.clear();
                     setUser(null);
                 }

@@ -150,6 +150,10 @@ function extractPhoneNumber(data: Record<string, unknown>): string | null {
 }
 
 export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
+    // Virtual dialer: when __TEST_VIRTUAL_DIALER is set on window, skip Zoom iframe
+    // and dispatch synthetic call events. All state-machine logic still runs unchanged.
+    const isVirtualDialer = typeof window !== 'undefined' && !!(window as any).__TEST_VIRTUAL_DIALER;
+
     const [isDialerOpen, setIsDialerOpen] = useState(false);
     const [iframeReady, setIframeReadyState] = useState(false);
     const [lastDialedNumber, setLastDialedNumber] = useState<string | null>(null);
@@ -191,6 +195,14 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore */ }
     }, []);
 
+    // Virtual dialer: no iframe needed — mark ready immediately
+    useEffect(() => {
+        if (isVirtualDialer) {
+            console.log('[Virtual Dialer] Test mode active — iframe auto-ready');
+            setIframeReadyState(true);
+        }
+    }, [isVirtualDialer]);
+
     const registerDialCallback = useCallback((cb: (() => void) | null) => {
         dialCallbackRef.current = cb;
     }, []);
@@ -212,8 +224,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     // ── Listen for postMessage events from the Zoom embed ───────────
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
-            // Only accept messages from Zoom's origin
-            if (event.origin !== 'https://applications.zoom.us') return;
+            // Only accept messages from Zoom's origin (bypassed in virtual dialer test mode)
+            if (!isVirtualDialer && event.origin !== 'https://applications.zoom.us') return;
 
             // Only process events from our primary iframe (prevents duplicate
             // events from the hidden layout iframe vs the docked session iframe).
@@ -345,6 +357,31 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, [activeCallNumber]);
 
     const sendDialMessage = useCallback((phoneNumber: string) => {
+        // Virtual dialer: dispatch synthetic call events instead of real Zoom postMessage
+        if (isVirtualDialer) {
+            const cfg = (window as any).__TEST_DIALER_CONFIG || {};
+            console.log('[Virtual Dialer] Dial:', phoneNumber);
+            setTimeout(() => {
+                window.postMessage({ type: 'ringing', data: { targetNumber: phoneNumber, callee: { phoneNumber } } }, '*');
+            }, cfg.ringDelay ?? 50);
+            if (cfg.shouldConnect !== false && !cfg.shouldFail) {
+                setTimeout(() => {
+                    window.postMessage({ type: 'connected', data: { targetNumber: phoneNumber } }, '*');
+                }, cfg.connectDelay ?? 150);
+            }
+            if (cfg.shouldFail) {
+                setTimeout(() => {
+                    window.postMessage({ type: 'ended', data: {} }, '*');
+                }, cfg.failDelay ?? 200);
+            }
+            if (cfg.autoEndDelay && cfg.shouldConnect !== false && !cfg.shouldFail) {
+                setTimeout(() => {
+                    window.postMessage({ type: 'ended', data: {} }, '*');
+                }, (cfg.connectDelay ?? 150) + cfg.autoEndDelay);
+            }
+            return true;
+        }
+
         const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
 
         if (!iframe?.contentWindow) {
@@ -364,9 +401,15 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             'https://applications.zoom.us'
         );
         return true;
-    }, []);
+    }, [isVirtualDialer]);
 
     const endCall = useCallback(() => {
+        // Virtual dialer: dispatch ended event directly
+        if (isVirtualDialer) {
+            window.postMessage({ type: 'ended', data: {} }, '*');
+            return;
+        }
+
         const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
 
         if (!iframe?.contentWindow) {
@@ -502,13 +545,13 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             });
         }, 10000);
 
-        if (iframeReady && iframeRef.current?.contentWindow) {
+        if (iframeReady && (isVirtualDialer || iframeRef.current?.contentWindow)) {
             sendDialMessage(cleaned);
             pendingCallRef.current = cleaned;
         } else {
             pendingCallRef.current = cleaned;
         }
-    }, [iframeReady, sendDialMessage]);
+    }, [iframeReady, sendDialMessage, isVirtualDialer]);
 
     return (
         <ZoomPhoneContext.Provider value={{

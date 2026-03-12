@@ -5195,7 +5195,7 @@
                 "autogeneratePattern": "",
                 "hidden": false,
                 "id": "text3872627396",
-                "max": 50000,
+                "max": 100000,
                 "min": 0,
                 "name": "note_text",
                 "pattern": "",

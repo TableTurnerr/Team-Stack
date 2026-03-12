@@ -91,9 +91,11 @@ export default function SessionPage() {
     const [ending, setEnding] = useState(false);
     const [pausing, setPausing] = useState(false);
     const [collectionMissing, setCollectionMissing] = useState(false);
-    const [zoomAppConfirmed, setZoomAppConfirmed] = useState(false);
+    // Virtual dialer test mode: auto-confirm Zoom detection
+    const isVirtualDialerMode = typeof window !== 'undefined' && !!(window as any).__TEST_VIRTUAL_DIALER;
+    const [zoomAppConfirmed, setZoomAppConfirmed] = useState(isVirtualDialerMode);
     const [zoomDetecting, setZoomDetecting] = useState(false);
-    const [zoomDetected, setZoomDetected] = useState<boolean | null>(null);
+    const [zoomDetected, setZoomDetected] = useState<boolean | null>(isVirtualDialerMode ? true : null);
     const [awaitingAudioConnect, setAwaitingAudioConnect] = useState(false);
 
     // Recording state
@@ -780,11 +782,19 @@ export default function SessionPage() {
         try {
             setStarting(true);
 
-            // 1. Start audio session (screen share) first
-            const audioStarted = await startAudioSession();
-            if (!audioStarted) {
-                // User cancelled or failed - stay on Connect Audio screen
-                return;
+            // In virtual dialer test mode, skip real audio session entirely.
+            // The mock getDisplayMedia stream ends immediately in Playwright's
+            // Chromium, which triggers handleStreamEnded → isSessionActive=false
+            // and cascades into session cleanup. Tests don't need real recording.
+            // Check window directly to avoid stale useCallback closure issues.
+            const isTestMode = typeof window !== 'undefined' && !!(window as any).__TEST_VIRTUAL_DIALER;
+            if (!isTestMode) {
+                // 1. Start audio session (screen share) first
+                const audioStarted = await startAudioSession();
+                if (!audioStarted) {
+                    // User cancelled or failed - stay on Connect Audio screen
+                    return;
+                }
             }
 
             // 2. Create the session in PocketBase only after screen share is secured
@@ -1263,7 +1273,6 @@ export default function SessionPage() {
                     callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                     is_callback: hasCallbacks ? true : undefined,
                 }, { expand: 'company,phone_number_record' });
-
                 // Submit this call's recording.
                 // For calls with callback legs, merge ALL queued segments into one recording
                 // (each callback re-dial creates a separate segment). For normal calls,
@@ -1797,7 +1806,7 @@ export default function SessionPage() {
             return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} onStartTestSession={startTestSession} lastCompletedSession={lastCompletedSession} onResumeSession={resumeLastSession} resuming={resuming} />;
         }
 
-        if (!isSessionActive) {
+        if (!isSessionActive && !isVirtualDialerMode) {
             // Session exists but audio disconnected (e.g. page reload) - reconnect audio
             return (
                 <div className="space-y-6">

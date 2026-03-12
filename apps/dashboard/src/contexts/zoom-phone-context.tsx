@@ -229,8 +229,10 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
             // Only process events from our primary iframe (prevents duplicate
             // events from the hidden layout iframe vs the docked session iframe).
+            // In virtual dialer mode, events come from window.postMessage (same window),
+            // so skip this check — the iframe is still mounted but its content is blocked.
             const primaryWindow = iframeRef.current?.contentWindow;
-            if (primaryWindow && event.source !== primaryWindow) return;
+            if (!isVirtualDialer && primaryWindow && event.source !== primaryWindow) return;
 
             const { type, data } = event.data || {};
             if (!type || typeof type !== 'string') return;

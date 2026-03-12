@@ -481,9 +481,20 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                         isCallActive ? "text-[var(--success)] animate-pulse" : "text-blue-400"
                     )} />
                     {disabled ? (
-                        <span className="flex-1 text-xs text-[var(--warning)] font-medium">
-                            Submit call log first
-                        </span>
+                        <div className="flex-1 flex items-center justify-between gap-2">
+                            <span className="text-xs text-[var(--warning)] font-medium">
+                                Submit call log first
+                            </span>
+                            <button
+                                type="button"
+                                onClick={refreshDialer}
+                                className="inline-flex items-center justify-center gap-1 rounded-full px-2 py-0.5 border border-[var(--card-border)] text-[var(--muted)] hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-all text-[10px] font-medium"
+                                title="Refresh Zoom dialer"
+                            >
+                                <RefreshCw size={10} />
+                                Refresh
+                            </button>
+                        </div>
                     ) : (
                         <div className="flex-1 flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
@@ -526,10 +537,11 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                                 <button
                                     type="button"
                                     onClick={refreshDialer}
-                                    className="inline-flex items-center justify-center rounded-full w-5 h-5 border border-[var(--card-border)] text-[var(--muted)] hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-all"
+                                    className="inline-flex items-center justify-center gap-1 rounded-full px-2 py-0.5 border border-[var(--card-border)] text-[var(--muted)] hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-all text-[10px] font-medium"
                                     title="Refresh Zoom dialer"
                                 >
                                     <RefreshCw size={10} />
+                                    Refresh
                                 </button>
                                 {!isCallActive && (
                                     <button

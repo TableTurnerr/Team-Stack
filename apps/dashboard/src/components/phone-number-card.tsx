@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Phone, MapPin, User, Calendar, Edit2, Trash2, History, Plus, Loader2 } from 'lucide-react';
-import { cn, formatDate } from '@/lib/utils';
+import { cn, formatDate, formatPhoneNumber } from '@/lib/utils';
 import type { PhoneNumber, CallLog } from '@/lib/types';
+import { COLLECTIONS } from '@/lib/types';
+import { pb } from '@/lib/pocketbase';
 import { ZoomCallButton } from '@/components/zoom-call-button';
 import { useZoomPhoneOptional } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
@@ -52,11 +54,17 @@ export function PhoneNumberCard({
     if (!recycleBin || isDeleting) return;
     setIsDeleting(true);
     try {
+      // Fetch related call logs so they can be saved in recycle bin and deleted first
+      const callLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList({
+        filter: `phone_number_record = "${phoneNumber.id}"`,
+      });
+
       await recycleBin.moveToTrash({
         itemType: 'phone_number',
         originalId: phoneNumber.id,
         itemLabel: phoneNumber.phone_number,
         itemData: phoneNumber as unknown as Record<string, unknown>,
+        relatedData: callLogs.length > 0 ? { [COLLECTIONS.CALL_LOGS]: callLogs } : undefined,
       });
     } catch (err) {
       console.error('Failed to delete phone number:', err);
@@ -90,7 +98,7 @@ export function PhoneNumberCard({
                 "text-lg font-mono font-bold tracking-tight",
                 isDisassociated && "line-through text-[var(--muted)]"
               )}>
-                {phoneNumber.phone_number}
+                {formatPhoneNumber(phoneNumber.phone_number)}
               </span>
               {!isDisassociated && <ZoomCallButton phoneNumber={phoneNumber.phone_number} />}
               {phoneNumber.label && (

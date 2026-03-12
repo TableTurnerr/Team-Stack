@@ -7,7 +7,7 @@ import { COLLECTIONS, type CallLog, type Recording, type ColdCallingSession, typ
 import Link from 'next/link';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
-import { cn } from '@/lib/utils';
+import { cn, formatPhoneNumber } from '@/lib/utils';
 
 interface CallLogsNestedTableProps {
     sessionId: string;
@@ -303,7 +303,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                                     )}
                                 </td>
                                 <td className="px-4 py-3 font-mono text-xs">
-                                    {log.expand?.phone_number_record?.phone_number || '-'}
+                                    {log.expand?.phone_number_record?.phone_number ? formatPhoneNumber(log.expand.phone_number_record.phone_number) : '-'}
                                 </td>
                                 <td className="px-4 py-3">
                                     {log.direction === 'inbound' ? (

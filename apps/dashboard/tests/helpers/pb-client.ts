@@ -96,7 +96,7 @@ export async function createRecord<T extends object>(
   data: object
 ): Promise<T & { id: string }> {
   // Small base delay to reduce burst pressure on PocketBase
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   const pb = await getAdminPb();
   return withRetry(
     () => pb.collection(collection).create<T & { id: string }>(data),

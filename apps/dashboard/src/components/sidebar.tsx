@@ -374,7 +374,7 @@ export function Sidebar() {
   // Global "/" shortcut to open search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
         e.preventDefault();
         setSearchOpen(true);
       }
@@ -634,7 +634,7 @@ export function Sidebar() {
             <Search size={15} />
             <span className="text-xs">Search everything...</span>
             <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--sidebar-hover)] border border-[var(--card-border)] font-mono">
-              /
+              Ctrl /
             </span>
           </button>
         </div>
@@ -644,7 +644,7 @@ export function Sidebar() {
           <button
             onClick={() => setSearchOpen(true)}
             className="p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] text-[var(--muted)] hover:border-[var(--muted)] transition-colors"
-            title="Search (press /)"
+            title="Search (Ctrl+/)"
           >
             <Search size={16} />
           </button>

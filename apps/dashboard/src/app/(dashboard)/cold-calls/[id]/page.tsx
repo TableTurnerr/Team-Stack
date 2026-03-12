@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type ColdCall, type Company, type ColdCallingSession, type PhoneNumber, type User as UserType } from '@/lib/types';
-import { formatDate, cn } from '@/lib/utils';
+import { formatDate, formatPhoneNumber, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 
@@ -191,7 +191,7 @@ function CallLogDetail({ log }: { log: CallLog }) {
         <InfoRow
           label="Phone Number"
           icon={Phone}
-          value={phoneRecord?.phone_number || '-'}
+          value={phoneRecord?.phone_number ? formatPhoneNumber(phoneRecord.phone_number) : '-'}
         />
         <InfoRow
           label="Recipient"
@@ -432,7 +432,7 @@ function ColdCallDetail({ call }: { call: ColdCall }) {
       <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
         <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Call Information</h2>
         <InfoRow label="Company" icon={Building2} value={company?.company_name || 'Unknown'} />
-        <InfoRow label="Phone Number" icon={Phone} value={call.phone_number || '-'} />
+        <InfoRow label="Phone Number" icon={Phone} value={call.phone_number ? formatPhoneNumber(call.phone_number) : '-'} />
         <InfoRow label="Recipient" icon={User} value={call.recipients || '-'} />
         <InfoRow label="Owner Name" icon={User} value={call.owner_name || '-'} />
         <InfoRow label="Caller" icon={User} value={call.caller_name || '-'} />

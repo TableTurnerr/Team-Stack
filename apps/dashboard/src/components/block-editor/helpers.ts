@@ -50,7 +50,7 @@ function walkNode(node: TiptapNode): string {
 
   // Add a newline between block-level nodes so preview reads naturally
   const blockTypes = new Set([
-    'paragraph', 'heading', 'bulletList', 'orderedList', 'taskList',
+    'doc', 'paragraph', 'heading', 'bulletList', 'orderedList', 'taskList',
     'listItem', 'taskItem', 'blockquote', 'codeBlock',
   ]);
   const joiner = blockTypes.has(node.type) ? '\n' : '';

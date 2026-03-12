@@ -368,9 +368,13 @@ export function useCallRecorder(
             return;
         }
 
+        // If already recording, DON'T stop-and-restart. Multiple effects may
+        // trigger startRecording() for the same call (activeCallNumber sync,
+        // callStatus change, auto-record in call-recorder-controls, handleDial).
+        // Restarting kills the in-progress recording after ~0-2 seconds and
+        // produces a tiny/empty segment — root cause of "recordings cut short."
         if (mediaRecorderRef.current?.state === 'recording') {
-            stopPendingRef.current = true;
-            mediaRecorderRef.current.stop();
+            return;
         }
 
         // Bump generation so any in-flight onstop from the previous recorder

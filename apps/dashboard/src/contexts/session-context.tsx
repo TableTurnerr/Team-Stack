@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { useAuth } from './auth-context';
@@ -100,6 +100,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         fetchGlobalActiveSession();
     }, [fetchSession, fetchGlobalActiveSession]);
 
+    // ── Debounced refresh to avoid 429s from rapid real-time events ──
+    const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const debouncedRefresh = useCallback(() => {
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = setTimeout(() => {
+            fetchSession();
+            fetchGlobalActiveSession();
+        }, 500);
+    }, [fetchSession, fetchGlobalActiveSession]);
+
+    // Clean up debounce timer
+    useEffect(() => {
+        return () => {
+            if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        };
+    }, []);
+
     // ── Real-time subscription to cold_calling_sessions for live updates ──
     useEffect(() => {
         if (!isAuthenticated || !user) return;
@@ -108,9 +125,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).subscribe('*', (e) => {
             console.log('[Session Context] Real-time event:', e.action, e.record?.id);
 
-            // Re-fetch both own session and global state on any change
-            fetchSession();
-            fetchGlobalActiveSession();
+            // Debounced re-fetch to prevent 429 rate limiting
+            debouncedRefresh();
         }).then(unsubscribe => {
             unsubscribeRef.current = unsubscribe;
         }).catch(err => {
@@ -123,6 +139,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
                 unsubscribeRef.current = null;
             }
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isAuthenticated, user, fetchSession, fetchGlobalActiveSession]);
 
     return (

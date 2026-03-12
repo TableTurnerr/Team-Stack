@@ -7,7 +7,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { TEST_PREFIX, TEST_NOTE, waitForTableLoad } from './helpers/test-data';
-import { cleanupByPrefix } from './helpers/pb-client';
+import { cleanupByPrefix, fetchRecords } from './helpers/pb-client';
 
 test.describe('Notes Page', () => {
   test.afterAll(async () => {
@@ -69,15 +69,47 @@ test.describe('Notes Page', () => {
     }
 
     // Save the note
-    const saveBtn = page.locator('button').filter({ hasText: /save|create|done/i }).first();
-    if (await saveBtn.count() > 0) {
+    const saveBtn = page.locator('button').filter({ hasText: /^save$/i }).first();
+    if (await saveBtn.count() > 0 && !(await saveBtn.isDisabled())) {
       await saveBtn.click();
       await page.waitForTimeout(1500);
+    }
+
+    // Close the editor to return to the notes list
+    const closeBtn = page.locator('button').filter({ hasText: /close/i }).first();
+    if (await closeBtn.count() > 0) {
+      await closeBtn.click();
+      await page.waitForTimeout(1000);
     }
 
     // The new note should appear in the active list
     const noteCard = page.locator('text=' + TEST_NOTE.title.substring(0, 30)).first();
     await expect(noteCard).toBeVisible({ timeout: 20_000 });
+  });
+
+  // ─── DB Verification ──────────────────────────────────────────────────────────
+
+  test('created note exists in PocketBase with correct fields', async () => {
+    // Verify the note created via UI was persisted correctly in the database
+    const notes = await fetchRecords<{
+      id: string;
+      title: string;
+      is_archived: boolean;
+      is_deleted: boolean;
+    }>(
+      'notes',
+      `title ~ '${TEST_PREFIX}'`,
+      'id,title,is_archived,is_deleted'
+    );
+
+    expect(notes.length).toBeGreaterThanOrEqual(1);
+    const note = notes.find(n => n.title.includes(TEST_PREFIX));
+    expect(note).toBeDefined();
+    // Note should not be archived or deleted
+    if (note) {
+      expect(note.is_archived).toBeFalsy();
+      expect(note.is_deleted).toBeFalsy();
+    }
   });
 
   // ─── Search Notes ─────────────────────────────────────────────────────────────

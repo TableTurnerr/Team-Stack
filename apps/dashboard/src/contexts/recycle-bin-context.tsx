@@ -85,6 +85,19 @@ export function RecycleBinProvider({ children }: { children: React.ReactNode }) 
     };
 
     try {
+      // Delete related records first to avoid required-relation constraint errors
+      if (params.relatedData) {
+        for (const [relCollection, items] of Object.entries(params.relatedData)) {
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              try {
+                await pb.collection(relCollection).delete((item as any).id);
+              } catch { /* item may already be gone */ }
+            }
+          }
+        }
+      }
+
       await pb.collection(collectionMap[params.itemType]).delete(params.originalId);
     } catch (err) {
       // If delete fails, remove the recycle bin entry too

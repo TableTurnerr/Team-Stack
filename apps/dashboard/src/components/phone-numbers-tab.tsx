@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type PhoneNumber, type FollowUp } from '@/lib/types';
-import { formatDate, cn } from '@/lib/utils';
+import { formatDate, formatPhoneNumber, cn } from '@/lib/utils';
 import { formatRelativeFollowUp } from '@/lib/timezone-utils';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { ColumnSelector } from '@/components/column-selector';
@@ -203,7 +203,7 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
                         {isColumnVisible('phone_number') && (
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-mono font-medium">{pn.phone_number}</span>
+                              <span className="text-sm font-mono font-medium">{formatPhoneNumber(pn.phone_number)}</span>
                               <ZoomCallButton phoneNumber={pn.phone_number} />
                             </div>
                           </td>

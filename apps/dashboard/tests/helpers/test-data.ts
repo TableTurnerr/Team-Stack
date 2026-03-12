@@ -85,9 +85,9 @@ export async function waitForTableLoad(page: import('@playwright/test').Page) {
   await page.waitForFunction(() => {
     const skeletons = document.querySelectorAll('[data-testid="skeleton"], .animate-pulse, .animate-shimmer');
     return skeletons.length === 0;
-  }, { timeout: 15_000 }).catch(() => {
+  }, { timeout: 10_000 }).catch(() => {
     // If no skeleton was ever found, that's fine
   });
-  // Then wait for network to settle
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  // Then wait for network to settle (reduced from 15s — if data hasn't arrived by 8s, it's a real issue)
+  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
 }

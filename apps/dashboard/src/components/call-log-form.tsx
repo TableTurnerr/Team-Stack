@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { X, Phone, Mic, User, FileText, Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatPhoneNumber } from '@/lib/utils';
 import type { CallLog } from '@/lib/types';
 
 interface CallLogFormProps {
@@ -83,7 +83,7 @@ export function CallLogForm({
               Log Call
             </h2>
             <p className="text-xs text-[var(--muted)]">
-              {companyName} • {phoneNumber}
+              {companyName} • {formatPhoneNumber(phoneNumber)}
             </p>
           </div>
           <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--foreground)]">

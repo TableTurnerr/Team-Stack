@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones, Download, Minimize2, Maximize2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Recording } from '@/lib/types';
-import { formatDate, formatDateTime, formatDuration, cn, sanitizeFilterValue } from '@/lib/utils';
+import { formatDate, formatDateTime, formatDuration, formatPhoneNumber, cn, sanitizeFilterValue } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
@@ -42,17 +42,6 @@ const getAudioDuration = (file: File): Promise<number> => {
   });
 };
 
-const formatPhoneNumber = (phone: string | undefined | null) => {
-  if (!phone) return 'N/A';
-  const cleaned = phone.replace(/\D/g, '');
-  if (cleaned.length === 10) {
-    return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
-  }
-  if (cleaned.length === 11 && cleaned.startsWith('1')) {
-    return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
-  }
-  return phone;
-};
 
 export default function RecordingsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();

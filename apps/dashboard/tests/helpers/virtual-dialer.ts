@@ -209,57 +209,78 @@ export async function waitForCallForm(page: Page, timeoutMs = 10_000) {
  * Handles the SessionModeSelector → Connect Audio → Session Active flow.
  */
 export async function startVirtualSession(page: Page) {
-    await page.goto('/session');
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(1500);
+    // Retry the full session start flow up to 2 times to handle transient
+    // issues (slow PB, stale state from prior test cleanup, etc.).
+    for (let attempt = 0; attempt < 2; attempt++) {
+        await page.goto('/session');
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForTimeout(1500);
 
-    // If already on the full session page, skip setup
-    const h1 = page.locator('h1').filter({ hasText: /call session/i });
-    if ((await h1.count()) > 0) {
-        return;
-    }
-
-    // Click "Start Session" on the mode selector (if shown)
-    const startBtn = page
-        .locator('button')
-        .filter({ hasText: /^start session$/i })
-        .first();
-    if ((await startBtn.count()) > 0) {
-        await startBtn.click();
-        await page.waitForTimeout(800);
-    }
-
-    // Handle "Connect Audio" screen
-    const connectBtn = page
-        .locator('button')
-        .filter({ hasText: /connect audio/i })
-        .first();
-    if ((await connectBtn.count()) > 0) {
-        // Check the Zoom checkbox (if present and unchecked)
-        const checkbox = page.locator('input[type="checkbox"]').first();
-        if ((await checkbox.count()) > 0 && !(await checkbox.isChecked())) {
-            await checkbox.click();
-            await page.waitForTimeout(200);
+        // If already on the full session page (not the mode selector), skip setup
+        const h1 = page.locator('h1').filter({ hasText: /call session/i });
+        const modeSelectBtn = page
+            .locator('button')
+            .filter({ hasText: /^start session$/i })
+            .first();
+        if ((await h1.count()) > 0 && (await modeSelectBtn.count()) === 0) {
+            return;
         }
 
-        const btn = page
+        // Click "Start Session" on the mode selector (if shown)
+        const startBtn = page
+            .locator('button')
+            .filter({ hasText: /^start session$/i })
+            .first();
+        if ((await startBtn.count()) > 0) {
+            await startBtn.click();
+            await page.waitForTimeout(800);
+        }
+
+        // Handle "Connect Audio" screen — in virtual dialer mode the button should
+        // be auto-enabled because zoomAppConfirmed is set to true by the source code.
+        const connectBtn = page
             .locator('button')
             .filter({ hasText: /connect audio/i })
             .first();
-        if ((await btn.count()) > 0 && !(await btn.isDisabled())) {
-            await btn.click();
-            await page.waitForTimeout(2000);
+        if ((await connectBtn.count()) > 0) {
+            // Wait for the button to become enabled (virtual dialer auto-confirms Zoom)
+            await page.waitForFunction(
+                () => {
+                    const btns = [...document.querySelectorAll('button')];
+                    const btn = btns.find(b => /connect audio/i.test(b.textContent || ''));
+                    return btn && !btn.disabled;
+                },
+                { timeout: 10_000 },
+            ).catch(() => {});
+
+            const btn = page
+                .locator('button')
+                .filter({ hasText: /connect audio/i })
+                .first();
+            if ((await btn.count()) > 0 && !(await btn.isDisabled())) {
+                await btn.click();
+                await page.waitForTimeout(3000);
+            }
+        }
+
+        // Wait for the session page to be fully active
+        try {
+            await page.waitForFunction(
+                () =>
+                    document.body.innerText.includes('Call Session') &&
+                    !document.body.innerText.includes('Start Session') &&
+                    !document.body.innerText.includes('Connect Audio'),
+                { timeout: 15_000 },
+            );
+            return; // Success
+        } catch {
+            if (attempt === 0) {
+                // First attempt failed — retry from scratch
+                continue;
+            }
+            throw new Error('startVirtualSession: session page did not become active after 2 attempts');
         }
     }
-
-    // Wait for the session page to be fully active
-    await page.waitForFunction(
-        () =>
-            document.body.innerText.includes('Call Session') &&
-            !document.body.innerText.includes('Start Session') &&
-            !document.body.innerText.includes('Connect Audio'),
-        { timeout: 15_000 },
-    );
 }
 
 /** End the current session via the End Session button. */
@@ -348,11 +369,12 @@ export async function fillAndSubmitCallForm(
 ): Promise<boolean> {
     await page.waitForTimeout(500);
 
-    // Company search
+    // Company search — fill the "Search or create company..." input and
+    // click the first dropdown suggestion to select an existing company.
     if (opts.companySearch) {
         const companyInput = page
             .locator(
-                'input[placeholder*="company" i], input[placeholder*="search" i]',
+                'input[placeholder*="company" i], input[placeholder*="search or create" i]',
             )
             .first();
         if (
@@ -361,11 +383,14 @@ export async function fillAndSubmitCallForm(
         ) {
             await companyInput.fill(opts.companySearch);
             await page.waitForTimeout(800);
-            // Click the first suggestion
+            // Click the first suggestion from the dropdown.
+            // The dropdown renders as buttons inside a positioned div (no ARIA roles).
             const suggestion = page
-                .locator('[role="option"], [role="listbox"] > *')
+                .locator(
+                    '[role="option"], [role="listbox"] > *, .absolute.z-20 button',
+                )
                 .first();
-            if ((await suggestion.count()) > 0) {
+            if ((await suggestion.count()) > 0 && (await suggestion.isVisible())) {
                 await suggestion.click();
                 await page.waitForTimeout(300);
             }
@@ -373,13 +398,15 @@ export async function fillAndSubmitCallForm(
     }
 
     // Select outcome pill (button matching the outcome text)
-    const outcomeBtn = page
-        .locator('button')
-        .filter({ hasText: new RegExp(`^${opts.outcome}$`, 'i') })
-        .first();
-    if ((await outcomeBtn.count()) > 0) {
-        await outcomeBtn.click();
-        await page.waitForTimeout(200);
+    if (opts.outcome) {
+        const outcomeBtn = page
+            .locator('button')
+            .filter({ hasText: new RegExp(`^${opts.outcome}$`, 'i') })
+            .first();
+        if ((await outcomeBtn.count()) > 0) {
+            await outcomeBtn.click();
+            await page.waitForTimeout(200);
+        }
     }
 
     // Performance flags
@@ -396,12 +423,31 @@ export async function fillAndSubmitCallForm(
         if ((await apptBtn.count()) > 0) await apptBtn.click();
     }
 
-    // Notes
+    // Notes — target the call form's notes textarea specifically (not the
+    // LastCallPreview or PowerDialerPanel textareas which also exist on the page).
     if (opts.notes) {
-        const notesField = page.locator('textarea').first();
-        if ((await notesField.count()) > 0) {
+        const notesField = page
+            .locator(
+                'textarea[placeholder*="notes about the call" i], textarea[placeholder*="post-call" i], textarea[placeholder*="Quick notes" i]',
+            )
+            .first();
+        if ((await notesField.count()) > 0 && (await notesField.isVisible())) {
             await notesField.fill(opts.notes);
             await page.waitForTimeout(200);
+        } else {
+            // Fallback: find a textarea near the Save Call button
+            const formTextarea = page.locator('textarea').nth(0);
+            // Try each textarea until we find the one with the right placeholder
+            const count = await page.locator('textarea').count();
+            for (let i = 0; i < count; i++) {
+                const ta = page.locator('textarea').nth(i);
+                const placeholder = await ta.getAttribute('placeholder').catch(() => '');
+                if (placeholder?.toLowerCase().includes('notes') || placeholder?.toLowerCase().includes('quick')) {
+                    await ta.fill(opts.notes);
+                    await page.waitForTimeout(200);
+                    break;
+                }
+            }
         }
     }
 

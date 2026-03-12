@@ -35,7 +35,7 @@ import {
   type FollowUp,
   type ColdCall,
 } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, formatPhoneNumber } from '@/lib/utils';
 import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
@@ -723,7 +723,7 @@ export default function CompanyDetailPage() {
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-1">
                             <div>
-                              <div className="text-sm font-mono">{call.expand?.phone_number_record?.phone_number}</div>
+                              <div className="text-sm font-mono">{formatPhoneNumber(call.expand?.phone_number_record?.phone_number)}</div>
                               <div className="text-[10px] text-[var(--muted)] font-bold">{call.expand?.phone_number_record?.label}</div>
                             </div>
                             {call.expand?.phone_number_record?.phone_number && (
@@ -871,7 +871,7 @@ export default function CompanyDetailPage() {
                           <span>Created by {(fu.expand.created_by as any).name}</span>
                         )}
                         {fu.expand?.phone_number_record && (
-                          <span>• {(fu.expand.phone_number_record as any).phone_number}</span>
+                          <span>• {formatPhoneNumber((fu.expand.phone_number_record as any).phone_number)}</span>
                         )}
                       </div>
                     </div>

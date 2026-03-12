@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog } from '@/lib/types';
-import { formatDate, cn } from '@/lib/utils';
+import { formatDate, formatPhoneNumber, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { getOutcomeColors } from '@/lib/call-outcomes';
@@ -578,7 +578,7 @@ function CallLogsTable({
                       {isColumnVisible('phone') && (
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1">
-                            <span className="text-sm font-mono">{phoneNum || '-'}</span>
+                            <span className="text-sm font-mono">{phoneNum ? formatPhoneNumber(phoneNum) : '-'}</span>
                             {phoneNum && <ZoomCallButton phoneNumber={phoneNum} />}
                           </div>
                         </td>

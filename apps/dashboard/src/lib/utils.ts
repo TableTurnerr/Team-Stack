@@ -34,6 +34,18 @@ export function timeAgo(date: string | Date): string {
   return formatDate(date);
 }
 
+export function formatPhoneNumber(phone: string | undefined | null): string {
+  if (!phone) return 'N/A';
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length === 10) {
+    return `+1 (${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  }
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
+  }
+  return phone;
+}
+
 export function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.floor(seconds % 60);

@@ -25,7 +25,7 @@ import {
 import Image from 'next/image';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type FollowUp, type User as UserType } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, formatPhoneNumber } from '@/lib/utils';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { formatDateTimeInTimezone } from '@/lib/timezone-utils';
@@ -581,7 +581,7 @@ export default function FollowUpsPage() {
                     <td className="px-4 py-4 hidden lg:table-cell">
                       {phone ? (
                         <div>
-                          <p className="text-xs font-mono font-semibold">{phone.phone_number}</p>
+                          <p className="text-xs font-mono font-semibold">{formatPhoneNumber(phone.phone_number)}</p>
                           {phone.label && <p className="text-[10px] text-[var(--muted)]">{phone.label}</p>}
                         </div>
                       ) : (

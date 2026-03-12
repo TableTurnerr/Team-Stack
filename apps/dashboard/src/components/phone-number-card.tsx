@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Phone, MapPin, User, Calendar, Edit2, Trash2, History, Plus, Loader2 } from 'lucide-react';
-import { cn, formatDate } from '@/lib/utils';
+import { cn, formatDate, formatPhoneNumber } from '@/lib/utils';
 import type { PhoneNumber, CallLog } from '@/lib/types';
 import { COLLECTIONS } from '@/lib/types';
 import { pb } from '@/lib/pocketbase';
@@ -98,7 +98,7 @@ export function PhoneNumberCard({
                 "text-lg font-mono font-bold tracking-tight",
                 isDisassociated && "line-through text-[var(--muted)]"
               )}>
-                {phoneNumber.phone_number}
+                {formatPhoneNumber(phoneNumber.phone_number)}
               </span>
               {!isDisassociated && <ZoomCallButton phoneNumber={phoneNumber.phone_number} />}
               {phoneNumber.label && (

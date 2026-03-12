@@ -5,7 +5,7 @@ import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, Cal
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp } from '@/lib/types';
-import { cn, timeAgo, formatDateTime } from '@/lib/utils';
+import { cn, timeAgo, formatDateTime, formatPhoneNumber } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -1056,7 +1056,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         : "bg-[var(--sidebar-bg)] border border-[var(--card-border)]"
                 )}>
                     <PhoneIcon size={14} className={isCallLive ? "text-[var(--success)]" : "text-[var(--muted)]"} />
-                    <span className={cn("font-mono", isCallLive && "text-[var(--success)] font-medium")}>{phoneNumber || '—'}</span>
+                    <span className={cn("font-mono", isCallLive && "text-[var(--success)] font-medium")}>{phoneNumber ? formatPhoneNumber(phoneNumber) : '—'}</span>
                 </div>
             </div>
 

@@ -54,7 +54,7 @@ coverage/
 *.pem
 
 # Others
-.claude/
+dist-dev/
 *.tsbuildinfo
 prompt.txt
 # Call Recorder V2 (separate project)

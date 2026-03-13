@@ -17,7 +17,7 @@ import {
   ArrowRight,
   Headphones,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, buildPhoneSearchFilter, stripPhoneFormatting, formatPhoneNumber } from '@/lib/utils';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import { extractPlainText } from '@/components/block-editor/helpers';
@@ -123,14 +123,27 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
     try {
       const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const filter = `company_name ~ "${escaped}"`;
-      const phoneFilter = `number ~ "${escaped}"`;
+      const phoneFilter = buildPhoneSearchFilter('number', q);
 
-      const [companies, notes, recordings, users, followUps] = await Promise.all([
-        pb.collection(COLLECTIONS.COMPANIES).getList(1, 5, { filter, fields: 'id,company_name,owner_name', requestKey: null }).catch(() => ({ items: [] })),
+      // If the query has digits, also search companies by phone number
+      const digits = stripPhoneFormatting(q);
+      const companyPhoneFilter = digits.length >= 3
+        ? `${filter} || ${buildPhoneSearchFilter('phone_number', q)}`
+        : filter;
+
+      // Build call log filter: search by phone number (via relation), company name, or owner name
+      const callLogPhoneFilter = digits.length >= 3
+        ? buildPhoneSearchFilter('phone_number_record.phone_number', q)
+        : `phone_number_record.phone_number ~ "${escaped}"`;
+      const callLogFilter = `company.company_name ~ "${escaped}" || owner_name_found ~ "${escaped}" || ${callLogPhoneFilter}`;
+
+      const [companies, notes, recordings, users, followUps, callLogs] = await Promise.all([
+        pb.collection(COLLECTIONS.COMPANIES).getList(1, 5, { filter: companyPhoneFilter, fields: 'id,company_name,owner_name', requestKey: null }).catch(() => ({ items: [] })),
         pb.collection(COLLECTIONS.NOTES).getList(1, 5, { filter: `note_text ~ "${escaped}"`, fields: 'id,note_text,company', requestKey: null }).catch(() => ({ items: [] })),
         pb.collection(COLLECTIONS.RECORDINGS).getList(1, 5, { filter: `filename ~ "${escaped}"`, fields: 'id,filename,company', requestKey: null }).catch(() => ({ items: [] })),
         pb.collection(COLLECTIONS.USERS).getList(1, 5, { filter: `name ~ "${escaped}" || email ~ "${escaped}"`, fields: 'id,name,email', requestKey: null }).catch(() => ({ items: [] })),
         pb.collection(COLLECTIONS.FOLLOW_UPS).getList(1, 5, { filter: `title ~ "${escaped}" || description ~ "${escaped}"`, fields: 'id,title,due_date', requestKey: null }).catch(() => ({ items: [] })),
+        pb.collection(COLLECTIONS.CALL_LOGS).getList(1, 5, { filter: callLogFilter, expand: 'company,phone_number_record,cold_call', sort: '-call_time', requestKey: null }).catch(() => ({ items: [] })),
       ]);
 
       // Also search phone numbers
@@ -200,6 +213,23 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
           subtitle: (f as any).due_date ? `Due: ${new Date((f as any).due_date).toLocaleDateString()}` : undefined,
           href: '/follow-ups',
           icon: CalendarClock,
+        });
+      }
+
+      for (const cl of callLogs.items) {
+        const phone = (cl as any).expand?.phone_number_record?.phone_number || '';
+        const companyName = (cl as any).expand?.company?.company_name || '';
+        const owner = (cl as any).owner_name_found || '';
+        const outcome = Array.isArray((cl as any).call_outcome) ? (cl as any).call_outcome.join(', ') : ((cl as any).call_outcome || '');
+        const coldCall = (cl as any).expand?.cold_call;
+        const detailHref = coldCall ? `/cold-calls/${coldCall.id}` : `/cold-calls/${cl.id}?type=log`;
+        searchResults.push({
+          id: cl.id,
+          type: 'cold-call',
+          title: companyName ? `${companyName} — ${formatPhoneNumber(phone)}` : formatPhoneNumber(phone) || 'Call Log',
+          subtitle: [owner, outcome].filter(Boolean).join(' · ') || undefined,
+          href: detailHref,
+          icon: Phone,
         });
       }
     } catch (err) {

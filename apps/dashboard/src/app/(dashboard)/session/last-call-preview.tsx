@@ -29,6 +29,9 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
     const [localCompanyName, setLocalCompanyName] = useState('');
     const [fetchingLastCall, setFetchingLastCall] = useState(false);
 
+    // Track if we've already attempted to fetch the last call for this session
+    const fetchAttemptedRef = useRef(false);
+
     // Recording state
     const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
     const [playerLoading, setPlayerLoading] = useState(false);
@@ -71,9 +74,16 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
         }
     }, [callLog, companyName, sessionId]);
 
-    // Fetch latest call from DB if we have a sessionId but no log (or to refresh)
+    // Reset fetch attempt when session changes
     useEffect(() => {
-        if (!sessionId || callLog || fetchingLastCall) return;
+        fetchAttemptedRef.current = false;
+    }, [sessionId]);
+
+    // Fetch latest call from DB if we have a sessionId but no log
+    useEffect(() => {
+        if (!sessionId || callLog || localCallLog || fetchAttemptedRef.current) return;
+
+        fetchAttemptedRef.current = true;
 
         const fetchLastCall = async () => {
             setFetchingLastCall(true);
@@ -89,10 +99,10 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                     const compName = lastCall.expand?.company?.company_name || 'Unknown';
                     setLocalCallLog(lastCall);
                     setLocalCompanyName(compName);
-                    localStorage.setItem(LAST_CALL_STORAGE_KEY, JSON.stringify({ 
-                        callLog: lastCall, 
-                        companyName: compName, 
-                        sessionId 
+                    localStorage.setItem(LAST_CALL_STORAGE_KEY, JSON.stringify({
+                        callLog: lastCall,
+                        companyName: compName,
+                        sessionId
                     }));
                 }
             } catch (err) {
@@ -102,11 +112,8 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
             }
         };
 
-        // Only fetch if we don't have a local one yet or if we just refreshed
-        if (!localCallLog) {
-            fetchLastCall();
-        }
-    }, [sessionId, callLog, localCallLog, fetchingLastCall]);
+        fetchLastCall();
+    }, [sessionId, callLog, localCallLog]);
 
     const [notes, setNotes] = useState('');
     const [ownerReached, setOwnerReached] = useState(false);

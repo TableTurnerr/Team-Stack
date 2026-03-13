@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
-import { useLocalAgent } from './local-agent-context';
+// import { useLocalAgent } from './local-agent-context';  // See NOTE in ZoomPhoneProvider
 
 // ── Zoom Call Status ────────────────────────────────────────────────────
 export type ZoomCallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
@@ -155,11 +155,10 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     // When the local desktop agent is connected, its WASAPI-based call state
     // is ground truth. If the agent says the call is still connected, we
     // suppress false "ended" events from the Zoom iframe.
-    const { isConnected: agentConnected, callState: agentCallState } = useLocalAgent();
-    const agentConnectedRef = useRef(false);
-    const agentCallStateRef = useRef(agentCallState);
-    agentConnectedRef.current = agentConnected;
-    agentCallStateRef.current = agentCallState;
+    // NOTE: Local agent integration (useLocalAgent) was previously used here
+    // to suppress false Zoom ended events via WASAPI ground truth. Removed to
+    // avoid wasteful re-renders — re-add if agent-based call state verification
+    // is needed in the future.
 
     // Virtual dialer: when __TEST_VIRTUAL_DIALER is set on window, skip Zoom iframe
     // and dispatch synthetic call events. All state-machine logic still runs unchanged.

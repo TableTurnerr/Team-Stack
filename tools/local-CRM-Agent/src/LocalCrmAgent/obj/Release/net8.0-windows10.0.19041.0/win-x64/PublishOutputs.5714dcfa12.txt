@@ -1,2 +1,0 @@
-C:\Users\Hashaam\Desktop\MyCode\CRM-Tableturnerr\tools\local-CRM-Agent\dist\LocalCrmAgent.pdb
-C:\Users\Hashaam\Desktop\MyCode\CRM-Tableturnerr\tools\local-CRM-Agent\dist\LocalCrmAgent.exe

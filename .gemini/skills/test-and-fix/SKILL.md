@@ -57,6 +57,7 @@ Use this skill when:
    - `src/app/(dashboard)/settings/` → `tests/10-settings.spec.ts`
    - `src/contexts/`, `src/components/` → `tests/11-integration.spec.ts` + related suites
    - `packages/pocketbase-client/` → `pnpm --filter pocketbase-client test`
+   - `tools/local-CRM-Agent/` → `cmd /c "dotnet build tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release"` (build-only, no test suite)
 3. If scope maps to 1-3 suites, run only those. If scope is broad or unclear, proceed to Phase 2.
 
 ### Phase 2: Run Lint, Build, and Tests IN PARALLEL
@@ -92,6 +93,12 @@ cmd /c "pnpm --filter pocketbase-client lint"
 cmd /c "pnpm --filter pocketbase-client build"
 cmd /c "pnpm --filter pocketbase-client test"
 ```
+
+**If Local CRM Agent was modified**, also run in parallel:
+```bash
+cmd /c "dotnet build tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release"
+```
+Note: The Local CRM Agent is a C#/.NET 8.0 project. It has no lint or test suite — only build validation applies. Build failures indicate C# compilation errors (missing references, type mismatches, syntax errors).
 
 Capture all outputs. For each check, note:
 - **Lint:** file paths, line numbers, rule IDs, error vs warning
@@ -193,6 +200,7 @@ Output a concise summary:
 | `src/app/(dashboard)/settings/` | `10-settings.spec.ts` |
 | Cross-component, contexts, shared components | `11-integration.spec.ts` |
 | `packages/pocketbase-client/` | `pnpm --filter pocketbase-client test` |
+| `tools/local-CRM-Agent/` | `dotnet build` (build-only, no test suite) |
 | Login/auth flows | `01-auth.spec.ts` |
 
 ## Guidelines

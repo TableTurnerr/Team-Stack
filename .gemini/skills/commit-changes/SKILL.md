@@ -45,7 +45,7 @@ For EACH logical group identified in step 2:
 4. **Commit**: `cmd /c "git commit -F commit_msg.txt"`
 5. **Cleanup**: Delete `commit_msg.txt`.
 
-**CRITICAL**: Do NOT include version file updates (e.g., `package.json`, `manifest.json`) in these commits.
+**CRITICAL**: Do NOT include version file updates (e.g., `package.json`, `manifest.json`, `.csproj`) in these commits.
 
 ### 5. Final Version Bump Commit
 
@@ -54,6 +54,10 @@ After all functional changes are committed, perform a single, final commit for a
 1. **Apply Bumps**: Run `bump_version.js` for the root and all modified components.
    ```bash
    cmd /c "node .gemini/skills/commit-changes/scripts/bump_version.js apps/dashboard/package.json patch true"
+   ```
+   For the Local CRM Agent (.csproj, semver X.Y.Z):
+   ```bash
+   cmd /c "node .gemini/skills/commit-changes/scripts/bump_version.js tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj patch"
    ```
 2. **Stage all version files**: `git add package.json apps/dashboard/package.json ...`
 3. **Generate commit message**: `chore(version): bump versions to [Root New Version] ([Component1] vX.Y, [Component2] vA.B)`
@@ -65,4 +69,5 @@ After all functional changes are committed, perform a single, final commit for a
 - **Atomic Commits**: Keep commits focused. Don't mix UI changes with database schema changes in one commit.
 - **Granularity**: If a component has two unrelated changes, make two separate commits.
 - **Scraper UI**: When bumping the Scraper, ensure BOTH `manifest.json` and `version.json` are updated.
+- **Local CRM Agent**: Uses `.csproj` with semver (`X.Y.Z`). The bump script handles this format automatically. Bump path: `tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj`.
 - **Root Bump**: Ensure the root `package.json` version is updated at least once during the process if any changes occurred.

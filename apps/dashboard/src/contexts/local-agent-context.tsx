@@ -32,6 +32,10 @@ interface LocalAgentContextType {
     agentUptime: number;
     /** Attempt to launch the local agent via protocol handler */
     launchAgent: () => void;
+    /** Ask the agent to launch Zoom (find and start the process) */
+    launchZoom: () => void;
+    /** Whether a Zoom launch request is in progress */
+    zoomLaunching: boolean;
 }
 
 // ── Context ─────────────────────────────────────────────────────────
@@ -47,6 +51,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
     const [networkQuality, setNetworkQuality] = useState<AgentNetworkQuality | null>(null);
     const [zoomDetected, setZoomDetected] = useState(false);
     const [agentUptime, setAgentUptime] = useState(0);
+    const [zoomLaunching, setZoomLaunching] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,6 +101,10 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                             case 'heartbeat':
                                 setZoomDetected(msg.zoomDetected ?? false);
                                 setAgentUptime(msg.uptime ?? 0);
+                                break;
+                            case 'zoomAction':
+                                setZoomLaunching(false);
+                                if (msg.zoomRunning) setZoomDetected(true);
                                 break;
                         }
                     } catch { /* ignore malformed messages */ }
@@ -156,10 +165,24 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
         } catch { /* protocol handler may not be registered */ }
     }, []);
 
+    const launchZoom = useCallback(() => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        setZoomLaunching(true);
+        try {
+            ws.send(JSON.stringify({ type: 'launchZoom' }));
+        } catch {
+            setZoomLaunching(false);
+        }
+        // Safety timeout in case agent never responds
+        setTimeout(() => setZoomLaunching(false), 10000);
+    }, []);
+
     return (
         <LocalAgentContext.Provider value={{
             isConnected, callState, networkQuality,
             zoomDetected, agentUptime, launchAgent,
+            launchZoom, zoomLaunching,
         }}>
             {children}
         </LocalAgentContext.Provider>
@@ -180,5 +203,7 @@ export function useLocalAgent(): LocalAgentContextType {
         zoomDetected: false,
         agentUptime: 0,
         launchAgent: () => {},
+        launchZoom: () => {},
+        zoomLaunching: false,
     };
 }

@@ -83,7 +83,7 @@ export default function SessionPage() {
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
-    const { isConnected: agentConnected, launchAgent } = useLocalAgent();
+    const { isConnected: agentConnected, launchAgent, zoomDetected: agentZoomDetected, launchZoom, zoomLaunching } = useLocalAgent();
 
     // Loading combined
     const loading = sessionLoading;
@@ -195,10 +195,19 @@ export default function SessionPage() {
     };
 
     // ---------------------------------------------------------------------------
-    // Zoom detection — tries to open zoommtg:// and watches for window blur,
-    // which fires when the OS hands focus to the Zoom desktop app.
+    // Zoom detection — agent-based (process scan + launch) when agent is
+    // connected, falls back to zoommtg:// protocol handler hack otherwise.
     // ---------------------------------------------------------------------------
     const verifyZoomRunning = useCallback(() => {
+        // If agent is connected, ask it to launch/verify Zoom
+        if (agentConnected) {
+            setZoomDetecting(true);
+            setZoomDetected(null);
+            launchZoom();
+            return;
+        }
+
+        // Fallback: protocol handler blur detection (no agent)
         if (!document.hasFocus()) window.focus();
         setZoomDetecting(true);
         setZoomDetected(null);
@@ -218,8 +227,6 @@ export default function SessionPage() {
         const onBlur = () => resolve(true);
         window.addEventListener('blur', onBlur);
 
-        // Trigger the Zoom protocol handler; if Zoom is running the OS will
-        // switch focus to it, causing the browser window to blur.
         const a = document.createElement('a');
         a.href = 'zoommtg://zoom.us/';
         a.style.display = 'none';
@@ -227,9 +234,32 @@ export default function SessionPage() {
         a.click();
         document.body.removeChild(a);
 
-        // If no blur within 2 s, Zoom was not detected.
         setTimeout(() => resolve(false), 2000);
-    }, [refreshDialer]);
+    }, [agentConnected, launchZoom, refreshDialer]);
+
+    // Auto-confirm Zoom when agent reports it is running (via heartbeat)
+    useEffect(() => {
+        if (agentConnected && agentZoomDetected) {
+            setZoomDetected(true);
+            setZoomAppConfirmed(true);
+        }
+    }, [agentConnected, agentZoomDetected]);
+
+    // Handle agent's zoomAction response (after launchZoom command)
+    useEffect(() => {
+        if (!zoomLaunching && agentConnected && zoomDetecting) {
+            // Agent responded — check if zoom is now detected
+            if (agentZoomDetected) {
+                setZoomDetecting(false);
+                setZoomDetected(true);
+                setZoomAppConfirmed(true);
+                refreshDialer();
+            } else {
+                setZoomDetecting(false);
+                setZoomDetected(false);
+            }
+        }
+    }, [zoomLaunching, agentConnected, agentZoomDetected, zoomDetecting, refreshDialer]);
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -1055,11 +1085,8 @@ export default function SessionPage() {
                 total_paused_sec: (session.total_paused_sec ?? 0) + pausedDuration,
             });
             setSession(updated);
-            // Auto-resume the power dialer only if it was auto-paused by session pause
-            if (powerDialerAutoPausedRef.current) {
-                setPowerDialerPaused(false);
-                powerDialerAutoPausedRef.current = false;
-            }
+            // Keep the power dialer paused — user must manually resume it
+            powerDialerAutoPausedRef.current = false;
         } catch (err) {
             console.error('Failed to resume session:', err);
         } finally {

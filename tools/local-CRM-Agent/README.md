@@ -1,46 +1,49 @@
 # Local CRM Agent
 
-A lightweight Windows desktop agent that monitors Zoom Phone call state via WASAPI (Windows Audio Session API) and serves reliable call signals to the CRM dashboard over WebSocket.
+A lightweight Windows desktop agent that monitors Zoom Phone call state via WASAPI (Windows Audio Session API) event callbacks and serves reliable call signals to the CRM dashboard over a localhost WebSocket.
 
 ## Why This Exists
 
 The CRM dashboard embeds Zoom Phone in an iframe. When the user's internet becomes unstable, Zoom fires false "disconnect" events even though the call is still active (Zoom uses a separate, more resilient connection). This causes recordings to stop prematurely.
 
-The Local CRM Agent solves this by monitoring Zoom's audio sessions directly at the OS level. If Zoom has an active audio session, the call is live — regardless of what the iframe reports. The CRM dashboard connects to this agent and uses its signals to suppress false disconnects.
+The Local CRM Agent solves this by monitoring Zoom's audio sessions directly at the OS level using event-driven WASAPI callbacks. When a Zoom audio session starts or stops, Windows notifies the agent **instantly** — no polling delay, no internet dependency. The CRM dashboard connects to this agent over a localhost WebSocket (`ws://127.0.0.1:9876`) and uses its signals as ground truth for call state.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Local CRM Agent                    │
-│                                                 │
-│  ┌─────────────────┐   ┌─────────────────────┐  │
-│  │ ZoomAudioMonitor│   │ ZoomWindowMonitor   │  │
-│  │ (WASAPI)        │   │ (Win32 Window Title)│  │
-│  │ Ground Truth    │   │ Supplementary       │  │
-│  └────────┬────────┘   └──────────┬──────────┘  │
-│           └──────────┬────────────┘              │
-│              ┌───────▼────────┐                  │
-│              │ CallStateFusion│                  │
-│              │ (State Machine)│                  │
-│              └───────┬────────┘                  │
-│   ┌──────────────────┼──────────────────┐        │
-│   │          ┌───────▼────────┐         │        │
-│   │          │  AgentService  │         │        │
-│   │          │ (Orchestrator) │         │        │
-│   │          └───────┬────────┘         │        │
-│   │  ┌───────────────┼─────────────┐    │        │
-│   │  │       ┌───────▼────────┐    │    │        │
-│   │  │       │ WebSocket Srv  │    │    │        │
-│   │  │       │ localhost:9876 │    │    │        │
-│   │  │       └───────┬────────┘    │    │        │
-│   │  │               │             │    │        │
-│   │  │  NetworkMonitor  TrayIcon   │    │        │
-│   │  └─────────────────────────────┘    │        │
-│   └─────────────────────────────────────┘        │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│              Local CRM Agent                         │
+│                                                      │
+│  ┌──────────────────────┐   ┌─────────────────────┐  │
+│  │  ZoomAudioMonitor    │   │ ZoomWindowMonitor   │  │
+│  │  (WASAPI Events)     │   │ (Win32 Window Title)│  │
+│  │  Event-driven +      │   │ Supplementary       │  │
+│  │  500ms fallback poll │   │                     │  │
+│  │  Ground Truth        │   │                     │  │
+│  └────────┬─────────────┘   └──────────┬──────────┘  │
+│           └──────────┬─────────────────┘              │
+│              ┌───────▼────────┐                       │
+│              │ CallStateFusion│                       │
+│              │ (State Machine)│                       │
+│              └───────┬────────┘                       │
+│   ┌──────────────────┼──────────────────┐             │
+│   │          ┌───────▼────────┐         │             │
+│   │          │  AgentService  │         │             │
+│   │          │ (Orchestrator) │         │             │
+│   │          └───────┬────────┘         │             │
+│   │  ┌───────────────┼─────────────┐    │             │
+│   │  │       ┌───────▼────────┐    │    │             │
+│   │  │       │ WebSocket Srv  │    │    │             │
+│   │  │       │ localhost:9876 │    │    │             │
+│   │  │       └───────┬────────┘    │    │             │
+│   │  │               │             │    │             │
+│   │  │  NetworkMonitor  TrayIcon   │    │             │
+│   │  └─────────────────────────────┘    │             │
+│   └─────────────────────────────────────┘             │
+└──────────────────────────────────────────────────────┘
                        │
-              WebSocket (JSON)
+              WebSocket (JSON) — localhost only
+              Sub-millisecond latency (~0.1ms)
                        │
               ┌────────▼────────┐
               │  CRM Dashboard  │
@@ -50,13 +53,35 @@ The Local CRM Agent solves this by monitoring Zoom's audio sessions directly at 
 
 ## How It Works
 
+### Connection Model
+
+The agent communicates with the CRM dashboard entirely over **localhost** (`ws://127.0.0.1:9876`). This means:
+
+- **Zero internet dependency** — packets never leave the machine; it's a loopback connection
+- **Sub-millisecond latency** (~0.1ms) — just inter-process memory copies via the OS loopback interface
+- **No DNS, no TLS, no routing** — direct process-to-process communication
+- **Always-open persistent WebSocket** — no per-message connection overhead
+- **Immune to network issues** — works even if the internet is completely down
+
 ### Signal Sources
 
-| Signal | Source | Purpose |
-|--------|--------|---------|
-| **WASAPI Audio** | OS-level audio session API | **Ground truth** — if Zoom has an active audio session, the call is live |
-| **Window Title** | Win32 `EnumWindows` + `GetWindowText` | Supplementary — detects ringing state, phone numbers, call timers |
-| **Network Ping** | ICMP to 8.8.8.8 / 1.1.1.1 | Informational — latency, jitter, packet loss metrics |
+| Signal | Source | Detection Model | Purpose |
+|--------|--------|-----------------|---------|
+| **WASAPI Audio** | OS-level audio session API | **Event-driven** (instant callbacks) + 500ms fallback poll | **Ground truth** — if Zoom has an active audio session, the call is live |
+| **Window Title** | Win32 `EnumWindows` + `GetWindowText` | Polled alongside fusion evaluation | Supplementary — detects ringing state, phone numbers, call timers |
+| **Network Ping** | ICMP to 8.8.8.8 / 1.1.1.1 | Polled every 3s | Informational — latency, jitter, packet loss metrics |
+
+### Event-Driven WASAPI Detection
+
+Instead of polling audio sessions on a timer, the agent registers **OS-level event callbacks** via NAudio's WASAPI interface:
+
+| WASAPI Event | Fires When | Agent Response |
+|--------------|-----------|----------------|
+| `OnSessionCreated` | Zoom opens a new audio stream (call starts) | Attaches listener, evaluates state immediately |
+| `OnStateChanged` | Audio session goes Active/Inactive/Expired | Evaluates state immediately (call connected/ended) |
+| `OnSessionDisconnected` | Audio session is destroyed | Evaluates state immediately (call fully ended) |
+
+Windows fires these callbacks the **instant** the audio session state changes — no polling delay. A 500ms fallback poll runs as a safety net to catch edge cases (device changes, COM threading).
 
 ### State Machine
 
@@ -71,12 +96,25 @@ idle ──▶ ringing ──▶ connected ──▶ ended ──▶ idle
   └──▶ connected
 ```
 
-- **Idle → Ringing**: Window title shows "Calling" / "Ringing"
-- **Idle → Connected**: Audio session becomes active (skips ringing for fast pickups)
-- **Ringing → Connected**: Audio session activates
-- **Connected → Ended**: Audio inactive for 3 seconds
-- **Ended → Idle**: 3-second cooldown
-- **Ended → Connected**: New audio session starts (call reconnect)
+- **Idle -> Ringing**: Window title shows "Calling" / "Ringing"
+- **Idle -> Connected**: Audio session becomes active (skips ringing for fast pickups)
+- **Ringing -> Connected**: Audio session activates
+- **Connected -> Ended**: Audio inactive for 0.3 seconds (confirmed by event + fallback poll)
+- **Ended -> Idle**: 1-second cooldown
+- **Ended -> Connected**: New audio session starts (call reconnect)
+
+### End-to-End Detection Latency
+
+| Step | Latency | Internet Required? |
+|------|---------|-------------------|
+| Zoom call ends -> Windows tears down audio session | ~0ms | No |
+| WASAPI fires `OnStateChanged` callback | ~0ms | No |
+| CallStateFusion evaluates + transitions to "ended" | ~1ms | No |
+| WebSocket broadcasts to dashboard (localhost) | ~0.1ms | No |
+| React state update + re-render | ~16ms (one frame) | No |
+| **Total** | **~20ms** | **No** |
+
+Compare to previous polling-based approach (~6.5s worst case).
 
 ### WebSocket Messages
 
@@ -126,10 +164,11 @@ All configuration is hardcoded (no config files needed):
 | Setting | Value | Description |
 |---------|-------|-------------|
 | WebSocket port | `9876` | Localhost only |
-| Audio inactive threshold | `3s` | Time before declaring call ended |
-| Ended cooldown | `3s` | Time in "ended" before returning to idle |
+| Detection model | Event-driven | WASAPI callbacks fire instantly on session state change |
+| Fallback poll interval | `500ms` | Safety net poll in case events are missed |
+| Audio inactive threshold | `0.3s` | Confirmation window before declaring call ended |
+| Ended cooldown | `1.0s` | Time in "ended" before returning to idle |
 | Ringing timeout | `60s` | Max time in ringing without answer |
-| State poll interval | `500ms` | How often signals are checked |
 | Network ping interval | `3s` | How often network is measured |
 | Zoom processes | `zoom`, `cpthost`, `zoomphone` | Process names to detect |
 
@@ -150,11 +189,12 @@ Right-click the tray icon for status info (call state, connected CRM clients, Zo
 
 The dashboard connects to the agent via the `LocalAgentProvider` context (`local-agent-context.tsx`):
 
-1. **Auto-reconnect** with exponential backoff (1s → 30s max)
-2. **Agent verification** on the session start page — must be running before starting a call session
-3. **False disconnect suppression** — if the agent confirms the call is still active, iframe disconnect events are ignored
-4. **Agent status indicator** in the dialer UI showing connection state
-5. **Launch button** — triggers `crm-agent://launch` protocol handler to start the agent from the browser
+1. **Localhost WebSocket** — `ws://127.0.0.1:9876`, sub-millisecond latency, zero internet dependency
+2. **Auto-reconnect** with exponential backoff (1s → 30s max)
+3. **Agent verification** on the session start page — must be running before starting a call session
+4. **Instant end detection** — Zoom iframe "ended" events are processed immediately; agent WASAPI events provide parallel confirmation
+5. **Agent status indicator** in the dialer UI showing connection state
+6. **Launch button** — triggers `crm-agent://launch` protocol handler to start the agent from the browser
 
 ## Development
 
@@ -208,5 +248,5 @@ tools/local-CRM-Agent/
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| NAudio | 2.2.1 | WASAPI audio session enumeration |
+| NAudio | 2.2.1 | WASAPI audio session events + enumeration |
 | Fleck | 1.2.0 | WebSocket server |

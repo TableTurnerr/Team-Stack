@@ -60,7 +60,7 @@ public class NetworkQualityMessage : AgentMessage
 public class HeartbeatMessage : AgentMessage
 {
     [JsonPropertyName("version")]
-    public string Version { get; set; } = "1.0.0";
+    public string Version { get; set; } = "1.0.2";
 
     [JsonPropertyName("uptime")]
     public int Uptime { get; set; }

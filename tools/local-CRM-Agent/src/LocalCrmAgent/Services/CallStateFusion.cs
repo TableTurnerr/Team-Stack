@@ -6,7 +6,11 @@ namespace LocalCrmAgent.Services;
 /// <summary>
 /// State machine that fuses signals from audio monitoring (primary),
 /// window monitoring (supplementary), and network quality into a
-/// unified call state. Polls every 500ms.
+/// unified call state.
+///
+/// Primary: event-driven via ZoomAudioMonitor.ZoomAudioStateChanged
+/// (fires instantly when WASAPI session state changes).
+/// Secondary: fallback poll every 500ms to catch any missed events.
 ///
 /// Key principle: WASAPI audio session state is ground truth.
 /// If Zoom has an active audio session, the call is live — regardless
@@ -29,12 +33,12 @@ public class CallStateFusion : IDisposable
     private readonly object _lock = new();
 
     // How long audio must be inactive before we declare the call ended.
-    // Prevents brief audio gaps (silence, hold music transitions) from
-    // triggering a false "ended" state.
-    private const double AudioInactiveThresholdSeconds = 3.0;
+    // With event-driven detection this is just a confirmation threshold —
+    // the event fires instantly, and we confirm on the next evaluation.
+    private const double AudioInactiveThresholdSeconds = 0.3;
 
     // How long to stay in "ended" before returning to idle.
-    private const double EndedCooldownSeconds = 3.0;
+    private const double EndedCooldownSeconds = 1.0;
 
     // How long to stay in "ringing" without audio before giving up.
     private const double RingingTimeoutSeconds = 60.0;
@@ -51,12 +55,19 @@ public class CallStateFusion : IDisposable
     public void Start()
     {
         _cts = new CancellationTokenSource();
-        _pollingTask = Task.Run(() => PollLoop(_cts.Token));
-        Debug.WriteLine("[Fusion] Started polling");
+
+        // Subscribe to instant WASAPI events
+        _audioMonitor.ZoomAudioStateChanged += OnAudioEvent;
+        _audioMonitor.StartWatching();
+
+        // Slow fallback poll — catches anything events might miss
+        _pollingTask = Task.Run(() => FallbackPollLoop(_cts.Token));
+        Debug.WriteLine("[Fusion] Started (event-driven + 500ms fallback poll)");
     }
 
     public void Stop()
     {
+        _audioMonitor.ZoomAudioStateChanged -= OnAudioEvent;
         _cts?.Cancel();
         try { _pollingTask?.Wait(2000); } catch { }
         _cts?.Dispose();
@@ -64,17 +75,30 @@ public class CallStateFusion : IDisposable
         Debug.WriteLine("[Fusion] Stopped");
     }
 
-    private async Task PollLoop(CancellationToken ct)
+    /// <summary>
+    /// Called instantly by WASAPI when a Zoom audio session changes state.
+    /// </summary>
+    private void OnAudioEvent(bool isActive)
+    {
+        Debug.WriteLine($"[Fusion] Audio event: isActive={isActive}");
+        Evaluate();
+    }
+
+    /// <summary>
+    /// Fallback poll — runs every 500ms to catch edge cases where
+    /// WASAPI events might not fire (device changes, COM threading, etc).
+    /// </summary>
+    private async Task FallbackPollLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                Poll();
+                Evaluate();
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[Fusion] Poll error: {ex.Message}");
+                Debug.WriteLine($"[Fusion] Fallback poll error: {ex.Message}");
             }
 
             try { await Task.Delay(500, ct); }
@@ -82,7 +106,11 @@ public class CallStateFusion : IDisposable
         }
     }
 
-    private void Poll()
+    /// <summary>
+    /// Core state machine evaluation. Called both by events (instant)
+    /// and by the fallback poll (every 2s).
+    /// </summary>
+    private void Evaluate()
     {
         var audio = _audioMonitor.GetZoomAudioState();
         var window = _windowMonitor.GetZoomWindowInfo();

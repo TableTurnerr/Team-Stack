@@ -27,6 +27,7 @@ public class CallStateFusion : IDisposable
     private DateTime? _connectedAt;
     private DateTime? _ringingAt;
     private string? _phoneNumber;
+    private string? _direction;
 
     private CancellationTokenSource? _cts;
     private Task? _pollingTask;
@@ -108,7 +109,7 @@ public class CallStateFusion : IDisposable
 
     /// <summary>
     /// Core state machine evaluation. Called both by events (instant)
-    /// and by the fallback poll (every 2s).
+    /// and by the fallback poll (every 500ms).
     /// </summary>
     private void Evaluate()
     {
@@ -159,15 +160,22 @@ public class CallStateFusion : IDisposable
                         _connectedAt = DateTime.UtcNow;
                         _audioInactiveSince = null;
                     }
+                    else if (_ringingAt.HasValue &&
+                             (DateTime.UtcNow - _ringingAt.Value).TotalSeconds > RingingTimeoutSeconds)
+                    {
+                        // Ringing too long without audio — give up regardless
+                        // of window state. Zoom can keep showing "Calling" on
+                        // unanswered calls; without this unconditional timeout
+                        // we'd be stuck in Ringing forever.
+                        TransitionTo(CallState.Ended);
+                        _endedAt = DateTime.UtcNow;
+                    }
                     else if (!windowCalling && !windowTimer)
                     {
-                        // Window no longer shows calling and no timer
-                        if (_ringingAt.HasValue &&
-                            (DateTime.UtcNow - _ringingAt.Value).TotalSeconds > RingingTimeoutSeconds)
-                        {
-                            TransitionTo(CallState.Ended);
-                            _endedAt = DateTime.UtcNow;
-                        }
+                        // Window stopped showing calling/timer without audio
+                        // ever starting — call was abandoned or rejected.
+                        TransitionTo(CallState.Ended);
+                        _endedAt = DateTime.UtcNow;
                     }
                     break;
 
@@ -206,6 +214,7 @@ public class CallStateFusion : IDisposable
                         // Cooldown elapsed — return to idle
                         TransitionTo(CallState.Idle);
                         _phoneNumber = null;
+                        _direction = null;
                         _connectedAt = null;
                         _ringingAt = null;
                         _endedAt = null;
@@ -223,13 +232,18 @@ public class CallStateFusion : IDisposable
             ? (int)((_endedAt ?? DateTime.UtcNow) - _connectedAt.Value).TotalSeconds
             : 0;
 
-        string? direction = windowIncoming ? "inbound" : null;
+        // Latch direction: once "inbound" is detected from the window title,
+        // persist it for the entire call. The window title changes after the
+        // call connects (dropping the "incoming" keyword), so re-evaluating
+        // every cycle would lose direction info mid-call.
+        if (windowIncoming && _direction == null)
+            _direction = "inbound";
 
         var info = new CallStateInfo
         {
             State = _state,
             PhoneNumber = _phoneNumber,
-            Direction = direction,
+            Direction = _direction,
             Confidence = confidence,
             StartTime = _ringingAt ?? _connectedAt,
             ConnectTime = _connectedAt,

@@ -237,6 +237,35 @@ export default function SessionPage() {
         setTimeout(() => resolve(false), 2000);
     }, [agentConnected, launchZoom, refreshDialer]);
 
+    // Auto-launch Zoom when connect-audio screen appears and Zoom is not running.
+    // The agent will find and start Zoom automatically — the session cannot proceed
+    // until Zoom is verified running (zoomAppConfirmed gate on the Start button).
+    const autoLaunchAttemptedRef = useRef(false);
+    useEffect(() => {
+        if (awaitingAudioConnect && agentConnected && !agentZoomDetected && !zoomAppConfirmed && !zoomDetecting && !autoLaunchAttemptedRef.current) {
+            autoLaunchAttemptedRef.current = true;
+            verifyZoomRunning();
+        }
+        // Reset the flag when leaving the connect-audio screen so it works again next time
+        if (!awaitingAudioConnect) {
+            autoLaunchAttemptedRef.current = false;
+        }
+    }, [awaitingAudioConnect, agentConnected, agentZoomDetected, zoomAppConfirmed, zoomDetecting, verifyZoomRunning]);
+
+    // Auto-launch Local Agent when the "Reconnect Audio" screen appears and agent is offline.
+    // Uses a ref to avoid launching more than once per screen appearance.
+    const reconnectAgentLaunchAttemptedRef = useRef(false);
+    useEffect(() => {
+        const isReconnectScreen = !!session && !isSessionActive && !isVirtualDialerMode;
+        if (isReconnectScreen && !agentConnected && !reconnectAgentLaunchAttemptedRef.current) {
+            reconnectAgentLaunchAttemptedRef.current = true;
+            launchAgent();
+        }
+        if (!isReconnectScreen) {
+            reconnectAgentLaunchAttemptedRef.current = false;
+        }
+    }, [session, isSessionActive, isVirtualDialerMode, agentConnected, launchAgent]);
+
     // Auto-confirm Zoom when agent reports it is running (via heartbeat)
     useEffect(() => {
         if (agentConnected && agentZoomDetected) {
@@ -260,6 +289,76 @@ export default function SessionPage() {
             }
         }
     }, [zoomLaunching, agentConnected, agentZoomDetected, zoomDetecting, refreshDialer]);
+
+    // ---------------------------------------------------------------------------
+    // Mid-session Zoom recovery — when Zoom disappears during an active session,
+    // show a warning. When it comes back, refresh only the dialer section.
+    // ---------------------------------------------------------------------------
+    const [zoomLostDuringSession, setZoomLostDuringSession] = useState(false);
+    const prevAgentZoomDetectedRef = useRef<boolean | null>(null);
+
+    useEffect(() => {
+        // Only care about active sessions
+        if (!session || session.status !== 'active') {
+            setZoomLostDuringSession(false);
+            prevAgentZoomDetectedRef.current = null;
+            return;
+        }
+
+        if (!agentConnected) return;
+
+        const prev = prevAgentZoomDetectedRef.current;
+        prevAgentZoomDetectedRef.current = agentZoomDetected;
+
+        if (prev === null) return; // first heartbeat — skip transition check
+
+        if (prev && !agentZoomDetected) {
+            // Zoom just disappeared mid-session — auto-pause
+            setZoomLostDuringSession(true);
+            if (!session.paused_at) {
+                pauseSessionRef.current();
+                addToast('warning', 'Session auto-paused — Zoom not detected');
+            }
+        } else if (!prev && agentZoomDetected) {
+            // Zoom recovered — refresh the dialer and clear the warning (no auto-resume)
+            setZoomLostDuringSession(false);
+            refreshDialer();
+            addToast('success', 'Zoom detected — dialer refreshed. Resume session when ready.');
+        }
+    }, [agentConnected, agentZoomDetected, session, refreshDialer, addToast]);
+
+    // ---------------------------------------------------------------------------
+    // Mid-session agent loss — block calls when the local agent disconnects
+    // during an active session.
+    // ---------------------------------------------------------------------------
+    const [agentLostDuringSession, setAgentLostDuringSession] = useState(false);
+    const prevAgentConnectedRef = useRef<boolean | null>(null);
+
+    useEffect(() => {
+        if (!session || session.status !== 'active') {
+            setAgentLostDuringSession(false);
+            prevAgentConnectedRef.current = null;
+            return;
+        }
+
+        const prev = prevAgentConnectedRef.current;
+        prevAgentConnectedRef.current = agentConnected;
+
+        if (prev === null) return; // first render — skip transition check
+
+        if (prev && !agentConnected) {
+            // Agent disconnected mid-session — auto-pause
+            setAgentLostDuringSession(true);
+            if (!session.paused_at) {
+                pauseSessionRef.current();
+                addToast('warning', 'Session auto-paused — CRM Agent disconnected');
+            }
+        } else if (!prev && agentConnected) {
+            // Agent reconnected (no auto-resume)
+            setAgentLostDuringSession(false);
+            addToast('success', 'CRM Agent reconnected. Resume session when ready.');
+        }
+    }, [agentConnected, session, addToast]);
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -1094,6 +1193,10 @@ export default function SessionPage() {
         }
     }, [session, setSession]);
 
+    // Ref so effects defined earlier in the file can call the latest pauseSession
+    const pauseSessionRef = useRef(pauseSession);
+    pauseSessionRef.current = pauseSession;
+
     // ---------------------------------------------------------------------------
     // Start standalone mode
     // ---------------------------------------------------------------------------
@@ -1127,6 +1230,20 @@ export default function SessionPage() {
             return;
         }
 
+        // Prevent dialing when agent is not connected
+        if (!agentConnected) {
+            console.log('Agent not connected, blocking dial request');
+            addToast('error', 'CRM Agent is not running — launch the agent to make calls');
+            return;
+        }
+
+        // Prevent dialing when Zoom is not detected (agent reports no Zoom process)
+        if (!agentZoomDetected) {
+            console.log('Zoom not detected, blocking dial request');
+            addToast('error', 'Zoom is not running — open Zoom to make calls');
+            return;
+        }
+
         setCurrentPhoneNumber(phoneNumber);
         setContextPhoneNumber(phoneNumber); // Update phone number in context
         // Pass company suggestion from power dialer to the form
@@ -1138,7 +1255,7 @@ export default function SessionPage() {
         // when the iframe fails to process the dial command.
 
         dialNumber(phoneNumber);
-    }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at]);
+    }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at, agentConnected, agentZoomDetected, addToast]);
 
     // Ref so power dialer timers always call the latest handleDial (avoids stale closures)
     const handleDialRef = useRef(handleDial);
@@ -1712,7 +1829,7 @@ export default function SessionPage() {
                                 )}
                                 <button
                                     onClick={startAudioSession}
-                                    disabled={!zoomAppConfirmed}
+                                    disabled={!zoomAppConfirmed || !agentConnected}
                                     className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                                 >
                                     Connect Audio & Start
@@ -1963,6 +2080,33 @@ export default function SessionPage() {
                                     {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
                                 </div>
                             </button>
+                            {/* Local Agent verification */}
+                            <button
+                                type="button"
+                                onClick={() => { if (!agentConnected) launchAgent(); }}
+                                disabled={agentConnected}
+                                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                    agentConnected
+                                        ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                        : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                }`}
+                            >
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${agentConnected ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                    {agentConnected
+                                        ? <Check size={20} className="text-[var(--success)]" />
+                                        : <AlertTriangle size={20} className="text-[var(--muted)]" />
+                                    }
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-semibold ${agentConnected ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                        CRM Local Agent
+                                    </p>
+                                    {agentConnected
+                                        ? <p className="text-xs text-[var(--success)] mt-0.5">Agent connected and running</p>
+                                        : <p className="text-xs text-[var(--muted)] mt-0.5">Agent not detected — click to launch</p>
+                                    }
+                                </div>
+                            </button>
                             {recorderError && (
                                 <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                     {recorderError}
@@ -1970,7 +2114,7 @@ export default function SessionPage() {
                             )}
                             <button
                                 onClick={startAudioSession}
-                                disabled={!zoomAppConfirmed}
+                                disabled={!zoomAppConfirmed || !agentConnected}
                                 className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                             >
                                 Connect Audio
@@ -2020,14 +2164,22 @@ export default function SessionPage() {
 
                     <div className="flex items-center gap-2">
                         {session.paused_at ? (
-                            <button
-                                onClick={resumeSession}
-                                disabled={pausing}
-                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--success-subtle)] text-[var(--success)] font-medium text-sm border border-[var(--success)]/30 hover:bg-[var(--success)] hover:text-white transition-all disabled:opacity-50"
-                            >
-                                {pausing ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-                                {pausing ? 'Resuming...' : 'Resume Session'}
-                            </button>
+                            (() => {
+                                const resumeBlocked = !agentConnected || !agentZoomDetected;
+                                const resumeBtn = (
+                                    <button
+                                        onClick={resumeSession}
+                                        disabled={pausing || resumeBlocked}
+                                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--success-subtle)] text-[var(--success)] font-medium text-sm border border-[var(--success)]/30 hover:bg-[var(--success)] hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {pausing ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+                                        {pausing ? 'Resuming...' : 'Resume Session'}
+                                    </button>
+                                );
+                                if (!agentConnected) return <Tooltip content="CRM Agent must be running to resume">{resumeBtn}</Tooltip>;
+                                if (!agentZoomDetected) return <Tooltip content="Zoom must be running to resume">{resumeBtn}</Tooltip>;
+                                return resumeBtn;
+                            })()
                         ) : (
                             isInCall ? (
                                 <Tooltip content="Cannot pause during a call">
@@ -2126,12 +2278,66 @@ export default function SessionPage() {
                     </div>
                 )}
 
+                {/* Agent disconnected alert — shown during active session when agent drops */}
+                {agentLostDuringSession && (
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-[var(--error-subtle)]/30 border border-[var(--error)]/30">
+                        <AlertTriangle size={20} className="text-[var(--error)] shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-[var(--error)]">CRM Agent not detected</p>
+                            <p className="text-xs text-[var(--muted)] mt-0.5">
+                                The local CRM Agent is not running. Calls are blocked until the agent is connected. Click Launch to start it.
+                            </p>
+                        </div>
+                        <button
+                            onClick={launchAgent}
+                            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--error)] text-white hover:opacity-90 active:scale-[0.97] transition-all"
+                        >
+                            <Zap size={13} />
+                            Launch
+                        </button>
+                    </div>
+                )}
+
+                {/* Zoom not detected alert — shown during active session when agent reports Zoom gone */}
+                {zoomLostDuringSession && !agentLostDuringSession && (
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-[var(--error-subtle)]/30 border border-[var(--error)]/30">
+                        <AlertTriangle size={20} className="text-[var(--error)] shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-[var(--error)]">Zoom not detected</p>
+                            <p className="text-xs text-[var(--muted)] mt-0.5">
+                                Open Zoom Workplace on your device, then click Retry. The dialer will refresh automatically once Zoom is detected.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => { launchZoom(); }}
+                            disabled={zoomLaunching}
+                            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--error)] text-white hover:opacity-90 active:scale-[0.97] transition-all disabled:opacity-50"
+                        >
+                            {zoomLaunching ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                            Retry
+                        </button>
+                    </div>
+                )}
+
                 {/* Docked Zoom Phone Dialer - Above Current Call section */}
                 <div className="relative">
-                    <ZoomPhoneDialer docked disabled={(hasUnsavedCall && callStatus !== 'ringing' && callStatus !== 'connected') || !!session.paused_at} />
-                    {session.paused_at && (
+                    <ZoomPhoneDialer
+                        docked
+                        disabled={(hasUnsavedCall && callStatus !== 'ringing' && callStatus !== 'connected') || !!session.paused_at || zoomLostDuringSession || agentLostDuringSession}
+                        disabledReason={
+                            agentLostDuringSession ? 'Run CRM Agent first' :
+                            zoomLostDuringSession ? 'Open Zoom first' :
+                            session.paused_at ? 'Resume session to make calls' :
+                            undefined
+                        }
+                    />
+                    {(session.paused_at || agentLostDuringSession || zoomLostDuringSession) && (
                         <div className="absolute inset-0 bg-[var(--background)]/60 backdrop-blur-[1px] flex items-center justify-center rounded-xl z-10 pointer-events-none">
-                            <p className="text-sm font-medium text-[var(--muted)]">Resume session to make calls</p>
+                            <p className="text-sm font-medium text-[var(--muted)]">
+                                {agentLostDuringSession ? 'Run CRM Agent to make calls' :
+                                 zoomLostDuringSession ? 'Open Zoom to make calls' :
+                                 'Resume session to make calls'}
+                            </p>
                         </div>
                     )}
                 </div>

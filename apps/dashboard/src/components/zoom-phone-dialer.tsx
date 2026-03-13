@@ -49,11 +49,13 @@ interface ZoomPhoneDialerProps {
     docked?: boolean;
     /** If true, the dialer is disabled (e.g. unsaved call waiting) */
     disabled?: boolean;
+    /** Short message explaining why the dialer is disabled (shown in the header) */
+    disabledReason?: string;
     /** If true, the dialer is hidden but stays mounted for persistence */
     hidden?: boolean;
 }
 
-export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = false }: ZoomPhoneDialerProps = {}) {
+export function ZoomPhoneDialer({ docked = false, disabled = false, disabledReason, hidden = false }: ZoomPhoneDialerProps = {}) {
     const router = useRouter();
     const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey, customDialerNumber, activeCallNumber, refreshDialer } = useZoomPhone();
     const { session, setSession } = useSession();
@@ -485,7 +487,7 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                     {disabled ? (
                         <div className="flex-1 flex items-center justify-between gap-2">
                             <span className="text-xs text-[var(--warning)] font-medium">
-                                Submit call log first
+                                {disabledReason || 'Submit call log first'}
                             </span>
                             <button
                                 type="button"

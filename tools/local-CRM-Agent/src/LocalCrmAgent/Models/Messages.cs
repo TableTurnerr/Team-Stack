@@ -60,7 +60,7 @@ public class NetworkQualityMessage : AgentMessage
 public class HeartbeatMessage : AgentMessage
 {
     [JsonPropertyName("version")]
-    public string Version { get; set; } = "1.0.2";
+    public string Version { get; set; } = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
 
     [JsonPropertyName("uptime")]
     public int Uptime { get; set; }

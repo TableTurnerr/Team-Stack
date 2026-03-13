@@ -28,7 +28,9 @@ public class TrayIconManager : IDisposable
         _zoomItem = new ToolStripMenuItem("Zoom: Checking...") { Enabled = false };
 
         var contextMenu = new ContextMenuStrip();
-        contextMenu.Items.Add(new ToolStripMenuItem("CRM Agent v1.0") { Enabled = false, Font = new Font(contextMenu.Font, FontStyle.Bold) });
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        var versionLabel = version != null ? $"CRM Agent v{version.Major}.{version.Minor}.{version.Build}" : "CRM Agent";
+        contextMenu.Items.Add(new ToolStripMenuItem(versionLabel) { Enabled = false, Font = new Font(contextMenu.Font, FontStyle.Bold) });
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(_statusItem);
         contextMenu.Items.Add(_connectionsItem);

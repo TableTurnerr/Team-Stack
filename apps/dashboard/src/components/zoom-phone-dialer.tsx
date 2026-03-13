@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Phone, PhoneCall, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, ChevronLeft, Power, Loader2, Delete } from 'lucide-react';
+import { Phone, PhoneCall, X, GripHorizontal, Minimize2, Maximize2, ArrowLeftRight, ChevronLeft, Power, Loader2, Delete, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useSession } from '@/contexts/session-context';
@@ -10,6 +10,7 @@ import { CustomDialerOverlay } from '@/components/custom-dialer-overlay';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import { useRouter } from 'next/navigation';
+import { useLocalAgent } from '@/contexts/local-agent-context';
 
 const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
 
@@ -48,14 +49,17 @@ interface ZoomPhoneDialerProps {
     docked?: boolean;
     /** If true, the dialer is disabled (e.g. unsaved call waiting) */
     disabled?: boolean;
+    /** Short message explaining why the dialer is disabled (shown in the header) */
+    disabledReason?: string;
     /** If true, the dialer is hidden but stays mounted for persistence */
     hidden?: boolean;
 }
 
-export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = false }: ZoomPhoneDialerProps = {}) {
+export function ZoomPhoneDialer({ docked = false, disabled = false, disabledReason, hidden = false }: ZoomPhoneDialerProps = {}) {
     const router = useRouter();
-    const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey, customDialerNumber, activeCallNumber } = useZoomPhone();
+    const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey, customDialerNumber, activeCallNumber, refreshDialer } = useZoomPhone();
     const { session, setSession } = useSession();
+    const { isConnected: agentConnected, callState: agentCallState, networkQuality, launchAgent } = useLocalAgent();
 
     const [yPosition, setYPosition] = useState(DEFAULT_Y);
     const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -481,9 +485,20 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                         isCallActive ? "text-[var(--success)] animate-pulse" : "text-blue-400"
                     )} />
                     {disabled ? (
-                        <span className="flex-1 text-xs text-[var(--warning)] font-medium">
-                            Submit call log first
-                        </span>
+                        <div className="flex-1 flex items-center justify-between gap-2">
+                            <span className="text-xs text-[var(--warning)] font-medium">
+                                {disabledReason || 'Submit call log first'}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={refreshDialer}
+                                className="inline-flex items-center justify-center gap-1 rounded-full px-2 py-0.5 border border-[var(--card-border)] text-[var(--muted)] hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-all text-[10px] font-medium"
+                                title="Refresh Zoom dialer"
+                            >
+                                <RefreshCw size={10} />
+                                Refresh
+                            </button>
+                        </div>
                     ) : (
                         <div className="flex-1 flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
@@ -523,6 +538,15 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                                 <span className="text-[10px] text-[var(--muted)] italic">
                                     {isCallActive ? 'Hover for Zoom controls' : 'Hover to Dial'}
                                 </span>
+                                <button
+                                    type="button"
+                                    onClick={refreshDialer}
+                                    className="inline-flex items-center justify-center gap-1 rounded-full px-2 py-0.5 border border-[var(--card-border)] text-[var(--muted)] hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-all text-[10px] font-medium"
+                                    title="Refresh Zoom dialer"
+                                >
+                                    <RefreshCw size={10} />
+                                    Refresh
+                                </button>
                                 {!isCallActive && (
                                     <button
                                         type="button"
@@ -576,6 +600,13 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                             )}
                         </div>
                         <div className="flex items-center gap-1">
+                            <button
+                                onClick={refreshDialer}
+                                className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                                title="Refresh Zoom dialer"
+                            >
+                                <RefreshCw size={12} />
+                            </button>
                             <button
                                 onClick={() => setIsMinimized(!isMinimized)}
                                 className="p-1 rounded hover:bg-[var(--card-hover)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
@@ -711,6 +742,36 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                         <div className="flex-1 flex flex-col bg-white overflow-hidden">
                             {/* Call Recorder Controls */}
                             <CallRecorderControls />
+
+                            {/* Local Agent Status */}
+                            <div className={cn(
+                                'flex items-center gap-1.5 px-3 py-1 border-b border-[var(--card-border)] text-[10px]',
+                                agentConnected ? 'bg-[var(--sidebar-bg)]' : 'bg-yellow-500/5 border-yellow-500/20'
+                            )}>
+                                <span className={cn(
+                                    'inline-block w-1.5 h-1.5 rounded-full shrink-0',
+                                    agentConnected ? 'bg-green-500' : 'bg-yellow-500'
+                                )} />
+                                {agentConnected ? (
+                                    <span className="text-[var(--muted)] font-medium">
+                                        Agent
+                                        {agentCallState?.state === 'connected' && (
+                                            <span className="text-green-500 ml-1">Call active</span>
+                                        )}
+                                        {networkQuality && !networkQuality.isStable && (
+                                            <span className="text-yellow-500 ml-1">Network unstable</span>
+                                        )}
+                                    </span>
+                                ) : (
+                                    <button
+                                        onClick={launchAgent}
+                                        className="text-yellow-600 hover:text-yellow-500 font-medium transition-colors"
+                                        title="Click to launch the CRM Agent for reliable call monitoring"
+                                    >
+                                        Agent offline — Click to launch
+                                    </button>
+                                )}
+                            </div>
 
                             {/* Dialer / Iframe area */}
                             <div className="flex-1 relative">

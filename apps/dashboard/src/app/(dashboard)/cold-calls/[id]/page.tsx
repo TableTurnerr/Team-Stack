@@ -239,7 +239,7 @@ function CallLogDetail({ log }: { log: CallLog }) {
             "flex items-center gap-2 p-3 rounded-lg border",
             log.owner_reached
               ? "bg-[var(--success-subtle)] border-[var(--success)]/30"
-              : "bg-[var(--sidebar-bg)] border-[var(--card-border)]"
+              : "bg-[var(--sidebar-bg)] border-[var(--card-border)] opacity-40"
           )}>
             <UserCheck size={16} className={log.owner_reached ? "text-[var(--success)]" : "text-[var(--muted)]"} />
             <span className="text-sm font-medium">Owner Reached</span>
@@ -248,7 +248,7 @@ function CallLogDetail({ log }: { log: CallLog }) {
             "flex items-center gap-2 p-3 rounded-lg border",
             log.pitch_completed
               ? "bg-[var(--info-subtle)] border-[var(--info)]/30"
-              : "bg-[var(--sidebar-bg)] border-[var(--card-border)]"
+              : "bg-[var(--sidebar-bg)] border-[var(--card-border)] opacity-40"
           )}>
             <Target size={16} className={log.pitch_completed ? "text-[var(--info)]" : "text-[var(--muted)]"} />
             <span className="text-sm font-medium">Pitch Completed</span>
@@ -257,7 +257,7 @@ function CallLogDetail({ log }: { log: CallLog }) {
             "flex items-center gap-2 p-3 rounded-lg border",
             log.appointment_set
               ? "bg-[var(--warning-subtle)] border-[var(--warning)]/30"
-              : "bg-[var(--sidebar-bg)] border-[var(--card-border)]"
+              : "bg-[var(--sidebar-bg)] border-[var(--card-border)] opacity-40"
           )}>
             <CalendarCheck size={16} className={log.appointment_set ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
             <span className="text-sm font-medium">Appointment Set</span>
@@ -266,15 +266,17 @@ function CallLogDetail({ log }: { log: CallLog }) {
       </div>
 
       {/* Notes card */}
-      {log.post_call_notes && (
-        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4 flex items-center gap-2">
-            <StickyNote size={14} />
-            Post-call Notes
-          </h2>
+      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6">
+        <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-4 flex items-center gap-2">
+          <StickyNote size={14} />
+          Post-call Notes
+        </h2>
+        {log.post_call_notes ? (
           <p className="text-sm leading-relaxed whitespace-pre-wrap">{log.post_call_notes}</p>
-        </div>
-      )}
+        ) : (
+          <p className="text-sm text-[var(--muted)]">No notes</p>
+        )}
+      </div>
 
       {/* Callback Events card */}
       {(log.callback_events?.length ?? 0) > 0 && (

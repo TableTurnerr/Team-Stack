@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type PhoneNumber, type FollowUp } from '@/lib/types';
-import { formatDate, formatPhoneNumber, cn } from '@/lib/utils';
+import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilterValue, stripPhoneFormatting } from '@/lib/utils';
 import { formatRelativeFollowUp } from '@/lib/timezone-utils';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { ColumnSelector } from '@/components/column-selector';
@@ -60,8 +60,12 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
       setLoading(true);
       const filters: string[] = [];
       if (searchTerm) {
-        const safe = searchTerm.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        filters.push(`(phone_number ~ "${safe}" || expand.company.company_name ~ "${safe}" || location_name ~ "${safe}" || receptionist_name ~ "${safe}")`);
+        const safe = sanitizeFilterValue(searchTerm);
+        const digits = stripPhoneFormatting(searchTerm);
+        const phoneCondition = digits.length >= 3
+          ? buildPhoneSearchFilter('phone_number', searchTerm)
+          : `phone_number ~ "${safe}"`;
+        filters.push(`(${phoneCondition} || expand.company.company_name ~ "${safe}" || location_name ~ "${safe}" || receptionist_name ~ "${safe}")`);
       }
 
       const sortStr = `${sort.dir === 'desc' ? '-' : ''}${sort.field}`;

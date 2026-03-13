@@ -33,7 +33,7 @@ Use this skill when:
 
 3. **Failed-only re-runs** — After fixing failures, re-run ONLY the failed test files, not the entire suite. Use:
    ```bash
-   cmd /c "pnpm --filter dashboard exec playwright test <specific-file.spec.ts>"
+   pnpm --filter dashboard exec playwright test <specific-file.spec.ts>
    ```
 
 4. **Parallel by default** — Playwright is already configured for parallel workers. Never add `--workers=1` unless debugging a specific ordering issue.
@@ -48,7 +48,7 @@ Use this skill when:
 
 1. Check what files have been modified recently:
    ```bash
-   cmd /c "git diff --name-only HEAD~3"
+   git diff --name-only HEAD~3
    ```
 2. Map changed files to test suites:
    - `src/app/(dashboard)/companies/` → `tests/03-companies.spec.ts`
@@ -57,46 +57,46 @@ Use this skill when:
    - `src/app/(dashboard)/settings/` → `tests/10-settings.spec.ts`
    - `src/contexts/`, `src/components/` → `tests/11-integration.spec.ts` + related suites
    - `packages/pocketbase-client/` → `pnpm --filter pocketbase-client test`
-   - `tools/local-CRM-Agent/` → `cmd /c "dotnet build tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release"` (build-only, no test suite)
+   - `tools/local-CRM-Agent/` → `dotnet build tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release` (build-only, no test suite)
 3. If scope maps to 1-3 suites, run only those. If scope is broad or unclear, proceed to Phase 2.
 
 ### Phase 2: Run Lint, Build, and Tests IN PARALLEL
 
-**CRITICAL: Launch all three checks simultaneously.** These are independent tasks — never run them sequentially.
+**CRITICAL: Launch all three checks simultaneously.** These are independent tasks — never run them sequentially. Use parallel tool calls (multiple Bash calls in a single message) to maximize speed.
 
 **Run all three at once:**
 
 | Check | Command | What it catches |
 |-------|---------|-----------------|
-| **Lint** | `cmd /c "pnpm --filter dashboard lint"` | ESLint errors, unused imports, code style violations |
-| **Build** | `cmd /c "pnpm --filter dashboard build"` | TypeScript type errors, import resolution, build-time failures |
+| **Lint** | `pnpm --filter dashboard lint` | ESLint errors, unused imports, code style violations |
+| **Build** | `pnpm --filter dashboard build` | TypeScript type errors, import resolution, build-time failures |
 | **Tests** | *(targeted or smoke — see below)* | Runtime bugs, broken UI flows, regressions |
 
 **Test selection (run alongside lint & build):**
 
 - **Targeted run (preferred)** — when scope is known from Phase 1:
   ```bash
-  cmd /c "pnpm --filter dashboard exec playwright test tests/<specific-file>.spec.ts"
+  pnpm --filter dashboard exec playwright test tests/<specific-file>.spec.ts
   ```
 - **Smoke run (quick validation)** — when scope is unclear:
   ```bash
-  cmd /c "pnpm --filter dashboard test:smoke"
+  pnpm --filter dashboard test:smoke
   ```
 - **Full run (only when necessary):**
   ```bash
-  cmd /c "pnpm --filter dashboard test"
+  pnpm --filter dashboard test
   ```
 
 **If PocketBase client was modified**, also run in parallel:
 ```bash
-cmd /c "pnpm --filter pocketbase-client lint"
-cmd /c "pnpm --filter pocketbase-client build"
-cmd /c "pnpm --filter pocketbase-client test"
+pnpm --filter pocketbase-client lint
+pnpm --filter pocketbase-client build
+pnpm --filter pocketbase-client test
 ```
 
 **If Local CRM Agent was modified**, also run in parallel:
 ```bash
-cmd /c "dotnet build tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release"
+dotnet build tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release
 ```
 Note: The Local CRM Agent is a C#/.NET 8.0 project. It has no lint or test suite — only build validation applies. Build failures indicate C# compilation errors (missing references, type mismatches, syntax errors).
 
@@ -154,11 +154,11 @@ Collect ALL failures from lint, build, AND tests. Classify each:
 
 **Re-run only what failed, all in parallel again:**
 
-1. If lint failed → re-run `cmd /c "pnpm --filter dashboard lint"`
-2. If build failed → re-run `cmd /c "pnpm --filter dashboard build"`
+1. If lint failed → re-run `pnpm --filter dashboard lint`
+2. If build failed → re-run `pnpm --filter dashboard build`
 3. If tests failed → re-run ONLY the previously-failed test files:
    ```bash
-   cmd /c "pnpm --filter dashboard exec playwright test tests/03-companies.spec.ts tests/07-notes.spec.ts"
+   pnpm --filter dashboard exec playwright test tests/03-companies.spec.ts tests/07-notes.spec.ts
    ```
 4. Launch all applicable re-runs simultaneously in parallel
 5. If new failures appear, go back to Phase 3
@@ -206,7 +206,6 @@ Output a concise summary:
 ## Guidelines
 
 - **Speed is king** — always prefer targeted runs over full suite runs
-- **Parallel everything** — lint, build, and tests are independent; always run them simultaneously
 - **Fix code, not symptoms** — if a test fails because the code is wrong, fix the code
 - **Batch before re-run** — group related fixes and re-run once, not after each fix
 - **Respect test data patterns** — always use `TEST_PREFIX` for test data, always clean up in `afterAll`

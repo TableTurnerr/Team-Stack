@@ -13,9 +13,10 @@
 5. [Dashboard Setup](#5-dashboard-setup)
 6. [Transcriber Setup](#6-transcriber-setup)
 7. [Zoom Phone Configuration](#7-zoom-phone-configuration)
-8. [Automated Testing (Playwright)](#8-automated-testing-playwright)
-9. [Production Deployment](#9-production-deployment)
-10. [Troubleshooting](#10-troubleshooting)
+8. [Local CRM Agent Setup](#8-local-crm-agent-setup)
+9. [Automated Testing (Playwright)](#9-automated-testing-playwright)
+10. [Production Deployment](#10-production-deployment)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -25,6 +26,7 @@
 - **Node.js** v18+ (with pnpm)
 - **Python** 3.10+
 - **PocketBase** (self-hosted binary)
+- **Windows 10/11** (for Local CRM Agent — end users only need the distributed exe, no SDK required)
 
 ### Verify Installation
 ```bash
@@ -172,11 +174,60 @@ Access via **Settings → Integrations → Zoom Phone**.
 
 ---
 
-## 8. Automated Testing (Playwright)
+## 8. Local CRM Agent Setup
+
+The Local CRM Agent is a Windows desktop application that monitors Zoom Phone call state via WASAPI (OS-level audio sessions) and provides reliable call signals to the CRM dashboard. It prevents recordings from dropping during network instability.
+
+### For Team Members (End Users)
+
+1. Download the **CRM-Agent.zip** shared by your team lead.
+2. Extract the zip to any folder.
+3. Double-click **`install.bat`**.
+4. The agent installs to `%LocalAppData%\TableTurnerr\LocalCrmAgent\`, registers auto-start on Windows login, and launches immediately.
+5. Verify: look for a colored dot in your system tray (bottom-right, near the clock).
+
+### For Developers (Building from Source)
+
+**Prerequisites**: [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+
+```bash
+cd tools/local-CRM-Agent
+
+# Build self-contained single-file exe (~75MB, no .NET runtime needed)
+build-release.bat
+
+# Output: dist/LocalCrmAgent.exe + install.bat + uninstall.bat
+# Zip dist/ and share with team
+```
+
+### How It Integrates with the Dashboard
+
+1. Agent runs a WebSocket server on `ws://127.0.0.1:9876`.
+2. Dashboard connects automatically via `LocalAgentProvider` context.
+3. On the **Session** page, the agent must show a green checkmark before starting a call session.
+4. During calls, if Zoom's iframe fires a false "disconnect" event but the agent confirms the call is still active (via WASAPI audio), the disconnect is suppressed — preventing recording drops.
+5. The dialer UI shows agent connection status and a "Click to launch" button if offline.
+
+### Updating the Agent
+
+1. Make code changes in `tools/local-CRM-Agent/src/`.
+2. Run `build-release.bat`.
+3. Zip the `dist/` folder and share with the team.
+4. Team members extract and run `install.bat` again (replaces the old version).
+
+### Uninstalling
+
+Run `uninstall.bat` from the extracted zip — removes the app, auto-start, and protocol handler.
+
+> **Detailed docs**: [`tools/local-CRM-Agent/README.md`](tools/local-CRM-Agent/README.md) | [`tools/local-CRM-Agent/SETUP.md`](tools/local-CRM-Agent/SETUP.md)
+
+---
+
+## 9. Automated Testing (Playwright)
 
 The dashboard ships with a full E2E test suite — **127 tests across 12 files**. Run these whenever you make significant changes to verify nothing is broken.
 
-### 8.1 First-Time Setup
+### 9.1 First-Time Setup
 
 ```bash
 cd apps/dashboard
@@ -198,7 +249,7 @@ Required values in `.env.test`:
 | `TEST_PB_ADMIN_PASSWORD` | PocketBase superadmin password |
 | `TEST_LIVE_CALLS` | Set `true` to enable real call tests (default: `false`) |
 
-### 8.2 Running Tests
+### 9.2 Running Tests
 
 #### Interactive CLI Menu (recommended)
 
@@ -235,7 +286,7 @@ pnpm test:headed      # Run with visible browser
 pnpm test:report      # View last HTML report
 ```
 
-### 8.3 Test Coverage
+### 9.3 Test Coverage
 
 | Suite | What's verified |
 |-------|----------------|
@@ -252,7 +303,7 @@ pnpm test:report      # View last HTML report
 | **Integration** | Session→CallLog, CallLog→Recording, Company→CallHistory, Follow-Up linkage |
 | **Live Calls** | Real Zoom Phone calls to public test lines (disabled by default) |
 
-### 8.4 Live Call Testing
+### 9.4 Live Call Testing
 
 When `TEST_LIVE_CALLS=true`, the suite dials public telecom test lines to verify the full Zoom Phone → recording → call log pipeline.
 
@@ -281,15 +332,16 @@ pnpm test:headed tests/12-live-call-flow.spec.ts
 
 > **Full test documentation**: `apps/dashboard/tests/README.md`
 
-### 8.5 Manual Checklist (supplement to automated tests)
+### 9.5 Manual Checklist (supplement to automated tests)
 
 - [ ] **Power Dialer**: Paste phone numbers → start → verify sequential dialing → test pause/resume/stop → try negative delay mode
 - [ ] **Transcriber**: Place an `.mp3` in `tools/audio-recorder/recordings/` → run `python tools/transcriber/transcribe_calls.py` → verify transcript appears in Dashboard
 - [ ] **Google Maps Scraper**: Open extension → scrape a restaurant page → verify company appears in `/companies`
+- [ ] **Local CRM Agent**: Run `install.bat` → verify system tray icon appears → start a call session in dashboard → confirm agent shows green checkmark → place a call → verify tray icon turns green
 
 ---
 
-## 9. Production Deployment
+## 10. Production Deployment
 
 Recommended architecture:
 
@@ -301,12 +353,12 @@ Recommended architecture:
 └─────────────────┘     └───────────────────┘     └──────────────────┘
 ```
 
-### 9.1 Ubuntu Server (PocketBase)
+### 10.1 Ubuntu Server (PocketBase)
 1. Install PocketBase on a VPS (DigitalOcean/Hetzner/AWS).
 2. Set up a systemd service to keep it running `serve --http="0.0.0.0:8090"`.
 3. Use **Cloudflare Tunnel** (`cloudflared`) to expose `localhost:8090` to `https://api.yourdomain.com`. This handles SSL automatically.
 
-### 9.2 Vercel (Dashboard)
+### 10.2 Vercel (Dashboard)
 1. Connect your GitHub repo to Vercel.
 2. Set Root Directory to `apps/dashboard`.
 3. Add Environment Variable: `NEXT_PUBLIC_POCKETBASE_URL=https://api.yourdomain.com`.
@@ -314,7 +366,7 @@ Recommended architecture:
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### "ClientResponseError 0" (Auto-cancellation)
 - **Cause**: React Strict Mode double-invoking effects or rapid navigation cancelling pending requests.
@@ -331,6 +383,14 @@ Recommended architecture:
 ### Empty Dashboard
 - **Cause**: No data.
 - **Fix**: Run the seeder script (Step 4).
+
+### "Agent not detected" on Session Page
+- **Cause**: Local CRM Agent is not running or WebSocket connection failed.
+- **Fix**: Check system tray for the agent icon. If not there, run `install.bat` from the distributed zip or launch manually from `%LocalAppData%\TableTurnerr\LocalCrmAgent\LocalCrmAgent.exe`. If the icon is there but dashboard doesn't connect, try refreshing the browser.
+
+### Recording Drops After 1-2 Seconds
+- **Cause**: Network instability causing Zoom iframe to fire false "disconnect" events.
+- **Fix**: Ensure the Local CRM Agent is running. The agent uses WASAPI audio monitoring (OS-level, network-independent) to confirm calls are still active and suppress false disconnects.
 
 ---
 *Last updated: March 2026*

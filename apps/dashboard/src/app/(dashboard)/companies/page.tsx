@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
-import { cn, sanitizeFilterValue } from '@/lib/utils';
+import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting } from '@/lib/utils';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
@@ -637,9 +637,17 @@ export default function CompaniesPage() {
       setError(null);
 
       const safeSearch = sanitizeFilterValue(searchTerm);
+      const digits = stripPhoneFormatting(searchTerm);
+      let filter = '';
+      if (safeSearch) {
+        filter = `company_name ~ "${safeSearch}" || owner_name ~ "${safeSearch}"`;
+        if (digits.length >= 3) {
+          filter += ` || ${buildPhoneSearchFilter('phone_number', searchTerm)}`;
+        }
+      }
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
         sort: '-created',
-        ...(safeSearch && { filter: `company_name ~ "${safeSearch}" || owner_name ~ "${safeSearch}"` }),
+        ...(filter && { filter }),
       });
 
       setCompanies(result.items);

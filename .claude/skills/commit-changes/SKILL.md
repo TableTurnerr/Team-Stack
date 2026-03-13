@@ -11,7 +11,7 @@ This skill automates the workflow for committing changes in the TableTurnerr CRM
 
 - **Git** must be installed and configured.
 - **Node.js** must be available to run the `bump_version.js` script.
-- **cmd /c** should be used for all shell commands on Windows.
+- Use bash shell commands (Unix-style paths).
 
 ## Workflow
 
@@ -21,7 +21,7 @@ Before analyzing changes, the agent MUST report the current state of the workspa
 
 1. **Check Versions**: Run the status report script to see what versions everything is currently on.
    ```bash
-   cmd /c "node .gemini/skills/commit-changes/scripts/get_status.js"
+   node .gemini/skills/commit-changes/scripts/get_status.js
    ```
 2. **Report**: Display the current versions. Proceed autonomously to analyze changes without asking for confirmation or feature lists.
 
@@ -41,9 +41,8 @@ For EACH logical group identified in step 2:
 2. **Generate a specific commit message**:
    - **Regular Changes**: `Nature(Component): Detailed description of this specific group of changes`
    - **Fix Type**: If the change is a fix, use: `fix(Component): Description (vX.Y)` where `vX.Y` is the **current** version of the component (not the bumped one).
-3. **Write the message** to a temporary file `commit_msg.txt`.
-4. **Commit**: `cmd /c "git commit -F commit_msg.txt"`
-5. **Cleanup**: Delete `commit_msg.txt`.
+3. **Commit** using a heredoc for the message to ensure proper formatting.
+4. Repeat for each logical group.
 
 **CRITICAL**: Do NOT include version file updates (e.g., `package.json`, `manifest.json`, `.csproj`) in these commits.
 
@@ -53,23 +52,23 @@ After all functional changes are committed, perform a single, final commit for a
 
 1. **Apply Bumps**: Run `bump_version.js` for the root and all modified components.
    ```bash
-   cmd /c "node .gemini/skills/commit-changes/scripts/bump_version.js apps/dashboard/package.json patch true"
+   node .gemini/skills/commit-changes/scripts/bump_version.js apps/dashboard/package.json patch true
    ```
    For the Local CRM Agent (.csproj, semver X.Y.Z):
    ```bash
-   cmd /c "node .gemini/skills/commit-changes/scripts/bump_version.js tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj patch"
+   node .gemini/skills/commit-changes/scripts/bump_version.js tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj patch
    ```
 2. **Stage all version files**: `git add package.json apps/dashboard/package.json ...`
 3. **Generate commit message**: `chore(version): bump versions to [Root New Version] ([Component1] vX.Y, [Component2] vA.B)`
-4. **Commit**: `cmd /c "git commit -m \"[message]\""`
+4. **Commit** using a heredoc for the message.
 
 ## Guidelines
 
 - **Autonomous Mode**: Do NOT ask the user for confirmation, approval, or additional information once the directive to commit is given.
+- **No Co-Author**: NEVER add a `Co-Authored-By` line to commit messages.
 - **Atomic Commits**: Keep commits focused. Don't mix UI changes with database schema changes in one commit.
 - **Granularity**: If a component has two unrelated changes, make two separate commits.
 - **Scraper UI**: When bumping the Scraper, ensure BOTH `manifest.json` and `version.json` are updated.
-- **Local CRM Agent**: Uses `.csproj` with semver (`X.Y.Z`). The bump script handles this format automatically. Bump path: `tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj`. After bumping, you MUST also update all other hardcoded version strings to match:
-  - `tools/local-CRM-Agent/src/LocalCrmAgent/Models/Messages.cs` — `HeartbeatMessage.Version` default value
+- **Local CRM Agent**: Uses `.csproj` with semver (`X.Y.Z`). The bump script handles this format automatically. Bump path: `tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj`. The tray label and heartbeat `version` field both read from the assembly at runtime — only the README example still requires a manual update:
   - `tools/local-CRM-Agent/README.md` — heartbeat example JSON `"version"` field
 - **Root Bump**: Ensure the root `package.json` version is updated at least once during the process if any changes occurred.

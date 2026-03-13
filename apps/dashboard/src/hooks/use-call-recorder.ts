@@ -170,6 +170,11 @@ export function useCallRecorder(
             if (startTimeRef.current) {
                 setDuration(Math.floor((Date.now() - startTimeRef.current.getTime()) / 1000));
             }
+            // Keep AudioContext alive while recording — browsers may suspend it
+            // when the tab loses focus, which silently kills audio flow.
+            if (audioCtxRef.current?.state === 'suspended') {
+                audioCtxRef.current.resume().catch(console.error);
+            }
         }, 1000);
     }, []);
 
@@ -305,9 +310,17 @@ export function useCallRecorder(
                 setIsSessionActive(false);
             };
 
-            displayStream.getTracks().forEach((track) => {
+            // Only listen for ended on AUDIO tracks. The video track from
+            // getDisplayMedia can end randomly (browser optimisation, tab switch,
+            // minimised shared window) while the audio continues — attaching
+            // onended to it was the root cause of recordings stopping mid-call.
+            displayStream.getAudioTracks().forEach((track) => {
                 track.onended = handleStreamEnded;
             });
+
+            // Stop video tracks immediately — we only need audio, and keeping
+            // them alive wastes resources and can interfere with recording.
+            displayStream.getVideoTracks().forEach((t) => t.stop());
 
             streamRef.current = mixedStream;
             sourceStreamRef.current = displayStream;
@@ -375,6 +388,13 @@ export function useCallRecorder(
         // produces a tiny/empty segment — root cause of "recordings cut short."
         if (mediaRecorderRef.current?.state === 'recording') {
             return;
+        }
+
+        // Resume AudioContext if the browser suspended it (common when tab
+        // loses focus). A suspended context stops feeding audio to the
+        // MediaRecorder, causing empty/truncated recordings.
+        if (audioCtxRef.current?.state === 'suspended') {
+            audioCtxRef.current.resume().catch(console.error);
         }
 
         // Bump generation so any in-flight onstop from the previous recorder

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog } from '@/lib/types';
-import { formatDate, formatPhoneNumber, cn } from '@/lib/utils';
+import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilterValue, stripPhoneFormatting } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { getOutcomeColors } from '@/lib/call-outcomes';
@@ -161,8 +161,12 @@ export default function ColdCallsPage() {
       const filters: string[] = [];
 
       if (searchTerm) {
-        const safe = searchTerm.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        filters.push(`(expand.company.company_name ~ "${safe}" || expand.phone_number_record.phone_number ~ "${safe}" || owner_name_found ~ "${safe}" || post_call_notes ~ "${safe}")`);
+        const safe = sanitizeFilterValue(searchTerm);
+        const digits = stripPhoneFormatting(searchTerm);
+        const phoneCondition = digits.length >= 3
+          ? buildPhoneSearchFilter('phone_number_record.phone_number', searchTerm)
+          : `phone_number_record.phone_number ~ "${safe}"`;
+        filters.push(`(company.company_name ~ "${safe}" || ${phoneCondition} || owner_name_found ~ "${safe}" || post_call_notes ~ "${safe}")`);
       }
       if (outcomeFilter.length > 0) {
         const outcomeConditions = outcomeFilter.map(o => `call_outcome = "${o}"`).join(' || ');

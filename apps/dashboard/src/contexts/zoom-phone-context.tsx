@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
+// import { useLocalAgent } from './local-agent-context';  // See NOTE in ZoomPhoneProvider
 
 // ── Zoom Call Status ────────────────────────────────────────────────────
 export type ZoomCallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
@@ -150,6 +151,15 @@ function extractPhoneNumber(data: Record<string, unknown>): string | null {
 }
 
 export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
+    // ── Local Agent integration ──────────────────────────────────────
+    // When the local desktop agent is connected, its WASAPI-based call state
+    // is ground truth. If the agent says the call is still connected, we
+    // suppress false "ended" events from the Zoom iframe.
+    // NOTE: Local agent integration (useLocalAgent) was previously used here
+    // to suppress false Zoom ended events via WASAPI ground truth. Removed to
+    // avoid wasteful re-renders — re-add if agent-based call state verification
+    // is needed in the future.
+
     // Virtual dialer: when __TEST_VIRTUAL_DIALER is set on window, skip Zoom iframe
     // and dispatch synthetic call events. All state-machine logic still runs unchanged.
     const isVirtualDialer = typeof window !== 'undefined' && !!(window as any).__TEST_VIRTUAL_DIALER;
@@ -171,6 +181,12 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     const autoHangupEnabledRef = useRef(false);
     const autoHangupSecondsRef = useRef(15);
     const autoHangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Timer for delayed idle-reset after call ends — stored in ref so new
+    // ringing/connected events can cancel it (prevents stale resets during
+    // network instability where Zoom fires spurious disconnect events).
+    const endedIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+
 
     // Call direction tracking
     const [callDirection, setCallDirection] = useState<'outbound' | 'inbound' | null>(null);
@@ -212,7 +228,18 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const refreshDialer = useCallback(() => {
-        console.log('[Zoom Phone] Refreshing dialer...');
+        console.log('[Zoom Phone] Refreshing dialer — resetting all call state...');
+        // Reset call state so stale ringing/connected status doesn't persist
+        if (endedIdleTimerRef.current) { clearTimeout(endedIdleTimerRef.current); endedIdleTimerRef.current = null; }
+        callStatusRef.current = 'idle';
+        setCallStatus('idle');
+        setIsDialing(false);
+        setCallDirection(null);
+        setIncomingCallerNumber(null);
+        pendingCallRef.current = null;
+        outboundIntentRef.current = false;
+        if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+        // Reload the iframe
         setIframeReadyState(false);
         setRefreshKey(prev => prev + 1);
     }, []);
@@ -249,7 +276,10 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
             // ── RINGING ──
             if (eventLower.includes('ringing')) {
-                // Only process FIRST ringing event per call (ref updated synchronously).
+                // Cancel any pending idle-reset from a previous ended event
+                if (endedIdleTimerRef.current) { clearTimeout(endedIdleTimerRef.current); endedIdleTimerRef.current = null; }
+                // Cancel any pending agent grace timer — new call supersedes
+                        // Only process FIRST ringing event per call (ref updated synchronously).
                 if (callStatusRef.current !== 'ringing') {
                     callStatusRef.current = 'ringing';
                     setCallStatus('ringing');
@@ -308,6 +338,10 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
             // ── CONNECTED ──
             } else if (eventLower.includes('connected') || eventLower.includes('answered')) {
+                // Cancel any pending idle-reset from a previous ended event
+                if (endedIdleTimerRef.current) { clearTimeout(endedIdleTimerRef.current); endedIdleTimerRef.current = null; }
+                // Cancel any pending agent grace timer — call reconnected
+        
                 console.log('[Zoom Phone] Call connected');
                 if (callStatusRef.current !== 'connected' && callStatusRef.current !== 'ringing') {
                     // Direction not set yet (skipped ringing) — detect now
@@ -329,20 +363,80 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                 pendingCallRef.current = null;
 
             // ── ENDED ──
-            } else if (eventLower.includes('ended') || eventLower.includes('hangup') || eventLower.includes('disconnect')) {
-                console.log('[Zoom Phone] Call ended');
-                callStatusRef.current = 'ended';
-                setCallStatus('ended');
-                setIsDialing(false);
-                pendingCallRef.current = null;
-                outboundIntentRef.current = false;
-                if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
-                setTimeout(() => {
-                    callStatusRef.current = 'idle';
-                    setCallStatus('idle');
-                    setCallDirection(null);
-                    setIncomingCallerNumber(null);
-                }, 2000);
+            // Precise matching to avoid false positives from non-call events
+            // (e.g. "audioDisconnected", "websocketDisconnected", "recordingEnded")
+            // that Zoom fires during network instability without the call ending.
+            } else if (
+                eventLower === 'ended' || eventLower === 'hangup' || eventLower === 'disconnect' ||
+                (eventLower.startsWith('call') && (eventLower.includes('ended') || eventLower.includes('hangup') || eventLower.includes('disconnect'))) ||
+                (eventLower.startsWith('zp') && (eventLower.includes('ended') || eventLower.includes('hangup') || eventLower.includes('disconnect')))
+            ) {
+                // Only process if we're actually in a call — ignore stale/duplicate end events
+                if (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected') {
+                    // Helper to process the call-ended transition
+                    const processCallEnded = () => {
+                        // Guard: another event may have already transitioned us
+                        if (callStatusRef.current !== 'ringing' && callStatusRef.current !== 'connected') return;
+
+                        console.log('[Zoom Phone] Call ended');
+                        callStatusRef.current = 'ended';
+                        setCallStatus('ended');
+                        setIsDialing(false);
+                        pendingCallRef.current = null;
+                        outboundIntentRef.current = false;
+                        if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+                        if (endedIdleTimerRef.current) clearTimeout(endedIdleTimerRef.current);
+                        endedIdleTimerRef.current = setTimeout(() => {
+                            endedIdleTimerRef.current = null;
+                            callStatusRef.current = 'idle';
+                            setCallStatus('idle');
+                            setCallDirection(null);
+                            setIncomingCallerNumber(null);
+                        }, 500);
+                    };
+
+                    // Trust Zoom's ended event immediately — no grace period.
+                    // The agent's WASAPI polling now detects end within ~0.5s,
+                    // so delaying for the agent adds latency without benefit.
+                    processCallEnded();
+                } else {
+                    console.log('[Zoom Phone] Ignored end event (not in call):', type, '| status:', callStatusRef.current);
+                }
+
+            // ── FAILED / REJECTED ──
+            // Zoom may send events like "callFailed", "callRejected", etc.
+            // when the VoIP call fails to go through. Precise matching avoids
+            // false positives from generic failure events during network instability.
+            } else if (
+                eventLower === 'failed' || eventLower === 'rejected' ||
+                (eventLower.startsWith('call') && (eventLower.includes('fail') || eventLower.includes('reject'))) ||
+                (eventLower.startsWith('zp') && (eventLower.includes('fail') || eventLower.includes('reject')))
+            ) {
+                // Only process if we're actually in a call
+                if (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected') {
+                    const processCallFailed = () => {
+                        if (callStatusRef.current !== 'ringing' && callStatusRef.current !== 'connected') return;
+                        console.log('[Zoom Phone] Call failed/rejected:', type);
+                        callStatusRef.current = 'ended';
+                        setCallStatus('ended');
+                        setIsDialing(false);
+                        pendingCallRef.current = null;
+                        outboundIntentRef.current = false;
+                        if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+                        if (endedIdleTimerRef.current) clearTimeout(endedIdleTimerRef.current);
+                        endedIdleTimerRef.current = setTimeout(() => {
+                            endedIdleTimerRef.current = null;
+                            callStatusRef.current = 'idle';
+                            setCallStatus('idle');
+                            setCallDirection(null);
+                            setIncomingCallerNumber(null);
+                        }, 500);
+                    };
+
+                    processCallFailed();
+                } else {
+                    console.log('[Zoom Phone] Ignored fail/reject event (not in call):', type, '| status:', callStatusRef.current);
+                }
             }
 
             // Catch-all: extract phone number from any event with data
@@ -447,9 +541,16 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                 console.log('[Zoom Phone] Zoom did not respond to end call, forcing status update');
                 callStatusRef.current = 'ended';
                 setCallStatus('ended');
-                setTimeout(() => { callStatusRef.current = 'idle'; setCallStatus('idle'); }, 2000);
+                if (endedIdleTimerRef.current) clearTimeout(endedIdleTimerRef.current);
+                endedIdleTimerRef.current = setTimeout(() => {
+                    endedIdleTimerRef.current = null;
+                    callStatusRef.current = 'idle';
+                    setCallStatus('idle');
+                    setCallDirection(null);
+                    setIncomingCallerNumber(null);
+                }, 500);
             }
-        }, 1000);
+        }, 500);
     }, []);
 
     const setAutoHangup = useCallback((enabled: boolean, seconds?: number) => {
@@ -537,6 +638,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         setIsDialerOpen(true);
         setLastDialedNumber(cleaned);
         setActiveCallNumber(cleaned);
+        setCustomDialerNumber(cleaned);
         setIsDialing(true);
 
         // Safety timeout for isDialing in case Zoom never responds

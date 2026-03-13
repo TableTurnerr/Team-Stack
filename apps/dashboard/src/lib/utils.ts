@@ -73,6 +73,86 @@ export function sanitizeFilterValue(value: string): string {
 }
 
 /**
+ * Strip all non-digit characters from a string.
+ */
+export function stripPhoneFormatting(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+/**
+ * Build a PocketBase filter expression for phone number search that
+ * ignores formatting symbols (dashes, parentheses, spaces, dots, +).
+ *
+ * Generates multiple format variations so the search matches regardless
+ * of how the number is stored in the database.
+ */
+export function buildPhoneSearchFilter(fieldName: string, searchTerm: string): string {
+  const digits = stripPhoneFormatting(searchTerm);
+
+  // If fewer than 3 digits, just do a simple contains with the original
+  if (digits.length < 3) {
+    const safe = sanitizeFilterValue(searchTerm);
+    return `${fieldName} ~ "${safe}"`;
+  }
+
+  // Escape a value for use inside a quoted PocketBase filter string
+  const esc = (v: string) => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  const variations = new Set<string>();
+  variations.add(digits);
+
+  // Also add the original input (escaped for filter safety)
+  const sanitizedOriginal = sanitizeFilterValue(searchTerm);
+  if (sanitizedOriginal) variations.add(sanitizedOriginal);
+
+  // Derive 10-digit base from 11-digit (US country code) or take last 10
+  let base10 = '';
+  if (digits.length === 11 && digits.startsWith('1')) {
+    base10 = digits.slice(1);
+  } else if (digits.length === 10) {
+    base10 = digits;
+  } else if (digits.length > 10) {
+    base10 = digits.slice(-10);
+    variations.add(base10);
+  }
+
+  // Generate formatted variations for 10-digit numbers
+  if (base10.length === 10) {
+    const a = base10.slice(0, 3);
+    const p = base10.slice(3, 6);
+    const l = base10.slice(6);
+    variations.add(base10);
+    variations.add(`(${a}) ${p}-${l}`);
+    variations.add(`${a}-${p}-${l}`);
+    variations.add(`${a}.${p}.${l}`);
+    variations.add(`${a} ${p} ${l}`);
+    variations.add(`+1${base10}`);
+    variations.add(`+1 (${a}) ${p}-${l}`);
+    variations.add(`+1${a}${p}${l}`);
+  }
+
+  // Generate formatted variations for 7-digit numbers
+  if (digits.length === 7) {
+    const p = digits.slice(0, 3);
+    const l = digits.slice(3);
+    variations.add(`${p}-${l}`);
+    variations.add(`${p} ${l}`);
+    variations.add(`${p}.${l}`);
+  }
+
+  // For longer inputs, also try last 7 digits
+  if (digits.length > 7 && digits.length !== 10 && digits.length !== 11) {
+    variations.add(digits.slice(-7));
+  }
+
+  const conditions = Array.from(variations)
+    .map(v => `${fieldName} ~ "${esc(v)}"`)
+    .join(' || ');
+
+  return `(${conditions})`;
+}
+
+/**
  * Session Statistics Helper Functions
  */
 

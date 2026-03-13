@@ -79,14 +79,20 @@ export function IncomingCallHandler() {
 
     // ── Effect 1: Inbound ringing ──
     useEffect(() => {
-        if (callStatus !== 'ringing' || callDirection !== 'inbound') return;
+        if (callStatus !== 'ringing' || callDirection !== 'inbound') {
+            dialIncrementedRef.current = false; // Reset for next inbound call
+            return;
+        }
         if (!isActiveForCalls) return;
+        if (dialIncrementedRef.current) return; // Already handled this inbound ring
+
+        // Mark as handled immediately to prevent re-firing when session updates
+        dialIncrementedRef.current = true;
 
         // Capture state for this call's lifecycle
         ringStartTimeRef.current = Date.now();
         connectTimeRef.current = null;
         wasConnectedRef.current = false;
-        dialIncrementedRef.current = false;
         pickupIncrementedRef.current = false;
         capturedCallerNumberRef.current = incomingCallerNumber;
         capturedSessionRef.current = session;
@@ -105,7 +111,6 @@ export function IncomingCallHandler() {
                 'total_incoming+': 1,
             } as any).then(updated => {
                 setSession(updated);
-                dialIncrementedRef.current = true;
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
         }
     }, [callStatus, callDirection, incomingCallerNumber, session, setSession, lookupIncomingNumber, isActiveForCalls]);

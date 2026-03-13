@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using LocalCrmAgent.Models;
 using LocalCrmAgent.Services;
 
@@ -10,18 +11,23 @@ namespace LocalCrmAgent.UI;
 /// </summary>
 public class TrayIconManager : IDisposable
 {
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
     private readonly NotifyIcon _notifyIcon;
     private readonly AgentService _agent;
     private readonly CallStateFusion _fusion;
+    private readonly ZoomAudioMonitor _audioMonitor;
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _connectionsItem;
     private readonly ToolStripMenuItem _zoomItem;
     private readonly System.Windows.Forms.Timer _updateTimer;
 
-    public TrayIconManager(AgentService agent, CallStateFusion fusion)
+    public TrayIconManager(AgentService agent, CallStateFusion fusion, ZoomAudioMonitor audioMonitor)
     {
         _agent = agent;
         _fusion = fusion;
+        _audioMonitor = audioMonitor;
 
         _statusItem = new ToolStripMenuItem("Call: Idle") { Enabled = false };
         _connectionsItem = new ToolStripMenuItem("CRM Clients: 0") { Enabled = false };
@@ -86,7 +92,7 @@ public class TrayIconManager : IDisposable
                 _ => (Color.Gray, "Idle"),
             };
 
-            _notifyIcon.Icon = CreateDotIcon(color);
+            SetIcon(color);
             _notifyIcon.Text = $"CRM Agent — {text}";
             _statusItem.Text = $"Call: {text}";
 
@@ -120,17 +126,33 @@ public class TrayIconManager : IDisposable
                 _statusItem.Text = $"Call: Connected ({state.DurationSeconds}s)";
             }
 
-            // Update zoom detection indicator
-            // (done in timer to avoid constant process scanning)
-            var zoomRunning = _agent.IsRunning;
+            // Update zoom detection indicator using actual Zoom process check.
+            // Previously this checked _agent.IsRunning (always true while the
+            // agent service is active), making it useless as a Zoom indicator.
+            var zoomRunning = _audioMonitor.IsZoomRunning();
             _zoomItem.Text = zoomRunning ? "Zoom: Detected" : "Zoom: Not found";
         }
         catch { }
     }
 
+    /// <summary>
+    /// Replace the tray icon, properly disposing the old one to prevent
+    /// GDI handle leaks. Each icon involves a Bitmap + native HICON.
+    /// </summary>
+    private void SetIcon(Color color)
+    {
+        var oldIcon = _notifyIcon.Icon;
+        _notifyIcon.Icon = CreateDotIcon(color);
+        if (oldIcon != null)
+        {
+            DestroyIcon(oldIcon.Handle);
+            oldIcon.Dispose();
+        }
+    }
+
     private static Icon CreateDotIcon(Color color)
     {
-        var bmp = new Bitmap(16, 16);
+        using var bmp = new Bitmap(16, 16);
         using (var g = Graphics.FromImage(bmp))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -141,7 +163,10 @@ public class TrayIconManager : IDisposable
             g.DrawEllipse(pen, 2, 2, 12, 12);
         }
         var hIcon = bmp.GetHicon();
-        var icon = Icon.FromHandle(hIcon);
+        // Clone the icon so we own the lifetime; the HICON from GetHicon()
+        // is freed when the Bitmap is disposed (via the using above).
+        var icon = (Icon)Icon.FromHandle(hIcon).Clone();
+        DestroyIcon(hIcon);
         return icon;
     }
 

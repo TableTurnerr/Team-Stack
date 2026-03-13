@@ -39,7 +39,7 @@ static class Program
         Debug.WriteLine("[Main] Agent started, entering message loop...");
 
         // ── Create tray icon (must be on STA/UI thread) ────────────
-        using var trayManager = new TrayIconManager(agent, fusion);
+        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor);
 
         // ── Run WinForms message loop (blocks until Exit) ──────────
         Application.Run();

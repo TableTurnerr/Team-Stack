@@ -69,5 +69,7 @@ After all functional changes are committed, perform a single, final commit for a
 - **Atomic Commits**: Keep commits focused. Don't mix UI changes with database schema changes in one commit.
 - **Granularity**: If a component has two unrelated changes, make two separate commits.
 - **Scraper UI**: When bumping the Scraper, ensure BOTH `manifest.json` and `version.json` are updated.
-- **Local CRM Agent**: Uses `.csproj` with semver (`X.Y.Z`). The bump script handles this format automatically. Bump path: `tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj`.
+- **Local CRM Agent**: Uses `.csproj` with semver (`X.Y.Z`). The bump script handles this format automatically. Bump path: `tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj`. After bumping, you MUST also update all other hardcoded version strings to match:
+  - `tools/local-CRM-Agent/src/LocalCrmAgent/Models/Messages.cs` — `HeartbeatMessage.Version` default value
+  - `tools/local-CRM-Agent/README.md` — heartbeat example JSON `"version"` field
 - **Root Bump**: Ensure the root `package.json` version is updated at least once during the process if any changes occurred.

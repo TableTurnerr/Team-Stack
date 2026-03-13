@@ -21,6 +21,7 @@ import { RecycleBinProvider } from '@/contexts/recycle-bin-context';
 import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
 import { IncomingCallHandler } from '@/components/incoming-call-handler';
+import { LocalAgentProvider } from '@/contexts/local-agent-context';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -85,6 +86,7 @@ export default function DashboardLayout({
     <SidebarProvider>
       <AuthGuard>
         <ToastProvider>
+          <LocalAgentProvider>
           <ZoomPhoneProvider>
             <SessionProvider>
               <TeamPresenceProvider>
@@ -100,6 +102,7 @@ export default function DashboardLayout({
               </TeamPresenceProvider>
             </SessionProvider>
           </ZoomPhoneProvider>
+          </LocalAgentProvider>
         </ToastProvider>
       </AuthGuard>
     </SidebarProvider>

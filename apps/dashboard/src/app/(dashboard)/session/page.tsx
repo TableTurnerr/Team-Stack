@@ -34,6 +34,7 @@ import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useToast } from '@/components/ui/toast';
 import { Tooltip } from '@/components/ui/tooltip';
+import { useLocalAgent } from '@/contexts/local-agent-context';
 
 function formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
@@ -82,6 +83,7 @@ export default function SessionPage() {
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
+    const { isConnected: agentConnected, launchAgent } = useLocalAgent();
 
     // Loading combined
     const loading = sessionLoading;
@@ -1757,6 +1759,33 @@ export default function SessionPage() {
                                     {zoomDetected === null && !zoomDetecting && <p className="text-xs text-[var(--muted)] mt-0.5">Click to open Zoom and verify it is running</p>}
                                 </div>
                             </button>
+                            {/* Local Agent verification */}
+                            <button
+                                type="button"
+                                onClick={() => { if (!agentConnected) launchAgent(); }}
+                                disabled={agentConnected}
+                                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                                    agentConnected
+                                        ? 'border-[var(--success)] bg-[var(--success-subtle)] cursor-default'
+                                        : 'border-[var(--card-border)] bg-[var(--sidebar-bg)] hover:border-[var(--foreground)]/30 hover:bg-[var(--card-hover)] cursor-pointer active:scale-[0.99]'
+                                }`}
+                            >
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${agentConnected ? 'bg-[var(--success)]/20' : 'bg-[var(--card-bg)]'}`}>
+                                    {agentConnected
+                                        ? <Check size={20} className="text-[var(--success)]" />
+                                        : <AlertTriangle size={20} className="text-[var(--muted)]" />
+                                    }
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-semibold ${agentConnected ? 'text-[var(--success)]' : 'text-[var(--foreground)]'}`}>
+                                        CRM Local Agent
+                                    </p>
+                                    {agentConnected
+                                        ? <p className="text-xs text-[var(--success)] mt-0.5">Agent connected and running</p>
+                                        : <p className="text-xs text-[var(--muted)] mt-0.5">Agent not detected — click to launch</p>
+                                    }
+                                </div>
+                            </button>
                             {recorderError && (
                                 <div className="text-xs text-[var(--error)] bg-[var(--error-subtle)]/30 p-2 rounded-lg">
                                     {recorderError}
@@ -1771,7 +1800,7 @@ export default function SessionPage() {
                                 </button>
                                 <button
                                     onClick={handleConnectAudioAndStart}
-                                    disabled={!zoomAppConfirmed || starting}
+                                    disabled={!zoomAppConfirmed || !agentConnected || starting}
                                     className="flex-[2] py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                                 >
                                     {starting ? 'Connecting...' : 'Connect Audio & Start'}

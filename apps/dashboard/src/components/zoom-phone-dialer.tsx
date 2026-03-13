@@ -10,6 +10,7 @@ import { CustomDialerOverlay } from '@/components/custom-dialer-overlay';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import { useRouter } from 'next/navigation';
+import { useLocalAgent } from '@/contexts/local-agent-context';
 
 const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
 
@@ -56,6 +57,7 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
     const router = useRouter();
     const { callStatus, dialNumber, iframeRef, iframeReady, setIframeReady, isDialing, refreshKey, customDialerNumber, activeCallNumber, refreshDialer } = useZoomPhone();
     const { session, setSession } = useSession();
+    const { isConnected: agentConnected, callState: agentCallState, networkQuality, launchAgent } = useLocalAgent();
 
     const [yPosition, setYPosition] = useState(DEFAULT_Y);
     const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -738,6 +740,36 @@ export function ZoomPhoneDialer({ docked = false, disabled = false, hidden = fal
                         <div className="flex-1 flex flex-col bg-white overflow-hidden">
                             {/* Call Recorder Controls */}
                             <CallRecorderControls />
+
+                            {/* Local Agent Status */}
+                            <div className={cn(
+                                'flex items-center gap-1.5 px-3 py-1 border-b border-[var(--card-border)] text-[10px]',
+                                agentConnected ? 'bg-[var(--sidebar-bg)]' : 'bg-yellow-500/5 border-yellow-500/20'
+                            )}>
+                                <span className={cn(
+                                    'inline-block w-1.5 h-1.5 rounded-full shrink-0',
+                                    agentConnected ? 'bg-green-500' : 'bg-yellow-500'
+                                )} />
+                                {agentConnected ? (
+                                    <span className="text-[var(--muted)] font-medium">
+                                        Agent
+                                        {agentCallState?.state === 'connected' && (
+                                            <span className="text-green-500 ml-1">Call active</span>
+                                        )}
+                                        {networkQuality && !networkQuality.isStable && (
+                                            <span className="text-yellow-500 ml-1">Network unstable</span>
+                                        )}
+                                    </span>
+                                ) : (
+                                    <button
+                                        onClick={launchAgent}
+                                        className="text-yellow-600 hover:text-yellow-500 font-medium transition-colors"
+                                        title="Click to launch the CRM Agent for reliable call monitoring"
+                                    >
+                                        Agent offline — Click to launch
+                                    </button>
+                                )}
+                            </div>
 
                             {/* Dialer / Iframe area */}
                             <div className="flex-1 relative">

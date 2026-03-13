@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones, Download, Minimize2, Maximize2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Recording } from '@/lib/types';
-import { formatDate, formatDateTime, formatDuration, formatPhoneNumber, cn, sanitizeFilterValue } from '@/lib/utils';
+import { formatDate, formatDateTime, formatDuration, formatPhoneNumber, cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
@@ -394,16 +394,14 @@ export default function RecordingsPage() {
       if (searchTerm) {
         const safeSearch = sanitizeFilterValue(searchTerm);
         if (safeSearch) {
+          const digits = stripPhoneFormatting(searchTerm);
+          const phoneCondition = digits.length >= 3
+            ? buildPhoneSearchFilter('phone_number', searchTerm)
+            : `phone_number ~ "${safeSearch}"`;
           const searchConditions = [
-            `phone_number ~ "${safeSearch}"`,
+            phoneCondition,
             `note ~ "${safeSearch}"`
           ];
-
-          // If search resembles a phone number, try also searching by raw digits
-          const cleanedSearch = safeSearch.replace(/\D/g, '');
-          if (cleanedSearch.length >= 3 && cleanedSearch !== safeSearch) {
-            searchConditions.push(`phone_number ~ "${cleanedSearch}"`);
-          }
 
           filters.push(`(${searchConditions.join(' || ')})`);
         }

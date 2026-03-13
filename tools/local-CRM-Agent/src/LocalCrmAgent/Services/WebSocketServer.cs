@@ -13,6 +13,7 @@ public class AgentWebSocketServer : IDisposable
 {
     private readonly CallStateFusion _fusion;
     private readonly NetworkMonitor _networkMonitor;
+    private readonly ZoomAudioMonitor _audioMonitor;
     private WebSocketServer? _server;
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
@@ -29,10 +30,11 @@ public class AgentWebSocketServer : IDisposable
 
     public event Action<int>? ConnectionCountChanged;
 
-    public AgentWebSocketServer(CallStateFusion fusion, NetworkMonitor networkMonitor, int port = 9876)
+    public AgentWebSocketServer(CallStateFusion fusion, NetworkMonitor networkMonitor, ZoomAudioMonitor audioMonitor, int port = 9876)
     {
         _fusion = fusion;
         _networkMonitor = networkMonitor;
+        _audioMonitor = audioMonitor;
         Port = port;
     }
 
@@ -71,8 +73,8 @@ public class AgentWebSocketServer : IDisposable
 
             socket.OnMessage = msg =>
             {
-                // Clients can send config messages (future use)
                 Debug.WriteLine($"[WS] Received: {msg}");
+                _ = HandleClientMessage(msg, socket);
             };
         });
 
@@ -80,6 +82,74 @@ public class AgentWebSocketServer : IDisposable
         _fusion.StateChanged += OnStateChanged;
 
         Debug.WriteLine($"[WS] Server started on ws://127.0.0.1:{Port}");
+    }
+
+    private async Task HandleClientMessage(string message, IWebSocketConnection client)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(message);
+            var type = doc.RootElement.GetProperty("type").GetString();
+
+            switch (type)
+            {
+                case "launchZoom":
+                    await HandleLaunchZoom(client);
+                    break;
+                case "checkZoom":
+                    HandleCheckZoom(client);
+                    break;
+                default:
+                    Debug.WriteLine($"[WS] Unknown command type: {type}");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[WS] Error handling client message: {ex.Message}");
+        }
+    }
+
+    private async Task HandleLaunchZoom(IWebSocketConnection client)
+    {
+        var (success, alreadyRunning, msg) = await _audioMonitor.LaunchZoom();
+        var response = new ZoomActionMessage
+        {
+            Action = "launch",
+            Success = success,
+            ZoomRunning = success || alreadyRunning,
+            Message = msg,
+        };
+        SendTo(client, response);
+    }
+
+    private void HandleCheckZoom(IWebSocketConnection client)
+    {
+        var isRunning = _audioMonitor.IsZoomRunning();
+        var response = new ZoomActionMessage
+        {
+            Action = "check",
+            Success = true,
+            ZoomRunning = isRunning,
+            Message = isRunning ? "Zoom is running" : "Zoom is not running",
+        };
+        SendTo(client, response);
+    }
+
+    private void SendTo<T>(IWebSocketConnection client, T message) where T : AgentMessage
+    {
+        try
+        {
+            if (client.IsAvailable)
+            {
+                var json = JsonSerializer.Serialize(message, _jsonOptions);
+                client.Send(json);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[WS] Error sending to client: {ex.Message}");
+        }
     }
 
     private void OnStateChanged(CallStateInfo info)

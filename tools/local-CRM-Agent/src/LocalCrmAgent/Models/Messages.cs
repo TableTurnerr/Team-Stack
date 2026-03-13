@@ -73,3 +73,20 @@ public class HeartbeatMessage : AgentMessage
 
     public HeartbeatMessage() => Type = "heartbeat";
 }
+
+public class ZoomActionMessage : AgentMessage
+{
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
+
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("zoomRunning")]
+    public bool ZoomRunning { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    public ZoomActionMessage() => Type = "zoomAction";
+}

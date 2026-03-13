@@ -31,7 +31,7 @@ static class Program
         var windowMonitor = new ZoomWindowMonitor();
         var networkMonitor = new NetworkMonitor();
         var fusion = new CallStateFusion(audioMonitor, windowMonitor);
-        var wsServer = new AgentWebSocketServer(fusion, networkMonitor);
+        var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
         var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor);
 
         // ── Start agent ────────────────────────────────────────────

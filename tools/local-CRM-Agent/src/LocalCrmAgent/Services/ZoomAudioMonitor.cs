@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 
@@ -15,8 +16,33 @@ namespace LocalCrmAgent.Services;
 /// </summary>
 public class ZoomAudioMonitor : IDisposable
 {
+    // ── Win32 P/Invoke for minimizing Zoom after launch ──────────────
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    private const int SW_MINIMIZE = 6;
+
+    // Broad matching for audio session detection — safe because we're only
+    // checking processes that already have an active audio session.
     private static readonly string[] ZoomProcessNames =
         ["zoom", "cpthost", "zoomphone", "zoom phone"];
+
+    // Exact-match names for the main Zoom APPLICATION (not background services
+    // like ZoomWebHost, ZoomUs, updaters, etc. that persist after closing the app).
+    private static readonly string[] ZoomAppProcessNames =
+        ["zoom", "zoomphone"];
 
     public class AudioSessionInfo
     {
@@ -248,24 +274,35 @@ public class ZoomAudioMonitor : IDisposable
     }
 
     /// <summary>
-    /// Quick check: is any Zoom process currently running?
+    /// Quick check: is the main Zoom application currently running?
+    /// Uses exact process-name matching to avoid false positives from
+    /// Zoom background services (ZoomWebHost, updaters, etc.) that
+    /// persist even after the user closes Zoom.
     /// </summary>
     public bool IsZoomRunning()
     {
         try
         {
-            foreach (var proc in Process.GetProcesses())
+            var processes = Process.GetProcesses();
+            try
             {
-                try
+                foreach (var proc in processes)
                 {
-                    if (IsZoomProcess(proc.ProcessName))
+                    try
                     {
-                        proc.Dispose();
-                        return true;
+                        if (IsZoomAppProcess(proc.ProcessName))
+                            return true;
                     }
-                    proc.Dispose();
+                    catch { }
                 }
-                catch { }
+            }
+            finally
+            {
+                // Dispose ALL process handles — not just the matched one.
+                // Process.GetProcesses() allocates native handles for every
+                // process; failing to dispose them all leaks OS handles.
+                foreach (var proc in processes)
+                    try { proc.Dispose(); } catch { }
             }
         }
         catch { }
@@ -273,8 +310,19 @@ public class ZoomAudioMonitor : IDisposable
     }
 
     /// <summary>
+    /// Exact match against known Zoom application process names.
+    /// Excludes background services like ZoomWebHost, ZoomUs, etc.
+    /// </summary>
+    private static bool IsZoomAppProcess(string processName)
+    {
+        return ZoomAppProcessNames.Any(z =>
+            string.Equals(processName, z, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// Attempt to launch Zoom if it is not already running.
     /// Returns (success, alreadyRunning, message).
+    /// Polls for up to 10 seconds after launch to confirm the process started.
     /// </summary>
     public async Task<(bool Success, bool AlreadyRunning, string Message)> LaunchZoom()
     {
@@ -292,10 +340,12 @@ public class ZoomAudioMonitor : IDisposable
                     FileName = "zoommtg://zoom.us/",
                     UseShellExecute = true,
                 });
-                await Task.Delay(3000);
-                return IsZoomRunning()
-                    ? (true, false, "Zoom launched via protocol handler")
-                    : (false, false, "Zoom not found — please install or launch manually");
+                if (await WaitForZoomProcess())
+                {
+                    MinimizeZoomWindows();
+                    return (true, false, "Zoom launched via protocol handler");
+                }
+                return (false, false, "Zoom not found — please install or launch manually");
             }
             catch
             {
@@ -309,17 +359,91 @@ public class ZoomAudioMonitor : IDisposable
             {
                 FileName = exePath,
                 UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Minimized,
             });
-            // Wait briefly for the process to appear
-            await Task.Delay(3000);
-            return IsZoomRunning()
-                ? (true, false, "Zoom launched successfully")
-                : (false, false, "Zoom process started but not detected yet");
+            if (await WaitForZoomProcess())
+            {
+                // Zoom creates its own windows after the initial process starts,
+                // so minimize all visible Zoom windows to keep it in the background.
+                MinimizeZoomWindows();
+                return (true, false, "Zoom launched successfully");
+            }
+            return (false, false, "Zoom process started but not detected yet");
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[AudioMonitor] Failed to launch Zoom: {ex.Message}");
             return (false, false, $"Failed to launch Zoom: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Poll for the main Zoom process for up to 10 seconds (1s intervals).
+    /// Zoom can take several seconds to fully start.
+    /// </summary>
+    private async Task<bool> WaitForZoomProcess()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await Task.Delay(1000);
+            if (IsZoomRunning())
+            {
+                Debug.WriteLine($"[AudioMonitor] Zoom process detected after {i + 1}s");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Minimize all visible Zoom windows so the app runs in the background
+    /// (system tray) without stealing focus from the CRM.
+    /// </summary>
+    private void MinimizeZoomWindows()
+    {
+        try
+        {
+            // Collect PIDs of running Zoom app processes
+            var zoomPids = new HashSet<uint>();
+            var processes = Process.GetProcesses();
+            try
+            {
+                foreach (var proc in processes)
+                {
+                    try
+                    {
+                        if (IsZoomAppProcess(proc.ProcessName))
+                            zoomPids.Add((uint)proc.Id);
+                    }
+                    catch { }
+                }
+            }
+            finally
+            {
+                foreach (var proc in processes)
+                    try { proc.Dispose(); } catch { }
+            }
+
+            if (zoomPids.Count == 0) return;
+
+            int minimized = 0;
+            EnumWindows((hWnd, _) =>
+            {
+                if (!IsWindowVisible(hWnd)) return true;
+                GetWindowThreadProcessId(hWnd, out uint pid);
+                if (zoomPids.Contains(pid))
+                {
+                    ShowWindow(hWnd, SW_MINIMIZE);
+                    minimized++;
+                }
+                return true;
+            }, IntPtr.Zero);
+
+            Debug.WriteLine($"[AudioMonitor] Minimized {minimized} Zoom window(s)");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[AudioMonitor] Failed to minimize Zoom: {ex.Message}");
         }
     }
 

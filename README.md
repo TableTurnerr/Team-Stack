@@ -52,7 +52,11 @@ CRM-Tableturnerr/
 │   │   ├── recorder.py            # Main GUI application
 │   │   └── installer.nsi          # NSIS installer script
 │   │
-│   ├── call-recorder-v2/          # 🎤 .NET/WPF call recording application
+│   ├── local-CRM-Agent/           # 🖥️ .NET 8 desktop agent for Zoom call monitoring
+│   │   ├── src/LocalCrmAgent/     # WASAPI audio + Win32 window monitoring
+│   │   ├── build-release.bat      # Build self-contained exe
+│   │   ├── install.bat            # End-user one-click installer
+│   │   └── uninstall.bat          # Clean removal script
 │   │
 │   ├── transcriber/               # 🧠 Gemini AI transcription service
 │   │   ├── transcribe_calls.py    # Main transcription script
@@ -86,7 +90,8 @@ CRM-Tableturnerr/
 | | SQLite | (built into PocketBase) |
 | **AI/ML** | Google Gemini API | gemini-2.5-flash |
 | **Integrations** | Zoom Phone Smart Embed | Latest |
-| **Desktop Tools** | Python | 3.10+ |
+| **Desktop Tools** | .NET 8 | (Local CRM Agent — WASAPI + WebSocket) |
+| | Python | 3.10+ |
 | | PyQt6 | (audio recorder GUI) |
 | | PyInstaller | (Windows executables) |
 | **Browser Extension** | Chrome Manifest V3 | |
@@ -213,7 +218,28 @@ Modern Next.js 15 web application with:
   - Auto-record calls setting for automatic recording
   - Native dialer toggle for switching between custom and Zoom dialers
   - Call status tracking (idle, ringing, connected, ended)
+  - **Local Agent Integration**: Suppresses false iframe disconnect events during network instability using WASAPI ground-truth signals from the Local CRM Agent
   - Configurable via Settings → Integrations
+
+- **Local Agent Integration** (`local-agent-context.tsx`):
+  - WebSocket client to `ws://127.0.0.1:9876` with auto-reconnect (exponential backoff)
+  - Agent verification gate on session start page (must be running before calling)
+  - Agent status indicator in dialer UI with one-click launch button
+  - Graceful degradation when agent is not installed or running
+
+### Local CRM Agent (`tools/local-CRM-Agent`)
+.NET 8 Windows desktop agent that provides reliable call state monitoring:
+- **WASAPI Audio Monitoring**: OS-level Zoom audio session detection — ground truth for call state regardless of network conditions
+- **Win32 Window Parsing**: Extracts phone numbers, call timers, and ringing state from Zoom window titles
+- **WebSocket Server**: Broadcasts call state, heartbeats, and network quality on `ws://127.0.0.1:9876`
+- **State Machine**: Fuses audio + window signals into `idle → ringing → connected → ended` lifecycle
+- **Network Quality**: ICMP ping monitoring with latency, jitter, and packet loss metrics
+- **System Tray**: Colored dot icon (gray/gold/green/blue) with status context menu
+- **Auto-Start**: Registers in Windows startup and `crm-agent://` protocol handler
+- **Self-Contained**: Single ~75MB exe, no .NET runtime install needed
+- **Distribution**: `build-release.bat` → zip `dist/` → team runs `install.bat`
+
+> **Detailed docs**: [`tools/local-CRM-Agent/README.md`](tools/local-CRM-Agent/README.md) | [`tools/local-CRM-Agent/SETUP.md`](tools/local-CRM-Agent/SETUP.md)
 
 ### Audio Recorder (`tools/audio-recorder`)
 PyQt6 desktop application:
@@ -310,6 +336,7 @@ These can be configured via **Settings → Integrations → Zoom Phone**.
 | PocketBase API | `http://localhost:8090` | `https://api.yourdomain.com` |
 | Dashboard | `http://localhost:3000` | `https://app.yourdomain.com` |
 | PocketBase Admin | `http://localhost:8090/_/` | `https://api.yourdomain.com/_/` |
+| Local CRM Agent (WebSocket) | `ws://127.0.0.1:9876` | N/A (runs locally per user) |
 
 ---
 
@@ -329,6 +356,11 @@ pocketbase serve  # http://localhost:8090
 cd apps/dashboard
 cp .env.example .env.local
 pnpm dev  # http://localhost:3000
+
+# 5. Install Local CRM Agent (Windows — required for call sessions)
+cd tools/local-CRM-Agent
+build-release.bat        # Build self-contained exe
+dist\install.bat         # Install and launch
 ```
 
 > **Detailed Setup**: See [SETUP_GUIDE.md](SETUP_GUIDE.md)
@@ -371,6 +403,8 @@ Test coverage: auth, overview, companies, cold calls, session lifecycle, session
 | Document | Purpose |
 |----------|---------|
 | [SETUP_GUIDE.md](SETUP_GUIDE.md) | Detailed installation, seeding, and deployment |
+| [tools/local-CRM-Agent/README.md](tools/local-CRM-Agent/README.md) | Local Agent architecture, WebSocket protocol, state machine |
+| [tools/local-CRM-Agent/SETUP.md](tools/local-CRM-Agent/SETUP.md) | Agent installation for team members and developer build guide |
 | [packages/hubspot/HUBSPOT_CONTEXT.md](packages/hubspot/HUBSPOT_CONTEXT.md) | HubSpot CRM migration mapping |
 
 ---

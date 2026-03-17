@@ -10,13 +10,18 @@ namespace ToolManager;
 static class Program
 {
     [DllImport("kernel32.dll")]
-    private static extern IntPtr GetConsoleWindow();
+    private static extern bool AllocConsole();
 
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("kernel32.dll")]
+    private static extern bool FreeConsole();
 
-    private const int SW_HIDE = 0;
-    private const int SW_SHOW = 5;
+    [DllImport("kernel32.dll")]
+    private static extern bool SetConsoleOutputCP(uint codepage);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool SetConsoleCP(uint codepage);
+
+    private const uint CP_UTF8 = 65001;
 
     [STAThread]
     static async Task Main(string[] args)
@@ -51,8 +56,21 @@ static class Program
         // ── Interactive CLI mode ──────────────────────────────
         if (isInteractive)
         {
+            // WinExe has no console — allocate one for the CLI
+            AllocConsole();
+            SetConsoleOutputCP(CP_UTF8);
+            SetConsoleCP(CP_UTF8);
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            Console.InputEncoding = System.Text.Encoding.UTF8;
+            Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+            Console.SetIn(new StreamReader(Console.OpenStandardInput()));
+            Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+            Console.Title = "TableTurnerr Tool Manager";
+
             var cli = new CliApp(github, installer, registry, scheduler, selfUpdater);
             await cli.RunAsync();
+
+            FreeConsole();
             return;
         }
 
@@ -74,9 +92,7 @@ static class Program
             return;
         }
 
-        // ── Tray mode (default): hide console, show tray icon ─
-        HideConsole();
-
+        // ── Tray mode (default): no console, just tray icon ──
         scheduler.Start();
         selfUpdater.Start();
         Debug.WriteLine("[Main] Services started (tray mode)");
@@ -94,7 +110,7 @@ static class Program
     }
 
     /// <summary>
-    /// Launch an interactive CLI session in a new console window.
+    /// Launch an interactive CLI session in a new process with its own console.
     /// </summary>
     internal static void LaunchInteractive()
     {
@@ -103,17 +119,10 @@ static class Program
 
         Process.Start(new ProcessStartInfo
         {
-            FileName = "cmd.exe",
-            Arguments = $"/c \"\"{exePath}\" --interactive\"",
+            FileName = exePath,
+            Arguments = "--interactive",
             UseShellExecute = true,
         });
-    }
-
-    private static void HideConsole()
-    {
-        var hwnd = GetConsoleWindow();
-        if (hwnd != IntPtr.Zero)
-            ShowWindow(hwnd, SW_HIDE);
     }
 
     private static void EnsureAutoStart()

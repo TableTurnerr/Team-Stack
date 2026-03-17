@@ -191,6 +191,17 @@ public class TrayIconManager : IDisposable
                 _updateItem.Text = status;
                 _updateItem.Enabled = false;
             }
+            else if (_autoUpdater.UpdateAvailable)
+            {
+                _updateItem.Text = $"Install Update (v{_autoUpdater.LatestVersion!.ToString(3)})";
+                _updateItem.Enabled = true;
+            }
+            else
+            {
+                // "Up to date", "Check failed", etc. — revert to default
+                _updateItem.Text = "Check for Updates";
+                _updateItem.Enabled = true;
+            }
         }
         catch { }
     }

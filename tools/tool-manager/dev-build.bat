@@ -26,12 +26,12 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo Build successful: dist-dev\ToolManager.exe
 
-:: Deploy to installed location
+:: Deploy to installed location (copy ALL published files, not just exe)
 set "INSTALL_DIR=%LocalAppData%\TableTurnerr\ToolManager"
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 if not exist "%INSTALL_DIR%\tools" mkdir "%INSTALL_DIR%\tools"
 echo Updating installed version at %INSTALL_DIR%...
-copy /Y "dist-dev\ToolManager.exe" "%INSTALL_DIR%\ToolManager.exe" >nul
+xcopy /Y /Q "dist-dev\*.*" "%INSTALL_DIR%\" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [WARN] Could not update installed version. Launching from dist-dev instead.
     echo        Close the manager from system tray and try again.
@@ -39,10 +39,15 @@ if %ERRORLEVEL% neq 0 (
     goto :done
 )
 echo Installed version updated.
-echo Launching...
 echo.
 
+:: Start the tray process (background, hides its console)
 start "" "%INSTALL_DIR%\ToolManager.exe"
+timeout /t 2 /nobreak >nul
+
+:: Open the interactive CLI in a new terminal window
+echo Opening Tool Manager CLI...
+start "TableTurnerr Tool Manager" "%INSTALL_DIR%\ToolManager.exe" --interactive
 
 :done
-echo Tool Manager is running. Check the system tray.
+echo Tool Manager is running in the system tray.

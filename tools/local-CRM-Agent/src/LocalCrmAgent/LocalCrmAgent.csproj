@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>LocalCrmAgent</RootNamespace>
     <AssemblyName>LocalCrmAgent</AssemblyName>
-    <Version>1.0.7</Version>
+    <Version>1.0.8</Version>
     <Company>TableTurnerr</Company>
     <Product>Local CRM Agent</Product>
     <Description>Local desktop agent that monitors Zoom Phone call state via WASAPI and serves reliable signals to the CRM dashboard over WebSocket.</Description>

@@ -100,6 +100,7 @@ export function FloatingSessionStatus() {
                 ended_at: new Date().toISOString(),
                 total_duration_sec: elapsedSec,
                 status: 'completed',
+                on_call: false,
             });
             setSession(null);
         } catch (err) {

@@ -79,7 +79,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup } = useZoomPhone();
+    const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup, isAudioDisconnected } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
@@ -359,6 +359,39 @@ export default function SessionPage() {
             addToast('success', 'CRM Agent reconnected. Resume session when ready.');
         }
     }, [agentConnected, session, addToast]);
+
+    // ---------------------------------------------------------------------------
+    // Audio disconnect (Reconnect Audio screen) — auto-pause when Zoom reports
+    // audio disconnection while NOT on an active call. If on a call, skip the
+    // pause so the call and recording can continue uninterrupted.
+    // ---------------------------------------------------------------------------
+    const prevAudioDisconnectedRef = useRef(false);
+
+    useEffect(() => {
+        if (!session || session.status !== 'active') {
+            prevAudioDisconnectedRef.current = false;
+            return;
+        }
+
+        const prev = prevAudioDisconnectedRef.current;
+        prevAudioDisconnectedRef.current = isAudioDisconnected;
+
+        const isOnCall = callStatus === 'ringing' || callStatus === 'connected';
+
+        if (!prev && isAudioDisconnected) {
+            if (isOnCall) {
+                // On a call — don't pause, let call and recording continue
+                addToast('warning', 'Reconnect Audio detected — call still active, session not paused');
+            } else if (!session.paused_at) {
+                // Not on a call — auto-pause
+                pauseSessionRef.current();
+                addToast('warning', 'Session auto-paused — Reconnect Audio detected');
+            }
+        } else if (prev && !isAudioDisconnected && !isOnCall) {
+            // Audio reconnected outside a call (no auto-resume)
+            addToast('success', 'Audio reconnected. Resume session when ready.');
+        }
+    }, [isAudioDisconnected, session, callStatus, addToast]);
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -974,6 +1007,7 @@ export default function SessionPage() {
                 ended_at: new Date().toISOString(),
                 total_duration_sec: finalDuration,
                 status: 'completed',
+                on_call: false,
             });
             setSession(null);
             setLastCallLog(null);

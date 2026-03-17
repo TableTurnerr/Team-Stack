@@ -148,6 +148,7 @@ export function TeamPresenceProvider({ children }: { children: React.ReactNode }
                         ended_at: new Date().toISOString(),
                         total_duration_sec: elapsedSec,
                         status: 'completed',
+                        on_call: false,
                     });
                     console.log('[TeamPresence] Auto-ended stale session for offline user:', owner.id, session.id);
                 } catch (err) {

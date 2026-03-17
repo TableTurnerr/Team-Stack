@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { Plus, Phone, MessageSquare, Clock, RefreshCw, Users, Radio, PhoneCall, Trophy } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { Plus, Phone, MessageSquare, Clock, RefreshCw, Users, Radio, PhoneCall, Trophy, Power, Loader2 } from 'lucide-react';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useTeamPresence } from '@/contexts/team-presence-context';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type User } from '@/lib/types';
+import { COLLECTIONS, type User, type ColdCallingSession } from '@/lib/types';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
 
 interface UserStats {
@@ -43,11 +43,84 @@ function LiveClock({ startedAt }: { startedAt: string }) {
   return <>{formatElapsed(elapsed)}</>;
 }
 
+// Confirmation dialog for ending another user's session
+function EndSessionConfirmDialog({
+  userName,
+  onConfirm,
+  onCancel,
+  isEnding,
+}: {
+  userName: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isEnding: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">
+        <h3 className="text-base font-semibold mb-2">End Session</h3>
+        <p className="text-sm text-[var(--muted)] mb-5">
+          Are you sure you want to end <span className="font-semibold text-[var(--foreground)]">{userName}</span>&apos;s session? This will mark it as completed immediately.
+        </p>
+        <div className="flex items-center gap-3 justify-end">
+          <button
+            onClick={onCancel}
+            disabled={isEnding}
+            className="px-4 py-2 rounded-lg text-sm font-medium border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isEnding}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[var(--error)] text-white hover:bg-[var(--error)]/90 transition-colors disabled:opacity-50"
+          >
+            {isEnding ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
+            {isEnding ? 'Ending...' : 'End Session'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TeamPage() {
   const { isAuthenticated } = useAuth();
   const { teamMembers, getSessionForUser, isOnline, isLoading, refresh } = useTeamPresence();
   const [statsMap, setStatsMap] = useState<Record<string, UserStats>>({});
   const [statsLoading, setStatsLoading] = useState(true);
+
+  // State for ending another user's session
+  const [endingSessionFor, setEndingSessionFor] = useState<{ userId: string; userName: string; session: ColdCallingSession } | null>(null);
+  const [isEndingSession, setIsEndingSession] = useState(false);
+
+  const handleEndOtherSession = useCallback(async () => {
+    if (!endingSessionFor) return;
+    const { session } = endingSessionFor;
+    try {
+      setIsEndingSession(true);
+      const started = new Date(session.started_at).getTime();
+      const totalPausedSec = session.total_paused_sec ?? 0;
+      const currentPauseSec = session.paused_at
+        ? Math.floor((Date.now() - new Date(session.paused_at).getTime()) / 1000)
+        : 0;
+      const elapsedSec = Math.max(0,
+        Math.floor((Date.now() - started) / 1000) - totalPausedSec - currentPauseSec
+      );
+      await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, {
+        ended_at: new Date().toISOString(),
+        total_duration_sec: elapsedSec,
+        status: 'completed',
+        on_call: false,
+      });
+      setEndingSessionFor(null);
+    } catch (err) {
+      console.error('Failed to end session:', err);
+      alert('Failed to end session. Please try again.');
+    } finally {
+      setIsEndingSession(false);
+    }
+  }, [endingSessionFor]);
 
   // Fetch supplemental stats (all-time calls, DMs) once — these aren't real-time critical
   useEffect(() => {
@@ -134,6 +207,16 @@ export default function TeamPage() {
           </button>
         </div>
       </div>
+
+      {/* End Session Confirmation Dialog */}
+      {endingSessionFor && (
+        <EndSessionConfirmDialog
+          userName={endingSessionFor.userName}
+          onConfirm={handleEndOtherSession}
+          onCancel={() => setEndingSessionFor(null)}
+          isEnding={isEndingSession}
+        />
+      )}
 
       {/* Team Grid */}
       <div className={cn(teamMembers.length === 0 && 'bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden')}>
@@ -242,6 +325,21 @@ export default function TeamPage() {
                           </div>
                         </div>
                       </div>
+                      {/* End Session button */}
+                      <button
+                        onClick={() => setEndingSessionFor({ userId: user.id, userName: user.name || 'this user', session: activeSession })}
+                        disabled={!!activeSession.on_call}
+                        className={cn(
+                          "w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all mt-1",
+                          activeSession.on_call
+                            ? "bg-[var(--card-hover)] text-[var(--muted)] cursor-not-allowed opacity-60"
+                            : "bg-[var(--error-subtle)] text-[var(--error)] border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white"
+                        )}
+                        title={activeSession.on_call ? `${user.name || 'User'} is currently on a call` : 'End this session'}
+                      >
+                        <Power size={11} />
+                        {activeSession.on_call ? 'On Call — Cannot End' : 'End Session'}
+                      </button>
                     </div>
                   )}
 

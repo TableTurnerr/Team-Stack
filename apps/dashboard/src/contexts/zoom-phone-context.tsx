@@ -49,6 +49,12 @@ interface ZoomPhoneContextType {
     callDirection: 'outbound' | 'inbound' | null;
     /** Phone number of the incoming caller for inbound calls */
     incomingCallerNumber: string | null;
+    /** Configured outbound caller ID (manual or auto-learned) */
+    outboundCallerId: string | null;
+    /** Set the outbound caller ID manually */
+    setOutboundCallerId: (callerId: string | null) => void;
+    /** Whether Zoom reported an audio disconnect (Reconnect Audio screen) */
+    isAudioDisconnected: boolean;
 }
 
 const ZoomPhoneContext = createContext<ZoomPhoneContextType | null>(null);
@@ -75,6 +81,8 @@ export function useZoomPhoneOptional() {
 // whose caller matches our own number is a false positive (Zoom echoing our
 // outbound call) and gets suppressed.
 const OWN_PHONE_STORAGE_KEY = 'crm:zoom-own-phone-number';
+const CALLER_ID_STORAGE_KEY = 'crm:zoom-outbound-caller-id';
+const DEFAULT_CALLER_ID = '+1808559006';
 
 /** Normalize to last 10 digits for comparison (strips country code, +, formatting) */
 function normalizeDigits(phone: string): string {
@@ -186,11 +194,17 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     // network instability where Zoom fires spurious disconnect events).
     const endedIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-
+    // Audio disconnect detection — set when Zoom fires "audioDisconnected"
+    // during an active call (Reconnect Audio screen), cleared on next call event
+    const [isAudioDisconnected, setIsAudioDisconnected] = useState(false);
 
     // Call direction tracking
     const [callDirection, setCallDirection] = useState<'outbound' | 'inbound' | null>(null);
     const [incomingCallerNumber, setIncomingCallerNumber] = useState<string | null>(null);
+
+    // Outbound caller ID — manually configured, auto-learned, or default
+    const [outboundCallerId, setOutboundCallerIdState] = useState<string | null>(DEFAULT_CALLER_ID);
+    const outboundCallerIdRef = useRef<string | null>(DEFAULT_CALLER_ID);
 
     // Outbound intent — set in dialNumber(), persists until call ends.
     const outboundIntentRef = useRef(false);
@@ -200,13 +214,21 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     // Any "incoming call" from this number is suppressed as a false positive.
     const ownPhoneNumberRef = useRef<string | null>(null);
 
-    // Load own number from localStorage on mount
+    // Load own number and caller ID from localStorage on mount
     useEffect(() => {
         try {
             const saved = localStorage.getItem(OWN_PHONE_STORAGE_KEY);
             if (saved) {
                 ownPhoneNumberRef.current = saved;
                 console.log('[Zoom Phone] Loaded own phone number from storage:', saved);
+            }
+        } catch { /* ignore */ }
+        try {
+            const savedCallerId = localStorage.getItem(CALLER_ID_STORAGE_KEY);
+            if (savedCallerId) {
+                outboundCallerIdRef.current = savedCallerId;
+                setOutboundCallerIdState(savedCallerId);
+                console.log('[Zoom Phone] Loaded outbound caller ID from storage:', savedCallerId);
             }
         } catch { /* ignore */ }
     }, []);
@@ -218,6 +240,50 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             setIframeReadyState(true);
         }
     }, [isVirtualDialer]);
+
+    const setOutboundCallerId = useCallback((callerId: string | null) => {
+        outboundCallerIdRef.current = callerId;
+        setOutboundCallerIdState(callerId);
+        try {
+            if (callerId) {
+                localStorage.setItem(CALLER_ID_STORAGE_KEY, callerId);
+            } else {
+                localStorage.removeItem(CALLER_ID_STORAGE_KEY);
+            }
+        } catch { /* ignore */ }
+        console.log('[Zoom Phone] Outbound caller ID set to:', callerId);
+
+        // Push to Zoom iframe immediately if ready
+        if (callerId && !isVirtualDialer) {
+            const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
+            if (iframe?.contentWindow) {
+                iframe.contentWindow.postMessage({ type: 'zp-set-caller-id', data: { callerId } }, 'https://applications.zoom.us');
+                iframe.contentWindow.postMessage({ type: 'zp-set-outbound-caller-id', data: { callerId } }, 'https://applications.zoom.us');
+            }
+        }
+    }, [isVirtualDialer]);
+
+    // When iframe becomes ready, push caller ID configuration to Zoom
+    useEffect(() => {
+        if (!iframeReady || isVirtualDialer) return;
+
+        const callerId = outboundCallerIdRef.current || ownPhoneNumberRef.current;
+        if (!callerId) return;
+
+        // Small delay to let the embedded phone finish internal initialization
+        const timer = setTimeout(() => {
+            const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
+            if (!iframe?.contentWindow) return;
+
+            console.log('[Zoom Phone] Pushing caller ID to Zoom embed:', callerId);
+            // Try multiple message formats — Zoom's API may accept either
+            iframe.contentWindow.postMessage({ type: 'zp-set-caller-id', data: { callerId } }, 'https://applications.zoom.us');
+            iframe.contentWindow.postMessage({ type: 'zp-set-outbound-caller-id', data: { callerId } }, 'https://applications.zoom.us');
+            iframe.contentWindow.postMessage({ type: 'zp-set-settings', data: { outboundCallerId: callerId } }, 'https://applications.zoom.us');
+        }, 2000);
+
+        return () => clearTimeout(timer);
+    }, [iframeReady, isVirtualDialer]);
 
     const registerDialCallback = useCallback((cb: (() => void) | null) => {
         dialCallbackRef.current = cb;
@@ -236,6 +302,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         setIsDialing(false);
         setCallDirection(null);
         setIncomingCallerNumber(null);
+        setIsAudioDisconnected(false);
         pendingCallRef.current = null;
         outboundIntentRef.current = false;
         if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
@@ -278,6 +345,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             if (eventLower.includes('ringing')) {
                 // Cancel any pending idle-reset from a previous ended event
                 if (endedIdleTimerRef.current) { clearTimeout(endedIdleTimerRef.current); endedIdleTimerRef.current = null; }
+                // Clear audio disconnect flag — call is active again
+                setIsAudioDisconnected(false);
                 // Cancel any pending agent grace timer — new call supersedes
                         // Only process FIRST ringing event per call (ref updated synchronously).
                 if (callStatusRef.current !== 'ringing') {
@@ -316,6 +385,13 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                                 console.log('[Zoom Phone] Learned own phone number:', callerNum);
                                 try { localStorage.setItem(OWN_PHONE_STORAGE_KEY, callerNum); } catch { /* */ }
                             }
+                            // Auto-set caller ID if not manually configured
+                            if (!outboundCallerIdRef.current && callerNum) {
+                                outboundCallerIdRef.current = callerNum;
+                                setOutboundCallerIdState(callerNum);
+                                try { localStorage.setItem(CALLER_ID_STORAGE_KEY, callerNum); } catch { /* */ }
+                                console.log('[Zoom Phone] Auto-set outbound caller ID:', callerNum);
+                            }
                         }
                     }
 
@@ -340,6 +416,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             } else if (eventLower.includes('connected') || eventLower.includes('answered')) {
                 // Cancel any pending idle-reset from a previous ended event
                 if (endedIdleTimerRef.current) { clearTimeout(endedIdleTimerRef.current); endedIdleTimerRef.current = null; }
+                // Clear audio disconnect flag — audio reconnected
+                setIsAudioDisconnected(false);
                 // Cancel any pending agent grace timer — call reconnected
         
                 console.log('[Zoom Phone] Call connected');
@@ -437,6 +515,13 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                 } else {
                     console.log('[Zoom Phone] Ignored fail/reject event (not in call):', type, '| status:', callStatusRef.current);
                 }
+
+            // ── AUDIO DISCONNECTED (Reconnect Audio screen) ──
+            } else if (eventLower.includes('audiodisconnect')) {
+                if (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected' || callStatusRef.current === 'idle') {
+                    console.log('[Zoom Phone] Audio disconnected — Reconnect Audio interface detected');
+                    setIsAudioDisconnected(true);
+                }
             }
 
             // Catch-all: extract phone number from any event with data
@@ -485,12 +570,14 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             return false;
         }
 
-        console.log('[Zoom Phone] Sending dial message for:', phoneNumber);
+        const callerId = outboundCallerIdRef.current || ownPhoneNumberRef.current;
+        console.log('[Zoom Phone] Sending dial message for:', phoneNumber, '| callerId:', callerId);
         iframe.contentWindow.postMessage(
             {
                 type: 'zp-make-call',
                 data: {
                     number: phoneNumber,
+                    callerId: callerId || undefined,
                     autoDial: true
                 }
             },
@@ -667,6 +754,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             refreshKey,
             autoHangupEnabled, autoHangupSeconds, setAutoHangup,
             callDirection, incomingCallerNumber,
+            outboundCallerId, setOutboundCallerId,
+            isAudioDisconnected,
         }}>
             {children}
         </ZoomPhoneContext.Provider>

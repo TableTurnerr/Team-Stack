@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, Mail, Building2, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CompanyHoverCard } from '@/components/company-hover-card';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
@@ -110,13 +111,17 @@ export function ListMembersTable({ listType, companyIds, filterRules, className 
               <div key={company.id} className="px-4 py-3 hover:bg-[var(--card-hover)] transition-colors">
                 <div className="grid grid-cols-12 gap-4 items-center">
                   <div className="col-span-4 flex items-center gap-2 min-w-0">
-                    <Building2 size={16} className="text-[var(--muted)] shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{company.company_name}</p>
-                      {company.owner_name && (
-                        <p className="text-xs text-[var(--muted)] truncate">{company.owner_name}</p>
-                      )}
-                    </div>
+                    <CompanyHoverCard company={company}>
+                      <div className="flex items-center gap-2 min-w-0 cursor-default">
+                        <Building2 size={16} className="text-[var(--muted)] shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{company.company_name}</p>
+                          {company.owner_name && (
+                            <p className="text-xs text-[var(--muted)] truncate">{company.owner_name}</p>
+                          )}
+                        </div>
+                      </div>
+                    </CompanyHoverCard>
                   </div>
 
                   <div className="col-span-3 min-w-0">

@@ -8,6 +8,7 @@ import { COLLECTIONS } from '@/lib/types';
 import type { Company } from '@/lib/types';
 import { EMAIL_COLLECTIONS, type EmailUnsubscribe } from '@/lib/email-types';
 import { SearchInput } from '@/components/search-input';
+import { CompanyHoverCard } from '@/components/company-hover-card';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { formatDateTime, sanitizeFilterValue } from '@/lib/utils';
 
@@ -277,10 +278,14 @@ export function SuppressionManager({ className }: SuppressionManagerProps) {
                   <div key={company.id} className="px-4 py-3 hover:bg-[var(--card-hover)] transition-colors">
                     <div className="grid grid-cols-12 gap-4 items-center">
                       <div className="col-span-4">
-                        <p className="text-sm font-medium truncate">{company.company_name}</p>
-                        {company.owner_name && (
-                          <p className="text-xs text-[var(--muted)] truncate">{company.owner_name}</p>
-                        )}
+                        <CompanyHoverCard company={company}>
+                          <div className="cursor-default">
+                            <p className="text-sm font-medium truncate">{company.company_name}</p>
+                            {company.owner_name && (
+                              <p className="text-xs text-[var(--muted)] truncate">{company.owner_name}</p>
+                            )}
+                          </div>
+                        </CompanyHoverCard>
                       </div>
                       <div className="col-span-3">
                         <p className="text-sm text-[var(--muted)] truncate">{company.email || '—'}</p>

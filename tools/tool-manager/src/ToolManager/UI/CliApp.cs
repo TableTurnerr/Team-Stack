@@ -8,7 +8,6 @@ namespace ToolManager.UI;
 
 /// <summary>
 /// Interactive terminal UI for the Tool Manager — styled after modern CLI tools.
-/// Replaces the WinForms GUI with a rich Spectre.Console-based interface.
 /// </summary>
 public class CliApp
 {
@@ -44,21 +43,27 @@ public class CliApp
 
         while (true)
         {
-            AnsiConsole.Clear();
-            RenderHeader();
-
-            tools = await FetchTools();
-            RenderToolTable(tools);
-            AnsiConsole.WriteLine();
-
-            var action = PromptAction(tools);
-            if (action == "Exit") break;
-
-            await HandleAction(action, tools);
-
-            if (action != "Exit")
+            try
             {
+                AnsiConsole.Clear();
+                RenderHeader();
+
+                tools = await FetchTools();
+                RenderToolTable(tools);
                 AnsiConsole.WriteLine();
+
+                var action = PromptAction(tools);
+                if (action == "Exit") break;
+
+                await HandleAction(action, tools);
+
+                AnsiConsole.WriteLine();
+                AnsiConsole.Markup("[dim]Press any key to continue...[/]");
+                Console.ReadKey(true);
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[red]Error: {Markup.Escape(ex.Message)}[/]");
                 AnsiConsole.Markup("[dim]Press any key to continue...[/]");
                 Console.ReadKey(true);
             }
@@ -72,15 +77,28 @@ public class CliApp
     /// </summary>
     private async Task AutoUpdateInstalledTools(List<ToolInfo> tools)
     {
-        var updatable = tools.Where(t => t.IsInstalled && t.UpdateAvailable).ToList();
-        if (updatable.Count == 0) return;
+        await _selfUpdater.CheckNow();
 
-        AnsiConsole.MarkupLine($"[yellow]Found {updatable.Count} update(s) — applying automatically...[/]");
+        var updatable = tools.Where(t => t.IsInstalled && t.UpdateAvailable).ToList();
+        var hasSelfUpdate = _selfUpdater.UpdateAvailable;
+
+        if (updatable.Count == 0 && !hasSelfUpdate) return;
+
+        var totalUpdates = updatable.Count + (hasSelfUpdate ? 1 : 0);
+        AnsiConsole.MarkupLine($"[yellow]Found {totalUpdates} update(s) — applying automatically...[/]");
         AnsiConsole.WriteLine();
 
         foreach (var tool in updatable)
         {
             await RunInstallWithProgress(tool, "Updating");
+        }
+        _github.RefreshInstalledStatus();
+
+        if (hasSelfUpdate)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Updating Tool Manager v{_selfUpdater.CurrentVersion.ToString(3)} → v{_selfUpdater.LatestVersion!.ToString(3)} — restarting...[/]");
+            await _selfUpdater.ApplyUpdate();
+            return;
         }
 
         AnsiConsole.MarkupLine("[green]All updates applied.[/]");
@@ -130,17 +148,19 @@ public class CliApp
             .AddColumn(new TableColumn("[bold]Type[/]"));
 
         // Manager self-entry
+        var selfLatest = _selfUpdater.UpdateAvailable
+            ? $"v{_selfUpdater.LatestVersion!.ToString(3)}"
+            : $"v{_selfUpdater.CurrentVersion.ToString(3)}";
         var selfStatus = _selfUpdater.UpdateAvailable
-            ? $"[yellow]v{_selfUpdater.LatestVersion!.ToString(3)} available[/]"
+            ? "[yellow]Update available[/]"
             : "[green]Up to date[/]";
         table.AddRow(
             "[dodgerblue1]Tool Manager[/]",
-            $"v{_selfUpdater.CurrentVersion.ToString(3)}",
+            selfLatest,
             $"v{_selfUpdater.CurrentVersion.ToString(3)}",
             selfStatus,
             "[dim]this app[/]");
 
-        // Tool entries
         foreach (var tool in tools)
         {
             var latest = FormatVersion(tool.LatestVersion);
@@ -181,13 +201,9 @@ public class CliApp
     {
         var choices = new List<string> { "Check for Updates" };
 
-        var installable = tools.Where(t => !t.IsInstalled).ToList();
-        var updatable = tools.Where(t => t.UpdateAvailable).ToList();
-        var uninstallable = tools.Where(t => t.IsInstalled).ToList();
-
-        if (installable.Count > 0) choices.Add("Install a Tool");
-        if (updatable.Count > 0) choices.Add("Update a Tool");
-        if (uninstallable.Count > 0) choices.Add("Uninstall a Tool");
+        if (tools.Any(t => !t.IsInstalled)) choices.Add("Install a Tool");
+        if (tools.Any(t => t.UpdateAvailable) || _selfUpdater.UpdateAvailable) choices.Add("Update a Tool");
+        if (tools.Any(t => t.IsInstalled)) choices.Add("Uninstall a Tool");
 
         choices.Add("Configure API Token");
         choices.Add("Exit");
@@ -242,15 +258,21 @@ public class CliApp
             });
 
         var updatable = tools.Where(t => t.IsInstalled && t.UpdateAvailable).ToList();
+        var hasSelfUpdate = _selfUpdater.UpdateAvailable;
 
-        if (updatable.Count == 0)
+        if (updatable.Count == 0 && !hasSelfUpdate)
         {
             AnsiConsole.MarkupLine("[green]All tools are up to date.[/]");
             return;
         }
 
-        // Show what's available
-        AnsiConsole.MarkupLine($"[yellow]Found {updatable.Count} update(s):[/]");
+        var totalUpdates = updatable.Count + (hasSelfUpdate ? 1 : 0);
+        AnsiConsole.MarkupLine($"[yellow]Found {totalUpdates} update(s):[/]");
+        if (hasSelfUpdate)
+        {
+            AnsiConsole.MarkupLine($"  [bold dodgerblue1]Tool Manager[/]  " +
+                $"v{_selfUpdater.CurrentVersion.ToString(3)} → v{_selfUpdater.LatestVersion!.ToString(3)}");
+        }
         foreach (var t in updatable)
         {
             AnsiConsole.MarkupLine($"  [bold]{Markup.Escape(t.DisplayName)}[/]  " +
@@ -258,16 +280,23 @@ public class CliApp
         }
         AnsiConsole.WriteLine();
 
-        // Ask user to confirm
         if (!AnsiConsole.Confirm("Apply updates now?", defaultValue: true))
             return;
 
         AnsiConsole.WriteLine();
+
         foreach (var tool in updatable)
         {
             await RunInstallWithProgress(tool, "Updating");
         }
         _github.RefreshInstalledStatus();
+
+        if (hasSelfUpdate)
+        {
+            AnsiConsole.MarkupLine("[yellow]Applying Tool Manager update — the app will restart...[/]");
+            await _selfUpdater.ApplyUpdate();
+            return;
+        }
 
         AnsiConsole.MarkupLine("[green]All updates applied.[/]");
     }
@@ -289,29 +318,48 @@ public class CliApp
 
         if (choice == "Cancel") return;
 
-        var tool = tools.First(t => choice.StartsWith(t.DisplayName));
+        var tool = tools.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
+        if (tool == null) return;
         await RunInstallWithProgress(tool, "Installing");
     }
 
     private async Task UpdateTool(List<ToolInfo> tools)
     {
-        if (tools.Count == 0)
+        var hasSelfUpdate = _selfUpdater.UpdateAvailable;
+
+        if (tools.Count == 0 && !hasSelfUpdate)
         {
             AnsiConsole.MarkupLine("[dim]All tools are up to date.[/]");
             return;
         }
 
+        var choices = new List<string>();
+
+        if (hasSelfUpdate)
+            choices.Add($"Tool Manager (v{_selfUpdater.CurrentVersion.ToString(3)} → v{_selfUpdater.LatestVersion!.ToString(3)})");
+
+        choices.AddRange(tools.Select(t =>
+            $"{t.DisplayName} ({FormatVersionRaw(t.InstalledVersion)} → v{FormatVersionRaw(t.LatestVersion)})"));
+
+        choices.Add("Cancel");
+
         var choice = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title("[bold]Select a tool to update:[/]")
                 .HighlightStyle(new Style(Color.Yellow))
-                .AddChoices(tools.Select(t =>
-                    $"{t.DisplayName} ({FormatVersionRaw(t.InstalledVersion)} → v{FormatVersionRaw(t.LatestVersion)})"))
-                .AddChoices("Cancel"));
+                .AddChoices(choices));
 
         if (choice == "Cancel") return;
 
-        var tool = tools.First(t => choice.StartsWith(t.DisplayName));
+        if (choice.StartsWith("Tool Manager"))
+        {
+            AnsiConsole.MarkupLine("[yellow]Applying Tool Manager update — the app will restart...[/]");
+            await _selfUpdater.ApplyUpdate();
+            return;
+        }
+
+        var tool = tools.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
+        if (tool == null) return;
         await RunInstallWithProgress(tool, "Updating");
     }
 
@@ -337,7 +385,7 @@ public class CliApp
 
                 var progress = new Progress<InstallProgress>(p =>
                 {
-                    task.Description = $"{Markup.Escape(p.Status)}";
+                    task.Description = Markup.Escape(p.Status);
                     if (p.Percent >= 0)
                     {
                         task.IsIndeterminate = false;
@@ -379,7 +427,8 @@ public class CliApp
 
         if (choice == "Cancel") return;
 
-        var tool = tools.First(t => choice.StartsWith(t.DisplayName));
+        var tool = tools.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
+        if (tool == null) return;
 
         if (!AnsiConsole.Confirm($"Uninstall [bold]{Markup.Escape(tool.DisplayName)}[/]?", defaultValue: false))
             return;
@@ -414,7 +463,9 @@ public class CliApp
         var actions = new List<string>();
         if (existing != null)
         {
-            var masked = existing[..4] + new string('*', Math.Min(existing.Length - 4, 30));
+            var masked = existing.Length > 4
+                ? existing[..4] + new string('*', Math.Min(existing.Length - 4, 30))
+                : new string('*', existing.Length);
             AnsiConsole.MarkupLine($"  Saved token: [dim]{Markup.Escape(masked)}[/]");
             AnsiConsole.WriteLine();
             actions.AddRange(["Replace Token", "Remove Token", "Cancel"]);

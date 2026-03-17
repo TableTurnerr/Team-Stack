@@ -12,7 +12,6 @@ public class ToolInfo
     public Version LatestVersion { get; set; } = new(0, 0, 0);
     public string LatestDownloadUrl { get; set; } = "";
     public string? ReleaseBody { get; set; }
-    public DateTime PublishedAt { get; set; }
     public bool IsInstalled { get; set; }
     public Version? InstalledVersion { get; set; }
     public string? InstallPath { get; set; }

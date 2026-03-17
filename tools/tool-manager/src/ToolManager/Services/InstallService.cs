@@ -37,6 +37,9 @@ public class InstallService
 
     public async Task<bool> InstallOrUpdate(ToolInfo tool, IProgress<InstallProgress>? status = null, CancellationToken ct = default)
     {
+        string? zipPath = null;
+        string? stagingDir = null;
+
         try
         {
             // 1. Download with byte-level progress
@@ -58,11 +61,11 @@ public class InstallService
                 }
             });
 
-            var zipPath = await _downloadService.DownloadAsync(tool.LatestDownloadUrl, downloadProgress, ct);
+            zipPath = await _downloadService.DownloadAsync(tool.LatestDownloadUrl, downloadProgress, ct);
 
             // 2. Extract to staging
             status?.Report(new InstallProgress("Extracting..."));
-            var stagingDir = Path.Combine(Path.GetTempPath(),
+            stagingDir = Path.Combine(Path.GetTempPath(),
                 $"ToolManager_Stage_{tool.TagPrefix}_{Guid.NewGuid():N}");
             if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, true);
             ZipFile.ExtractToDirectory(zipPath, stagingDir);
@@ -74,6 +77,9 @@ public class InstallService
             {
                 var json = await File.ReadAllTextAsync(manifestPath, ct);
                 manifest = JsonSerializer.Deserialize<ToolManifest>(json, JsonOptions);
+                // Validate required fields
+                if (manifest != null && string.IsNullOrEmpty(manifest.Id))
+                    manifest = null;
             }
 
             // Fallback manifest for releases that don't include tool.json
@@ -122,10 +128,6 @@ public class InstallService
                 Manifest = manifest,
             });
 
-            // 7. Cleanup
-            try { Directory.Delete(stagingDir, true); } catch { }
-            try { File.Delete(zipPath); } catch { }
-
             status?.Report(new InstallProgress("Done", 100));
             Debug.WriteLine($"[Install] {manifest.Name} v{tool.LatestVersion} installed to {installPath}");
             return true;
@@ -135,6 +137,14 @@ public class InstallService
             Debug.WriteLine($"[Install] Failed: {ex.Message}");
             status?.Report(new InstallProgress($"Failed: {ex.Message}"));
             return false;
+        }
+        finally
+        {
+            // Always clean up temp files
+            if (stagingDir != null)
+                try { Directory.Delete(stagingDir, true); } catch { }
+            if (zipPath != null)
+                try { File.Delete(zipPath); } catch { }
         }
     }
 

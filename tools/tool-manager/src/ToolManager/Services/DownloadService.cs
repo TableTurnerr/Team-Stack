@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace ToolManager.Services;
 
-public class DownloadService
+public class DownloadService : IDisposable
 {
     private readonly HttpClient _http = new();
 
@@ -33,7 +33,13 @@ public class DownloadService
             progress?.Report((totalRead, totalBytes));
         }
 
+        // Verify download completeness
+        if (totalBytes.HasValue && totalRead != totalBytes.Value)
+            throw new IOException($"Partial download: received {totalRead} of {totalBytes.Value} bytes");
+
         Debug.WriteLine($"[Download] Complete: {totalRead} bytes -> {tempFile}");
         return tempFile;
     }
+
+    public void Dispose() => _http.Dispose();
 }

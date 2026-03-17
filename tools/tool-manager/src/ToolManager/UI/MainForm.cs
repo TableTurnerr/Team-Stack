@@ -17,6 +17,7 @@ public class MainForm : Form
     private readonly FlowLayoutPanel _toolList;
     private readonly Label _statusLabel;
     private readonly Button _checkAllButton;
+    private bool _isLoading;
 
     public MainForm(
         GitHubReleaseService github,
@@ -32,11 +33,24 @@ public class MainForm : Form
         _selfUpdater = selfUpdater;
 
         Text = "TableTurnerr Tool Manager";
-        Size = new Size(680, 520);
         MinimumSize = new Size(550, 400);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(240, 242, 245);
         Font = new Font("Segoe UI", 9f);
+
+        // Set window icon from embedded logo
+        try
+        {
+            using var stream = typeof(MainForm).Assembly
+                .GetManifestResourceStream("ToolManager.icon.png");
+            if (stream != null)
+            {
+                using var bmp = new Bitmap(stream);
+                var hIcon = bmp.GetHicon();
+                Icon = Icon.FromHandle(hIcon);
+            }
+        }
+        catch { }
 
         // ── Header ───────────────────────────────────────────
         _headerPanel = new Panel
@@ -52,13 +66,30 @@ public class MainForm : Form
             e.Graphics.DrawLine(pen, 0, _headerPanel.Height - 1, _headerPanel.Width, _headerPanel.Height - 1);
         };
 
+        // Logo in header
+        var logoBox = new PictureBox
+        {
+            Size = new Size(32, 32),
+            Location = new Point(16, 12),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Color.Transparent,
+        };
+        try
+        {
+            using var stream = typeof(MainForm).Assembly
+                .GetManifestResourceStream("ToolManager.icon.png");
+            if (stream != null)
+                logoBox.Image = new Bitmap(stream);
+        }
+        catch { }
+
         var titleLabel = new Label
         {
             Text = "TableTurnerr Tool Manager",
             Font = new Font("Segoe UI", 14f, FontStyle.Bold),
             ForeColor = Color.FromArgb(32, 33, 36),
             AutoSize = true,
-            Location = new Point(20, 16),
+            Location = new Point(54, 16),
         };
 
         var versionLabel = new Label
@@ -73,6 +104,7 @@ public class MainForm : Form
         _headerPanel.Resize += (_, _) =>
             versionLabel.Location = new Point(_headerPanel.Width - versionLabel.Width - 24, 20);
 
+        _headerPanel.Controls.Add(logoBox);
         _headerPanel.Controls.Add(titleLabel);
         _headerPanel.Controls.Add(versionLabel);
 
@@ -133,14 +165,17 @@ public class MainForm : Form
         Controls.Add(_actionBar);
         Controls.Add(_headerPanel);
 
+        // Set size AFTER _toolList is initialized (OnResize fires when Size is set)
+        Size = new Size(680, 520);
+
         // Refresh UI when the background scheduler finishes
         _scheduler.UpdatesChecked += () =>
         {
-            try { BeginInvoke(async () => await LoadTools()); } catch { }
+            try { BeginInvoke(() => _ = LoadTools()); } catch { }
         };
-        _scheduler.UpdatesApplied += _ =>
+        _scheduler.UpdatesApplied += results =>
         {
-            try { BeginInvoke(async () => await LoadTools(forceRefresh: true)); } catch { }
+            try { BeginInvoke(() => _ = LoadTools(forceRefresh: true)); } catch { }
         };
 
         // Load on shown
@@ -164,6 +199,7 @@ public class MainForm : Form
             // Check for manager self-update
             await _selfUpdater.CheckNow();
 
+            _github.InvalidateCache();
             await LoadTools(forceRefresh: true);
             _statusLabel.Text = "All checks complete";
         }
@@ -179,9 +215,9 @@ public class MainForm : Form
 
     public async Task LoadTools(bool forceRefresh = false)
     {
+        if (_isLoading) return;
+        _isLoading = true;
         _checkAllButton.Enabled = false;
-        if (_statusLabel.Text == "Loading...")
-            _statusLabel.Text = "Checking...";
 
         try
         {
@@ -208,14 +244,19 @@ public class MainForm : Form
 
             if (tools.Count == 0)
             {
+                var msg = _github.LastError != null
+                    ? $"{_github.LastError}\nTools will appear once the connection is restored."
+                    : "No tools found in GitHub Releases.\nPush a version to the release branch to get started.";
                 var emptyLabel = new Label
                 {
-                    Text = "No tools found in GitHub Releases.\nPush a version to the release branch to get started.",
+                    Text = msg,
                     Font = new Font("Segoe UI", 10f),
-                    ForeColor = Color.FromArgb(128, 134, 139),
+                    ForeColor = _github.LastError != null
+                        ? Color.FromArgb(234, 136, 0)
+                        : Color.FromArgb(128, 134, 139),
                     TextAlign = ContentAlignment.MiddleCenter,
-                    Dock = DockStyle.Top,
                     Height = 60,
+                    Width = _toolList.ClientSize.Width - 30,
                     AutoSize = false,
                 };
                 _toolList.Controls.Add(emptyLabel);
@@ -234,6 +275,7 @@ public class MainForm : Form
         }
         finally
         {
+            _isLoading = false;
             _checkAllButton.Enabled = true;
         }
     }
@@ -243,7 +285,6 @@ public class MainForm : Form
         var panel = new Panel
         {
             Height = 70,
-            Dock = DockStyle.Top,
             Margin = new Padding(12, 0, 12, 8),
             Padding = new Padding(14),
             BackColor = Color.FromArgb(232, 240, 254),
@@ -316,6 +357,7 @@ public class MainForm : Form
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
+        if (_toolList == null) return;
         foreach (Control c in _toolList.Controls)
         {
             if (c is ToolCard or Panel)

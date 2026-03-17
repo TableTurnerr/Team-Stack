@@ -33,18 +33,21 @@ static class Program
         var fusion = new CallStateFusion(audioMonitor, windowMonitor);
         var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
         var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor);
+        var autoUpdater = new AutoUpdateService();
 
         // ── Start agent ────────────────────────────────────────────
         agent.Start();
+        autoUpdater.Start();
         Debug.WriteLine("[Main] Agent started, entering message loop...");
 
         // ── Create tray icon (must be on STA/UI thread) ────────────
-        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor);
+        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater);
 
         // ── Run WinForms message loop (blocks until Exit) ──────────
         Application.Run();
 
         // ── Cleanup ────────────────────────────────────────────────
+        autoUpdater.Dispose();
         agent.Stop();
         networkMonitor.Dispose();
         Debug.WriteLine("[Main] Agent stopped, exiting.");

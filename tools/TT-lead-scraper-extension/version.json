@@ -1,5 +1,5 @@
 {
-  "version": "2.7",
+  "version": "2.8",
   "releaseNotes": "Complete CRM field mapping: now sends website, industry, price_range, email, google_rating, google_reviews_count, and contact_source from all modes. Website scanner emails flow to CRM. Added website/industry/price_range fields to DB schema.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

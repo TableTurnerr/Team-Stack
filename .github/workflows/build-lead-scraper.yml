@@ -34,6 +34,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Create tool.json
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          cat > tools/TT-lead-scraper-extension/tool.json << EOF
+          {
+            "id": "lead-scraper",
+            "name": "TableTurner Lead Scraper",
+            "description": "Chrome extension for lead generation with CRM integration.",
+            "type": "chrome-extension",
+            "version": "${{ steps.version.outputs.VERSION }}"
+          }
+          EOF
+
       - name: Package extension
         if: steps.check.outputs.exists == 'false'
         run: |

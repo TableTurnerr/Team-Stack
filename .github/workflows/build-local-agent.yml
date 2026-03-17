@@ -46,6 +46,25 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: dotnet publish tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release -o publish
 
+      - name: Create tool.json
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          @{
+            id = "local-crm-agent"
+            name = "Local CRM Agent"
+            description = "Desktop agent that monitors Zoom Phone call state and serves signals to the CRM dashboard."
+            type = "windows-app"
+            version = "${{ steps.version.outputs.VERSION }}"
+            executable = "LocalCrmAgent.exe"
+            processName = "LocalCrmAgent"
+            autoStart = $true
+            registryAutoStart = @{ key = "LocalCrmAgent"; args = "--background" }
+            protocolHandler = "crm-agent"
+            startMenuFolder = "TableTurnerr"
+            startMenuName = "CRM Agent"
+          } | ConvertTo-Json -Depth 3 | Set-Content publish/tool.json
+
       - name: Package
         if: steps.check.outputs.exists == 'false'
         shell: pwsh

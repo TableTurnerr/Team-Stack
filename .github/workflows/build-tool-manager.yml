@@ -1,0 +1,86 @@
+name: Build Tool Manager
+
+on:
+  push:
+    branches: [release]
+    paths:
+      - 'tools/tool-manager/src/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Extract version
+        id: version
+        shell: pwsh
+        run: |
+          $xml = [xml](Get-Content 'tools/tool-manager/src/ToolManager/ToolManager.csproj')
+          $version = $xml.Project.PropertyGroup.Version
+          "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Check if release already exists
+        id: check
+        shell: bash
+        run: |
+          if gh release view "tool-manager-v${{ steps.version.outputs.VERSION }}" &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release tool-manager-v${{ steps.version.outputs.VERSION }} already exists, skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build
+        if: steps.check.outputs.exists == 'false'
+        run: dotnet publish tools/tool-manager/src/ToolManager/ToolManager.csproj -c Release -o publish
+
+      - name: Create tool.json
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          @{
+            id = "tool-manager"
+            name = "TableTurnerr Tool Manager"
+            description = "Discovers, installs, and auto-updates all TableTurnerr team tools."
+            type = "windows-app"
+            version = "${{ steps.version.outputs.VERSION }}"
+            executable = "ToolManager.exe"
+            processName = "ToolManager"
+            autoStart = $true
+            registryAutoStart = @{ key = "ToolManager"; args = "--background" }
+            startMenuFolder = "TableTurnerr"
+            startMenuName = "Tool Manager"
+          } | ConvertTo-Json -Depth 3 | Set-Content publish/tool.json
+
+      - name: Package
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          Copy-Item tools/tool-manager/install.bat publish/
+          Copy-Item tools/tool-manager/uninstall.bat publish/
+          Compress-Archive -Path publish/* -DestinationPath "ToolManager-v${{ steps.version.outputs.VERSION }}.zip"
+
+      - name: Create release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tool-manager-v${{ steps.version.outputs.VERSION }}
+          name: TableTurnerr Tool Manager v${{ steps.version.outputs.VERSION }}
+          body: |
+            Automated release of TableTurnerr Tool Manager v${{ steps.version.outputs.VERSION }}.
+
+            **New users:** Download the zip, extract, and run `install.bat`.
+            **Existing users:** The manager will auto-update within the hour.
+          files: ToolManager-v${{ steps.version.outputs.VERSION }}.zip

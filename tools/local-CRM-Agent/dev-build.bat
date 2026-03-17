@@ -26,8 +26,16 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo Build successful: dist-dev\LocalCrmAgent.exe
 
-:: Update the installed version so it persists across restarts
-set "INSTALL_DIR=%LocalAppData%\TableTurnerr\LocalCrmAgent"
+:: Determine install path: prefer managed path if Tool Manager exists, else legacy
+set "MANAGED_DIR=%LocalAppData%\TableTurnerr\ToolManager\tools\local-crm-agent"
+set "LEGACY_DIR=%LocalAppData%\TableTurnerr\LocalCrmAgent"
+
+if exist "%LocalAppData%\TableTurnerr\ToolManager\ToolManager.exe" (
+    set "INSTALL_DIR=%MANAGED_DIR%"
+) else (
+    set "INSTALL_DIR=%LEGACY_DIR%"
+)
+
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 echo Updating installed version at %INSTALL_DIR%...
 copy /Y "dist-dev\LocalCrmAgent.exe" "%INSTALL_DIR%\LocalCrmAgent.exe" >nul

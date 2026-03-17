@@ -36,12 +36,18 @@ public class CliApp
 
     public async Task RunAsync()
     {
+        // First load — auto-update installed tools silently
+        AnsiConsole.Clear();
+        RenderHeader();
+        var tools = await FetchTools();
+        await AutoUpdateInstalledTools(tools);
+
         while (true)
         {
             AnsiConsole.Clear();
             RenderHeader();
 
-            var tools = await FetchTools();
+            tools = await FetchTools();
             RenderToolTable(tools);
             AnsiConsole.WriteLine();
 
@@ -59,6 +65,28 @@ public class CliApp
         }
 
         AnsiConsole.MarkupLine("[dim]Goodbye.[/]");
+    }
+
+    /// <summary>
+    /// Auto-update all installed tools that have updates available. No confirmation needed.
+    /// </summary>
+    private async Task AutoUpdateInstalledTools(List<ToolInfo> tools)
+    {
+        var updatable = tools.Where(t => t.IsInstalled && t.UpdateAvailable).ToList();
+        if (updatable.Count == 0) return;
+
+        AnsiConsole.MarkupLine($"[yellow]Found {updatable.Count} update(s) — applying automatically...[/]");
+        AnsiConsole.WriteLine();
+
+        foreach (var tool in updatable)
+        {
+            await RunInstallWithProgress(tool, "Updating");
+        }
+
+        AnsiConsole.MarkupLine("[green]All updates applied.[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.Markup("[dim]Press any key to continue...[/]");
+        Console.ReadKey(true);
     }
 
     // ── Header ──────────────────────────────────────────────
@@ -198,18 +226,50 @@ public class CliApp
 
     private async Task CheckForUpdates()
     {
+        List<ToolInfo> tools = [];
+
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .SpinnerStyle(new Style(Color.DodgerBlue1))
             .StartAsync("Checking for updates...", async ctx =>
             {
-                await _scheduler.CheckAndUpdateInstalled();
+                _github.InvalidateCache();
+                _registry.Load();
+                tools = await _github.FetchToolsAsync(forceRefresh: true);
+                _lastFetchTime = DateTime.UtcNow;
                 ctx.Status("Checking for manager updates...");
                 await _selfUpdater.CheckNow();
-                _github.RefreshInstalledStatus();
             });
 
-        AnsiConsole.MarkupLine("[green]All checks complete.[/]");
+        var updatable = tools.Where(t => t.IsInstalled && t.UpdateAvailable).ToList();
+
+        if (updatable.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[green]All tools are up to date.[/]");
+            return;
+        }
+
+        // Show what's available
+        AnsiConsole.MarkupLine($"[yellow]Found {updatable.Count} update(s):[/]");
+        foreach (var t in updatable)
+        {
+            AnsiConsole.MarkupLine($"  [bold]{Markup.Escape(t.DisplayName)}[/]  " +
+                $"{FormatVersion(t.InstalledVersion)} → {FormatVersion(t.LatestVersion)}");
+        }
+        AnsiConsole.WriteLine();
+
+        // Ask user to confirm
+        if (!AnsiConsole.Confirm("Apply updates now?", defaultValue: true))
+            return;
+
+        AnsiConsole.WriteLine();
+        foreach (var tool in updatable)
+        {
+            await RunInstallWithProgress(tool, "Updating");
+        }
+        _github.RefreshInstalledStatus();
+
+        AnsiConsole.MarkupLine("[green]All updates applied.[/]");
     }
 
     private async Task InstallTool(List<ToolInfo> tools)

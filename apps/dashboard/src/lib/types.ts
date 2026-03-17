@@ -251,6 +251,8 @@ export interface ColdCallingSession extends RecordModel {
   total_incoming?: number;
   /** History of manual counter adjustments */
   manual_adjustments?: ManualAdjustment[] | null;
+  /** Whether the session owner is currently on an active Zoom call */
+  on_call?: boolean;
   expand?: {
     user?: User;
   };

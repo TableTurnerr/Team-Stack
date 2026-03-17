@@ -22,16 +22,20 @@ public class TrayIconManager : IDisposable
     private readonly ToolStripMenuItem _connectionsItem;
     private readonly ToolStripMenuItem _zoomItem;
     private readonly System.Windows.Forms.Timer _updateTimer;
+    private readonly AutoUpdateService _autoUpdater;
+    private readonly ToolStripMenuItem _updateItem;
 
-    public TrayIconManager(AgentService agent, CallStateFusion fusion, ZoomAudioMonitor audioMonitor)
+    public TrayIconManager(AgentService agent, CallStateFusion fusion, ZoomAudioMonitor audioMonitor, AutoUpdateService autoUpdater)
     {
         _agent = agent;
         _fusion = fusion;
         _audioMonitor = audioMonitor;
+        _autoUpdater = autoUpdater;
 
         _statusItem = new ToolStripMenuItem("Call: Idle") { Enabled = false };
         _connectionsItem = new ToolStripMenuItem("CRM Clients: 0") { Enabled = false };
         _zoomItem = new ToolStripMenuItem("Zoom: Checking...") { Enabled = false };
+        _updateItem = new ToolStripMenuItem("Check for Updates", null, OnUpdateClick);
 
         var contextMenu = new ContextMenuStrip();
         var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
@@ -41,6 +45,8 @@ public class TrayIconManager : IDisposable
         contextMenu.Items.Add(_statusItem);
         contextMenu.Items.Add(_connectionsItem);
         contextMenu.Items.Add(_zoomItem);
+        contextMenu.Items.Add(new ToolStripSeparator());
+        contextMenu.Items.Add(_updateItem);
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add("Exit", null, (_, _) =>
         {
@@ -70,6 +76,8 @@ public class TrayIconManager : IDisposable
         // Wire events
         _fusion.StateChanged += OnStateChanged;
         _agent.ConnectionCountChanged += OnConnectionCountChanged;
+        _autoUpdater.UpdateFound += OnUpdateFound;
+        _autoUpdater.StatusChanged += OnUpdateStatusChanged;
 
         // Periodic UI refresh (every 2s for zoom detection status)
         _updateTimer = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -135,6 +143,58 @@ public class TrayIconManager : IDisposable
         catch { }
     }
 
+    private void OnUpdateClick(object? sender, EventArgs e)
+    {
+        if (_autoUpdater.UpdateAvailable)
+        {
+            _ = _autoUpdater.ApplyUpdate();
+        }
+        else
+        {
+            _updateItem.Enabled = false;
+            _updateItem.Text = "Checking...";
+            _ = Task.Run(async () =>
+            {
+                await _autoUpdater.CheckForUpdate();
+                try
+                {
+                    if (!_autoUpdater.UpdateAvailable)
+                    {
+                        _updateItem.Text = "Check for Updates";
+                        _updateItem.Enabled = true;
+                    }
+                }
+                catch { }
+            });
+        }
+    }
+
+    private void OnUpdateFound(Version version)
+    {
+        try
+        {
+            _updateItem.Text = $"Install Update (v{version.ToString(3)})";
+            _updateItem.Enabled = true;
+            _notifyIcon.ShowBalloonTip(5000, "CRM Agent Update",
+                $"Version {version.ToString(3)} is available.\nRight-click tray icon to install.",
+                ToolTipIcon.Info);
+        }
+        catch { }
+    }
+
+    private void OnUpdateStatusChanged(string status)
+    {
+        try
+        {
+            if (_autoUpdater.IsUpdating)
+            {
+                _updateItem.Text = status;
+                _updateItem.Enabled = false;
+            }
+        }
+        catch { }
+    }
+
     /// <summary>
     /// Replace the tray icon, properly disposing the old one to prevent
     /// GDI handle leaks. Each icon involves a Bitmap + native HICON.
@@ -176,6 +236,8 @@ public class TrayIconManager : IDisposable
         _updateTimer.Dispose();
         _fusion.StateChanged -= OnStateChanged;
         _agent.ConnectionCountChanged -= OnConnectionCountChanged;
+        _autoUpdater.UpdateFound -= OnUpdateFound;
+        _autoUpdater.StatusChanged -= OnUpdateStatusChanged;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
     }

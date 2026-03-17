@@ -5,7 +5,8 @@
 // Update Checker - Checks for new versions from GitHub
 // ============================================================================
 
-var VERSION_JSON_URL = 'https://raw.githubusercontent.com/TableTurnerr/Team-Stack/release/tools/TT-lead-scraper-extension/version.json';
+var GITHUB_RELEASES_URL = 'https://api.github.com/repos/TableTurnerr/Team-Stack/releases';
+var RELEASE_TAG_PREFIX = 'lead-scraper-v';
 var UPDATE_CHECK_ALARM_NAME = 'checkForUpdates';
 var CHECK_INTERVAL_MINUTES = 60;
 
@@ -38,45 +39,46 @@ function compareVersions(v1, v2) {
     return 0;
 }
 
-// Fetch version.json from GitHub
-function fetchVersionInfo() {
-    return fetch(VERSION_JSON_URL)
-        .then(function (response) {
-            if (!response.ok) {
-                throw new Error('Failed to fetch version info: ' + response.status);
-            }
-            return response.json();
-        })
-        .catch(function (error) {
-            console.error('Error fetching version info:', error);
-            throw error;
-        });
-}
-
-// Check for updates and show notification if newer version is available
+// Check for updates via GitHub Releases API
 function checkForUpdates() {
     var currentVersion = getCurrentVersion();
 
-    fetchVersionInfo()
-        .then(function (versionInfo) {
-            if (!versionInfo || !versionInfo.version) {
-                console.error('Invalid version.json format');
-                return;
-            }
+    fetch(GITHUB_RELEASES_URL, {
+        headers: { 'Accept': 'application/vnd.github+json' }
+    })
+    .then(function (response) {
+        if (!response.ok) throw new Error('GitHub API returned ' + response.status);
+        return response.json();
+    })
+    .then(function (releases) {
+        for (var i = 0; i < releases.length; i++) {
+            var release = releases[i];
+            var tag = release.tag_name;
+            if (!tag || tag.indexOf(RELEASE_TAG_PREFIX) !== 0) continue;
+            if (release.draft) continue;
 
-            var remoteVersion = versionInfo.version;
+            var remoteVersion = tag.substring(RELEASE_TAG_PREFIX.length);
             var comparison = compareVersions(remoteVersion, currentVersion);
 
             if (comparison > 0) {
-                // Newer version available
+                // Find zip asset download URL, fallback to release page
+                var downloadUrl = release.html_url;
+                var assets = release.assets || [];
+                for (var j = 0; j < assets.length; j++) {
+                    if (assets[j].name && assets[j].name.match(/\.zip$/i)) {
+                        downloadUrl = assets[j].browser_download_url;
+                        break;
+                    }
+                }
+
+                var releaseNotes = release.body || 'Bug fixes and improvements';
                 console.log('New version available: ' + remoteVersion + ' (current: ' + currentVersion + ')');
 
-                // Store update info in chrome.storage.local
                 chrome.storage.local.set({
                     updateAvailable: true,
                     updateVersion: remoteVersion,
-                    updateUrl: versionInfo.downloadUrl || 'https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension',
-                    updateReleaseNotes: versionInfo.releaseNotes || 'Bug fixes and improvements'
+                    updateUrl: downloadUrl,
+                    updateReleaseNotes: releaseNotes
                 });
 
                 // Check if user permanently dismissed this specific version or saw it within the last hour
@@ -95,22 +97,24 @@ function checkForUpdates() {
                         return;
                     }
 
-                    // Record the time we are showing the notification
                     shownAt[remoteVersion] = Date.now();
                     chrome.storage.local.set({ updateNotificationShownAt: shownAt }, function () {
-                        showUpdateNotification(remoteVersion, versionInfo.downloadUrl, versionInfo.releaseNotes);
+                        showUpdateNotification(remoteVersion, downloadUrl, releaseNotes);
                     });
                 });
-            } else {
-                console.log('Extension is up to date: ' + currentVersion);
-                // Clear update flag if no update available
-                chrome.storage.local.set({ updateAvailable: false });
+                return;
             }
-        })
-        .catch(function (error) {
-            // Handle errors gracefully - don't show notification for network errors
-            console.error('Update check failed:', error);
-        });
+
+            // First matching release with our tag prefix is the latest
+            break;
+        }
+
+        console.log('Extension is up to date: ' + currentVersion);
+        chrome.storage.local.set({ updateAvailable: false });
+    })
+    .catch(function (error) {
+        console.error('Update check failed:', error);
+    });
 }
 
 // Show Chrome notification for new version
@@ -149,7 +153,7 @@ chrome.notifications.onButtonClicked.addListener(function (notificationId, butto
     if (buttonIndex === 0) {
         // Download Update button clicked
         chrome.storage.local.get(['notification_' + notificationId + '_url', 'updateUrl'], function (data) {
-            var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension';
+            var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/TableTurnerr/Team-Stack/releases';
             chrome.tabs.create({ url: url });
             chrome.storage.local.remove(['notification_' + notificationId + '_url', 'notification_' + notificationId + '_version']);
         });
@@ -172,7 +176,7 @@ chrome.notifications.onButtonClicked.addListener(function (notificationId, butto
 // Handle notification clicks (clicking the notification itself)
 chrome.notifications.onClicked.addListener(function (notificationId) {
     chrome.storage.local.get(['notification_' + notificationId + '_url', 'updateUrl'], function (data) {
-        var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/TableTurnerr/Team-Stack/tree/release/tools/TT-lead-scraper-extension';
+        var url = data['notification_' + notificationId + '_url'] || data.updateUrl || 'https://github.com/TableTurnerr/Team-Stack/releases';
         chrome.tabs.create({ url: url });
         chrome.storage.local.remove(['notification_' + notificationId + '_url', 'notification_' + notificationId + '_version']);
     });

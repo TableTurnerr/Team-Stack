@@ -33,18 +33,21 @@ static class Program
         var fusion = new CallStateFusion(audioMonitor, windowMonitor);
         var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
         var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor);
+        var autoUpdater = new AutoUpdateService();
 
         // ── Start agent ────────────────────────────────────────────
         agent.Start();
+        autoUpdater.Start();
         Debug.WriteLine("[Main] Agent started, entering message loop...");
 
         // ── Create tray icon (must be on STA/UI thread) ────────────
-        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor);
+        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater);
 
         // ── Run WinForms message loop (blocks until Exit) ──────────
         Application.Run();
 
         // ── Cleanup ────────────────────────────────────────────────
+        autoUpdater.Dispose();
         agent.Stop();
         networkMonitor.Dispose();
         Debug.WriteLine("[Main] Agent stopped, exiting.");
@@ -63,11 +66,13 @@ static class Program
             var exePath = Environment.ProcessPath;
             if (key == null || exePath == null) return;
 
-            // Only register if not already registered
+            var desired = $"\"{exePath}\" --background";
             var existing = key.GetValue("LocalCrmAgent") as string;
-            if (existing != null && existing.Contains("LocalCrmAgent")) return;
 
-            key.SetValue("LocalCrmAgent", $"\"{exePath}\" --background");
+            // Update if not registered or if the exe path has changed (e.g. dev vs release build)
+            if (string.Equals(existing, desired, StringComparison.OrdinalIgnoreCase)) return;
+
+            key.SetValue("LocalCrmAgent", desired);
             Debug.WriteLine("[Main] Registered auto-start");
         }
         catch (Exception ex)

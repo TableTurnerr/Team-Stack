@@ -25,10 +25,24 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo Build successful: dist-dev\LocalCrmAgent.exe
+
+:: Update the installed version so it persists across restarts
+set "INSTALL_DIR=%LocalAppData%\TableTurnerr\LocalCrmAgent"
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+echo Updating installed version at %INSTALL_DIR%...
+copy /Y "dist-dev\LocalCrmAgent.exe" "%INSTALL_DIR%\LocalCrmAgent.exe" >nul
+if %ERRORLEVEL% neq 0 (
+    echo [WARN] Could not update installed version. Launching from dist-dev instead.
+    echo        Close the agent from system tray and try again.
+    start "" "dist-dev\LocalCrmAgent.exe"
+    goto :done
+)
+echo Installed version updated.
 echo Launching...
 echo.
 
-:: Launch the agent
-start "" "dist-dev\LocalCrmAgent.exe"
+:: Launch from the installed location so registry auto-start path stays correct
+start "" "%INSTALL_DIR%\LocalCrmAgent.exe"
 
+:done
 echo Agent is running. Check the system tray.

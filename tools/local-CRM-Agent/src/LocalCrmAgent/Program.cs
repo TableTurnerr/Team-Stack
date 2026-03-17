@@ -63,11 +63,13 @@ static class Program
             var exePath = Environment.ProcessPath;
             if (key == null || exePath == null) return;
 
-            // Only register if not already registered
+            var desired = $"\"{exePath}\" --background";
             var existing = key.GetValue("LocalCrmAgent") as string;
-            if (existing != null && existing.Contains("LocalCrmAgent")) return;
 
-            key.SetValue("LocalCrmAgent", $"\"{exePath}\" --background");
+            // Update if not registered or if the exe path has changed (e.g. dev vs release build)
+            if (string.Equals(existing, desired, StringComparison.OrdinalIgnoreCase)) return;
+
+            key.SetValue("LocalCrmAgent", desired);
             Debug.WriteLine("[Main] Registered auto-start");
         }
         catch (Exception ex)

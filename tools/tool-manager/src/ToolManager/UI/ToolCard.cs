@@ -26,7 +26,6 @@ public class ToolCard : UserControl
         _tool = tool;
 
         Height = 100;
-        Dock = DockStyle.Top;
         Margin = new Padding(12, 0, 12, 8);
         Padding = new Padding(14);
         BackColor = Color.White;

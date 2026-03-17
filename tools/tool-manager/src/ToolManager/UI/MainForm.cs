@@ -38,6 +38,20 @@ public class MainForm : Form
         BackColor = Color.FromArgb(240, 242, 245);
         Font = new Font("Segoe UI", 9f);
 
+        // Set window icon from embedded logo
+        try
+        {
+            using var stream = typeof(MainForm).Assembly
+                .GetManifestResourceStream("ToolManager.icon.png");
+            if (stream != null)
+            {
+                using var bmp = new Bitmap(stream);
+                var hIcon = bmp.GetHicon();
+                Icon = Icon.FromHandle(hIcon);
+            }
+        }
+        catch { }
+
         // ── Header ───────────────────────────────────────────
         _headerPanel = new Panel
         {
@@ -52,13 +66,30 @@ public class MainForm : Form
             e.Graphics.DrawLine(pen, 0, _headerPanel.Height - 1, _headerPanel.Width, _headerPanel.Height - 1);
         };
 
+        // Logo in header
+        var logoBox = new PictureBox
+        {
+            Size = new Size(32, 32),
+            Location = new Point(16, 12),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Color.Transparent,
+        };
+        try
+        {
+            using var stream = typeof(MainForm).Assembly
+                .GetManifestResourceStream("ToolManager.icon.png");
+            if (stream != null)
+                logoBox.Image = new Bitmap(stream);
+        }
+        catch { }
+
         var titleLabel = new Label
         {
             Text = "TableTurnerr Tool Manager",
             Font = new Font("Segoe UI", 14f, FontStyle.Bold),
             ForeColor = Color.FromArgb(32, 33, 36),
             AutoSize = true,
-            Location = new Point(20, 16),
+            Location = new Point(54, 16),
         };
 
         var versionLabel = new Label
@@ -73,6 +104,7 @@ public class MainForm : Form
         _headerPanel.Resize += (_, _) =>
             versionLabel.Location = new Point(_headerPanel.Width - versionLabel.Width - 24, 20);
 
+        _headerPanel.Controls.Add(logoBox);
         _headerPanel.Controls.Add(titleLabel);
         _headerPanel.Controls.Add(versionLabel);
 
@@ -212,14 +244,19 @@ public class MainForm : Form
 
             if (tools.Count == 0)
             {
+                var msg = _github.LastError != null
+                    ? $"{_github.LastError}\nTools will appear once the connection is restored."
+                    : "No tools found in GitHub Releases.\nPush a version to the release branch to get started.";
                 var emptyLabel = new Label
                 {
-                    Text = "No tools found in GitHub Releases.\nPush a version to the release branch to get started.",
+                    Text = msg,
                     Font = new Font("Segoe UI", 10f),
-                    ForeColor = Color.FromArgb(128, 134, 139),
+                    ForeColor = _github.LastError != null
+                        ? Color.FromArgb(234, 136, 0)
+                        : Color.FromArgb(128, 134, 139),
                     TextAlign = ContentAlignment.MiddleCenter,
-                    Dock = DockStyle.Top,
                     Height = 60,
+                    Width = _toolList.ClientSize.Width - 30,
                     AutoSize = false,
                 };
                 _toolList.Controls.Add(emptyLabel);
@@ -248,7 +285,6 @@ public class MainForm : Form
         var panel = new Panel
         {
             Height = 70,
-            Dock = DockStyle.Top,
             Margin = new Padding(12, 0, 12, 8),
             Padding = new Padding(14),
             BackColor = Color.FromArgb(232, 240, 254),

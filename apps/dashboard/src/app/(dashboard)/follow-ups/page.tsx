@@ -26,6 +26,7 @@ import Image from 'next/image';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type FollowUp, type User as UserType } from '@/lib/types';
 import { cn, formatPhoneNumber } from '@/lib/utils';
+import { CompanyHoverCard } from '@/components/company-hover-card';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { formatDateTimeInTimezone } from '@/lib/timezone-utils';
@@ -482,14 +483,14 @@ export default function FollowUpsPage() {
             <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
               <tr>
                 <HeaderIndexCell allSelected={allSelected} someSelected={someSelected} onToggleAll={toggleSelectAll} />
-                <ResizableTh width={getWidth('company')} onResize={(w) => resize('company', w)}>Company</ResizableTh>
-                <ResizableTh width={getWidth('scheduled')} onResize={(w) => resize('scheduled', w)}>Scheduled</ResizableTh>
-                <ResizableTh width={getWidth('assigned_to')} onResize={(w) => resize('assigned_to', w)} className="hidden md:table-cell">Assigned To</ResizableTh>
-                <ResizableTh width={getWidth('phone')} onResize={(w) => resize('phone', w)} className="hidden lg:table-cell">Phone</ResizableTh>
-                <ResizableTh width={getWidth('notes')} onResize={(w) => resize('notes', w)} className="hidden lg:table-cell">Notes</ResizableTh>
-                <ResizableTh width={getWidth('status')} onResize={(w) => resize('status', w)}>Status</ResizableTh>
+                <ResizableTh width={getWidth('company')} minWidth={120} onResize={(w) => resize('company', w)}>Company</ResizableTh>
+                <ResizableTh width={getWidth('scheduled')} minWidth={100} onResize={(w) => resize('scheduled', w)}>Scheduled</ResizableTh>
+                <ResizableTh width={getWidth('assigned_to')} minWidth={80} onResize={(w) => resize('assigned_to', w)} className="hidden md:table-cell">Assigned To</ResizableTh>
+                <ResizableTh width={getWidth('phone')} minWidth={90} onResize={(w) => resize('phone', w)} className="hidden lg:table-cell">Phone</ResizableTh>
+                <ResizableTh width={getWidth('notes')} minWidth={80} onResize={(w) => resize('notes', w)} className="hidden lg:table-cell">Notes</ResizableTh>
+                <ResizableTh width={getWidth('status')} minWidth={80} onResize={(w) => resize('status', w)}>Status</ResizableTh>
                 {(activeTab === 'overdue' || activeTab === 'upcoming') && (
-                  <ResizableTh width={getWidth('actions')} onResize={(w) => resize('actions', w)} resizable={false} align="right">Actions</ResizableTh>
+                  <ResizableTh width={getWidth('actions')} minWidth={80} onResize={(w) => resize('actions', w)} resizable={false} align="right">Actions</ResizableTh>
                 )}
               </tr>
             </thead>
@@ -519,46 +520,48 @@ export default function FollowUpsPage() {
                     />
 
                     {/* Company */}
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 overflow-hidden">
                       {company ? (
-                        <Link
-                          href={`/companies/${fu.company}?tab=follow_ups`}
-                          className="flex items-center gap-2 group"
-                        >
-                          <div className="w-7 h-7 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] flex items-center justify-center flex-shrink-0">
-                            <Building2 size={12} className="text-[var(--muted)]" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold group-hover:text-[var(--primary)] transition-colors line-clamp-1">
-                              {company.company_name}
-                            </p>
-                            {Array.isArray(company.status) && company.status.length > 0 && (
-                              <p className="text-[10px] text-[var(--muted)]">{company.status.join(', ')}</p>
-                            )}
-                          </div>
-                          <ChevronRight size={12} className="text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity ml-auto flex-shrink-0" />
-                        </Link>
+                        <CompanyHoverCard company={company}>
+                          <Link
+                            href={`/companies/${fu.company}?tab=follow_ups`}
+                            className="flex items-center gap-2 group min-w-0"
+                          >
+                            <div className="w-7 h-7 rounded-lg bg-[var(--sidebar-bg)] border border-[var(--card-border)] flex items-center justify-center flex-shrink-0">
+                              <Building2 size={12} className="text-[var(--muted)]" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold group-hover:text-[var(--primary)] transition-colors truncate">
+                                {company.company_name}
+                              </p>
+                              {Array.isArray(company.status) && company.status.length > 0 && (
+                                <p className="text-[10px] text-[var(--muted)] truncate">{company.status.join(', ')}</p>
+                              )}
+                            </div>
+                            <ChevronRight size={12} className="text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity ml-auto flex-shrink-0" />
+                          </Link>
+                        </CompanyHoverCard>
                       ) : (
                         <span className="text-sm text-[var(--muted)] italic">Unknown company</span>
                       )}
                     </td>
 
                     {/* Scheduled */}
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 overflow-hidden">
                       <FollowUpTimeDisplay
                         scheduledTime={fu.scheduled_time}
                         clientTimezone={fu.client_timezone}
                         compact={false}
                       />
-                      <p className="text-[10px] text-[var(--muted)] mt-1 font-mono">
+                      <p className="text-[10px] text-[var(--muted)] mt-1 font-mono truncate">
                         {formatDateTimeInTimezone(fu.scheduled_time, fu.client_timezone)}
                       </p>
                     </td>
 
                     {/* Assigned to */}
-                    <td className="px-4 py-4 hidden md:table-cell">
+                    <td className="px-4 py-4 hidden md:table-cell overflow-hidden">
                       {assignee ? (
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <div className="w-6 h-6 rounded-full bg-[var(--primary)] flex items-center justify-center flex-shrink-0 relative overflow-hidden">
                             {assignee.avatar ? (
                               <Image src={pb.files.getUrl(assignee, assignee.avatar, { thumb: '48x48' })} alt={assignee.name || ''} fill sizes="24px" className="object-cover" />
@@ -568,7 +571,7 @@ export default function FollowUpsPage() {
                               </span>
                             )}
                           </div>
-                          <span className="text-sm">{assignee.name || assignee.email}</span>
+                          <span className="text-sm truncate">{assignee.name || assignee.email}</span>
                         </div>
                       ) : (
                         <span className="flex items-center gap-1 text-xs text-[var(--muted)]">
@@ -578,11 +581,11 @@ export default function FollowUpsPage() {
                     </td>
 
                     {/* Phone */}
-                    <td className="px-4 py-4 hidden lg:table-cell">
+                    <td className="px-4 py-4 hidden lg:table-cell overflow-hidden">
                       {phone ? (
-                        <div>
-                          <p className="text-xs font-mono font-semibold">{formatPhoneNumber(phone.phone_number)}</p>
-                          {phone.label && <p className="text-[10px] text-[var(--muted)]">{phone.label}</p>}
+                        <div className="min-w-0">
+                          <p className="text-xs font-mono font-semibold truncate">{formatPhoneNumber(phone.phone_number)}</p>
+                          {phone.label && <p className="text-[10px] text-[var(--muted)] truncate">{phone.label}</p>}
                         </div>
                       ) : (
                         <span className="text-xs text-[var(--muted)]">—</span>
@@ -590,16 +593,16 @@ export default function FollowUpsPage() {
                     </td>
 
                     {/* Notes */}
-                    <td className="px-4 py-4 hidden lg:table-cell max-w-[200px]">
+                    <td className="px-4 py-4 hidden lg:table-cell overflow-hidden">
                       {fu.notes ? (
-                        <p className="text-xs text-[var(--muted)] line-clamp-2">{fu.notes}</p>
+                        <p className="text-xs text-[var(--muted)] truncate" title={fu.notes}>{fu.notes}</p>
                       ) : (
                         <span className="text-xs text-[var(--muted)]">—</span>
                       )}
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 overflow-hidden">
                       {statusBadge(fu.status, isOverdue)}
                       {fu.status === 'completed' && fu.completed_at && (
                         <p className="text-[10px] text-[var(--muted)] mt-1">

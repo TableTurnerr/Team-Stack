@@ -26,6 +26,7 @@ import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting }
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
+import { CompanyHoverCard } from '@/components/company-hover-card';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
@@ -236,42 +237,44 @@ function CompanyRow({
         forceCheckbox={hasSelection}
       />
       {isColumnVisible('company_name') && (
-        <td className="py-3 px-4">
-          <Link href={`/companies/${company.id}`} className="font-medium hover:text-[var(--primary)] transition-colors">
-            {company.company_name}
-          </Link>
+        <td className="py-3 px-4 overflow-visible">
+          <CompanyHoverCard company={company}>
+            <Link href={`/companies/${company.id}`} className="block truncate font-medium hover:text-[var(--primary)] transition-colors" title={company.company_name}>
+              {company.company_name}
+            </Link>
+          </CompanyHoverCard>
         </td>
       )}
       {isColumnVisible('owner_name') && (
-        <td className="py-3 px-4 text-sm">
-          {company.owner_name || <span className="text-[var(--muted)]">-</span>}
+        <td className="py-3 px-4 text-sm overflow-hidden">
+          <span className="block truncate">{company.owner_name || <span className="text-[var(--muted)]">-</span>}</span>
         </td>
       )}
       {isColumnVisible('instagram_handle') && (
-        <td className="py-3 px-4">
+        <td className="py-3 px-4 overflow-hidden">
           <span className="text-sm">
             {company.instagram_handle ? (
               <a
                 href={`https://instagram.com/${company.instagram_handle.replace('@', '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[var(--primary)] hover:underline flex items-center gap-1"
+                className="text-[var(--primary)] hover:underline flex items-center gap-1 min-w-0"
               >
-                <Instagram size={12} />
-                @{company.instagram_handle.replace('@', '')}
+                <Instagram size={12} className="shrink-0" />
+                <span className="truncate">@{company.instagram_handle.replace('@', '')}</span>
               </a>
             ) : <span className="text-[var(--muted)]">-</span>}
           </span>
         </td>
       )}
       {isColumnVisible('status') && (
-        <td className="py-3 px-4">
+        <td className="py-3 px-4 overflow-hidden">
           {Array.isArray(company.status) && company.status.length > 0 ? (
             <div className="flex flex-wrap gap-1">
               {company.status.map(s => {
                 const colors = getOutcomeColors(s);
                 return (
-                  <span key={s} className={cn("inline-flex px-2 py-0.5 text-xs font-medium rounded-full", colors.bg, colors.text)}>
+                  <span key={s} className={cn("inline-flex px-2 py-0.5 text-xs font-medium rounded-full whitespace-nowrap", colors.bg, colors.text)}>
                     {s}
                   </span>
                 );
@@ -281,27 +284,27 @@ function CompanyRow({
         </td>
       )}
       {isColumnVisible('email') && (
-        <td className="py-3 px-4">
+        <td className="py-3 px-4 overflow-hidden">
           <span className="text-sm">
             {company.email ? (
-              <a href={`mailto:${company.email}`} className="text-[var(--primary)] hover:underline flex items-center gap-1">
-                <Mail size={12} />
-                {company.email}
+              <a href={`mailto:${company.email}`} className="text-[var(--primary)] hover:underline flex items-center gap-1 min-w-0">
+                <Mail size={12} className="shrink-0" />
+                <span className="truncate">{company.email}</span>
               </a>
             ) : <span className="text-[var(--muted)]">-</span>}
           </span>
         </td>
       )}
       {isColumnVisible('company_location') && (
-        <td className="py-3 px-4 text-sm">
-          <div className="flex items-center gap-1">
-            {company.company_location || <span className="text-[var(--muted)]">-</span>}
+        <td className="py-3 px-4 text-sm overflow-hidden">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="truncate">{company.company_location || <span className="text-[var(--muted)]">-</span>}</span>
             {company.google_maps_link && (
               <a
                 href={company.google_maps_link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[var(--primary)] hover:underline"
+                className="text-[var(--primary)] hover:underline shrink-0"
               >
                 <ExternalLink size={12} />
               </a>
@@ -618,15 +621,15 @@ export default function CompaniesPage() {
 
   // Resizable columns
   const { getWidth, resize } = useResizableColumns('companies', [
-    { key: 'company_name', initialWidth: 200 },
-    { key: 'owner_name', initialWidth: 150 },
-    { key: 'instagram_handle', initialWidth: 150 },
-    { key: 'status', initialWidth: 150 },
-    { key: 'email', initialWidth: 180 },
-    { key: 'company_location', initialWidth: 150 },
-    { key: 'source', initialWidth: 100 },
-    { key: 'last_contacted', initialWidth: 130 },
-    { key: 'actions', initialWidth: 100 },
+    { key: 'company_name', initialWidth: 200, minWidth: 100 },
+    { key: 'owner_name', initialWidth: 150, minWidth: 80 },
+    { key: 'instagram_handle', initialWidth: 150, minWidth: 80 },
+    { key: 'status', initialWidth: 150, minWidth: 80 },
+    { key: 'email', initialWidth: 180, minWidth: 100 },
+    { key: 'company_location', initialWidth: 150, minWidth: 80 },
+    { key: 'source', initialWidth: 100, minWidth: 70 },
+    { key: 'last_contacted', initialWidth: 130, minWidth: 80 },
+    { key: 'actions', initialWidth: 100, minWidth: 70 },
   ]);
 
   const fetchCompanies = useCallback(async () => {
@@ -793,30 +796,30 @@ export default function CompaniesPage() {
                       onToggleAll={selection.toggleAll}
                     />
                     {isColumnVisible('company_name') && (
-                      <ResizableTh width={getWidth('company_name')} onResize={(w) => resize('company_name', w)}>Company Name</ResizableTh>
+                      <ResizableTh width={getWidth('company_name')} minWidth={100} onResize={(w) => resize('company_name', w)}>Company Name</ResizableTh>
                     )}
                     {isColumnVisible('owner_name') && (
-                      <ResizableTh width={getWidth('owner_name')} onResize={(w) => resize('owner_name', w)}>Owner</ResizableTh>
+                      <ResizableTh width={getWidth('owner_name')} minWidth={80} onResize={(w) => resize('owner_name', w)}>Owner</ResizableTh>
                     )}
                     {isColumnVisible('instagram_handle') && (
-                      <ResizableTh width={getWidth('instagram_handle')} onResize={(w) => resize('instagram_handle', w)}>Instagram</ResizableTh>
+                      <ResizableTh width={getWidth('instagram_handle')} minWidth={80} onResize={(w) => resize('instagram_handle', w)}>Instagram</ResizableTh>
                     )}
                     {isColumnVisible('status') && (
-                      <ResizableTh width={getWidth('status')} onResize={(w) => resize('status', w)}>Status</ResizableTh>
+                      <ResizableTh width={getWidth('status')} minWidth={80} onResize={(w) => resize('status', w)}>Status</ResizableTh>
                     )}
                     {isColumnVisible('email') && (
-                      <ResizableTh width={getWidth('email')} onResize={(w) => resize('email', w)}>Email</ResizableTh>
+                      <ResizableTh width={getWidth('email')} minWidth={100} onResize={(w) => resize('email', w)}>Email</ResizableTh>
                     )}
                     {isColumnVisible('company_location') && (
-                      <ResizableTh width={getWidth('company_location')} onResize={(w) => resize('company_location', w)}>Location</ResizableTh>
+                      <ResizableTh width={getWidth('company_location')} minWidth={80} onResize={(w) => resize('company_location', w)}>Location</ResizableTh>
                     )}
                     {isColumnVisible('source') && (
-                      <ResizableTh width={getWidth('source')} onResize={(w) => resize('source', w)}>Source</ResizableTh>
+                      <ResizableTh width={getWidth('source')} minWidth={70} onResize={(w) => resize('source', w)}>Source</ResizableTh>
                     )}
                     {isColumnVisible('last_contacted') && (
-                      <ResizableTh width={getWidth('last_contacted')} onResize={(w) => resize('last_contacted', w)}>Last Contact</ResizableTh>
+                      <ResizableTh width={getWidth('last_contacted')} minWidth={80} onResize={(w) => resize('last_contacted', w)}>Last Contact</ResizableTh>
                     )}
-                    <ResizableTh width={getWidth('actions')} resizable={false}>Actions</ResizableTh>
+                    <ResizableTh width={getWidth('actions')} minWidth={70} resizable={false}>Actions</ResizableTh>
                   </tr>
                 </thead>
                 <tbody>

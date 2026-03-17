@@ -25,6 +25,8 @@ import { useAuth } from '@/contexts/auth-context';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
+import { CompanyHoverCard } from '@/components/company-hover-card';
+import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
@@ -134,18 +136,18 @@ export default function ColdCallsPage() {
   // Selection & resizable columns
   const selection = useTableSelection(callLogs);
   const { widths: colWidths, resize: resizeCol } = useResizableColumns('cold-calls', [
-    { key: 'call_time', initialWidth: 130 },
-    { key: 'company', initialWidth: 160 },
-    { key: 'phone', initialWidth: 140 },
-    { key: 'recipient', initialWidth: 130 },
-    { key: 'call_outcome', initialWidth: 150 },
-    { key: 'duration', initialWidth: 90 },
-    { key: 'performance', initialWidth: 100 },
-    { key: 'session', initialWidth: 130 },
-    { key: 'ai_transcript', initialWidth: 70 },
-    { key: 'caller', initialWidth: 100 },
-    { key: 'notes', initialWidth: 150 },
-    { key: 'actions', initialWidth: 60 },
+    { key: 'call_time', initialWidth: 130, minWidth: 90 },
+    { key: 'company', initialWidth: 160, minWidth: 100 },
+    { key: 'phone', initialWidth: 140, minWidth: 100 },
+    { key: 'recipient', initialWidth: 130, minWidth: 80 },
+    { key: 'call_outcome', initialWidth: 150, minWidth: 90 },
+    { key: 'duration', initialWidth: 90, minWidth: 70 },
+    { key: 'performance', initialWidth: 100, minWidth: 70 },
+    { key: 'session', initialWidth: 130, minWidth: 80 },
+    { key: 'ai_transcript', initialWidth: 70, minWidth: 50 },
+    { key: 'caller', initialWidth: 100, minWidth: 70 },
+    { key: 'notes', initialWidth: 150, minWidth: 80 },
+    { key: 'actions', initialWidth: 60, minWidth: 50 },
   ]);
 
   const pageOffset = (callLogsPage - 1) * perPage;
@@ -483,61 +485,61 @@ function CallLogsTable({
                     onToggleAll={selection.toggleAll}
                   />
                   {isColumnVisible('call_time') && (
-                    <ResizableTh width={colWidths.call_time} onResize={(w) => resizeCol('call_time', w)}>
+                    <ResizableTh width={colWidths.call_time} minWidth={90} onResize={(w) => resizeCol('call_time', w)}>
                       <SortLabel label="Date" field="call_time" currentSort={sort} onSort={onSort} />
                     </ResizableTh>
                   )}
                   {isColumnVisible('company') && (
-                    <ResizableTh width={colWidths.company} onResize={(w) => resizeCol('company', w)}>
+                    <ResizableTh width={colWidths.company} minWidth={100} onResize={(w) => resizeCol('company', w)}>
                       Company
                     </ResizableTh>
                   )}
                   {isColumnVisible('phone') && (
-                    <ResizableTh width={colWidths.phone} onResize={(w) => resizeCol('phone', w)}>
+                    <ResizableTh width={colWidths.phone} minWidth={100} onResize={(w) => resizeCol('phone', w)}>
                       Phone
                     </ResizableTh>
                   )}
                   {isColumnVisible('recipient') && (
-                    <ResizableTh width={colWidths.recipient} onResize={(w) => resizeCol('recipient', w)}>
+                    <ResizableTh width={colWidths.recipient} minWidth={80} onResize={(w) => resizeCol('recipient', w)}>
                       Recipient
                     </ResizableTh>
                   )}
                   {isColumnVisible('call_outcome') && (
-                    <ResizableTh width={colWidths.call_outcome} onResize={(w) => resizeCol('call_outcome', w)}>
+                    <ResizableTh width={colWidths.call_outcome} minWidth={90} onResize={(w) => resizeCol('call_outcome', w)}>
                       <SortLabel label="Outcome" field="call_outcome" currentSort={sort} onSort={onSort} />
                     </ResizableTh>
                   )}
                   {isColumnVisible('duration') && (
-                    <ResizableTh width={colWidths.duration} onResize={(w) => resizeCol('duration', w)}>
+                    <ResizableTh width={colWidths.duration} minWidth={70} onResize={(w) => resizeCol('duration', w)}>
                       <SortLabel label="Duration" field="duration" currentSort={sort} onSort={onSort} />
                     </ResizableTh>
                   )}
                   {isColumnVisible('performance') && (
-                    <ResizableTh width={colWidths.performance} onResize={(w) => resizeCol('performance', w)}>
+                    <ResizableTh width={colWidths.performance} minWidth={70} onResize={(w) => resizeCol('performance', w)}>
                       Performance
                     </ResizableTh>
                   )}
                   {isColumnVisible('session') && (
-                    <ResizableTh width={colWidths.session} onResize={(w) => resizeCol('session', w)}>
+                    <ResizableTh width={colWidths.session} minWidth={80} onResize={(w) => resizeCol('session', w)}>
                       Session
                     </ResizableTh>
                   )}
                   {isColumnVisible('ai_transcript') && (
-                    <ResizableTh width={colWidths.ai_transcript} onResize={(w) => resizeCol('ai_transcript', w)}>
+                    <ResizableTh width={colWidths.ai_transcript} minWidth={50} onResize={(w) => resizeCol('ai_transcript', w)}>
                       AI
                     </ResizableTh>
                   )}
                   {isColumnVisible('caller') && (
-                    <ResizableTh width={colWidths.caller} onResize={(w) => resizeCol('caller', w)}>
+                    <ResizableTh width={colWidths.caller} minWidth={70} onResize={(w) => resizeCol('caller', w)}>
                       Caller
                     </ResizableTh>
                   )}
                   {isColumnVisible('notes') && (
-                    <ResizableTh width={colWidths.notes} onResize={(w) => resizeCol('notes', w)}>
+                    <ResizableTh width={colWidths.notes} minWidth={80} onResize={(w) => resizeCol('notes', w)}>
                       Notes
                     </ResizableTh>
                   )}
-                  <ResizableTh width={colWidths.actions} onResize={(w) => resizeCol('actions', w)} resizable={false}>
+                  <ResizableTh width={colWidths.actions} minWidth={50} onResize={(w) => resizeCol('actions', w)} resizable={false}>
                     Actions
                   </ResizableTh>
                 </tr>
@@ -560,7 +562,7 @@ function CallLogsTable({
                         forceCheckbox={selection.hasSelection}
                       />
                       {isColumnVisible('call_time') && (
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 overflow-hidden">
                           {log.call_time ? (
                             <RelativeTime date={log.call_time} timezones={timezones} className="text-sm" />
                           ) : (
@@ -569,30 +571,38 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('company') && (
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 overflow-visible">
                           {log.expand?.company ? (
-                            <Link href={`/companies/${log.expand.company.id}`} className="font-medium hover:text-[var(--primary)] transition-colors">
-                              {log.expand.company.company_name}
-                            </Link>
+                            <CompanyHoverCard company={log.expand.company}>
+                              <Link href={`/companies/${log.expand.company.id}`} className="block truncate font-medium hover:text-[var(--primary)] transition-colors" title={log.expand.company.company_name}>
+                                {log.expand.company.company_name}
+                              </Link>
+                            </CompanyHoverCard>
                           ) : (
                             <span className="text-[var(--muted)]">Unknown</span>
                           )}
                         </td>
                       )}
                       {isColumnVisible('phone') && (
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-1">
-                            <span className="text-sm font-mono">{phoneNum ? formatPhoneNumber(phoneNum) : '-'}</span>
+                        <td className="py-3 px-4 overflow-visible">
+                          <div className="flex items-center gap-1 min-w-0">
+                            {phoneNum ? (
+                              <PhoneHoverCard phoneRecord={log.expand?.phone_number_record} phoneNumber={phoneNum}>
+                                <span className="text-sm font-mono truncate cursor-default">{formatPhoneNumber(phoneNum)}</span>
+                              </PhoneHoverCard>
+                            ) : (
+                              <span className="text-sm font-mono">-</span>
+                            )}
                             {phoneNum && <ZoomCallButton phoneNumber={phoneNum} />}
                           </div>
                         </td>
                       )}
                       {isColumnVisible('recipient') && (
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm">{log.owner_name_found || '-'}</span>
+                        <td className="py-3 px-4 overflow-hidden">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-sm truncate">{log.owner_name_found || '-'}</span>
                             {log.owner_reached && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] font-semibold uppercase">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] font-semibold uppercase shrink-0">
                                 Owner
                               </span>
                             )}
@@ -600,7 +610,7 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('call_outcome') && (
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 overflow-hidden">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {(Array.isArray(log.call_outcome) ? log.call_outcome : log.call_outcome ? [log.call_outcome] : []).map(oc => {
                               const colors = getOutcomeColors(oc);
@@ -623,15 +633,15 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('duration') && (
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 overflow-hidden">
                           <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
-                            <Clock size={12} />
-                            <span>{formatCallDuration(log.duration)}</span>
+                            <Clock size={12} className="shrink-0" />
+                            <span className="truncate">{formatCallDuration(log.duration)}</span>
                           </div>
                         </td>
                       )}
                       {isColumnVisible('performance') && (
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 overflow-hidden">
                           <div className="flex items-center gap-1">
                             {log.owner_reached && (
                               <span className="p-1 rounded bg-[var(--success-subtle)]" title="Owner Reached">
@@ -655,13 +665,13 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('session') && (
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 overflow-hidden">
                           {session ? (
-                            <div className="flex flex-col">
-                              <span className="text-xs font-medium text-[var(--foreground)]">
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-xs font-medium text-[var(--foreground)] truncate">
                                 {session.started_at ? formatDate(session.started_at) : '-'}
                               </span>
-                              <span className="text-[10px] text-[var(--muted)]">
+                              <span className="text-[10px] text-[var(--muted)] truncate">
                                 {session.total_dials || 0} dials &middot; {session.total_pickups || 0} pickups
                               </span>
                             </div>
@@ -687,13 +697,13 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('caller') && (
-                        <td className="py-3 px-4">
-                          <span className="text-sm">{log.expand?.caller?.name || '-'}</span>
+                        <td className="py-3 px-4 overflow-hidden">
+                          <span className="text-sm block truncate">{log.expand?.caller?.name || '-'}</span>
                         </td>
                       )}
                       {isColumnVisible('notes') && (
-                        <td className="py-3 px-4 max-w-[200px]">
-                          <span className="text-xs text-[var(--muted)] line-clamp-2">
+                        <td className="py-3 px-4 overflow-hidden">
+                          <span className="text-xs text-[var(--muted)] block truncate" title={log.post_call_notes || undefined}>
                             {log.post_call_notes || '-'}
                           </span>
                         </td>

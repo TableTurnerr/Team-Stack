@@ -48,11 +48,20 @@ function pbSendToCrm_maps(item, cb) {
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
         var userId = pbGetUserIdFromToken_maps(pbToken);
         var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
+        var websiteUrl = item.companyUrl || '';
+        if (websiteUrl && websiteUrl.indexOf('https://www.google.com/maps') === 0) websiteUrl = '';
         var companyBody = JSON.stringify({
             company_name: item.title || '',
             company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
             google_maps_link: item.href || '',
+            google_rating: item.rating || '',
+            google_reviews_count: (item.reviewCount || '').replace(/[()]/g, ''),
+            website: websiteUrl,
+            industry: item.industry || '',
+            price_range: item.expensiveness || '',
+            email: item.email || '',
             source: 'Google Maps',
+            contact_source: 'Extension - Manual Maps',
             notes: item.note || '',
             status: ['Untouched']
         });

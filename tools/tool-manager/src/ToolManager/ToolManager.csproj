@@ -4,12 +4,12 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <RootNamespace>LocalCrmAgent</RootNamespace>
-    <AssemblyName>LocalCrmAgent</AssemblyName>
-    <Version>1.0.7</Version>
+    <RootNamespace>ToolManager</RootNamespace>
+    <AssemblyName>ToolManager</AssemblyName>
+    <Version>1.0.0</Version>
     <Company>TableTurnerr</Company>
-    <Product>Local CRM Agent</Product>
-    <Description>Local desktop agent that monitors Zoom Phone call state via WASAPI and serves reliable signals to the CRM dashboard over WebSocket.</Description>
+    <Product>TableTurnerr Tool Manager</Product>
+    <Description>Discovers, installs, and auto-updates all TableTurnerr team tools from GitHub Releases.</Description>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
@@ -20,10 +20,5 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="Fleck" Version="1.2.0" />
-  </ItemGroup>
 
 </Project>

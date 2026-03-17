@@ -1,10 +1,10 @@
-name: Build Local CRM Agent
+name: Build Tool Manager
 
 on:
   push:
     branches: [release]
     paths:
-      - 'tools/local-CRM-Agent/src/**'
+      - 'tools/tool-manager/src/**'
   workflow_dispatch:
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $xml = [xml](Get-Content 'tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj')
+          $xml = [xml](Get-Content 'tools/tool-manager/src/ToolManager/ToolManager.csproj')
           $version = $xml.Project.PropertyGroup.Version
           "VERSION=$version" >> $env:GITHUB_OUTPUT
 
@@ -33,9 +33,9 @@ jobs:
         id: check
         shell: bash
         run: |
-          if gh release view "local-agent-v${{ steps.version.outputs.VERSION }}" &>/dev/null; then
+          if gh release view "tool-manager-v${{ steps.version.outputs.VERSION }}" &>/dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release local-agent-v${{ steps.version.outputs.VERSION }} already exists, skipping."
+            echo "Release tool-manager-v${{ steps.version.outputs.VERSION }} already exists, skipping."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -44,44 +44,43 @@ jobs:
 
       - name: Build
         if: steps.check.outputs.exists == 'false'
-        run: dotnet publish tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release -o publish
+        run: dotnet publish tools/tool-manager/src/ToolManager/ToolManager.csproj -c Release -o publish
 
       - name: Create tool.json
         if: steps.check.outputs.exists == 'false'
         shell: pwsh
         run: |
           @{
-            id = "local-crm-agent"
-            name = "Local CRM Agent"
-            description = "Desktop agent that monitors Zoom Phone call state and serves signals to the CRM dashboard."
+            id = "tool-manager"
+            name = "TableTurnerr Tool Manager"
+            description = "Discovers, installs, and auto-updates all TableTurnerr team tools."
             type = "windows-app"
             version = "${{ steps.version.outputs.VERSION }}"
-            executable = "LocalCrmAgent.exe"
-            processName = "LocalCrmAgent"
+            executable = "ToolManager.exe"
+            processName = "ToolManager"
             autoStart = $true
-            registryAutoStart = @{ key = "LocalCrmAgent"; args = "--background" }
-            protocolHandler = "crm-agent"
+            registryAutoStart = @{ key = "ToolManager"; args = "--background" }
             startMenuFolder = "TableTurnerr"
-            startMenuName = "CRM Agent"
+            startMenuName = "Tool Manager"
           } | ConvertTo-Json -Depth 3 | Set-Content publish/tool.json
 
       - name: Package
         if: steps.check.outputs.exists == 'false'
         shell: pwsh
         run: |
-          Copy-Item tools/local-CRM-Agent/install.bat publish/
-          Copy-Item tools/local-CRM-Agent/uninstall.bat publish/
-          Compress-Archive -Path publish/* -DestinationPath "LocalCrmAgent-v${{ steps.version.outputs.VERSION }}.zip"
+          Copy-Item tools/tool-manager/install.bat publish/
+          Copy-Item tools/tool-manager/uninstall.bat publish/
+          Compress-Archive -Path publish/* -DestinationPath "ToolManager-v${{ steps.version.outputs.VERSION }}.zip"
 
       - name: Create release
         if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: local-agent-v${{ steps.version.outputs.VERSION }}
-          name: Local CRM Agent v${{ steps.version.outputs.VERSION }}
+          tag_name: tool-manager-v${{ steps.version.outputs.VERSION }}
+          name: TableTurnerr Tool Manager v${{ steps.version.outputs.VERSION }}
           body: |
-            Automated release of Local CRM Agent v${{ steps.version.outputs.VERSION }}.
+            Automated release of TableTurnerr Tool Manager v${{ steps.version.outputs.VERSION }}.
 
             **New users:** Download the zip, extract, and run `install.bat`.
-            **Existing users:** The agent will auto-update within the hour.
-          files: LocalCrmAgent-v${{ steps.version.outputs.VERSION }}.zip
+            **Existing users:** The manager will auto-update within the hour.
+          files: ToolManager-v${{ steps.version.outputs.VERSION }}.zip

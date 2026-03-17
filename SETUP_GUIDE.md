@@ -13,10 +13,11 @@
 5. [Dashboard Setup](#5-dashboard-setup)
 6. [Transcriber Setup](#6-transcriber-setup)
 7. [Zoom Phone Configuration](#7-zoom-phone-configuration)
-8. [Local CRM Agent Setup](#8-local-crm-agent-setup)
-9. [Automated Testing (Playwright)](#9-automated-testing-playwright)
-10. [Production Deployment](#10-production-deployment)
-11. [Troubleshooting](#11-troubleshooting)
+8. [Tool Manager Setup (Recommended)](#8-tool-manager-setup-recommended)
+9. [Local CRM Agent Setup (Manual)](#9-local-crm-agent-setup-manual--alternative-to-tool-manager)
+10. [Automated Testing (Playwright)](#10-automated-testing-playwright)
+11. [Production Deployment](#11-production-deployment)
+12. [Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -174,13 +175,50 @@ Access via **Settings → Integrations → Zoom Phone**.
 
 ---
 
-## 8. Local CRM Agent Setup
+## 8. Tool Manager Setup (Recommended)
 
-The Local CRM Agent is a Windows desktop application that monitors Zoom Phone call state via WASAPI (OS-level audio sessions) and provides reliable call signals to the CRM dashboard. It prevents recordings from dropping during network instability.
+The **TableTurnerr Tool Manager** is a unified installer and auto-updater for all team tools (Local CRM Agent, Lead Scraper, and any future tools). Install it once — it handles everything else automatically.
 
 ### For Team Members (End Users)
 
-1. Download the **CRM-Agent.zip** shared by your team lead.
+1. Download the **ToolManager.zip** from the latest [GitHub Release](https://github.com/TableTurnerr/Team-Stack/releases) (tag: `tool-manager-v*`).
+2. Extract the zip to any folder.
+3. Double-click **`install.bat`**.
+4. The Tool Manager opens and shows all available tools — pick which ones to install.
+5. After that, the manager runs in the system tray and **auto-updates installed tools** on startup and every hour (with tray notification confirmation).
+6. Tools are installed to `%LocalAppData%\TableTurnerr\ToolManager\tools\`.
+
+### What It Manages
+
+| Tool | Type | Auto-Update Behavior |
+|------|------|---------------------|
+| Local CRM Agent | Windows App | Kills process, replaces exe, relaunches automatically |
+| Lead Scraper Extension | Chrome Extension | Silently replaces files (user reloads extension in Chrome) |
+| Tool Manager itself | Windows App | Self-updates via tray notification |
+
+### For Developers
+
+**Prerequisites**: [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+
+```bash
+cd tools/tool-manager
+build-release.bat
+# Output: dist/ToolManager.exe + install.bat + uninstall.bat
+```
+
+To publish a new tool that the manager auto-discovers: create a GitHub Actions workflow that builds a zip, creates a release tagged `{tool-id}-v{version}`, and includes a `tool.json` manifest in the zip.
+
+---
+
+## 9. Local CRM Agent Setup (Manual — alternative to Tool Manager)
+
+> If you're using the Tool Manager (Section 8), skip this section — the manager handles installation and updates.
+
+The Local CRM Agent is a Windows desktop application that monitors Zoom Phone call state via WASAPI (OS-level audio sessions) and provides reliable call signals to the CRM dashboard.
+
+### For Team Members (End Users)
+
+1. Download the **CRM-Agent.zip** from the latest [GitHub Release](https://github.com/TableTurnerr/Team-Stack/releases) (tag: `local-agent-v*`).
 2. Extract the zip to any folder.
 3. Double-click **`install.bat`**.
 4. The agent installs to `%LocalAppData%\TableTurnerr\LocalCrmAgent\`, registers auto-start on Windows login, and launches immediately.
@@ -197,7 +235,6 @@ cd tools/local-CRM-Agent
 build-release.bat
 
 # Output: dist/LocalCrmAgent.exe + install.bat + uninstall.bat
-# Zip dist/ and share with team
 ```
 
 ### How It Integrates with the Dashboard
@@ -208,26 +245,19 @@ build-release.bat
 4. During calls, if Zoom's iframe fires a false "disconnect" event but the agent confirms the call is still active (via WASAPI audio), the disconnect is suppressed — preventing recording drops.
 5. The dialer UI shows agent connection status and a "Click to launch" button if offline.
 
-### Updating the Agent
+### Updating
 
-1. Make code changes in `tools/local-CRM-Agent/src/`.
-2. Run `build-release.bat`.
-3. Zip the `dist/` folder and share with the team.
-4. Team members extract and run `install.bat` again (replaces the old version).
-
-### Uninstalling
-
-Run `uninstall.bat` from the extracted zip — removes the app, auto-start, and protocol handler.
+Handled automatically by the Tool Manager. For manual updates: bump the version in `.csproj`, push to the `release` branch, and the GitHub Actions workflow creates a new release. The agent's built-in auto-updater (or the Tool Manager) picks it up within an hour.
 
 > **Detailed docs**: [`tools/local-CRM-Agent/README.md`](tools/local-CRM-Agent/README.md) | [`tools/local-CRM-Agent/SETUP.md`](tools/local-CRM-Agent/SETUP.md)
 
 ---
 
-## 9. Automated Testing (Playwright)
+## 10. Automated Testing (Playwright)
 
 The dashboard ships with a full E2E test suite — **127 tests across 12 files**. Run these whenever you make significant changes to verify nothing is broken.
 
-### 9.1 First-Time Setup
+### 11.1 First-Time Setup
 
 ```bash
 cd apps/dashboard
@@ -249,7 +279,7 @@ Required values in `.env.test`:
 | `TEST_PB_ADMIN_PASSWORD` | PocketBase superadmin password |
 | `TEST_LIVE_CALLS` | Set `true` to enable real call tests (default: `false`) |
 
-### 9.2 Running Tests
+### 11.2 Running Tests
 
 #### Interactive CLI Menu (recommended)
 
@@ -286,7 +316,7 @@ pnpm test:headed      # Run with visible browser
 pnpm test:report      # View last HTML report
 ```
 
-### 9.3 Test Coverage
+### 11.3 Test Coverage
 
 | Suite | What's verified |
 |-------|----------------|
@@ -303,7 +333,7 @@ pnpm test:report      # View last HTML report
 | **Integration** | Session→CallLog, CallLog→Recording, Company→CallHistory, Follow-Up linkage |
 | **Live Calls** | Real Zoom Phone calls to public test lines (disabled by default) |
 
-### 9.4 Live Call Testing
+### 11.4 Live Call Testing
 
 When `TEST_LIVE_CALLS=true`, the suite dials public telecom test lines to verify the full Zoom Phone → recording → call log pipeline.
 
@@ -332,7 +362,7 @@ pnpm test:headed tests/12-live-call-flow.spec.ts
 
 > **Full test documentation**: `apps/dashboard/tests/README.md`
 
-### 9.5 Manual Checklist (supplement to automated tests)
+### 11.5 Manual Checklist (supplement to automated tests)
 
 - [ ] **Power Dialer**: Paste phone numbers → start → verify sequential dialing → test pause/resume/stop → try negative delay mode
 - [ ] **Transcriber**: Place an `.mp3` in `tools/audio-recorder/recordings/` → run `python tools/transcriber/transcribe_calls.py` → verify transcript appears in Dashboard
@@ -341,7 +371,7 @@ pnpm test:headed tests/12-live-call-flow.spec.ts
 
 ---
 
-## 10. Production Deployment
+## 11. Production Deployment
 
 Recommended architecture:
 
@@ -353,12 +383,12 @@ Recommended architecture:
 └─────────────────┘     └───────────────────┘     └──────────────────┘
 ```
 
-### 10.1 Ubuntu Server (PocketBase)
+### 11.1 Ubuntu Server (PocketBase)
 1. Install PocketBase on a VPS (DigitalOcean/Hetzner/AWS).
 2. Set up a systemd service to keep it running `serve --http="0.0.0.0:8090"`.
 3. Use **Cloudflare Tunnel** (`cloudflared`) to expose `localhost:8090` to `https://api.yourdomain.com`. This handles SSL automatically.
 
-### 10.2 Vercel (Dashboard)
+### 11.2 Vercel (Dashboard)
 1. Connect your GitHub repo to Vercel.
 2. Set Root Directory to `apps/dashboard`.
 3. Add Environment Variable: `NEXT_PUBLIC_POCKETBASE_URL=https://api.yourdomain.com`.
@@ -366,7 +396,7 @@ Recommended architecture:
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### "ClientResponseError 0" (Auto-cancellation)
 - **Cause**: React Strict Mode double-invoking effects or rapid navigation cancelling pending requests.

@@ -57,6 +57,22 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isSessionPage = pathname === '/session';
 
+  // Track page visits for quick access on overview
+  useEffect(() => {
+    if (pathname === '/') return; // don't track overview itself
+    try {
+      const key = 'tt_page_visits';
+      const raw = localStorage.getItem(key);
+      const visits: Record<string, { count: number; last: number }> = raw ? JSON.parse(raw) : {};
+      const basePath = '/' + pathname.split('/').filter(Boolean)[0]; // normalize to top-level route
+      const entry = visits[basePath] || { count: 0, last: 0 };
+      entry.count += 1;
+      entry.last = Date.now();
+      visits[basePath] = entry;
+      localStorage.setItem(key, JSON.stringify(visits));
+    } catch { /* ignore storage errors */ }
+  }, [pathname]);
+
   return (
     <div className="flex min-h-screen bg-[var(--background)]">
       <Sidebar />

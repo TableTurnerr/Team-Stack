@@ -41,13 +41,13 @@ if %ERRORLEVEL% neq 0 (
 echo Installed version updated.
 echo.
 
-:: Start the tray process (background, hides its console)
+:: Start tray process (WinExe, no console window)
 start "" "%INSTALL_DIR%\ToolManager.exe"
 timeout /t 2 /nobreak >nul
 
-:: Open the interactive CLI in a new terminal window
+:: Open interactive CLI (allocates its own console)
 echo Opening Tool Manager CLI...
-start "TableTurnerr Tool Manager" "%INSTALL_DIR%\ToolManager.exe" --interactive
+start "" "%INSTALL_DIR%\ToolManager.exe" --interactive
 
 :done
 echo Tool Manager is running in the system tray.

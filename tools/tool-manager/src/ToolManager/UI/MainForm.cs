@@ -316,6 +316,7 @@ public class MainForm : Form
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
+        if (_toolList == null) return;
         foreach (Control c in _toolList.Controls)
         {
             if (c is ToolCard or Panel)

@@ -9,12 +9,20 @@ namespace ToolManager.Services;
 /// <summary>
 /// Fetches all releases from the GitHub API, groups by tag prefix,
 /// and produces a list of discoverable tools.
+/// Rate-limit aware: respects GitHub's X-RateLimit headers and enforces
+/// a local minimum cooldown between requests to prevent exhaustion.
 /// </summary>
 public partial class GitHubReleaseService
 {
     private const string GitHubOwner = "TableTurnerr";
     private const string GitHubRepo = "Team-Stack";
     public const string SelfTagPrefix = "tool-manager";
+
+    /// <summary>Hard minimum between any two actual API requests, regardless of caller.</summary>
+    private static readonly TimeSpan MinRequestInterval = TimeSpan.FromMinutes(5);
+
+    /// <summary>Stop making requests when remaining quota drops to this level.</summary>
+    private const int RateLimitFloor = 10;
 
     [GeneratedRegex(@"^(.+)-v(\d+(?:\.\d+)*)$")]
     private static partial Regex TagPattern();
@@ -23,8 +31,11 @@ public partial class GitHubReleaseService
     private readonly InstalledToolsRegistry _registry;
 
     private List<ToolInfo>? _cachedTools;
-    private DateTime _cacheTime;
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(2);
+    private DateTime _lastApiCall;
+    private int _rateLimitRemaining = 60;
+    private DateTime _rateLimitReset;
+
+    public string? LastError { get; private set; }
 
     public GitHubReleaseService(InstalledToolsRegistry registry)
     {
@@ -37,11 +48,54 @@ public partial class GitHubReleaseService
             new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
     }
 
+    /// <summary>
+    /// Returns true if we should skip the API call (too soon or rate limited).
+    /// </summary>
+    private bool ShouldThrottle()
+    {
+        // Hard cooldown between requests
+        if (DateTime.UtcNow - _lastApiCall < MinRequestInterval)
+            return true;
+
+        // GitHub told us we're near the limit
+        if (_rateLimitRemaining <= RateLimitFloor && DateTime.UtcNow < _rateLimitReset)
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Read rate-limit headers from the response and store them.
+    /// </summary>
+    private void ReadRateLimitHeaders(HttpResponseMessage resp)
+    {
+        if (resp.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining))
+        {
+            if (int.TryParse(remaining.FirstOrDefault(), out var val))
+                _rateLimitRemaining = val;
+        }
+        if (resp.Headers.TryGetValues("X-RateLimit-Reset", out var reset))
+        {
+            if (long.TryParse(reset.FirstOrDefault(), out var epoch))
+                _rateLimitReset = DateTimeOffset.FromUnixTimeSeconds(epoch).UtcDateTime;
+        }
+        Debug.WriteLine($"[GitHub] Rate limit: {_rateLimitRemaining} remaining, resets {_rateLimitReset:HH:mm:ss}");
+    }
+
     public async Task<List<ToolInfo>> FetchToolsAsync(bool forceRefresh = false, CancellationToken ct = default)
     {
-        if (!forceRefresh && _cachedTools != null && DateTime.UtcNow - _cacheTime < CacheDuration)
+        // Always return cache if available and not force-refreshing
+        if (!forceRefresh && _cachedTools != null)
             return _cachedTools;
 
+        // Even with forceRefresh, respect the rate limit
+        if (ShouldThrottle() && _cachedTools != null)
+        {
+            Debug.WriteLine("[GitHub] Throttled — returning cached tools");
+            return _cachedTools;
+        }
+
+        LastError = null;
         Debug.WriteLine("[GitHub] Fetching releases...");
 
         var url = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases?per_page=100";
@@ -49,16 +103,22 @@ public partial class GitHubReleaseService
         try
         {
             resp = await _http.GetAsync(url, ct);
+            _lastApiCall = DateTime.UtcNow;
+            ReadRateLimitHeaders(resp);
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[GitHub] Request failed: {ex.Message}");
+            LastError = $"Network error: {ex.Message}";
             return _cachedTools ?? [];
         }
 
         if (!resp.IsSuccessStatusCode)
         {
             Debug.WriteLine($"[GitHub] API returned {resp.StatusCode}");
+            LastError = (int)resp.StatusCode == 403
+                ? $"GitHub API rate limited. Resets at {_rateLimitReset.ToLocalTime():HH:mm}."
+                : $"GitHub API error: {resp.StatusCode}";
             return _cachedTools ?? [];
         }
 
@@ -75,15 +135,13 @@ public partial class GitHubReleaseService
             if (release.GetProperty("draft").GetBoolean()) continue;
 
             var match = TagPattern().Match(tag);
-            if (!match.Success) { Debug.WriteLine($"[GitHub] No regex match: {tag}"); continue; }
+            if (!match.Success) continue;
 
             var prefix = match.Groups[1].Value;
             var versionStr = match.Groups[2].Value;
 
-            // Skip the manager's own releases
             if (prefix == SelfTagPrefix) continue;
-
-            if (!Version.TryParse(versionStr, out var version)) { Debug.WriteLine($"[GitHub] Version parse failed: {versionStr}"); continue; }
+            if (!Version.TryParse(versionStr, out var version)) continue;
 
             // Only keep the latest version per prefix (API returns newest first)
             if (toolMap.ContainsKey(prefix)) continue;
@@ -124,7 +182,6 @@ public partial class GitHubReleaseService
         }
 
         _cachedTools = toolMap.Values.OrderBy(t => t.DisplayName).ToList();
-        _cacheTime = DateTime.UtcNow;
 
         Debug.WriteLine($"[GitHub] Found {_cachedTools.Count} tools");
         return _cachedTools;
@@ -132,11 +189,25 @@ public partial class GitHubReleaseService
 
     public async Task<(Version? version, string? url)> CheckSelfUpdate(CancellationToken ct = default)
     {
+        // Respect the same rate limit
+        if (ShouldThrottle())
+        {
+            Debug.WriteLine("[GitHub] Self-update check throttled");
+            return (null, null);
+        }
+
         var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version
             ?? new Version(0, 0, 0);
 
-        var resp = await _http.GetAsync(
-            $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases?per_page=30", ct);
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _http.GetAsync(
+                $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases?per_page=30", ct);
+            _lastApiCall = DateTime.UtcNow;
+            ReadRateLimitHeaders(resp);
+        }
+        catch { return (null, null); }
 
         if (!resp.IsSuccessStatusCode) return (null, null);
 

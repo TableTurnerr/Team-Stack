@@ -58,6 +58,11 @@ CRM-Tableturnerr/
 │   │   ├── install.bat            # End-user one-click installer
 │   │   └── uninstall.bat          # Clean removal script
 │   │
+│   ├── tool-manager/              # 🔧 Unified installer & auto-updater for all team tools
+│   │   ├── src/ToolManager/       # .NET 8 WinForms app
+│   │   ├── install.bat            # One-time installer for team members
+│   │   └── uninstall.bat          # Clean removal
+│   │
 │   ├── transcriber/               # 🧠 Gemini AI transcription service
 │   │   ├── transcribe_calls.py    # Main transcription script
 │   │   └── pocketbase_service.py  # DB integration
@@ -245,6 +250,17 @@ Modern Next.js 15 web application with:
 
 > **Detailed docs**: [`tools/local-CRM-Agent/README.md`](tools/local-CRM-Agent/README.md) | [`tools/local-CRM-Agent/SETUP.md`](tools/local-CRM-Agent/SETUP.md)
 
+### Tool Manager (`tools/tool-manager`)
+.NET 8 WinForms application that discovers, installs, and auto-updates all team tools:
+- **Auto-Discovery**: Scans GitHub Releases for all tools — new tools appear automatically when published
+- **One-Time Install**: Team members run `install.bat` once, then the manager handles everything
+- **User Choice**: On first launch, shows all available tools for the user to pick which to install
+- **Auto-Update**: Silently updates installed tools on startup and hourly (tray notification confirmation)
+- **Tool Types**: Windows apps (kill/replace/relaunch) and Chrome extensions (silent file replacement)
+- **Self-Updating**: Manager updates itself automatically via GitHub Releases (`tool-manager-v*` tags)
+- **Install Location**: `%LocalAppData%\TableTurnerr\ToolManager\` (tools in `tools\` subfolder)
+- **CI/CD**: GitHub Actions workflow builds and releases on push to `release` branch
+
 ### Audio Recorder (`tools/audio-recorder`)
 PyQt6 desktop application:
 - **Hotkey**: Alt+R for quick recording
@@ -361,10 +377,10 @@ cd apps/dashboard
 cp .env.example .env.local
 pnpm dev  # http://localhost:3000
 
-# 5. Install Local CRM Agent (Windows — required for call sessions)
-cd tools/local-CRM-Agent
+# 5. Install Tool Manager (handles Local CRM Agent + Lead Scraper + future tools)
+cd tools/tool-manager
 build-release.bat        # Build self-contained exe
-dist\install.bat         # Install and launch
+dist\install.bat         # Install, pick tools, auto-updates from there
 ```
 
 > **Detailed Setup**: See [SETUP_GUIDE.md](SETUP_GUIDE.md)
@@ -409,6 +425,7 @@ Test coverage: auth, overview, companies, cold calls, session lifecycle, session
 | [SETUP_GUIDE.md](SETUP_GUIDE.md) | Detailed installation, seeding, and deployment |
 | [tools/local-CRM-Agent/README.md](tools/local-CRM-Agent/README.md) | Local Agent architecture, WebSocket protocol, state machine |
 | [tools/local-CRM-Agent/SETUP.md](tools/local-CRM-Agent/SETUP.md) | Agent installation for team members and developer build guide |
+| [tools/tool-manager/](tools/tool-manager/) | Unified Tool Manager — auto-installs and auto-updates all team tools |
 | [packages/hubspot/HUBSPOT_CONTEXT.md](packages/hubspot/HUBSPOT_CONTEXT.md) | HubSpot CRM migration mapping |
 
 ---

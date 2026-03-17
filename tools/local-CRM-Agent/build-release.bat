@@ -23,13 +23,8 @@ echo ============================================
 echo.
 echo Output: dist\LocalCrmAgent.exe
 echo.
-echo To distribute to your team:
-echo   1. Copy the 'dist' folder contents
-echo   2. Include 'install.bat' alongside LocalCrmAgent.exe
-echo   3. Send both files to your team members
-echo.
 
-:: Copy installer script next to the built exe
+:: Copy installer scripts next to the built exe
 copy /Y install.bat dist\install.bat >nul 2>&1
 copy /Y uninstall.bat dist\uninstall.bat >nul 2>&1
 
@@ -54,5 +49,12 @@ echo.
 echo ============================================
 echo   Ready to distribute: dist\%ZIPNAME%
 echo ============================================
+echo.
+echo   Recommended: Push to the release branch
+echo   and GitHub Actions will create the release
+echo   automatically. The Tool Manager picks it up.
+echo.
+echo   Manual: Share the zip directly — teammates
+echo   extract and run install.bat.
 echo.
 pause

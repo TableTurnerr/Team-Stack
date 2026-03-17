@@ -3,6 +3,9 @@ setlocal EnableDelayedExpansion
 
 :: =============================================
 ::  TableTurnerr Local CRM Agent - Installer
+::  NOTE: The Tool Manager is the recommended
+::  way to install. Use this only for standalone
+::  installs without the Tool Manager.
 :: =============================================
 
 echo.
@@ -11,7 +14,6 @@ echo   TableTurnerr CRM Local Agent - Setup
 echo  =============================================
 echo.
 
-:: Check if running from the correct location (LocalCrmAgent.exe should be alongside this script)
 if not exist "%~dp0LocalCrmAgent.exe" (
     echo [ERROR] LocalCrmAgent.exe not found next to this installer.
     echo         Make sure install.bat and LocalCrmAgent.exe are in the same folder.
@@ -20,8 +22,15 @@ if not exist "%~dp0LocalCrmAgent.exe" (
     exit /b 1
 )
 
-:: Define install location
-set "INSTALL_DIR=%LocalAppData%\TableTurnerr\LocalCrmAgent"
+:: Use managed path if Tool Manager is installed, otherwise legacy path
+set "MANAGED_DIR=%LocalAppData%\TableTurnerr\ToolManager\tools\local-crm-agent"
+set "LEGACY_DIR=%LocalAppData%\TableTurnerr\LocalCrmAgent"
+
+if exist "%LocalAppData%\TableTurnerr\ToolManager\ToolManager.exe" (
+    set "INSTALL_DIR=%MANAGED_DIR%"
+) else (
+    set "INSTALL_DIR=%LEGACY_DIR%"
+)
 
 echo  Install location: %INSTALL_DIR%
 echo.
@@ -64,7 +73,7 @@ reg add "HKCU\Software\Classes\crm-agent\DefaultIcon" /ve /t REG_SZ /d "\"%INSTA
 reg add "HKCU\Software\Classes\crm-agent\shell\open\command" /ve /t REG_SZ /d "\"%INSTALL_DIR%\LocalCrmAgent.exe\" \"%%1\"" /f >nul 2>&1
 echo        Done.
 
-:: Create Start Menu shortcut (makes app searchable via Windows Search)
+:: Create Start Menu shortcut
 echo  [4/5] Creating Start Menu shortcut...
 set "SHORTCUT_DIR=%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr"
 if not exist "!SHORTCUT_DIR!" mkdir "!SHORTCUT_DIR!"
@@ -86,8 +95,5 @@ echo   system tray (bottom-right corner).
 echo.
 echo   It will automatically start when you
 echo   log into Windows.
-echo.
-echo   You can now open the CRM dashboard and
-echo   start a call session.
 echo.
 pause

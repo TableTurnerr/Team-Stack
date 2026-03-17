@@ -7,7 +7,9 @@ echo   TableTurnerr CRM Local Agent - Uninstall
 echo  =============================================
 echo.
 
-set "INSTALL_DIR=%LocalAppData%\TableTurnerr\LocalCrmAgent"
+:: Check both managed and legacy paths
+set "MANAGED_DIR=%LocalAppData%\TableTurnerr\ToolManager\tools\local-crm-agent"
+set "LEGACY_DIR=%LocalAppData%\TableTurnerr\LocalCrmAgent"
 
 :: Stop running instance
 echo  [1/5] Stopping agent...
@@ -35,11 +37,10 @@ if exist "%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr" (
 )
 echo        Done.
 
-:: Remove files
+:: Remove files from both locations
 echo  [5/5] Removing files...
-if exist "%INSTALL_DIR%" (
-    rmdir /s /q "%INSTALL_DIR%"
-)
+if exist "%MANAGED_DIR%" rmdir /s /q "%MANAGED_DIR%"
+if exist "%LEGACY_DIR%" rmdir /s /q "%LEGACY_DIR%"
 echo        Done.
 
 echo.

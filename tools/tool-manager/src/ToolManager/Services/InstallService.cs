@@ -35,16 +35,33 @@ public class InstallService
         };
     }
 
-    public async Task<bool> InstallOrUpdate(ToolInfo tool, IProgress<string>? status = null, CancellationToken ct = default)
+    public async Task<bool> InstallOrUpdate(ToolInfo tool, IProgress<InstallProgress>? status = null, CancellationToken ct = default)
     {
         try
         {
-            // 1. Download
-            status?.Report("Downloading...");
-            var zipPath = await _downloadService.DownloadAsync(tool.LatestDownloadUrl, ct: ct);
+            // 1. Download with byte-level progress
+            status?.Report(new InstallProgress("Downloading...", 0));
+
+            var downloadProgress = new Progress<(long downloaded, long? total)>(p =>
+            {
+                if (p.total is > 0)
+                {
+                    var pct = (int)(p.downloaded * 100 / p.total.Value);
+                    var mb = p.downloaded / (1024.0 * 1024.0);
+                    var totalMb = p.total.Value / (1024.0 * 1024.0);
+                    status?.Report(new InstallProgress($"Downloading... {mb:F1} / {totalMb:F1} MB", pct));
+                }
+                else
+                {
+                    var mb = p.downloaded / (1024.0 * 1024.0);
+                    status?.Report(new InstallProgress($"Downloading... {mb:F1} MB", -1));
+                }
+            });
+
+            var zipPath = await _downloadService.DownloadAsync(tool.LatestDownloadUrl, downloadProgress, ct);
 
             // 2. Extract to staging
-            status?.Report("Extracting...");
+            status?.Report(new InstallProgress("Extracting..."));
             var stagingDir = Path.Combine(Path.GetTempPath(),
                 $"ToolManager_Stage_{tool.TagPrefix}_{Guid.NewGuid():N}");
             if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, true);
@@ -79,7 +96,7 @@ public class InstallService
                 ?? Path.Combine(InstalledToolsRegistry.ToolsDir, manifest.Id);
 
             // 5. Install via handler
-            status?.Report("Installing...");
+            status?.Report(new InstallProgress("Installing..."));
             if (_handlers.TryGetValue(manifest.Type, out var handler))
             {
                 await handler.Install(stagingDir, installPath, manifest);
@@ -109,26 +126,26 @@ public class InstallService
             try { Directory.Delete(stagingDir, true); } catch { }
             try { File.Delete(zipPath); } catch { }
 
-            status?.Report("Done");
+            status?.Report(new InstallProgress("Done", 100));
             Debug.WriteLine($"[Install] {manifest.Name} v{tool.LatestVersion} installed to {installPath}");
             return true;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[Install] Failed: {ex.Message}");
-            status?.Report("Failed");
+            status?.Report(new InstallProgress($"Failed: {ex.Message}"));
             return false;
         }
     }
 
-    public async Task<bool> Uninstall(string tagPrefix, IProgress<string>? status = null)
+    public async Task<bool> Uninstall(string tagPrefix, IProgress<InstallProgress>? status = null)
     {
         var installed = _registry.GetByTagPrefix(tagPrefix);
         if (installed == null) return false;
 
         try
         {
-            status?.Report("Uninstalling...");
+            status?.Report(new InstallProgress("Uninstalling..."));
 
             if (_handlers.TryGetValue(installed.Type, out var handler))
                 await handler.Uninstall(installed);
@@ -136,13 +153,13 @@ public class InstallService
                 Directory.Delete(installed.InstallPath, true);
 
             _registry.Remove(tagPrefix);
-            status?.Report("Done");
+            status?.Report(new InstallProgress("Done", 100));
             return true;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[Uninstall] Failed: {ex.Message}");
-            status?.Report("Failed");
+            status?.Report(new InstallProgress($"Failed: {ex.Message}"));
             return false;
         }
     }

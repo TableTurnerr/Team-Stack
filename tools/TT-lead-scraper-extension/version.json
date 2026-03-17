@@ -1,5 +1,5 @@
 {
   "version": "2.7",
-  "releaseNotes": "Fixed phone_number field mapping to CRM. Added CRM send confirmation modal. Auto-add to local list on CRM send. Fixed website scanner CRM phone data. Multi-location Excel export. Note deduplication.",
+  "releaseNotes": "Complete CRM field mapping: now sends website, industry, price_range, email, google_rating, google_reviews_count, and contact_source from all modes. Website scanner emails flow to CRM. Added website/industry/price_range fields to DB schema.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

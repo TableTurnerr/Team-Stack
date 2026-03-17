@@ -83,13 +83,20 @@ function pbSendToCrm(item, cb) {
         if (pbToken) headers['Authorization'] = 'Bearer ' + pbToken;
         var userId = pbGetUserIdFromToken(pbToken);
         var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
+        var websiteUrl = item.companyUrl || '';
+        if (websiteUrl && websiteUrl.indexOf('https://www.google.com/maps') === 0) websiteUrl = '';
         var companyBody = JSON.stringify({
             company_name: item.title || '',
             company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
             google_maps_link: item.href || '',
             google_rating: item.rating || '',
             google_reviews_count: (item.reviewCount || '').replace(/[()]/g, ''),
+            website: websiteUrl,
+            industry: item.industry || '',
+            price_range: item.expensiveness || '',
+            email: item.email || '',
             source: 'Google Maps',
+            contact_source: 'Extension - Scraper',
             notes: item.note || '',
             status: ['Untouched']
         });
@@ -209,6 +216,7 @@ function showCrmConfirmation(item, onConfirm) {
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:var(--text-muted,#5f6368);white-space:nowrap;vertical-align:top;">Location</td><td style="padding:6px 0;color:var(--text,#202124);">' + escapeHtmlModal((item.address || '') + (item.city ? ', ' + item.city : '') || 'N/A') + '</td></tr>' +
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:var(--text-muted,#5f6368);white-space:nowrap;vertical-align:top;">Phone(s)</td><td style="padding:6px 0;color:var(--text,#202124);">' + phonesDisplay + '</td></tr>' +
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:var(--text-muted,#5f6368);white-space:nowrap;vertical-align:top;">Rating</td><td style="padding:6px 0;color:var(--text,#202124);">' + escapeHtmlModal(item.rating || '0') + ' ★ ' + escapeHtmlModal((item.reviewCount || '').replace(/[()]/g, '')) + ' reviews</td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:var(--text-muted,#5f6368);white-space:nowrap;vertical-align:top;">Industry</td><td style="padding:6px 0;color:var(--text,#202124);">' + escapeHtmlModal(item.industry || 'N/A') + (item.expensiveness ? ' · ' + escapeHtmlModal(item.expensiveness) : '') + '</td></tr>' +
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:var(--text-muted,#5f6368);white-space:nowrap;vertical-align:top;">Website</td><td style="padding:6px 0;color:var(--text,#202124);word-break:break-all;">' + escapeHtmlModal(item.companyUrl || 'N/A') + '</td></tr>' +
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:var(--text-muted,#5f6368);white-space:nowrap;vertical-align:top;">Maps Link</td><td style="padding:6px 0;color:var(--text,#202124);word-break:break-all;">' + escapeHtmlModal(item.href || 'N/A') + '</td></tr>' +
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:var(--text-muted,#5f6368);white-space:nowrap;vertical-align:top;">Note</td><td style="padding:6px 0;color:var(--text,#202124);white-space:pre-wrap;">' + escapeHtmlModal(item.note || 'None') + '</td></tr>' +

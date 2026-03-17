@@ -52,7 +52,14 @@ function pbSendToCrm_website(item, cb) {
             company_name: item.title || '',
             company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
             google_maps_link: item.href || '',
-            source: 'Google Maps',
+            google_rating: item.rating || '',
+            google_reviews_count: (item.reviewCount || '').replace(/[()]/g, ''),
+            website: item.companyUrl || '',
+            industry: item.industry || '',
+            price_range: item.expensiveness || '',
+            email: item.email || '',
+            source: item.source || 'Website',
+            contact_source: 'Extension - Manual Website',
             notes: item.note || '',
             status: ['Untouched']
         });
@@ -89,7 +96,7 @@ function pbSendToCrm_website(item, cb) {
                 }
 
                 // Create interaction for activity timeline
-                var interactionBody = { company: companyId, channel: 'phone', direction: 'outbound', timestamp: new Date().toISOString(), summary: 'Lead added from Google Maps scraper extension' };
+                var interactionBody = { company: companyId, channel: 'phone', direction: 'outbound', timestamp: new Date().toISOString(), summary: 'Lead added from website scraper extension' };
                 if (userId) interactionBody.user = userId;
                 followUp.push(fetch(pbUrl + '/api/collections/interactions/records', {
                     method: 'POST', headers: headers,
@@ -142,6 +149,7 @@ function showCrmConfirmation_website(item, onConfirm) {
         '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Company</td><td style="padding:5px 0;color:#202124;">' + esc(item.title || 'Unknown') + '</td></tr>' +
         '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Location</td><td style="padding:5px 0;color:#202124;">' + esc(item.address || 'N/A') + '</td></tr>' +
         '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Phone(s)</td><td style="padding:5px 0;color:#202124;">' + phonesDisplay + '</td></tr>' +
+        '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Email</td><td style="padding:5px 0;color:#202124;">' + esc(item.email || 'N/A') + '</td></tr>' +
         '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Website</td><td style="padding:5px 0;color:#202124;word-break:break-all;">' + esc(item.companyUrl || window.location.href) + '</td></tr>' +
         '<tr><td style="padding:5px 8px 5px 0;font-weight:700;color:#80868b;white-space:nowrap;vertical-align:top;">Note</td><td style="padding:5px 0;color:#202124;white-space:pre-wrap;">' + esc(item.note || 'None') + '</td></tr>' +
         '</table></div>' +
@@ -863,6 +871,7 @@ function showCrmConfirmation_website(item, onConfirm) {
                     ? `https://www.google.com/search?q=${encodeURIComponent(businessName + ' Instagram')}`
                     : '',
                 href: data.mapsLinks[0] || `https://www.google.com/maps/search/${encodeURIComponent(businessName + ' ' + (data.addresses[0] || ''))}`,
+                email: data.emails && data.emails.length > 0 ? data.emails[0] : '',
                 note: noteValue
             };
 
@@ -928,6 +937,8 @@ function showCrmConfirmation_website(item, onConfirm) {
                             address: data.addresses && data.addresses[0] ? data.addresses[0] : '',
                             companyUrl: window.location.href,
                             href: data.mapsLinks && data.mapsLinks[0] ? data.mapsLinks[0] : '',
+                            email: data.emails && data.emails.length > 0 ? data.emails[0] : '',
+                            source: 'Website',
                             note: noteInput ? noteInput.value.trim() : ''
                         };
 

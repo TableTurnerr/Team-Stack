@@ -2301,6 +2301,45 @@
                 "type": "text"
             },
             {
+                "exceptDomains": null,
+                "hidden": false,
+                "id": "url_website",
+                "name": "website",
+                "onlyDomains": null,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "url"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_industry",
+                "max": 200,
+                "min": 0,
+                "name": "industry",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_price_range",
+                "max": 20,
+                "min": 0,
+                "name": "price_range",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
                 "autogeneratePattern": "[a-z0-9]{15}",
                 "hidden": false,
                 "id": "text3208210256",

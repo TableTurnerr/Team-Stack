@@ -4,5 +4,5 @@ Skills:
 
 * Technical Writer: See .claude/skills/technical-writer/SKILL.md for guidance on documentation and technical writing.
 * Commit Changes: See .claude/skills/commit-changes/SKILL.md for autonomous granular commits with version bumping.
-* Prompt Optimizer: See .claude/skills/prompt-optimizer/SKILL.md — trigger with `optimize:` prefix to refine any prompt.
+* Prompt Optimizer: See .claude/skills/prompt-optimizer/SKILL.md — silently optimizes every prompt before execution; use `optimize:` prefix to get the refined prompt as text output instead.
 * Test and Fix: See .claude/skills/test-and-fix/SKILL.md — runs tests, analyzes failures, fixes code/tests, and re-runs until passing.

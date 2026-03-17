@@ -111,18 +111,27 @@ static class Program
 
     /// <summary>
     /// Launch an interactive CLI session in a new process with its own console.
+    /// Uses cmd.exe to avoid SmartScreen/UAC prompts on unsigned executables.
     /// </summary>
     internal static void LaunchInteractive()
     {
         var exePath = Environment.ProcessPath;
         if (exePath == null) return;
 
-        Process.Start(new ProcessStartInfo
+        try
         {
-            FileName = exePath,
-            Arguments = "--interactive",
-            UseShellExecute = true,
-        });
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c \"\"{exePath}\" --interactive\"",
+                UseShellExecute = false,
+                CreateNoWindow = false,
+            });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Main] Failed to launch interactive CLI: {ex.Message}");
+        }
     }
 
     private static void EnsureAutoStart()

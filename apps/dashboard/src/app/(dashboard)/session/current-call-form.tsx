@@ -7,6 +7,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp } from '@/lib/types';
 import { cn, timeAgo, formatDateTime, formatPhoneNumber } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
+import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
@@ -868,7 +869,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                     return (
                                         <div key={key} className="px-3 py-2">
                                             <div className="flex items-center gap-1.5 mb-1">
-                                                <span className="font-mono font-medium text-[var(--foreground)]">{phone}</span>
+                                                <PhoneHoverCard phoneNumber={phone !== 'Unknown' ? phone : undefined} phoneRecord={calls[0]?.expand?.phone_number_record} side="bottom">
+                                                  <span className="font-mono font-medium text-[var(--foreground)] cursor-default">{phone}</span>
+                                                </PhoneHoverCard>
                                                 <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] font-semibold whitespace-nowrap">
                                                     {calls.length} call{calls.length !== 1 ? 's' : ''}
                                                 </span>
@@ -1049,15 +1052,17 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         </span>
                     )}
                 </label>
-                <div className={cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-300",
-                    isCallLive
-                        ? "bg-[var(--success-subtle)] border border-[var(--success)] animate-[pulse-green-border_2s_ease-in-out_infinite]"
-                        : "bg-[var(--sidebar-bg)] border border-[var(--card-border)]"
-                )}>
-                    <PhoneIcon size={14} className={isCallLive ? "text-[var(--success)]" : "text-[var(--muted)]"} />
-                    <span className={cn("font-mono", isCallLive && "text-[var(--success)] font-medium")}>{phoneNumber ? formatPhoneNumber(phoneNumber) : '—'}</span>
-                </div>
+                <PhoneHoverCard phoneNumber={phoneNumber || undefined} side="bottom">
+                  <div className={cn(
+                      "flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-300",
+                      isCallLive
+                          ? "bg-[var(--success-subtle)] border border-[var(--success)] animate-[pulse-green-border_2s_ease-in-out_infinite]"
+                          : "bg-[var(--sidebar-bg)] border border-[var(--card-border)]"
+                  )}>
+                      <PhoneIcon size={14} className={isCallLive ? "text-[var(--success)]" : "text-[var(--muted)]"} />
+                      <span className={cn("font-mono", isCallLive && "text-[var(--success)] font-medium")}>{phoneNumber ? formatPhoneNumber(phoneNumber) : '—'}</span>
+                  </div>
+                </PhoneHoverCard>
             </div>
 
             {/* Receptionist Name with "Owner Reached?" tag */}

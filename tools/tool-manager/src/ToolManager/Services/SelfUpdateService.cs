@@ -56,7 +56,7 @@ public class SelfUpdateService : IDisposable
                 Debug.WriteLine($"[SelfUpdate] Error: {ex.Message}");
             }
 
-            await Task.Delay(TimeSpan.FromHours(1), ct);
+            await Task.Delay(TimeSpan.FromMinutes(15), ct);
         }
     }
 
@@ -124,7 +124,7 @@ public class SelfUpdateService : IDisposable
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
 
-            Application.Exit();
+            Environment.Exit(0);
             return true;
         }
         catch (Exception ex)

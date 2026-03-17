@@ -14,6 +14,8 @@ import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-v
 import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
 import { ZoomCallButton } from '@/components/zoom-call-button';
 import { TableContainer, IndexCell, HeaderIndexCell, ResizableTh, useResizableColumns, TablePagination, TableEmptyState } from '@/components/ui/data-table';
+import { CompanyHoverCard } from '@/components/company-hover-card';
+import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 
@@ -702,9 +704,11 @@ export default function RecordingsPage() {
                           {recording.expand?.phone_number_record ? (
                             <div className="flex items-center gap-1">
                               <div className="flex flex-col">
-                                <span className="font-bold text-[var(--foreground)]">
-                                  {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
-                                </span>
+                                <PhoneHoverCard phoneRecord={recording.expand.phone_number_record} side="bottom">
+                                  <span className="font-bold text-[var(--foreground)] cursor-default">
+                                    {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
+                                  </span>
+                                </PhoneHoverCard>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                   {recording.expand.phone_number_record.label && (
                                     <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
@@ -712,12 +716,14 @@ export default function RecordingsPage() {
                                     </span>
                                   )}
                                   {recording.expand.company && (
-                                    <Link
-                                      href={`/companies/${recording.company}`}
-                                      className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
-                                    >
-                                      {recording.expand.company.company_name}
-                                    </Link>
+                                    <CompanyHoverCard company={recording.expand.company} side="bottom">
+                                      <Link
+                                        href={`/companies/${recording.company}`}
+                                        className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
+                                      >
+                                        {recording.expand.company.company_name}
+                                      </Link>
+                                    </CompanyHoverCard>
                                   )}
                                 </div>
                               </div>

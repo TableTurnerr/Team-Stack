@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using ToolManager.Models;
 using ToolManager.Services;
@@ -8,16 +9,34 @@ namespace ToolManager;
 
 static class Program
 {
-    [STAThread]
-    static void Main(string[] args)
-    {
-        // Single instance enforcement
-        using var mutex = new Mutex(true, @"Global\TableTurnerr_ToolManager", out bool createdNew);
-        if (!createdNew) return;
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
 
-        Application.EnableVisualStyles();
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
-        Application.SetCompatibleTextRenderingDefault(false);
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    private const int SW_HIDE = 0;
+    private const int SW_SHOW = 5;
+
+    [STAThread]
+    static async Task Main(string[] args)
+    {
+        bool isInteractive = args.Contains("--interactive");
+        bool isBackground = args.Contains("--background");
+
+        // Single instance only for the tray/background process, not for interactive CLI sessions
+        Mutex? mutex = null;
+        if (!isInteractive)
+        {
+            mutex = new Mutex(true, @"Global\TableTurnerr_ToolManager", out bool createdNew);
+            if (!createdNew)
+            {
+                // If tray is running and user double-clicks the exe, open interactive CLI
+                LaunchInteractive();
+                return;
+            }
+        }
+        using var _ = mutex;
 
         EnsureAutoStart();
 
@@ -29,27 +48,72 @@ static class Program
         var scheduler = new UpdateScheduler(github, installer, registry);
         var selfUpdater = new SelfUpdateService(github, downloadService);
 
-        // Start background services
+        // ── Interactive CLI mode ──────────────────────────────
+        if (isInteractive)
+        {
+            var cli = new CliApp(github, installer, registry, scheduler, selfUpdater);
+            await cli.RunAsync();
+            return;
+        }
+
+        // ── Background mode: single check + exit ─────────────
+        if (isBackground)
+        {
+            Debug.WriteLine("[Main] Running background update check...");
+            try
+            {
+                await scheduler.CheckAndUpdateInstalled();
+                await selfUpdater.CheckNow();
+                if (selfUpdater.UpdateAvailable)
+                    await selfUpdater.ApplyUpdate();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Background] Error: {ex.Message}");
+            }
+            return;
+        }
+
+        // ── Tray mode (default): hide console, show tray icon ─
+        HideConsole();
+
         scheduler.Start();
         selfUpdater.Start();
-        Debug.WriteLine("[Main] Services started");
+        Debug.WriteLine("[Main] Services started (tray mode)");
 
-        // Create UI
-        var mainForm = new MainForm(github, installer, registry, scheduler, selfUpdater);
-        using var trayManager = new TrayIconManager(mainForm, scheduler, selfUpdater);
+        Application.EnableVisualStyles();
+        Application.SetHighDpiMode(HighDpiMode.SystemAware);
 
-        // First launch (no tools installed yet): always show the window so user
-        // can pick which tools to install. Subsequent boots with --background stay in tray.
-        bool startMinimized = args.Contains("--background") && registry.Tools.Count > 0;
-        if (!startMinimized)
-            mainForm.Show();
-
+        using var tray = new TrayIconManager(scheduler, selfUpdater);
         Application.Run();
 
         // Cleanup
         selfUpdater.Dispose();
         scheduler.Dispose();
         Debug.WriteLine("[Main] Exiting");
+    }
+
+    /// <summary>
+    /// Launch an interactive CLI session in a new console window.
+    /// </summary>
+    internal static void LaunchInteractive()
+    {
+        var exePath = Environment.ProcessPath;
+        if (exePath == null) return;
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c \"\"{exePath}\" --interactive\"",
+            UseShellExecute = true,
+        });
+    }
+
+    private static void HideConsole()
+    {
+        var hwnd = GetConsoleWindow();
+        if (hwnd != IntPtr.Zero)
+            ShowWindow(hwnd, SW_HIDE);
     }
 
     private static void EnsureAutoStart()

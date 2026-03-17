@@ -218,8 +218,8 @@ export default function ActorsPage() {
                         forceCheckbox={selection.hasSelection}
                       />
                       {isColumnVisible('username') && (
-                        <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-3">
+                        <td className="py-3.5 px-4 overflow-hidden">
+                          <div className="flex items-center gap-3 min-w-0">
                             <div className="w-10 h-10 rounded-full bg-[var(--accent-red-subtle)] flex items-center justify-center shrink-0">
                               <Instagram size={18} className="text-[var(--accent-red)]" />
                             </div>
@@ -228,9 +228,9 @@ export default function ActorsPage() {
                         </td>
                       )}
                       {isColumnVisible('status') && (
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           <span className={cn(
-                            'px-2 py-1 rounded text-xs font-medium',
+                            'px-2 py-1 rounded text-xs font-medium whitespace-nowrap',
                             statusStyle.bg,
                             statusStyle.text
                           )}>
@@ -239,25 +239,25 @@ export default function ActorsPage() {
                         </td>
                       )}
                       {isColumnVisible('owner') && (
-                        <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
+                        <td className="py-3.5 px-4 overflow-hidden">
+                          <div className="flex items-center gap-1.5 text-sm text-[var(--muted)] min-w-0">
                             <UserIcon size={14} className="shrink-0" />
                             <span className="truncate">{actor.ownerName}</span>
                           </div>
                         </td>
                       )}
                       {isColumnVisible('activity') && (
-                        <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-1.5 text-sm">
+                        <td className="py-3.5 px-4 overflow-hidden">
+                          <div className="flex items-center gap-1.5 text-sm min-w-0">
                             <Activity size={14} className="text-[var(--primary)] shrink-0" />
                             <span className="font-medium">{actor.stats.dmsSent}</span>
-                            <span className="text-[var(--muted)]">DMs sent</span>
+                            <span className="text-[var(--muted)] truncate">DMs sent</span>
                           </div>
                         </td>
                       )}
                       {isColumnVisible('last_activity') && (
-                        <td className="py-3.5 px-4">
-                          <span className="text-sm text-[var(--muted)]">
+                        <td className="py-3.5 px-4 overflow-hidden">
+                          <span className="text-sm text-[var(--muted)] block truncate">
                             {actor.last_activity ? format(new Date(actor.last_activity), 'MMM d, HH:mm') : '-'}
                           </span>
                         </td>

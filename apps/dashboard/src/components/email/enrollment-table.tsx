@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, UserMinus, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { EMAIL_COLLECTIONS, type EmailSequenceEnrollment, type EnrollmentStatus } from '@/lib/email-types';
+import { CompanyHoverCard } from '@/components/company-hover-card';
 import { cn } from '@/lib/utils';
 
 interface EnrollmentTableProps {
@@ -144,8 +145,14 @@ export function EnrollmentTable({ sequenceId }: EnrollmentTableProps) {
               <tbody>
                 {enrollments.map((enrollment) => (
                   <tr key={enrollment.id} className="border-b border-[var(--card-border)] last:border-0 hover:bg-[var(--card-hover)] transition-colors">
-                    <td className="px-4 py-3 font-medium">
-                      {enrollment.expand?.company?.company_name || 'Unknown'}
+                    <td className="px-4 py-3 font-medium overflow-visible">
+                      {enrollment.expand?.company ? (
+                        <CompanyHoverCard company={enrollment.expand.company}>
+                          <span className="cursor-default">{enrollment.expand.company.company_name}</span>
+                        </CompanyHoverCard>
+                      ) : (
+                        <span>Unknown</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={cn('px-2 py-0.5 rounded-full text-xs font-bold', STATUS_COLORS[enrollment.status])}>

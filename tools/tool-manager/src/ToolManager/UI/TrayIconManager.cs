@@ -1,156 +1,128 @@
+using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using ToolManager.Services;
 
 namespace ToolManager.UI;
 
+/// <summary>
+/// System tray icon that keeps the Tool Manager running in the background.
+/// "Open Manager" launches an interactive CLI session in a new console window.
+/// </summary>
 public class TrayIconManager : IDisposable
 {
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyIcon(IntPtr hIcon);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool DestroyIcon(IntPtr handle);
 
-    private readonly NotifyIcon _notifyIcon;
-    private readonly MainForm _mainForm;
+    private readonly NotifyIcon _trayIcon;
     private readonly UpdateScheduler _scheduler;
     private readonly SelfUpdateService _selfUpdater;
 
-    public TrayIconManager(MainForm mainForm, UpdateScheduler scheduler, SelfUpdateService selfUpdater)
+    public TrayIconManager(UpdateScheduler scheduler, SelfUpdateService selfUpdater)
     {
-        _mainForm = mainForm;
         _scheduler = scheduler;
         _selfUpdater = selfUpdater;
 
-        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-        var versionText = version != null ? $"v{version.Major}.{version.Minor}.{version.Build}" : "";
-
-        var contextMenu = new ContextMenuStrip();
-        contextMenu.Items.Add(new ToolStripMenuItem($"Tool Manager {versionText}")
+        _trayIcon = new NotifyIcon
         {
-            Enabled = false,
-            Font = new Font(contextMenu.Font, FontStyle.Bold)
-        });
-        contextMenu.Items.Add(new ToolStripSeparator());
-        contextMenu.Items.Add("Open Manager", null, (_, _) => ShowMainForm());
-        contextMenu.Items.Add("Check for Updates", null, async (_, _) =>
-        {
-            await _scheduler.CheckAndUpdateInstalled();
-        });
-        contextMenu.Items.Add(new ToolStripSeparator());
-        contextMenu.Items.Add("Exit", null, (_, _) =>
-        {
-            _notifyIcon.Visible = false;
-            Application.Exit();
-        });
-
-        _notifyIcon = new NotifyIcon
-        {
-            Icon = CreateTrayIcon(),
-            Text = $"TableTurnerr Tool Manager {versionText}",
-            ContextMenuStrip = contextMenu,
+            Text = "TableTurnerr Tool Manager",
             Visible = true,
+            ContextMenuStrip = BuildContextMenu(),
         };
 
-        _notifyIcon.DoubleClick += (_, _) => ShowMainForm();
+        // Load icon from embedded resource
+        try
+        {
+            using var stream = typeof(TrayIconManager).Assembly
+                .GetManifestResourceStream("ToolManager.icon.png");
+            if (stream != null)
+            {
+                using var bmp = new Bitmap(stream);
+                var hIcon = bmp.GetHicon();
+                _trayIcon.Icon = Icon.FromHandle(hIcon);
+            }
+        }
+        catch
+        {
+            _trayIcon.Icon = SystemIcons.Application;
+        }
 
-        // Notification: about to update
+        // Double-click tray icon → open CLI
+        _trayIcon.DoubleClick += (_, _) => Program.LaunchInteractive();
+
+        // Subscribe to update events for balloon notifications
         _scheduler.UpdatingTools += names =>
         {
-            try
-            {
-                var list = string.Join(", ", names);
-                _notifyIcon.ShowBalloonTip(3000, "TableTurnerr Tools",
-                    $"Updating: {list}...",
-                    ToolTipIcon.Info);
-            }
-            catch { }
+            ShowBalloon("Updating Tools", string.Join(", ", names), ToolTipIcon.Info);
         };
-
-        // Notification: update results
         _scheduler.UpdatesApplied += results =>
         {
-            try
-            {
-                var succeeded = results.Where(r => r.success).ToList();
-                var failed = results.Where(r => !r.success).ToList();
-
-                if (succeeded.Count == 0 && failed.Count == 0) return;
-
-                var lines = new List<string>();
-                foreach (var r in succeeded)
-                    lines.Add($"{r.name} v{r.version} - Updated");
-                foreach (var r in failed)
-                    lines.Add($"{r.name} - Failed");
-
-                _notifyIcon.ShowBalloonTip(5000, "TableTurnerr Tools",
-                    string.Join("\n", lines),
-                    failed.Count > 0 ? ToolTipIcon.Warning : ToolTipIcon.Info);
-            }
-            catch { }
+            var summary = string.Join("\n", results.Select(r =>
+                r.success ? $"{r.name} → v{r.version}" : $"{r.name}: failed"));
+            ShowBalloon("Updates Applied", summary, ToolTipIcon.Info);
         };
-
-        // Self-update: apply automatically
-        _selfUpdater.UpdateFound += ver =>
+        _selfUpdater.UpdateFound += version =>
         {
-            try
-            {
-                _notifyIcon.ShowBalloonTip(3000, "Tool Manager",
-                    $"Updating Tool Manager to v{ver.ToString(3)}...",
-                    ToolTipIcon.Info);
-                _ = _selfUpdater.ApplyUpdate();
-            }
-            catch { }
+            ShowBalloon("Manager Update Available",
+                $"Tool Manager v{version.ToString(3)} is available.", ToolTipIcon.Info);
         };
     }
 
-    private void ShowMainForm()
+    private ContextMenuStrip BuildContextMenu()
     {
-        _mainForm.Show();
-        _mainForm.BringToFront();
-        if (_mainForm.WindowState == FormWindowState.Minimized)
-            _mainForm.WindowState = FormWindowState.Normal;
+        var menu = new ContextMenuStrip();
+
+        var openItem = new ToolStripMenuItem("Open Manager");
+        openItem.Font = new Font(openItem.Font, FontStyle.Bold);
+        openItem.Click += (_, _) => Program.LaunchInteractive();
+        menu.Items.Add(openItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
+        var checkItem = new ToolStripMenuItem("Check for Updates");
+        checkItem.Click += async (_, _) =>
+        {
+            try
+            {
+                await _scheduler.CheckAndUpdateInstalled();
+                await _selfUpdater.CheckNow();
+                ShowBalloon("Check Complete", "All tools checked.", ToolTipIcon.Info);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Tray] Check failed: {ex.Message}");
+            }
+        };
+        menu.Items.Add(checkItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
+        var exitItem = new ToolStripMenuItem("Exit");
+        exitItem.Click += (_, _) =>
+        {
+            _trayIcon.Visible = false;
+            Application.Exit();
+        };
+        menu.Items.Add(exitItem);
+
+        return menu;
     }
 
-    private static Icon CreateTrayIcon()
+    private void ShowBalloon(string title, string text, ToolTipIcon icon)
     {
-        using var stream = typeof(TrayIconManager).Assembly
-            .GetManifestResourceStream("ToolManager.icon.png");
-
-        if (stream != null)
+        try
         {
-            using var original = new Bitmap(stream);
-            using var bmp = new Bitmap(16, 16);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                g.Clear(Color.Transparent);
-                g.DrawImage(original, 0, 0, 16, 16);
-            }
-            var hIcon = bmp.GetHicon();
-            var icon = (Icon)Icon.FromHandle(hIcon).Clone();
-            DestroyIcon(hIcon);
-            return icon;
+            _trayIcon.BalloonTipTitle = title;
+            _trayIcon.BalloonTipText = text;
+            _trayIcon.BalloonTipIcon = icon;
+            _trayIcon.ShowBalloonTip(5000);
         }
-
-        // Fallback if resource not found
-        using var fallback = new Bitmap(16, 16);
-        using (var g = Graphics.FromImage(fallback))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            using var brush = new SolidBrush(Color.FromArgb(26, 115, 232));
-            g.FillEllipse(brush, 1, 1, 14, 14);
-        }
-        var h = fallback.GetHicon();
-        var f = (Icon)Icon.FromHandle(h).Clone();
-        DestroyIcon(h);
-        return f;
+        catch { }
     }
 
     public void Dispose()
     {
-        _notifyIcon.Visible = false;
-        _notifyIcon.Dispose();
+        _trayIcon.Visible = false;
+        _trayIcon.Dispose();
     }
 }

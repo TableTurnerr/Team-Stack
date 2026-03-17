@@ -48,10 +48,10 @@ public class UpdateScheduler : IDisposable
         await Task.Delay(TimeSpan.FromSeconds(10), ct);
         await CheckAndUpdateInstalled(ct);
 
-        // Hourly loop
+        // Check every 15 minutes
         while (!ct.IsCancellationRequested)
         {
-            await Task.Delay(TimeSpan.FromHours(1), ct);
+            await Task.Delay(TimeSpan.FromMinutes(15), ct);
             try { await CheckAndUpdateInstalled(ct); }
             catch (Exception ex) { Debug.WriteLine($"[UpdateScheduler] Error: {ex.Message}"); }
         }

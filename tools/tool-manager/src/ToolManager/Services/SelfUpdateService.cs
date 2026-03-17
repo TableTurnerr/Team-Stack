@@ -5,7 +5,7 @@ namespace ToolManager.Services;
 
 /// <summary>
 /// Checks for and applies updates to the Tool Manager itself.
-/// Uses the same batch-script swap approach as the CRM Agent's AutoUpdateService.
+/// Uses a batch-script swap approach to replace the running executable.
 /// </summary>
 public class SelfUpdateService : IDisposable
 {
@@ -15,11 +15,14 @@ public class SelfUpdateService : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
 
+    // Cache the last check result so ApplyUpdate doesn't re-fetch
+    private (Version? version, string? url) _lastCheck;
+
     public Version CurrentVersion { get; } =
         System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
 
     public Version? LatestVersion { get; private set; }
-    public bool UpdateAvailable => LatestVersion != null;
+    public bool UpdateAvailable => LatestVersion != null && LatestVersion > CurrentVersion;
 
     public event Action<Version>? UpdateFound;
 
@@ -43,9 +46,10 @@ public class SelfUpdateService : IDisposable
         {
             try
             {
-                var (version, _) = await _github.CheckSelfUpdate(ct);
+                var (version, url) = await _github.CheckSelfUpdate(ct);
                 if (version != null)
                 {
+                    _lastCheck = (version, url);
                     LatestVersion = version;
                     Debug.WriteLine($"[SelfUpdate] Found: v{version}");
                     UpdateFound?.Invoke(version);
@@ -63,9 +67,10 @@ public class SelfUpdateService : IDisposable
     /// <summary>Manual check triggered from the UI.</summary>
     public async Task CheckNow(CancellationToken ct = default)
     {
-        var (version, _) = await _github.CheckSelfUpdate(ct);
+        var (version, url) = await _github.CheckSelfUpdate(ct);
         if (version != null)
         {
+            _lastCheck = (version, url);
             LatestVersion = version;
             Debug.WriteLine($"[SelfUpdate] Found: v{version}");
             UpdateFound?.Invoke(version);
@@ -74,13 +79,18 @@ public class SelfUpdateService : IDisposable
 
     public async Task<bool> ApplyUpdate()
     {
-        var (version, url) = await _github.CheckSelfUpdate();
+        // Use cached result from CheckNow/Loop to avoid redundant API call
+        var (version, url) = _lastCheck.version != null ? _lastCheck : await _github.CheckSelfUpdate();
         if (version == null || url == null) return false;
+
+        string? zipPath = null;
+        string? tempDir = null;
+        string? script = null;
 
         try
         {
-            var zipPath = await _downloadService.DownloadAsync(url);
-            var tempDir = Path.Combine(Path.GetTempPath(), $"ToolManager_SelfUpdate_{version}");
+            zipPath = await _downloadService.DownloadAsync(url);
+            tempDir = Path.Combine(Path.GetTempPath(), $"ToolManager_SelfUpdate_{version}");
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
             ZipFile.ExtractToDirectory(zipPath, tempDir);
 
@@ -96,7 +106,7 @@ public class SelfUpdateService : IDisposable
             var installDir = Path.GetDirectoryName(Environment.ProcessPath)!;
             var targetExe = Path.Combine(installDir, "ToolManager.exe");
 
-            var script = Path.Combine(Path.GetTempPath(), "ToolManager_Updater.bat");
+            script = Path.Combine(Path.GetTempPath(), "ToolManager_Updater.bat");
             File.WriteAllText(script, $"""
                 @echo off
                 timeout /t 2 /nobreak >nul
@@ -130,6 +140,10 @@ public class SelfUpdateService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"[SelfUpdate] Failed: {ex.Message}");
+            // Clean up on failure
+            if (script != null) try { File.Delete(script); } catch { }
+            if (zipPath != null) try { File.Delete(zipPath); } catch { }
+            if (tempDir != null) try { Directory.Delete(tempDir, true); } catch { }
             return false;
         }
     }

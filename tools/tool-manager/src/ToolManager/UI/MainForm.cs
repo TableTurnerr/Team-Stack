@@ -17,6 +17,7 @@ public class MainForm : Form
     private readonly FlowLayoutPanel _toolList;
     private readonly Label _statusLabel;
     private readonly Button _checkAllButton;
+    private bool _isLoading;
 
     public MainForm(
         GitHubReleaseService github,
@@ -32,7 +33,6 @@ public class MainForm : Form
         _selfUpdater = selfUpdater;
 
         Text = "TableTurnerr Tool Manager";
-        Size = new Size(680, 520);
         MinimumSize = new Size(550, 400);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(240, 242, 245);
@@ -133,14 +133,17 @@ public class MainForm : Form
         Controls.Add(_actionBar);
         Controls.Add(_headerPanel);
 
+        // Set size AFTER _toolList is initialized (OnResize fires when Size is set)
+        Size = new Size(680, 520);
+
         // Refresh UI when the background scheduler finishes
         _scheduler.UpdatesChecked += () =>
         {
-            try { BeginInvoke(async () => await LoadTools()); } catch { }
+            try { BeginInvoke(() => _ = LoadTools()); } catch { }
         };
-        _scheduler.UpdatesApplied += _ =>
+        _scheduler.UpdatesApplied += results =>
         {
-            try { BeginInvoke(async () => await LoadTools(forceRefresh: true)); } catch { }
+            try { BeginInvoke(() => _ = LoadTools(forceRefresh: true)); } catch { }
         };
 
         // Load on shown
@@ -164,6 +167,7 @@ public class MainForm : Form
             // Check for manager self-update
             await _selfUpdater.CheckNow();
 
+            _github.InvalidateCache();
             await LoadTools(forceRefresh: true);
             _statusLabel.Text = "All checks complete";
         }
@@ -179,9 +183,9 @@ public class MainForm : Form
 
     public async Task LoadTools(bool forceRefresh = false)
     {
+        if (_isLoading) return;
+        _isLoading = true;
         _checkAllButton.Enabled = false;
-        if (_statusLabel.Text == "Loading...")
-            _statusLabel.Text = "Checking...";
 
         try
         {
@@ -234,6 +238,7 @@ public class MainForm : Form
         }
         finally
         {
+            _isLoading = false;
             _checkAllButton.Enabled = true;
         }
     }

@@ -44,8 +44,17 @@ public partial class GitHubReleaseService
 
         Debug.WriteLine("[GitHub] Fetching releases...");
 
-        var resp = await _http.GetAsync(
-            $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases?per_page=100", ct);
+        var url = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases?per_page=100";
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _http.GetAsync(url, ct);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GitHub] Request failed: {ex.Message}");
+            return _cachedTools ?? [];
+        }
 
         if (!resp.IsSuccessStatusCode)
         {
@@ -53,9 +62,11 @@ public partial class GitHubReleaseService
             return _cachedTools ?? [];
         }
 
-        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        var json = await resp.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
 
         var toolMap = new Dictionary<string, ToolInfo>();
+        Debug.WriteLine($"[GitHub] Parsing {doc.RootElement.GetArrayLength()} releases");
 
         foreach (var release in doc.RootElement.EnumerateArray())
         {
@@ -64,7 +75,7 @@ public partial class GitHubReleaseService
             if (release.GetProperty("draft").GetBoolean()) continue;
 
             var match = TagPattern().Match(tag);
-            if (!match.Success) continue;
+            if (!match.Success) { Debug.WriteLine($"[GitHub] No regex match: {tag}"); continue; }
 
             var prefix = match.Groups[1].Value;
             var versionStr = match.Groups[2].Value;
@@ -72,7 +83,7 @@ public partial class GitHubReleaseService
             // Skip the manager's own releases
             if (prefix == SelfTagPrefix) continue;
 
-            if (!Version.TryParse(versionStr, out var version)) continue;
+            if (!Version.TryParse(versionStr, out var version)) { Debug.WriteLine($"[GitHub] Version parse failed: {versionStr}"); continue; }
 
             // Only keep the latest version per prefix (API returns newest first)
             if (toolMap.ContainsKey(prefix)) continue;

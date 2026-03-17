@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, us
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { useAuth } from './auth-context';
+import { useZoomPhone } from './zoom-phone-context';
 
 interface SessionContextType {
     /** The current user's active session (if any) */
@@ -25,6 +26,7 @@ const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
     const { user, isAuthenticated } = useAuth();
+    const { callStatus } = useZoomPhone();
     const [session, setSession] = useState<ColdCallingSession | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isStandaloneMode, setStandaloneMode] = useState(false);
@@ -141,6 +143,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isAuthenticated, user, fetchSession, fetchGlobalActiveSession]);
+
+    // ── Sync on_call flag to PocketBase when Zoom call status changes ──
+    const prevOnCallRef = useRef<boolean>(false);
+    useEffect(() => {
+        if (!session || session.status !== 'active') return;
+        const isOnCall = callStatus === 'ringing' || callStatus === 'connected';
+        if (isOnCall === prevOnCallRef.current) return;
+        prevOnCallRef.current = isOnCall;
+        pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, { on_call: isOnCall }).catch(err => {
+            console.error('[Session Context] Failed to sync on_call status:', err);
+        });
+    }, [callStatus, session]);
 
     return (
         <SessionContext.Provider value={{

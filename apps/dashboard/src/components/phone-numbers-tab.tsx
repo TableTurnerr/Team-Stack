@@ -18,6 +18,8 @@ import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilt
 import { formatRelativeFollowUp } from '@/lib/timezone-utils';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { ColumnSelector } from '@/components/column-selector';
+import { CompanyHoverCard } from '@/components/company-hover-card';
+import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { ZoomCallButton } from '@/components/zoom-call-button';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 
@@ -117,7 +119,7 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
 
   if (loading) {
     return (
-      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-16 text-center">
+      <div className="bg-[var(--card-bg)] border-y border-[var(--card-border)] -mx-4 lg:-mx-8 p-16 text-center">
         <div className="animate-pulse space-y-4">
           <div className="h-4 bg-[var(--card-border)] rounded w-1/3 mx-auto" />
           <div className="h-4 bg-[var(--card-border)] rounded w-1/2 mx-auto" />
@@ -136,7 +138,7 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
         />
       </div>
 
-      <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden">
+      <div className="bg-[var(--card-bg)] border-y border-[var(--card-border)] overflow-hidden -mx-4 lg:-mx-8">
         {phoneNumbers.length === 0 ? (
           <div className="p-16 text-center">
             <div className="w-12 h-12 rounded-full bg-[var(--info-subtle)] flex items-center justify-center mx-auto mb-4">
@@ -205,31 +207,35 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
                         className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors"
                       >
                         {isColumnVisible('phone_number') && (
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-4 overflow-visible">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-mono font-medium">{formatPhoneNumber(pn.phone_number)}</span>
+                              <PhoneHoverCard phoneRecord={pn}>
+                                <span className="text-sm font-mono font-medium cursor-default">{formatPhoneNumber(pn.phone_number)}</span>
+                              </PhoneHoverCard>
                               <ZoomCallButton phoneNumber={pn.phone_number} />
                             </div>
                           </td>
                         )}
                         {isColumnVisible('company') && (
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-4 overflow-visible">
                             {company ? (
-                              <Link href={`/companies/${company.id}`} className="flex items-center gap-1.5 hover:text-[var(--primary)] transition-colors">
-                                <Building2 size={12} className="text-[var(--muted)]" />
-                                <span className="font-medium text-sm">{company.company_name}</span>
-                              </Link>
+                              <CompanyHoverCard company={company}>
+                                <Link href={`/companies/${company.id}`} className="flex items-center gap-1.5 hover:text-[var(--primary)] transition-colors min-w-0">
+                                  <Building2 size={12} className="text-[var(--muted)] shrink-0" />
+                                  <span className="font-medium text-sm truncate">{company.company_name}</span>
+                                </Link>
+                              </CompanyHoverCard>
                             ) : (
                               <span className="text-[var(--muted)] text-sm">Unknown</span>
                             )}
                           </td>
                         )}
                         {isColumnVisible('location') && (
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-4 overflow-hidden">
                             {pn.location_name ? (
-                              <div className="flex items-center gap-1">
-                                <MapPin size={12} className="text-[var(--muted)]" />
-                                <span className="text-sm">{pn.location_name}</span>
+                              <div className="flex items-center gap-1 min-w-0">
+                                <MapPin size={12} className="text-[var(--muted)] shrink-0" />
+                                <span className="text-sm truncate">{pn.location_name}</span>
                               </div>
                             ) : (
                               <span className="text-xs text-[var(--muted)]">-</span>

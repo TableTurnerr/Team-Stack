@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, Arro
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type Company, type Recording } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { PhoneHoverCard } from '@/components/phone-hover-card';
 
 const OUTCOME_COLORS: Record<string, { bg: string; text: string }> = {
     'Interested': { bg: 'bg-[var(--success-subtle)]', text: 'text-[var(--success)]' },
@@ -460,9 +461,11 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                             <Building2 size={14} className="text-[var(--muted)]" />
                             <span className="text-sm font-medium">{displayCompany || 'Unknown Company'}</span>
                             {displayCall.expand?.phone_number_record?.phone_number && (
-                                <span className="text-xs font-light text-[var(--muted)] font-mono">
-                                    {displayCall.expand.phone_number_record.phone_number}
-                                </span>
+                                <PhoneHoverCard phoneRecord={displayCall.expand.phone_number_record} side="bottom">
+                                  <span className="text-xs font-light text-[var(--muted)] font-mono cursor-default">
+                                      {displayCall.expand.phone_number_record.phone_number}
+                                  </span>
+                                </PhoneHoverCard>
                             )}
                         </div>
                         

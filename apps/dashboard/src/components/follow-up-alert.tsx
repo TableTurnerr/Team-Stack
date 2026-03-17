@@ -2,6 +2,7 @@
 
 import { Calendar, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CompanyHoverCard } from '@/components/company-hover-card';
 import type { FollowUp, Company } from '@/lib/types';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 
@@ -37,7 +38,14 @@ export function FollowUpAlert({
               <Calendar size={14} />
             </div>
             <span className="text-sm font-semibold truncate">
-              Follow up with {followUp.expand?.company?.company_name || 'Company'}
+              Follow up with{' '}
+              {followUp.expand?.company ? (
+                <CompanyHoverCard company={followUp.expand.company} side="bottom">
+                  <span className="underline decoration-dotted cursor-default">{followUp.expand.company.company_name}</span>
+                </CompanyHoverCard>
+              ) : (
+                'Company'
+              )}
             </span>
           </div>
 

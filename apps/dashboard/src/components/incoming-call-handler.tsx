@@ -5,6 +5,8 @@ import { PhoneIncoming, PhoneMissed, X, Building2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type ColdCallingSession, type CallLog } from '@/lib/types';
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
+import { CompanyHoverCard } from '@/components/company-hover-card';
+import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
@@ -315,12 +317,16 @@ export function IncomingCallHandler() {
                     </div>
                     <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-[var(--primary)] uppercase tracking-wider">Incoming Call</p>
-                        <p className="text-sm font-medium truncate">{incomingCallerNumber || 'Unknown number'}</p>
+                        <PhoneHoverCard phoneRecord={matchedPhoneRecord ?? undefined} phoneNumber={incomingCallerNumber || undefined} side="bottom">
+                          <p className="text-sm font-medium truncate cursor-default">{incomingCallerNumber || 'Unknown number'}</p>
+                        </PhoneHoverCard>
                         {matchedCompany && (
-                            <p className="text-xs text-[var(--muted)] flex items-center gap-1 truncate">
-                                <Building2 size={10} />
-                                {matchedCompany.company_name}
-                            </p>
+                            <CompanyHoverCard company={matchedCompany} side="bottom">
+                              <p className="text-xs text-[var(--muted)] flex items-center gap-1 truncate cursor-default">
+                                  <Building2 size={10} />
+                                  {matchedCompany.company_name}
+                              </p>
+                            </CompanyHoverCard>
                         )}
                     </div>
                     {session && (
@@ -339,12 +345,16 @@ export function IncomingCallHandler() {
                     </div>
                     <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-[var(--error)] uppercase tracking-wider">Missed Call</p>
-                        <p className="text-sm font-medium truncate">{displayNumber}</p>
+                        <PhoneHoverCard phoneRecord={matchedPhoneRecord ?? undefined} phoneNumber={displayNumber || undefined} side="bottom">
+                          <p className="text-sm font-medium truncate cursor-default">{displayNumber}</p>
+                        </PhoneHoverCard>
                         {matchedCompany && (
-                            <p className="text-xs text-[var(--muted)] flex items-center gap-1 truncate">
-                                <Building2 size={10} />
-                                {matchedCompany.company_name}
-                            </p>
+                            <CompanyHoverCard company={matchedCompany} side="bottom">
+                              <p className="text-xs text-[var(--muted)] flex items-center gap-1 truncate cursor-default">
+                                  <Building2 size={10} />
+                                  {matchedCompany.company_name}
+                              </p>
+                            </CompanyHoverCard>
                         )}
                     </div>
                     <button

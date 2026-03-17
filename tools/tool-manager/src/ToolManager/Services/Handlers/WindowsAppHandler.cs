@@ -6,7 +6,6 @@ namespace ToolManager.Services.Handlers;
 
 /// <summary>
 /// Handles install/uninstall for windows-app type tools.
-/// Mirrors the logic from install.bat / uninstall.bat.
 /// </summary>
 public class WindowsAppHandler : IToolTypeHandler
 {
@@ -19,9 +18,12 @@ public class WindowsAppHandler : IToolTypeHandler
         {
             foreach (var proc in Process.GetProcessesByName(manifest.ProcessName))
             {
-                try { proc.Kill(); } catch { }
+                using (proc)
+                {
+                    try { proc.Kill(); proc.WaitForExit(3000); } catch { }
+                }
             }
-            await Task.Delay(2000);
+            await Task.Delay(1000);
         }
 
         // 2. Copy files to install path
@@ -40,7 +42,7 @@ public class WindowsAppHandler : IToolTypeHandler
                 using var key = Registry.CurrentUser.OpenSubKey(
                     @"Software\Microsoft\Windows\CurrentVersion\Run", true);
                 var value = $"\"{exePath}\"";
-                if (!string.IsNullOrEmpty(manifest.RegistryAutoStart.Args))
+                if (manifest.RegistryAutoStart.Args != null)
                     value += $" {manifest.RegistryAutoStart.Args}";
                 key?.SetValue(manifest.RegistryAutoStart.Key, value);
                 Debug.WriteLine($"[WindowsApp] Registered auto-start: {manifest.RegistryAutoStart.Key}");
@@ -87,14 +89,20 @@ public class WindowsAppHandler : IToolTypeHandler
                 Directory.CreateDirectory(shortcutDir);
                 var shortcutPath = Path.Combine(shortcutDir, $"{manifest.StartMenuName}.lnk");
 
-                var ps = Process.Start(new ProcessStartInfo
+                // Escape single quotes for PowerShell
+                var psShortcut = shortcutPath.Replace("'", "''");
+                var psExe = exePath.Replace("'", "''");
+                var psName = (manifest.Name ?? "").Replace("'", "''");
+                var psInstall = installPath.Replace("'", "''");
+
+                using var ps = Process.Start(new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
                     Arguments = $"-NoProfile -Command \"$ws = New-Object -ComObject WScript.Shell; " +
-                        $"$s = $ws.CreateShortcut('{shortcutPath}'); " +
-                        $"$s.TargetPath = '{exePath}'; " +
-                        $"$s.Description = '{manifest.Name}'; " +
-                        $"$s.WorkingDirectory = '{installPath}'; " +
+                        $"$s = $ws.CreateShortcut('{psShortcut}'); " +
+                        $"$s.TargetPath = '{psExe}'; " +
+                        $"$s.Description = '{psName}'; " +
+                        $"$s.WorkingDirectory = '{psInstall}'; " +
                         $"$s.Save()\"",
                     CreateNoWindow = true,
                     UseShellExecute = false,
@@ -113,7 +121,7 @@ public class WindowsAppHandler : IToolTypeHandler
         {
             try
             {
-                Process.Start(new ProcessStartInfo { FileName = exePath, UseShellExecute = true });
+                using var _ = Process.Start(new ProcessStartInfo { FileName = exePath, UseShellExecute = true });
                 Debug.WriteLine($"[WindowsApp] Launched: {exePath}");
             }
             catch (Exception ex)
@@ -132,9 +140,12 @@ public class WindowsAppHandler : IToolTypeHandler
         {
             foreach (var proc in Process.GetProcessesByName(manifest.ProcessName))
             {
-                try { proc.Kill(); } catch { }
+                using (proc)
+                {
+                    try { proc.Kill(); proc.WaitForExit(3000); } catch { }
+                }
             }
-            await Task.Delay(2000);
+            await Task.Delay(1000);
         }
 
         // 2. Remove auto-start

@@ -21,4 +21,8 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="icon.png" LogicalName="ToolManager.icon.png" />
+  </ItemGroup>
+
 </Project>

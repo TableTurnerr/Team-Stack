@@ -113,25 +113,39 @@ public class TrayIconManager : IDisposable
 
     private static Icon CreateTrayIcon()
     {
-        using var bmp = new Bitmap(16, 16);
-        using (var g = Graphics.FromImage(bmp))
+        using var stream = typeof(TrayIconManager).Assembly
+            .GetManifestResourceStream("ToolManager.icon.png");
+
+        if (stream != null)
+        {
+            using var original = new Bitmap(stream);
+            using var bmp = new Bitmap(16, 16);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.Clear(Color.Transparent);
+                g.DrawImage(original, 0, 0, 16, 16);
+            }
+            var hIcon = bmp.GetHicon();
+            var icon = (Icon)Icon.FromHandle(hIcon).Clone();
+            DestroyIcon(hIcon);
+            return icon;
+        }
+
+        // Fallback if resource not found
+        using var fallback = new Bitmap(16, 16);
+        using (var g = Graphics.FromImage(fallback))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
-
             using var brush = new SolidBrush(Color.FromArgb(26, 115, 232));
             g.FillEllipse(brush, 1, 1, 14, 14);
-
-            using var font = new Font("Segoe UI", 8f, FontStyle.Bold);
-            using var textBrush = new SolidBrush(Color.White);
-            var size = g.MeasureString("T", font);
-            g.DrawString("T", font, textBrush, (16 - size.Width) / 2, (16 - size.Height) / 2);
         }
-
-        var hIcon = bmp.GetHicon();
-        var icon = (Icon)Icon.FromHandle(hIcon).Clone();
-        DestroyIcon(hIcon);
-        return icon;
+        var h = fallback.GetHicon();
+        var f = (Icon)Icon.FromHandle(h).Clone();
+        DestroyIcon(h);
+        return f;
     }
 
     public void Dispose()

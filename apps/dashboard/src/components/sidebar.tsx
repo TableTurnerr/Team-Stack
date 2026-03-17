@@ -599,7 +599,7 @@ export function Sidebar() {
         'flex items-center border-b border-[var(--sidebar-border)]',
         collapsed ? 'flex-col gap-2 px-2 py-4' : 'justify-between px-4 py-4',
       )}>
-        <div className={cn('flex items-center gap-3', collapsed && 'flex-col')}>
+        <Link href="/" className={cn('flex items-center gap-3 hover:opacity-80 transition-opacity', collapsed && 'flex-col')}>
           <div className="w-9 h-9 rounded-xl bg-[var(--foreground)] flex items-center justify-center flex-shrink-0">
             <Zap size={18} className="text-[var(--background)]" />
           </div>
@@ -611,7 +611,7 @@ export function Sidebar() {
               </p>
             </div>
           )}
-        </div>
+        </Link>
         <button
           onClick={toggle}
           className={cn(

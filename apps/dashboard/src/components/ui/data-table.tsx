@@ -14,7 +14,7 @@ interface TableContainerProps {
 export function TableContainer({ children, className }: TableContainerProps) {
   return (
     <div className={cn(
-      "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl overflow-hidden",
+      "bg-[var(--card-bg)] border-y border-[var(--card-border)] overflow-hidden -mx-4 lg:-mx-8",
       className
     )}>
       {children}
@@ -193,7 +193,10 @@ export function ResizableTh({
         alignClass,
         className
       )}
-      style={width ? { width: `${width}px` } : undefined}
+      style={{
+        ...(width ? { width: `${width}px` } : {}),
+        minWidth: `${minWidth}px`,
+      }}
     >
       {children}
       {resizable && onResize && (

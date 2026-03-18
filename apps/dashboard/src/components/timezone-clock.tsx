@@ -10,6 +10,7 @@ interface TimezoneClockProps {
   onRemove?: () => void;
   isStarred?: boolean;
   onStar?: () => void;
+  showRemove?: boolean;
   className?: string;
 }
 
@@ -19,6 +20,7 @@ export function TimezoneClock({
   onRemove,
   isStarred,
   onStar,
+  showRemove,
   className
 }: TimezoneClockProps) {
   const [time, setTime] = useState<string>('');
@@ -54,7 +56,7 @@ export function TimezoneClock({
 
   return (
     <div className={cn(
-      "group relative flex items-center justify-between p-2.5 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[var(--sidebar-border)] transition-all",
+      "relative flex items-center justify-between p-2.5 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[var(--sidebar-border)] transition-all",
       className
     )}>
       <div className="flex items-center gap-3">
@@ -68,34 +70,36 @@ export function TimezoneClock({
           <p className="text-sm font-bold tracking-tight">{time}</p>
         </div>
       </div>
-      
-      <div className="flex items-center gap-1.5">
+
+      <div className="flex items-center gap-2">
         {onStar && (
           <button
             onClick={(e) => { e.stopPropagation(); onStar(); }}
             className={cn(
-              "p-0.5 rounded transition-colors",
+              "p-1 rounded-md transition-colors",
               isStarred
                 ? "text-amber-500"
-                : "text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-amber-400"
+                : "text-[var(--muted-foreground)] hover:text-amber-400 hover:bg-[var(--sidebar-hover)]"
             )}
             title={isStarred ? 'Default cold calling timezone' : 'Set as default cold calling timezone'}
           >
-            <Star size={12} fill={isStarred ? 'currentColor' : 'none'} />
+            <Star size={13} fill={isStarred ? 'currentColor' : 'none'} />
           </button>
         )}
         <div className="text-right">
           <p className="text-[10px] text-[var(--muted)]">{date}</p>
         </div>
-        {onRemove && (
-          <button
-            onClick={onRemove}
-            className="absolute -top-1 -right-1 p-0.5 rounded-full bg-[var(--error-subtle)] text-[var(--error)] opacity-0 group-hover:opacity-100 transition-opacity border border-[var(--card-border)]"
-          >
-            <X size={10} />
-          </button>
-        )}
       </div>
+
+      {onRemove && showRemove && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-[var(--sidebar-bg)] border border-[var(--card-border)] text-[var(--muted-foreground)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] hover:border-[var(--error)] animate-in fade-in duration-150"
+          title="Remove timezone"
+        >
+          <X size={11} />
+        </button>
+      )}
     </div>
   );
 }

@@ -82,6 +82,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
 
     // Follow-up notifications
     const [activeNotifications, setActiveNotifications] = useState<FollowUpNotification[]>([]);
+    const [sessionDismissedIds, setSessionDismissedIds] = useState<Set<string>>(new Set());
     const isInCallForNotifications = callStatus === 'ringing' || callStatus === 'connected';
 
     const handleFollowUpNotification = useCallback((notification: FollowUpNotification) => {
@@ -95,10 +96,24 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         setActiveNotifications(prev => prev.filter(n => n.id !== id));
     }, []);
 
+    // Toggle session dismiss for a follow-up (snooze/restore)
+    const handleSessionDismiss = useCallback((followUpId: string) => {
+        setSessionDismissedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(followUpId)) {
+                next.delete(followUpId);
+            } else {
+                next.add(followUpId);
+            }
+            return next;
+        });
+    }, []);
+
     useFollowUpNotifications({
         isOnCall: isInCallForNotifications,
         enabled: true,
         onNotification: handleFollowUpNotification,
+        sessionDismissedIds,
     });
 
     // Pre-fill call form with follow-up company
@@ -500,6 +515,8 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                             onSelectCompany={handleSelectFollowUpCompany}
                             hasUnsavedCall={hasUnsavedCall}
                             isCallInProgress={callStatus === 'ringing' || callStatus === 'connected'}
+                            sessionDismissedIds={sessionDismissedIds}
+                            onSessionDismiss={handleSessionDismiss}
                         />
 
                         <LastCallPreview

@@ -24,10 +24,12 @@ interface UseFollowUpNotificationsOptions {
   enabled?: boolean;
   /** Callback when a notification should be shown */
   onNotification?: (notification: FollowUpNotification) => void;
+  /** Set of follow-up IDs dismissed for this session (skip notifications for these) */
+  sessionDismissedIds?: Set<string>;
 }
 
 export function useFollowUpNotifications(options: UseFollowUpNotificationsOptions = {}) {
-  const { isOnCall = false, enabled = true, onNotification } = options;
+  const { isOnCall = false, enabled = true, onNotification, sessionDismissedIds } = options;
   const { pendingFollowUps } = useFollowUps();
   const { preferences } = useUserPreferences();
 
@@ -111,6 +113,11 @@ export function useFollowUpNotifications(options: UseFollowUpNotificationsOption
       const initTime = initTimeRef.current;
 
       pendingFollowUps.forEach(followUp => {
+        // Skip notifications for session-dismissed follow-ups
+        if (sessionDismissedIds?.has(followUp.id)) {
+          return;
+        }
+
         const scheduledTime = new Date(followUp.scheduled_time).getTime();
         const preNotificationTime = scheduledTime - (preNotificationMinutes * 60 * 1000);
 
@@ -184,7 +191,7 @@ export function useFollowUpNotifications(options: UseFollowUpNotificationsOption
     const intervalId = setInterval(checkFollowUps, CHECK_INTERVAL);
 
     return () => clearInterval(intervalId);
-  }, [enabled, pendingFollowUps, preNotificationMinutes, isOnCall, triggerNotification]);
+  }, [enabled, pendingFollowUps, preNotificationMinutes, isOnCall, triggerNotification, sessionDismissedIds]);
 
   // Clear notified set when follow-up is completed/dismissed
   const clearNotified = useCallback((followUpId: string) => {

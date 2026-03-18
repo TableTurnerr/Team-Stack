@@ -1372,13 +1372,16 @@ export default function SessionPage() {
         // Pass company suggestion from power dialer to the form
         setSuggestedCompanyName(companyName || '');
 
-        // NOTE: Do NOT start recording here — recording will begin automatically
-        // when Zoom confirms the call is ringing/connected (via callStatus effects).
-        // Starting recording before Zoom confirms causes false recording states
-        // when the iframe fails to process the dial command.
+        // Start recording immediately when dialing — captures ringing audio.
+        // The ringing/connected effects also call startRecording(), but the
+        // recorder guards against double-start (returns early if already recording).
+        if (isSessionActive) {
+            enterDeferredMode();
+            startRecording();
+        }
 
         dialNumber(phoneNumber);
-    }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at, agentConnected, agentZoomDetected, addToast]);
+    }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at, agentConnected, agentZoomDetected, addToast, isSessionActive, enterDeferredMode, startRecording]);
 
     // Ref so power dialer timers always call the latest handleDial (avoids stale closures)
     const handleDialRef = useRef(handleDial);

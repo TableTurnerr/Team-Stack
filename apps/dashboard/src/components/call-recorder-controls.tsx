@@ -143,7 +143,7 @@ export function CallRecorderControls() {
                             {error ? 'REC FAILED — Retry' : 'FAILED — Retry'}
                         </button>
                     ) : isAutoMode ? (
-                        <span className="text-[10px] text-green-400 font-semibold" title="Recording will start automatically when a call connects">
+                        <span className="text-[10px] text-green-400 font-semibold" title="Recording starts automatically when a call is dialed">
                             AUTO
                         </span>
                     ) : (

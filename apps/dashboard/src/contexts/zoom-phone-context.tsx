@@ -707,8 +707,22 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
         if (!cleaned || digits.length < 7) return;
 
-        // Prevent dialing if already in a call
-        if (callStatusRef.current !== 'idle') {
+        // Prevent dialing if already in a call.
+        // Allow dialing when status is 'ended' — the previous call is over,
+        // we just haven't transitioned to 'idle' yet (500ms delay timer).
+        // This fixes the power dialer race condition where auto-dial fires
+        // before the idle timer completes.
+        if (callStatusRef.current === 'ended') {
+            // Cancel the pending idle timer and force immediate transition
+            if (endedIdleTimerRef.current) {
+                clearTimeout(endedIdleTimerRef.current);
+                endedIdleTimerRef.current = null;
+            }
+            callStatusRef.current = 'idle';
+            setCallStatus('idle');
+            setCallDirection(null);
+            setIncomingCallerNumber(null);
+        } else if (callStatusRef.current !== 'idle') {
             console.warn('[Zoom Phone] Call already in progress, ignoring dial request');
             return;
         }

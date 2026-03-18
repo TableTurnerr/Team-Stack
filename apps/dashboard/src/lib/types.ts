@@ -366,6 +366,11 @@ export interface UserPreferences extends RecordModel {
     default_status_filters?: string[];
     expanded_view?: boolean;
     cold_calling_timezone?: string; // IANA timezone string for follow-up scheduling
+    // Follow-up notification settings
+    followup_window_hours_ahead?: number; // Hours ahead of current time to show follow-ups (default: 8)
+    followup_window_hours_behind?: number; // Hours behind current time to show overdue follow-ups (default: 8)
+    followup_pre_notification_minutes?: number; // Minutes before scheduled time to send "heads up" notification (default: 0 = disabled)
+    followup_sound_enabled?: boolean; // Whether to play sound on follow-up notifications (default: true)
   };
   privacy_settings?: {
     show_online_status?: boolean;

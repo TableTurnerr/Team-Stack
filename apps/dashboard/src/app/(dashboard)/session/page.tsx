@@ -31,7 +31,10 @@ import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
+import { SessionFollowUps } from './session-followups';
 import { useFollowUps } from '@/contexts/follow-up-context';
+import { useFollowUpNotifications, type FollowUpNotification } from '@/hooks/use-followup-notifications';
+import { FollowUpNotificationContainer } from '@/components/followup-notification-toast';
 import { useToast } from '@/components/ui/toast';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useLocalAgent } from '@/contexts/local-agent-context';
@@ -426,6 +429,77 @@ export default function SessionPage() {
     powerDialerActiveRef.current = powerDialerActive;
     powerDialerPausedRef.current = powerDialerPaused;
     powerDialerDelayRef.current = powerDialerDelay;
+
+    // ---------------------------------------------------------------------------
+    // Follow-up Notifications state
+    // ---------------------------------------------------------------------------
+    const [activeNotifications, setActiveNotifications] = useState<FollowUpNotification[]>([]);
+    const isInCallForNotifications = callStatus === 'ringing' || callStatus === 'connected';
+
+    const handleFollowUpNotification = useCallback((notification: FollowUpNotification) => {
+        setActiveNotifications(prev => {
+            // Avoid duplicates
+            if (prev.some(n => n.id === notification.id)) return prev;
+            return [...prev, notification];
+        });
+    }, []);
+
+    const handleDismissNotification = useCallback((id: string) => {
+        setActiveNotifications(prev => prev.filter(n => n.id !== id));
+    }, []);
+
+    // Use the follow-up notifications hook
+    useFollowUpNotifications({
+        isOnCall: isInCallForNotifications,
+        enabled: !!session && session.status === 'active',
+        onNotification: handleFollowUpNotification,
+    });
+
+    // Add follow-up to power dialer queue
+    const handleAddFollowUpToDialer = useCallback((entry: DialerEntry) => {
+        // Check for duplicates first (outside state updater to avoid side effects during render)
+        const isDuplicate = powerDialerQueue.some(e => e.number === entry.number);
+        if (isDuplicate) {
+            addToast('info', `${entry.company || entry.number} is already in the dialer queue`);
+            return;
+        }
+        setPowerDialerQueue(prev => [...prev, entry]);
+        addToast('success', `Added ${entry.company || entry.number} to power dialer`);
+    }, [powerDialerQueue, addToast]);
+
+    // Dial a follow-up immediately
+    const handleDialFollowUp = useCallback((phoneNumber: string, companyName?: string) => {
+        // Check if we can dial
+        if (isDialing || callStatus === 'ringing' || callStatus === 'connected') {
+            addToast('warning', 'A call is already in progress');
+            return;
+        }
+        if (hasUnsavedCall) {
+            addToast('warning', 'Save or discard the current call first');
+            return;
+        }
+        if (session?.paused_at) {
+            addToast('warning', 'Resume the session to make calls');
+            return;
+        }
+        // Set the suggested company name for the form
+        if (companyName) {
+            setSuggestedCompanyName(companyName);
+        }
+        setCurrentPhoneNumber(phoneNumber);
+        // Dial the number
+        dialNumber(phoneNumber);
+    }, [isDialing, callStatus, hasUnsavedCall, session?.paused_at, dialNumber, addToast]);
+
+    // Pre-fill call form with follow-up company (only if form is empty)
+    const handleSelectFollowUpCompany = useCallback((companyId: string, companyName: string, phoneNumber?: string) => {
+        if (hasUnsavedCall) return;
+        setSuggestedCompanyName(companyName);
+        if (phoneNumber) {
+            setCurrentPhoneNumber(phoneNumber);
+        }
+        addToast('info', `Selected ${companyName} for next call`);
+    }, [hasUnsavedCall, addToast]);
 
     // Auto-enable hangup when power dialer activates; disable when it stops
     useEffect(() => {
@@ -1701,6 +1775,29 @@ export default function SessionPage() {
         }
     }, []);
 
+    // Reorder the power dialer queue and adjust currentIndex to maintain consistency
+    const handlePowerDialerReorder = useCallback((newQueue: DialerEntry[], fromIndex: number, toIndex: number) => {
+        setPowerDialerQueue(newQueue);
+
+        // Adjust currentIndex based on the move
+        setPowerDialerIndex(prevIndex => {
+            // If moving an item from after current to before/at current, increment index
+            if (fromIndex > prevIndex && toIndex <= prevIndex) {
+                return prevIndex + 1;
+            }
+            // If moving an item from before/at current to after current, decrement index
+            if (fromIndex <= prevIndex && toIndex > prevIndex) {
+                return Math.max(0, prevIndex - 1);
+            }
+            // If moving the current item itself
+            if (fromIndex === prevIndex) {
+                return toIndex;
+            }
+            // No change needed
+            return prevIndex;
+        });
+    }, []);
+
     // ---------------------------------------------------------------------------
     // Update performance counters
     // ---------------------------------------------------------------------------
@@ -2390,6 +2487,7 @@ export default function SessionPage() {
                     onStartFrom={handlePowerDialerStartFrom}
                     onDelayChange={setPowerDialerDelay}
                     onQueueLoad={handlePowerDialerQueueLoad}
+                    onQueueReorder={handlePowerDialerReorder}
                     disabled={!!session.paused_at}
                     canStart={!hasUnsavedCall && callStatus !== 'ringing' && callStatus !== 'connected'}
                 />
@@ -2428,6 +2526,13 @@ export default function SessionPage() {
                             appointmentSet={session.appointment_set || 0}
                             onUpdate={handlePerformanceUpdate}
                         />
+                        <SessionFollowUps
+                            onAddToDialer={handleAddFollowUpToDialer}
+                            onDialNow={handleDialFollowUp}
+                            onSelectCompany={handleSelectFollowUpCompany}
+                            hasUnsavedCall={hasUnsavedCall}
+                            isCallInProgress={callStatus === 'ringing' || callStatus === 'connected'}
+                        />
                         <button
                             onClick={() => setShowManualAdjustment(true)}
                             className="w-full text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[var(--primary)]/30 rounded-xl px-4 py-2.5 transition-colors flex items-center justify-center gap-1.5"
@@ -2449,6 +2554,12 @@ export default function SessionPage() {
     return (
         <>
             {renderContent()}
+
+            {/* Follow-up notification toasts */}
+            <FollowUpNotificationContainer
+                notifications={activeNotifications}
+                onDismiss={handleDismissNotification}
+            />
 
             {/* Manual adjustment modal */}
             {showManualAdjustment && session && (

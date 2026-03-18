@@ -46,6 +46,10 @@ const DEFAULT_PREFERENCES: Partial<UserPreferences> = {
     auto_start_recording: false,
     show_transcript_panel: true,
     expanded_view: false,
+    followup_window_hours_ahead: 8,
+    followup_window_hours_behind: 8,
+    followup_pre_notification_minutes: 0,
+    followup_sound_enabled: true,
   },
   privacy_settings: {
     show_online_status: true,

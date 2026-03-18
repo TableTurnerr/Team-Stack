@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { UserPreferences } from '@/lib/types';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
-import { Table, Calendar, Phone, Building2 } from 'lucide-react';
+import { Table, Calendar, Phone, Building2, Bell } from 'lucide-react';
 
 interface PreferencesSectionProps {
     preferences: UserPreferences | null;
@@ -22,6 +22,10 @@ export function PreferencesSection({ preferences, updatePreferences, isSaving }:
             auto_start_recording: false,
             show_transcript_panel: true,
             expanded_view: false,
+            followup_window_hours_ahead: 8,
+            followup_window_hours_behind: 8,
+            followup_pre_notification_minutes: 0,
+            followup_sound_enabled: true,
         }
     );
 
@@ -122,6 +126,79 @@ export function PreferencesSection({ preferences, updatePreferences, isSaving }:
                         onChange={(v) => updateSetting('auto_follow_up_callback', v)}
                         label="Auto-create follow-up on 'Callback'"
                         description="Automatically schedule follow-up when call outcome is 'Callback'"
+                        disabled={isSaving}
+                    />
+                </div>
+            </div>
+
+            <hr className="border-[var(--card-border)]" />
+
+            {/* Follow-Up Notifications */}
+            <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                    <Bell size={18} className="text-[var(--muted)]" />
+                    <h3 className="font-medium">Follow-Up Notifications</h3>
+                </div>
+
+                <div className="space-y-4 pl-6">
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium">Session Follow-Up Window</label>
+                        <p className="text-xs text-[var(--muted)] mb-2">
+                            Show follow-ups within this time range during calling sessions
+                        </p>
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={24}
+                                    value={settings.followup_window_hours_behind ?? 8}
+                                    onChange={(e) => updateSetting('followup_window_hours_behind', Math.max(1, Math.min(24, Number(e.target.value))))}
+                                    disabled={isSaving}
+                                    className="w-16 px-2 py-1.5 text-sm bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                                />
+                                <span className="text-sm text-[var(--muted)]">hours behind</span>
+                            </div>
+                            <span className="text-[var(--muted)]">&mdash;</span>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={24}
+                                    value={settings.followup_window_hours_ahead ?? 8}
+                                    onChange={(e) => updateSetting('followup_window_hours_ahead', Math.max(1, Math.min(24, Number(e.target.value))))}
+                                    disabled={isSaving}
+                                    className="w-16 px-2 py-1.5 text-sm bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                                />
+                                <span className="text-sm text-[var(--muted)]">hours ahead</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium">Pre-Notification Time</label>
+                        <p className="text-xs text-[var(--muted)] mb-2">
+                            Get a &quot;heads up&quot; notification before a follow-up is due (0 = disabled)
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="number"
+                                min={0}
+                                max={60}
+                                value={settings.followup_pre_notification_minutes ?? 0}
+                                onChange={(e) => updateSetting('followup_pre_notification_minutes', Math.max(0, Math.min(60, Number(e.target.value))))}
+                                disabled={isSaving}
+                                className="w-16 px-2 py-1.5 text-sm bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                            />
+                            <span className="text-sm text-[var(--muted)]">minutes before</span>
+                        </div>
+                    </div>
+
+                    <ToggleSwitch
+                        checked={settings.followup_sound_enabled ?? true}
+                        onChange={(v) => updateSetting('followup_sound_enabled', v)}
+                        label="Play notification sound"
+                        description="Play a ding sound when a follow-up becomes due"
                         disabled={isSaving}
                     />
                 </div>

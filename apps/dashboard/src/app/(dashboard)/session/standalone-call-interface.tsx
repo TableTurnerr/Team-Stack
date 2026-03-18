@@ -11,8 +11,11 @@ import { useCallRecording } from '@/contexts/call-recording-context';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
+import { SessionFollowUps } from './session-followups';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { useFollowUps } from '@/contexts/follow-up-context';
+import { useFollowUpNotifications, type FollowUpNotification } from '@/hooks/use-followup-notifications';
+import { FollowUpNotificationContainer } from '@/components/followup-notification-toast';
 import { useToast } from '@/components/ui/toast';
 
 interface StandaloneCallInterfaceProps {
@@ -75,6 +78,57 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
     const [autoHangupEnabled, setAutoHangupEnabled] = useState(false);
     const [autoHangupSeconds, setAutoHangupSeconds] = useState(15);
     const [showExitConfirm, setShowExitConfirm] = useState(false);
+    const [suggestedCompanyName, setSuggestedCompanyName] = useState('');
+
+    // Follow-up notifications
+    const [activeNotifications, setActiveNotifications] = useState<FollowUpNotification[]>([]);
+    const isInCallForNotifications = callStatus === 'ringing' || callStatus === 'connected';
+
+    const handleFollowUpNotification = useCallback((notification: FollowUpNotification) => {
+        setActiveNotifications(prev => {
+            if (prev.some(n => n.id === notification.id)) return prev;
+            return [...prev, notification];
+        });
+    }, []);
+
+    const handleDismissNotification = useCallback((id: string) => {
+        setActiveNotifications(prev => prev.filter(n => n.id !== id));
+    }, []);
+
+    useFollowUpNotifications({
+        isOnCall: isInCallForNotifications,
+        enabled: true,
+        onNotification: handleFollowUpNotification,
+    });
+
+    // Pre-fill call form with follow-up company
+    const handleSelectFollowUpCompany = useCallback((companyId: string, companyName: string, phoneNumber?: string) => {
+        if (hasUnsavedCall) return;
+        setSuggestedCompanyName(companyName);
+        if (phoneNumber) {
+            setCurrentPhoneNumber(phoneNumber);
+            setContextPhoneNumber(phoneNumber);
+        }
+        addToast('info', `Selected ${companyName} for next call`);
+    }, [hasUnsavedCall, addToast, setContextPhoneNumber]);
+
+    // Dial a follow-up immediately
+    const handleDialFollowUp = useCallback((phoneNumber: string, companyName?: string) => {
+        if (callStatus === 'ringing' || callStatus === 'connected') {
+            addToast('warning', 'A call is already in progress');
+            return;
+        }
+        if (hasUnsavedCall) {
+            addToast('warning', 'Save or discard the current call first');
+            return;
+        }
+        if (companyName) {
+            setSuggestedCompanyName(companyName);
+        }
+        setCurrentPhoneNumber(phoneNumber);
+        setContextPhoneNumber(phoneNumber);
+        dialNumber(phoneNumber);
+    }, [callStatus, hasUnsavedCall, dialNumber, setContextPhoneNumber, addToast]);
 
     // Sync auto-hangup settings to zoom phone context
     useEffect(() => {
@@ -300,7 +354,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
         } finally {
             setSavingCall(false);
         }
-    }, [user, stopRecording, setContextPhoneNumber, ringStartTime, connectTime]);
+    }, [user, stopRecording, setContextPhoneNumber, ringStartTime, connectTime, completeFollowUp, addToast]);
 
     const handleDiscardCall = useCallback(() => {
         stopRecording();
@@ -427,6 +481,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                             isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
                             onCallback={handleCallback}
                             callbackEvents={callbackEvents}
+                            suggestedCompanyName={suggestedCompanyName}
                         />
                     </div>
                 </div>
@@ -439,6 +494,13 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                             <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Dialer</h3>
                             <ZoomPhoneDialer docked disabled={hasUnsavedCall} />
                         </div>
+
+                        <SessionFollowUps
+                            onDialNow={handleDialFollowUp}
+                            onSelectCompany={handleSelectFollowUpCompany}
+                            hasUnsavedCall={hasUnsavedCall}
+                            isCallInProgress={callStatus === 'ringing' || callStatus === 'connected'}
+                        />
 
                         <LastCallPreview
                             callLog={lastCallLog}
@@ -457,6 +519,11 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 confirmText={exiting ? "Exiting..." : "Exit Now"}
                 cancelText="Stay"
                 variant="default"
+            />
+
+            <FollowUpNotificationContainer
+                notifications={activeNotifications}
+                onDismiss={handleDismissNotification}
             />
         </div>
     );

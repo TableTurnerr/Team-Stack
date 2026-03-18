@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { SignUpPage } from '@/components/ui/sign-up';
@@ -8,8 +8,14 @@ import { SignUpPage } from '@/components/ui/sign-up';
 export default function RegisterPage() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const { register, loginWithGoogle } = useAuth();
+    const { register, loginWithGoogle, isAuthenticated, isLoading: isAuthLoading } = useAuth();
     const router = useRouter();
+
+    useEffect(() => {
+        if (!isAuthLoading && isAuthenticated) {
+            router.push('/');
+        }
+    }, [isAuthLoading, isAuthenticated, router]);
 
     const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -68,6 +74,10 @@ export default function RegisterPage() {
     const handleSignIn = () => {
         router.push('/login');
     };
+
+    if (isAuthLoading || isAuthenticated) {
+        return null;
+    }
 
     return (
         <SignUpPage

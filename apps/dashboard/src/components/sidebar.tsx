@@ -350,6 +350,7 @@ export function Sidebar() {
   const [showTzSelector, setShowTzSelector] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const [sidebarHovered, setSidebarHovered] = useState(false);
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
   const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -696,10 +697,14 @@ export function Sidebar() {
       </nav>
 
       {/* Timezones */}
-      <div className={cn(
-        'border-t border-[var(--sidebar-border)] relative',
-        collapsed ? 'px-2 py-3' : 'px-4 py-4 space-y-3',
-      )}>
+      <div
+        className={cn(
+          'border-t border-[var(--sidebar-border)] relative',
+          collapsed ? 'px-2 py-3' : 'px-4 py-4 space-y-3',
+        )}
+        onMouseEnter={() => setSidebarHovered(true)}
+        onMouseLeave={() => setSidebarHovered(false)}
+      >
         <div className={cn(
           'flex items-center',
           collapsed ? 'justify-center' : 'justify-between px-1',
@@ -743,6 +748,7 @@ export function Sidebar() {
                 onRemove={() => removeTimezone(tz.timezone)}
                 isStarred={coldCallingTimezone === tz.timezone}
                 onStar={() => setStarTimezone(tz.timezone)}
+                showRemove={sidebarHovered}
               />
             ))}
           </div>

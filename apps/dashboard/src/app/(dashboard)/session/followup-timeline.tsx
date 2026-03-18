@@ -27,6 +27,8 @@ interface FollowUpTimelineProps {
   hasUnsavedCall?: boolean;
   isCallInProgress?: boolean;
   compact?: boolean;
+  /** Set of follow-up IDs dismissed for this session */
+  sessionDismissedIds?: Set<string>;
 }
 
 interface TimelineGroup {
@@ -50,6 +52,7 @@ export function FollowUpTimeline({
   hasUnsavedCall = false,
   isCallInProgress = false,
   compact = false,
+  sessionDismissedIds,
 }: FollowUpTimelineProps) {
   // Group follow-ups by date
   const groupedFollowUps = useMemo(() => {
@@ -208,6 +211,7 @@ export function FollowUpTimeline({
                 hasUnsavedCall={hasUnsavedCall}
                 isCallInProgress={isCallInProgress}
                 compact={compact}
+                isSessionDismissed={sessionDismissedIds?.has(followUp.id)}
               />
             ))}
           </div>
@@ -228,6 +232,7 @@ interface TimelineItemProps {
   hasUnsavedCall?: boolean;
   isCallInProgress?: boolean;
   compact?: boolean;
+  isSessionDismissed?: boolean;
 }
 
 function TimelineItem({
@@ -241,6 +246,7 @@ function TimelineItem({
   hasUnsavedCall,
   isCallInProgress,
   compact,
+  isSessionDismissed,
 }: TimelineItemProps) {
   const company = followUp.expand?.company;
   const companyName = company?.company_name || 'Unknown Company';

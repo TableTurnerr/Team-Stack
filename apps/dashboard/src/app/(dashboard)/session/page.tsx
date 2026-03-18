@@ -434,6 +434,7 @@ export default function SessionPage() {
     // Follow-up Notifications state
     // ---------------------------------------------------------------------------
     const [activeNotifications, setActiveNotifications] = useState<FollowUpNotification[]>([]);
+    const [sessionDismissedIds, setSessionDismissedIds] = useState<Set<string>>(new Set());
     const isInCallForNotifications = callStatus === 'ringing' || callStatus === 'connected';
 
     const handleFollowUpNotification = useCallback((notification: FollowUpNotification) => {
@@ -448,11 +449,25 @@ export default function SessionPage() {
         setActiveNotifications(prev => prev.filter(n => n.id !== id));
     }, []);
 
+    // Toggle session dismiss for a follow-up (snooze/restore)
+    const handleSessionDismiss = useCallback((followUpId: string) => {
+        setSessionDismissedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(followUpId)) {
+                next.delete(followUpId);
+            } else {
+                next.add(followUpId);
+            }
+            return next;
+        });
+    }, []);
+
     // Use the follow-up notifications hook
     useFollowUpNotifications({
         isOnCall: isInCallForNotifications,
         enabled: !!session && session.status === 'active',
         onNotification: handleFollowUpNotification,
+        sessionDismissedIds,
     });
 
     // Add follow-up to power dialer queue
@@ -1781,8 +1796,12 @@ export default function SessionPage() {
 
         // Adjust currentIndex based on the move
         setPowerDialerIndex(prevIndex => {
-            // If moving an item from after current to before/at current, increment index
-            if (fromIndex > prevIndex && toIndex <= prevIndex) {
+            // Item dropped at current position — it becomes the new current, index stays
+            if (fromIndex > prevIndex && toIndex === prevIndex) {
+                return prevIndex;
+            }
+            // If moving an item from after current to before current, increment index
+            if (fromIndex > prevIndex && toIndex < prevIndex) {
                 return prevIndex + 1;
             }
             // If moving an item from before/at current to after current, decrement index
@@ -2532,6 +2551,8 @@ export default function SessionPage() {
                             onSelectCompany={handleSelectFollowUpCompany}
                             hasUnsavedCall={hasUnsavedCall}
                             isCallInProgress={callStatus === 'ringing' || callStatus === 'connected'}
+                            sessionDismissedIds={sessionDismissedIds}
+                            onSessionDismiss={handleSessionDismiss}
                         />
                         <button
                             onClick={() => setShowManualAdjustment(true)}

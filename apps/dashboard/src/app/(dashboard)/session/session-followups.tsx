@@ -27,6 +27,10 @@ interface SessionFollowUpsProps {
   hasUnsavedCall?: boolean;
   /** Whether a call is currently in progress */
   isCallInProgress?: boolean;
+  /** Set of follow-up IDs dismissed for this session (not persisted) */
+  sessionDismissedIds?: Set<string>;
+  /** Callback to dismiss a follow-up for this session only */
+  onSessionDismiss?: (id: string) => void;
   className?: string;
 }
 
@@ -44,9 +48,11 @@ export function SessionFollowUps({
   onSelectCompany,
   hasUnsavedCall = false,
   isCallInProgress = false,
+  sessionDismissedIds,
+  onSessionDismiss,
   className,
 }: SessionFollowUpsProps) {
-  const { pendingFollowUps, completeFollowUp, dismissFollowUp } = useFollowUps();
+  const { pendingFollowUps, completeFollowUp } = useFollowUps();
   const { preferences } = useUserPreferences();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -121,9 +127,18 @@ export function SessionFollowUps({
     return result;
   }, [pendingFollowUps, hoursAhead, hoursBehind]);
 
-  const overdueCount = categorizedFollowUps.filter(c => c.category === 'overdue').length;
-  const dueSoonCount = categorizedFollowUps.filter(c => c.category === 'due_soon').length;
-  const totalCount = categorizedFollowUps.length;
+  // Filter out session-dismissed follow-ups for the main view
+  const visibleFollowUps = useMemo(() => {
+    if (!sessionDismissedIds || sessionDismissedIds.size === 0) {
+      return categorizedFollowUps;
+    }
+    return categorizedFollowUps.filter(c => !sessionDismissedIds.has(c.followUp.id));
+  }, [categorizedFollowUps, sessionDismissedIds]);
+
+  const overdueCount = visibleFollowUps.filter(c => c.category === 'overdue').length;
+  const dueSoonCount = visibleFollowUps.filter(c => c.category === 'due_soon').length;
+  const totalCount = visibleFollowUps.length;
+  const dismissedCount = sessionDismissedIds?.size ?? 0;
 
   const handleAddToDialer = useCallback((followUp: FollowUp) => {
     const phoneNumber = followUp.expand?.phone_number_record?.phone_number;
@@ -233,9 +248,9 @@ export function SessionFollowUps({
           {viewMode === 'timeline' ? (
             <div className="p-3">
               <FollowUpTimeline
-                followUps={categorizedFollowUps.map(c => c.followUp)}
+                followUps={visibleFollowUps.map(c => c.followUp)}
                 onComplete={completeFollowUp}
-                onDismiss={dismissFollowUp}
+                onDismiss={onSessionDismiss}
                 onAddToDialer={onAddToDialer}
                 onDialNow={onDialNow}
                 onSelectCompany={onSelectCompany}
@@ -246,13 +261,13 @@ export function SessionFollowUps({
             </div>
           ) : (
             <div className="divide-y divide-[var(--card-border)]">
-              {categorizedFollowUps.map(({ followUp, category }) => (
+              {visibleFollowUps.map(({ followUp, category }) => (
                 <FollowUpItem
                   key={followUp.id}
                   followUp={followUp}
                   category={category}
                   onComplete={completeFollowUp}
-                  onDismiss={dismissFollowUp}
+                  onDismiss={onSessionDismiss || (() => {})}
                   onAddToDialer={onAddToDialer ? () => handleAddToDialer(followUp) : undefined}
                   onDialNow={onDialNow ? () => handleDialNow(followUp) : undefined}
                   onSelect={!hasUnsavedCall ? () => handleSelectForCall(followUp) : undefined}
@@ -274,6 +289,8 @@ export function SessionFollowUps({
         onSelectCompany={onSelectCompany}
         hasUnsavedCall={hasUnsavedCall}
         isCallInProgress={isCallInProgress}
+        sessionDismissedIds={sessionDismissedIds}
+        onSessionDismiss={onSessionDismiss}
       />
     </div>
   );

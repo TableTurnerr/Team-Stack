@@ -28,7 +28,7 @@ import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { FollowUpTimeline } from './followup-timeline';
 import type { FollowUp } from '@/lib/types';
 
-type FollowUpCategory = 'all' | 'overdue' | 'due_soon' | 'upcoming';
+type FollowUpCategory = 'all' | 'overdue' | 'due_soon' | 'upcoming' | 'dismissed';
 type ViewMode = 'list' | 'timeline';
 
 interface FollowUpsDetailModalProps {
@@ -39,6 +39,10 @@ interface FollowUpsDetailModalProps {
   onSelectCompany?: (companyId: string, companyName: string, phoneNumber?: string) => void;
   hasUnsavedCall?: boolean;
   isCallInProgress?: boolean;
+  /** Set of follow-up IDs dismissed for this session */
+  sessionDismissedIds?: Set<string>;
+  /** Callback to dismiss/restore a follow-up for this session */
+  onSessionDismiss?: (id: string) => void;
 }
 
 export function FollowUpsDetailModal({
@@ -49,8 +53,10 @@ export function FollowUpsDetailModal({
   onSelectCompany,
   hasUnsavedCall = false,
   isCallInProgress = false,
+  sessionDismissedIds,
+  onSessionDismiss,
 }: FollowUpsDetailModalProps) {
-  const { pendingFollowUps, completeFollowUp, dismissFollowUp, refreshFollowUps, isLoading } = useFollowUps();
+  const { pendingFollowUps, completeFollowUp, refreshFollowUps, isLoading } = useFollowUps();
   const { preferences } = useUserPreferences();
   const [selectedCategory, setSelectedCategory] = useState<FollowUpCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,6 +94,7 @@ export function FollowUpsDetailModal({
     return pendingFollowUps.map(followUp => {
       const scheduledTime = new Date(followUp.scheduled_time).getTime();
       const minutesUntil = (scheduledTime - now) / (60 * 1000);
+      const isSessionDismissed = sessionDismissedIds?.has(followUp.id) ?? false;
 
       let category: 'overdue' | 'due_soon' | 'upcoming';
       if (scheduledTime < now) {
@@ -98,22 +105,30 @@ export function FollowUpsDetailModal({
         category = 'upcoming';
       }
 
-      return { followUp, category, minutesUntil };
+      return { followUp, category, minutesUntil, isSessionDismissed };
     }).sort((a, b) => {
+      // Sort dismissed items last
+      if (a.isSessionDismissed !== b.isSessionDismissed) {
+        return a.isSessionDismissed ? 1 : -1;
+      }
       const categoryOrder = { overdue: 0, due_soon: 1, upcoming: 2 };
       if (categoryOrder[a.category] !== categoryOrder[b.category]) {
         return categoryOrder[a.category] - categoryOrder[b.category];
       }
       return a.minutesUntil - b.minutesUntil;
     });
-  }, [pendingFollowUps]);
+  }, [pendingFollowUps, sessionDismissedIds]);
 
   // Filter by category and search
   const filteredFollowUps = useMemo(() => {
-    return categorizedFollowUps.filter(({ followUp, category }) => {
+    return categorizedFollowUps.filter(({ followUp, category, isSessionDismissed }) => {
       // Category filter
-      if (selectedCategory !== 'all' && category !== selectedCategory) {
-        return false;
+      if (selectedCategory === 'dismissed') {
+        if (!isSessionDismissed) return false;
+      } else if (selectedCategory !== 'all') {
+        if (category !== selectedCategory) return false;
+        // In non-dismissed categories, hide dismissed items unless showing "all"
+        if (isSessionDismissed) return false;
       }
 
       // Search filter
@@ -130,10 +145,11 @@ export function FollowUpsDetailModal({
     });
   }, [categorizedFollowUps, selectedCategory, searchQuery]);
 
-  // Counts
-  const overdueCount = categorizedFollowUps.filter(c => c.category === 'overdue').length;
-  const dueSoonCount = categorizedFollowUps.filter(c => c.category === 'due_soon').length;
-  const upcomingCount = categorizedFollowUps.filter(c => c.category === 'upcoming').length;
+  // Counts (exclude session-dismissed from active counts)
+  const overdueCount = categorizedFollowUps.filter(c => c.category === 'overdue' && !c.isSessionDismissed).length;
+  const dueSoonCount = categorizedFollowUps.filter(c => c.category === 'due_soon' && !c.isSessionDismissed).length;
+  const upcomingCount = categorizedFollowUps.filter(c => c.category === 'upcoming' && !c.isSessionDismissed).length;
+  const dismissedCount = categorizedFollowUps.filter(c => c.isSessionDismissed).length;
   const totalCount = pendingFollowUps.length;
 
   const handleAddToDialer = useCallback((followUp: FollowUp) => {
@@ -175,6 +191,7 @@ export function FollowUpsDetailModal({
     { key: 'overdue', label: 'Overdue', count: overdueCount, color: 'text-[var(--error)]' },
     { key: 'due_soon', label: 'Due Soon', count: dueSoonCount, color: 'text-[var(--warning)]' },
     { key: 'upcoming', label: 'Upcoming', count: upcomingCount, color: 'text-[var(--primary)]' },
+    ...(dismissedCount > 0 ? [{ key: 'dismissed' as FollowUpCategory, label: 'Snoozed', count: dismissedCount, color: 'text-[var(--muted)]' }] : []),
   ];
 
   return (
@@ -320,12 +337,13 @@ export function FollowUpsDetailModal({
               <FollowUpTimeline
                 followUps={filteredFollowUps.map(f => f.followUp)}
                 onComplete={completeFollowUp}
-                onDismiss={dismissFollowUp}
+                onDismiss={onSessionDismiss}
                 onAddToDialer={onAddToDialer}
                 onDialNow={onDialNow}
                 onSelectCompany={onSelectCompany}
                 hasUnsavedCall={hasUnsavedCall}
                 isCallInProgress={isCallInProgress}
+                sessionDismissedIds={sessionDismissedIds}
               />
             </div>
           ) : (
@@ -347,7 +365,7 @@ export function FollowUpsDetailModal({
                   </div>
                 ) : (
                   <div className="divide-y divide-[var(--card-border)]">
-                    {filteredFollowUps.map(({ followUp, category }) => (
+                    {filteredFollowUps.map(({ followUp, category, isSessionDismissed }) => (
                       <FollowUpListItem
                         key={followUp.id}
                         followUp={followUp}
@@ -355,7 +373,8 @@ export function FollowUpsDetailModal({
                         isSelected={selectedFollowUp?.id === followUp.id}
                         onSelect={() => setSelectedFollowUp(followUp)}
                         onComplete={completeFollowUp}
-                        onDismiss={dismissFollowUp}
+                        onSessionDismiss={onSessionDismiss}
+                        isSessionDismissed={isSessionDismissed}
                         onAddToDialer={onAddToDialer ? () => handleAddToDialer(followUp) : undefined}
                         onDialNow={onDialNow ? () => handleDialNow(followUp) : undefined}
                         onSelectForCall={!hasUnsavedCall ? () => handleSelectForCall(followUp) : undefined}
@@ -377,10 +396,11 @@ export function FollowUpsDetailModal({
                       await completeFollowUp(selectedFollowUp.id);
                       setSelectedFollowUp(null);
                     }}
-                    onDismiss={async () => {
-                      await dismissFollowUp(selectedFollowUp.id);
+                    onSessionDismiss={() => {
+                      onSessionDismiss?.(selectedFollowUp.id);
                       setSelectedFollowUp(null);
                     }}
+                    isSessionDismissed={sessionDismissedIds?.has(selectedFollowUp.id) ?? false}
                     onAddToDialer={onAddToDialer ? () => handleAddToDialer(selectedFollowUp) : undefined}
                     onDialNow={onDialNow ? () => handleDialNow(selectedFollowUp) : undefined}
                     onSelectForCall={!hasUnsavedCall ? () => handleSelectForCall(selectedFollowUp) : undefined}
@@ -403,7 +423,8 @@ interface FollowUpListItemProps {
   isSelected: boolean;
   onSelect: () => void;
   onComplete: (id: string) => void;
-  onDismiss: (id: string) => void;
+  onSessionDismiss?: (id: string) => void;
+  isSessionDismissed?: boolean;
   onAddToDialer?: () => void;
   onDialNow?: () => void;
   onSelectForCall?: () => void;
@@ -417,7 +438,8 @@ function FollowUpListItem({
   isSelected,
   onSelect,
   onComplete,
-  onDismiss,
+  onSessionDismiss,
+  isSessionDismissed,
   onAddToDialer,
   onDialNow,
   onSelectForCall,
@@ -425,7 +447,6 @@ function FollowUpListItem({
   isCallInProgress,
 }: FollowUpListItemProps) {
   const [completing, setCompleting] = useState(false);
-  const [dismissing, setDismissing] = useState(false);
 
   const companyName = followUp.expand?.company?.company_name || 'Unknown Company';
   const phoneNumber = followUp.expand?.phone_number_record?.phone_number;
@@ -441,14 +462,9 @@ function FollowUpListItem({
     }
   };
 
-  const handleDismiss = async (e: React.MouseEvent) => {
+  const handleSessionDismiss = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setDismissing(true);
-    try {
-      await onDismiss(followUp.id);
-    } finally {
-      setDismissing(false);
-    }
+    onSessionDismiss?.(followUp.id);
   };
 
   const categoryStyles = {
@@ -477,20 +493,24 @@ function FollowUpListItem({
       className={cn(
         "p-4 cursor-pointer transition-colors",
         isSelected ? "bg-[var(--primary)]/10" : "hover:bg-[var(--card-hover)]",
-        styles.bg
+        isSessionDismissed ? "opacity-60" : styles.bg
       )}
     >
       <div className="flex items-start gap-3">
         {/* Icon */}
-        <div className={cn("p-2 rounded-lg bg-[var(--card-bg)] shrink-0", styles.icon)}>
+        <div className={cn("p-2 rounded-lg bg-[var(--card-bg)] shrink-0", isSessionDismissed ? "text-[var(--muted)]" : styles.icon)}>
           <Calendar size={16} />
         </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-semibold truncate">{companyName}</span>
-            {category !== 'upcoming' && (
+            <span className={cn("font-semibold truncate", isSessionDismissed && "text-[var(--muted)]")}>{companyName}</span>
+            {isSessionDismissed ? (
+              <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-[var(--card-hover)] text-[var(--muted)]">
+                Snoozed
+              </span>
+            ) : category !== 'upcoming' && (
               <span className={cn("text-[10px] font-bold uppercase px-1.5 py-0.5 rounded", styles.badge)}>
                 {category === 'overdue' ? 'Overdue' : 'Due Soon'}
               </span>
@@ -520,32 +540,44 @@ function FollowUpListItem({
 
         {/* Quick actions */}
         <div className="flex items-center gap-1 shrink-0">
-          {hasPhone && onDialNow && (
+          {isSessionDismissed ? (
             <button
-              onClick={(e) => { e.stopPropagation(); onDialNow(); }}
-              disabled={isCallInProgress || hasUnsavedCall}
-              className={cn(
-                "p-1.5 rounded-lg transition-colors",
-                isCallInProgress || hasUnsavedCall
-                  ? "opacity-40 cursor-not-allowed text-[var(--muted)]"
-                  : "hover:bg-[var(--success)]/10 text-[var(--success)]"
-              )}
-              title="Dial now"
+              onClick={handleSessionDismiss}
+              className="p-1.5 rounded-lg hover:bg-[var(--primary)]/10 text-[var(--primary)] transition-colors"
+              title="Restore for this session"
             >
-              <Phone size={14} />
+              <RefreshCw size={14} />
             </button>
+          ) : (
+            <>
+              {hasPhone && onDialNow && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDialNow(); }}
+                  disabled={isCallInProgress || hasUnsavedCall}
+                  className={cn(
+                    "p-1.5 rounded-lg transition-colors",
+                    isCallInProgress || hasUnsavedCall
+                      ? "opacity-40 cursor-not-allowed text-[var(--muted)]"
+                      : "hover:bg-[var(--success)]/10 text-[var(--success)]"
+                  )}
+                  title="Dial now"
+                >
+                  <Phone size={14} />
+                </button>
+              )}
+              <button
+                onClick={handleComplete}
+                disabled={completing}
+                className={cn(
+                  "p-1.5 rounded-lg transition-colors",
+                  completing ? "opacity-50" : "hover:bg-[var(--success)]/10 text-[var(--success)]"
+                )}
+                title="Complete"
+              >
+                <CheckCircle2 size={14} />
+              </button>
+            </>
           )}
-          <button
-            onClick={handleComplete}
-            disabled={completing}
-            className={cn(
-              "p-1.5 rounded-lg transition-colors",
-              completing ? "opacity-50" : "hover:bg-[var(--success)]/10 text-[var(--success)]"
-            )}
-            title="Complete"
-          >
-            <CheckCircle2 size={14} />
-          </button>
           <ChevronRight size={14} className="text-[var(--muted)]" />
         </div>
       </div>
@@ -557,7 +589,8 @@ interface FollowUpDetailPanelProps {
   followUp: FollowUp;
   onClose: () => void;
   onComplete: () => void;
-  onDismiss: () => void;
+  onSessionDismiss: () => void;
+  isSessionDismissed: boolean;
   onAddToDialer?: () => void;
   onDialNow?: () => void;
   onSelectForCall?: () => void;
@@ -569,7 +602,8 @@ function FollowUpDetailPanel({
   followUp,
   onClose,
   onComplete,
-  onDismiss,
+  onSessionDismiss,
+  isSessionDismissed,
   onAddToDialer,
   onDialNow,
   onSelectForCall,
@@ -577,7 +611,6 @@ function FollowUpDetailPanel({
   isCallInProgress,
 }: FollowUpDetailPanelProps) {
   const [completing, setCompleting] = useState(false);
-  const [dismissing, setDismissing] = useState(false);
 
   const company = followUp.expand?.company;
   const phoneNumber = followUp.expand?.phone_number_record?.phone_number;
@@ -590,15 +623,6 @@ function FollowUpDetailPanel({
       await onComplete();
     } finally {
       setCompleting(false);
-    }
-  };
-
-  const handleDismiss = async () => {
-    setDismissing(true);
-    try {
-      await onDismiss();
-    } finally {
-      setDismissing(false);
     }
   };
 
@@ -765,21 +789,25 @@ function FollowUpDetailPanel({
           </button>
 
           <button
-            onClick={handleDismiss}
-            disabled={dismissing}
+            onClick={onSessionDismiss}
             className={cn(
               "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-colors",
-              dismissing
-                ? "opacity-50 cursor-not-allowed"
+              isSessionDismissed
+                ? "bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20"
                 : "bg-[var(--card-bg)] text-[var(--muted)] hover:bg-[var(--card-hover)]"
             )}
           >
-            {dismissing ? (
-              <span className="w-4 h-4 border-2 border-[var(--muted)]/30 border-t-[var(--muted)] rounded-full animate-spin" />
+            {isSessionDismissed ? (
+              <>
+                <RefreshCw size={16} />
+                Restore
+              </>
             ) : (
-              <XCircle size={16} />
+              <>
+                <XCircle size={16} />
+                Snooze
+              </>
             )}
-            Dismiss
           </button>
         </div>
       </div>

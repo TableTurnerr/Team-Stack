@@ -173,6 +173,8 @@ export function PowerDialerPanel({
 
     const handleDragOver = (e: React.DragEvent, index: number) => {
         if (!canReorder || dragIndex === null) return;
+        // Don't show drop indicator on done items — dragging there will snap to current
+        if (index < currentIndex) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         if (index !== dragOverIndex) {
@@ -195,7 +197,11 @@ export function PowerDialerPanel({
         const newQueue = [...queue];
         const [removed] = newQueue.splice(dragIndex, 1);
         // Adjust drop index if dragging from before to after
-        const adjustedDropIndex = dragIndex < dropIndex ? dropIndex - 1 : dropIndex;
+        let adjustedDropIndex = dragIndex < dropIndex ? dropIndex - 1 : dropIndex;
+        // Clamp to currentIndex — makes the dragged item the new current instead of going into done zone
+        if (adjustedDropIndex < currentIndex) {
+            adjustedDropIndex = currentIndex;
+        }
         newQueue.splice(adjustedDropIndex, 0, removed);
         onQueueReorder!(newQueue, dragIndex, adjustedDropIndex);
 
@@ -412,7 +418,7 @@ export function PowerDialerPanel({
                                         const canStartHere = !isActivelyCallingThis && onStartFrom && (!isCurrent || !active);
                                         const isDragging = dragIndex === i;
                                         const isDragOver = dragOverIndex === i && dragIndex !== i;
-                                        const canDragThis = canReorder && !isDone;
+                                        const canDragThis = canReorder && !isDone && !(active && isCurrent);
                                         return (
                                             <div
                                                 key={i}

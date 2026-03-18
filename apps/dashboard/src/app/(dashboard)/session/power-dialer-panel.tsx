@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Zap, ChevronDown, ChevronUp, Play, Pause, Square, Check, RotateCcw, Database } from 'lucide-react';
+import { Zap, ChevronDown, ChevronUp, Play, Pause, Square, Check, RotateCcw, Database, GripVertical } from 'lucide-react';
 import { CRMImportModal, type CRMImportEntry } from '@/components/crm-import-modal';
 
 export interface DialerEntry {
@@ -21,6 +21,7 @@ interface PowerDialerPanelProps {
     onStop: () => void;
     onDelayChange: (delay: number) => void;
     onQueueLoad: (entries: DialerEntry[]) => void;
+    onQueueReorder?: (newQueue: DialerEntry[], fromIndex: number, toIndex: number) => void;
     onStartFrom?: (index: number) => void;
     disabled?: boolean;
     canStart?: boolean;
@@ -70,6 +71,7 @@ export function PowerDialerPanel({
     onStop,
     onDelayChange,
     onQueueLoad,
+    onQueueReorder,
     onStartFrom,
     disabled = false,
     canStart = true,
@@ -81,6 +83,11 @@ export function PowerDialerPanel({
     const [inputMode, setInputMode] = useState(queue.length === 0);
     const [stopConfirming, setStopConfirming] = useState(false);
     const [crmImportOpen, setCrmImportOpen] = useState(false);
+    // Drag and drop state
+    const [dragIndex, setDragIndex] = useState<number | null>(null);
+    const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+    // Can reorder when not actively calling (stopped or paused)
+    const canReorder = onQueueReorder && (!active || paused);
     // When queue transitions from empty→non-empty (hydrated from localStorage), exit input mode
     const prevQueueLengthRef = useRef(queue.length);
     useEffect(() => {
@@ -154,6 +161,51 @@ export function PowerDialerPanel({
     const handleConfirmStop = () => {
         onStop();
         setStopConfirming(false);
+    };
+
+    // Drag and drop handlers
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+        if (!canReorder) return;
+        setDragIndex(index);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(index));
+    };
+
+    const handleDragOver = (e: React.DragEvent, index: number) => {
+        if (!canReorder || dragIndex === null) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (index !== dragOverIndex) {
+            setDragOverIndex(index);
+        }
+    };
+
+    const handleDragLeave = () => {
+        setDragOverIndex(null);
+    };
+
+    const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+        e.preventDefault();
+        if (!canReorder || dragIndex === null || dragIndex === dropIndex) {
+            setDragIndex(null);
+            setDragOverIndex(null);
+            return;
+        }
+
+        const newQueue = [...queue];
+        const [removed] = newQueue.splice(dragIndex, 1);
+        // Adjust drop index if dragging from before to after
+        const adjustedDropIndex = dragIndex < dropIndex ? dropIndex - 1 : dropIndex;
+        newQueue.splice(adjustedDropIndex, 0, removed);
+        onQueueReorder!(newQueue, dragIndex, adjustedDropIndex);
+
+        setDragIndex(null);
+        setDragOverIndex(null);
+    };
+
+    const handleDragEnd = () => {
+        setDragIndex(null);
+        setDragOverIndex(null);
     };
 
     const delayColorClass =
@@ -358,16 +410,37 @@ export function PowerDialerPanel({
                                         const isCurrent = i === currentIndex;
                                         const isActivelyCallingThis = isCurrent && active && !paused;
                                         const canStartHere = !isActivelyCallingThis && onStartFrom && (!isCurrent || !active);
+                                        const isDragging = dragIndex === i;
+                                        const isDragOver = dragOverIndex === i && dragIndex !== i;
+                                        const canDragThis = canReorder && !isDone;
                                         return (
                                             <div
                                                 key={i}
-                                                className={`flex items-center gap-2 px-3 py-2 text-xs font-mono ${
+                                                draggable={canDragThis}
+                                                onDragStart={(e) => handleDragStart(e, i)}
+                                                onDragOver={(e) => handleDragOver(e, i)}
+                                                onDragLeave={handleDragLeave}
+                                                onDrop={(e) => handleDrop(e, i)}
+                                                onDragEnd={handleDragEnd}
+                                                className={`flex items-center gap-2 px-3 py-2 text-xs font-mono transition-all ${
+                                                    isDragging ? 'opacity-50 bg-[var(--primary-subtle)]' :
+                                                    isDragOver ? 'bg-[var(--primary-subtle)] border-t-2 border-[var(--primary)]' :
                                                     isDone ? 'opacity-40' :
                                                     isCurrent ? 'bg-[var(--success-subtle)]/20' :
                                                     ''
-                                                }`}
+                                                } ${canDragThis ? 'cursor-grab active:cursor-grabbing' : ''}`}
                                             >
-                                                <span className="w-5 text-right text-[var(--muted)]/60 shrink-0 text-[10px]">{i + 1}.</span>
+                                                {/* Index / Drag handle */}
+                                                <div className="w-5 shrink-0 flex items-center justify-end group">
+                                                    {canDragThis ? (
+                                                        <div className="relative">
+                                                            <span className="text-[var(--muted)]/60 text-[10px] group-hover:opacity-0 transition-opacity">{i + 1}.</span>
+                                                            <GripVertical size={12} className="absolute inset-0 text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity cursor-grab" />
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-[var(--muted)]/60 text-[10px]">{i + 1}.</span>
+                                                    )}
+                                                </div>
                                                 {isCurrent && !isActivelyCallingThis ? (
                                                     canStartHere ? (
                                                         <button

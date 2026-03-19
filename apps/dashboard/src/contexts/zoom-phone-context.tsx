@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
-// import { useLocalAgent } from './local-agent-context';  // See NOTE in ZoomPhoneProvider
+import { useLocalAgent } from './local-agent-context';
 
 // ── Zoom Call Status ────────────────────────────────────────────────────
 export type ZoomCallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
@@ -163,10 +163,13 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     // When the local desktop agent is connected, its WASAPI-based call state
     // is ground truth. If the agent says the call is still connected, we
     // suppress false "ended" events from the Zoom iframe.
-    // NOTE: Local agent integration (useLocalAgent) was previously used here
-    // to suppress false Zoom ended events via WASAPI ground truth. Removed to
-    // avoid wasteful re-renders — re-add if agent-based call state verification
-    // is needed in the future.
+    // Uses refs (not state) to avoid re-render storms — the agent broadcasts
+    // call state every 1s during connected calls.
+    const { isConnected: agentConnected, callState: agentCallState } = useLocalAgent();
+    const agentCallStateRef = useRef(agentCallState);
+    const agentConnectedRef = useRef(agentConnected);
+    useEffect(() => { agentCallStateRef.current = agentCallState; }, [agentCallState]);
+    useEffect(() => { agentConnectedRef.current = agentConnected; }, [agentConnected]);
 
     // Virtual dialer: when __TEST_VIRTUAL_DIALER is set on window, skip Zoom iframe
     // and dispatch synthetic call events. All state-machine logic still runs unchanged.
@@ -473,9 +476,18 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                         }, 500);
                     };
 
-                    // Trust Zoom's ended event immediately — no grace period.
-                    // The agent's WASAPI polling now detects end within ~0.5s,
-                    // so delaying for the agent adds latency without benefit.
+                    // When the local agent is connected and says the call is still
+                    // active (WASAPI ground truth), suppress the Zoom ended event —
+                    // it's likely a false disconnect from iframe instability.
+                    const agentState = agentCallStateRef.current;
+                    if (agentConnectedRef.current && agentState &&
+                        (agentState.state === 'connected' || agentState.state === 'ringing') &&
+                        agentState.confidence !== 'low') {
+                        console.log('[Zoom Phone] Suppressed ended event — agent says call is', agentState.state,
+                            '(confidence:', agentState.confidence + ')');
+                        return;
+                    }
+
                     processCallEnded();
                 } else {
                     console.log('[Zoom Phone] Ignored end event (not in call):', type, '| status:', callStatusRef.current);

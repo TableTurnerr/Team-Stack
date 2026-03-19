@@ -31,8 +31,12 @@ static class Program
         var windowMonitor = new ZoomWindowMonitor();
         var networkMonitor = new NetworkMonitor();
         var fusion = new CallStateFusion(audioMonitor, windowMonitor);
+        var storageManager = new RecordingStorageManager();
+        var recorder = new AudioRecorderService(storageManager, fusion);
+        var uploader = new RecordingUploadService(storageManager);
         var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
-        var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor);
+        wsServer.SetRecordingServices(recorder, uploader, storageManager);
+        var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor, recorder, uploader);
         var autoUpdater = new AutoUpdateService();
 
         // ── Start agent ────────────────────────────────────────────
@@ -41,7 +45,7 @@ static class Program
         Debug.WriteLine("[Main] Agent started, entering message loop...");
 
         // ── Create tray icon (must be on STA/UI thread) ────────────
-        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater);
+        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater, recorder, storageManager);
 
         // ── Run WinForms message loop (blocks until Exit) ──────────
         Application.Run();

@@ -18,23 +18,32 @@ public class TrayIconManager : IDisposable
     private readonly AgentService _agent;
     private readonly CallStateFusion _fusion;
     private readonly ZoomAudioMonitor _audioMonitor;
+    private readonly AudioRecorderService? _recorder;
+    private readonly RecordingStorageManager? _storage;
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _connectionsItem;
     private readonly ToolStripMenuItem _zoomItem;
+    private readonly ToolStripMenuItem _recordingItem;
+    private readonly ToolStripMenuItem _uploadItem;
     private readonly System.Windows.Forms.Timer _updateTimer;
     private readonly AutoUpdateService _autoUpdater;
     private readonly ToolStripMenuItem _updateItem;
 
-    public TrayIconManager(AgentService agent, CallStateFusion fusion, ZoomAudioMonitor audioMonitor, AutoUpdateService autoUpdater)
+    public TrayIconManager(AgentService agent, CallStateFusion fusion, ZoomAudioMonitor audioMonitor, AutoUpdateService autoUpdater,
+        AudioRecorderService? recorder = null, RecordingStorageManager? storage = null)
     {
         _agent = agent;
         _fusion = fusion;
         _audioMonitor = audioMonitor;
         _autoUpdater = autoUpdater;
+        _recorder = recorder;
+        _storage = storage;
 
         _statusItem = new ToolStripMenuItem("Call: Idle") { Enabled = false };
         _connectionsItem = new ToolStripMenuItem("CRM Clients: 0") { Enabled = false };
         _zoomItem = new ToolStripMenuItem("Zoom: Checking...") { Enabled = false };
+        _recordingItem = new ToolStripMenuItem("Recording: Idle") { Enabled = false };
+        _uploadItem = new ToolStripMenuItem("Uploads: None pending") { Enabled = false };
         _updateItem = new ToolStripMenuItem("Check for Updates", null, OnUpdateClick);
 
         var contextMenu = new ContextMenuStrip();
@@ -43,8 +52,17 @@ public class TrayIconManager : IDisposable
         contextMenu.Items.Add(new ToolStripMenuItem(versionLabel) { Enabled = false, Font = new Font(contextMenu.Font, FontStyle.Bold) });
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(_statusItem);
+        contextMenu.Items.Add(_recordingItem);
         contextMenu.Items.Add(_connectionsItem);
         contextMenu.Items.Add(_zoomItem);
+        contextMenu.Items.Add(_uploadItem);
+        if (_storage != null)
+        {
+            contextMenu.Items.Add(new ToolStripMenuItem("Open Recordings Folder", null, (_, _) =>
+            {
+                try { System.Diagnostics.Process.Start("explorer.exe", _storage.RecordingsDirectory); } catch { }
+            }));
+        }
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(_updateItem);
         contextMenu.Items.Add(new ToolStripSeparator());
@@ -134,11 +152,27 @@ public class TrayIconManager : IDisposable
                 _statusItem.Text = $"Call: Connected ({state.DurationSeconds}s)";
             }
 
-            // Update zoom detection indicator using actual Zoom process check.
-            // Previously this checked _agent.IsRunning (always true while the
-            // agent service is active), making it useless as a Zoom indicator.
+            // Update zoom detection indicator
             var zoomRunning = _audioMonitor.IsZoomRunning();
             _zoomItem.Text = zoomRunning ? "Zoom: Detected" : "Zoom: Not found";
+
+            // Update recording status
+            if (_recorder != null)
+            {
+                _recordingItem.Text = _recorder.CurrentState == Services.RecordingState.Recording
+                    ? $"Recording: Active ({_recorder.DurationSeconds}s)"
+                    : "Recording: Idle";
+            }
+
+            // Update upload status
+            if (_storage != null)
+            {
+                var pending = _storage.PendingCount;
+                var failed = _storage.FailedCount;
+                _uploadItem.Text = pending > 0 || failed > 0
+                    ? $"Uploads: {pending} pending, {failed} failed"
+                    : "Uploads: None pending";
+            }
         }
         catch { }
     }

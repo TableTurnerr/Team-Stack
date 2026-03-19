@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { pb } from '@/lib/pocketbase';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -107,6 +108,19 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     console.log('[LocalAgent] Connected to agent');
                     setIsConnected(true);
                     attemptRef.current = 0;
+
+                    // Relay PocketBase auth to agent for background uploads
+                    try {
+                        if (pb.authStore.isValid && pb.authStore.token) {
+                            ws.send(JSON.stringify({
+                                type: 'setUploadConfig',
+                                pocketbaseUrl: process.env.NEXT_PUBLIC_POCKETBASE_URL || '',
+                                authToken: pb.authStore.token,
+                                uploaderId: pb.authStore.model?.id || '',
+                            }));
+                            console.log('[LocalAgent] Sent upload config to agent');
+                        }
+                    } catch { /* ignore auth relay errors */ }
                 };
 
                 ws.onmessage = (event) => {

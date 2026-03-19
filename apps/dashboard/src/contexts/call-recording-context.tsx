@@ -2,7 +2,9 @@
 
 import React, { createContext, useContext, useRef, ReactNode } from 'react';
 import { useAuth } from './auth-context';
-import { useCallRecorder, type RecorderStatus } from '@/hooks/use-call-recorder';
+import { useLocalAgent } from './local-agent-context';
+import { useAgentRecorder, type RecorderStatus } from '@/hooks/use-agent-recorder';
+import { useCallRecorder, type RecorderStatus as BrowserRecorderStatus } from '@/hooks/use-call-recorder';
 
 interface CallRecordingContextType {
     isSessionActive: boolean;
@@ -14,43 +16,42 @@ interface CallRecordingContextType {
     startRecording: () => void;
     stopRecording: () => void;
     setPhoneNumber: (phone: string) => void;
-    /** Discard the current recording without uploading (e.g. for "No Answer" calls) */
     discardRecording: () => void;
-    /** Enter deferred mode — recordings queue in memory instead of auto-uploading */
     enterDeferredMode: () => void;
-    /**
-     * Pop the OLDEST queued recording and upload it for the given call log.
-     * Call once per form submission. Preserves other calls' recordings in the queue.
-     */
     submitOldestDeferredRecording: (callLogId?: string) => Promise<string | null>;
-    /**
-     * Discard the OLDEST queued recording without uploading (e.g. for "No Answer").
-     */
     discardOldestDeferredRecording: () => void;
-    /**
-     * Merge all queued segments and upload as a single file.
-     * @param callLogId Optional call log ID to link the recording to.
-     * @returns The created recording ID, or null if nothing was uploaded.
-     */
     submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
-    /** Discard all queued segments without uploading */
     discardDeferredRecording: () => void;
-    /** Whether deferred mode is currently active */
     isDeferredMode: boolean;
-    /** The queue of completed per-call recordings waiting for submission */
-    deferredSegments: any[]; // Use any[] or import DeferredSegment if possible, but any[] is safer for quick fix
+    deferredSegments: any[];
 }
 
 const CallRecordingContext = createContext<CallRecordingContextType | undefined>(undefined);
 
+/**
+ * Recording provider that uses the local agent when connected,
+ * falling back to browser-based recording when the agent is offline.
+ */
 export function CallRecordingProvider({ children }: { children: ReactNode }) {
     const { user } = useAuth();
+    const { isConnected } = useLocalAgent();
     const phoneNumberRef = useRef<string | null>(null);
 
-    const recorder = useCallRecorder(phoneNumberRef, user?.id);
+    // Agent-based recorder (used when agent is connected)
+    const agentRecorder = useAgentRecorder(phoneNumberRef, user?.id);
+
+    // Browser-based recorder (fallback when agent is offline)
+    const browserRecorder = useCallRecorder(phoneNumberRef, user?.id);
+
+    // Choose which recorder to use based on agent connection
+    const recorder = isConnected ? agentRecorder : browserRecorder;
 
     const setPhoneNumber = (phone: string) => {
         phoneNumberRef.current = phone;
+        // Also update the agent recorder's phone ref if available
+        if ('setPhoneNumber' in recorder) {
+            (recorder as any).setPhoneNumber(phone);
+        }
     };
 
     return (

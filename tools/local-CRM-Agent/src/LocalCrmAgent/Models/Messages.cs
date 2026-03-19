@@ -71,6 +71,18 @@ public class HeartbeatMessage : AgentMessage
     [JsonPropertyName("connectedClients")]
     public int ConnectedClients { get; set; }
 
+    [JsonPropertyName("isRecording")]
+    public bool IsRecording { get; set; }
+
+    [JsonPropertyName("recordingDuration")]
+    public int RecordingDuration { get; set; }
+
+    [JsonPropertyName("uploadsPending")]
+    public int UploadsPending { get; set; }
+
+    [JsonPropertyName("uploadsFailed")]
+    public int UploadsFailed { get; set; }
+
     public HeartbeatMessage() => Type = "heartbeat";
 }
 
@@ -89,4 +101,80 @@ public class ZoomActionMessage : AgentMessage
     public string Message { get; set; } = "";
 
     public ZoomActionMessage() => Type = "zoomAction";
+}
+
+// ─── Recording Messages ──────────────────────────────────────────────────────
+
+public class RecordingStateMessage : AgentMessage
+{
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "idle";
+
+    [JsonPropertyName("fileName")]
+    public string? FileName { get; set; }
+
+    [JsonPropertyName("phoneNumber")]
+    public string? PhoneNumber { get; set; }
+
+    [JsonPropertyName("duration")]
+    public int Duration { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    public RecordingStateMessage() => Type = "recordingState";
+}
+
+public class RecordingCompletedMessage : AgentMessage
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("phoneNumber")]
+    public string PhoneNumber { get; set; } = "";
+
+    [JsonPropertyName("duration")]
+    public int Duration { get; set; }
+
+    [JsonPropertyName("fileSizeBytes")]
+    public long FileSizeBytes { get; set; }
+
+    [JsonPropertyName("startTime")]
+    public string StartTime { get; set; } = "";
+
+    public RecordingCompletedMessage() => Type = "recordingCompleted";
+}
+
+public class RecordingUploadedMessage : AgentMessage
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("pocketbaseRecordingId")]
+    public string? PocketbaseRecordingId { get; set; }
+
+    [JsonPropertyName("callLogId")]
+    public string? CallLogId { get; set; }
+
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    public RecordingUploadedMessage() => Type = "recordingUploaded";
+}
+
+public class UploadQueueStatusMessage : AgentMessage
+{
+    [JsonPropertyName("pendingCount")]
+    public int PendingCount { get; set; }
+
+    [JsonPropertyName("failedCount")]
+    public int FailedCount { get; set; }
+
+    [JsonPropertyName("currentUpload")]
+    public string? CurrentUpload { get; set; }
+
+    public UploadQueueStatusMessage() => Type = "uploadQueueStatus";
 }

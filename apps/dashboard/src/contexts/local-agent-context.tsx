@@ -19,6 +19,28 @@ export interface AgentNetworkQuality {
     isStable: boolean;
 }
 
+export interface AgentRecordingState {
+    state: 'idle' | 'recording' | 'stopping' | 'error';
+    fileName: string | null;
+    phoneNumber: string | null;
+    duration: number;
+    error: string | null;
+}
+
+export interface AgentRecordingCompleted {
+    fileName: string;
+    phoneNumber: string;
+    duration: number;
+    fileSizeBytes: number;
+    startTime: string;
+}
+
+export interface AgentUploadQueueStatus {
+    pendingCount: number;
+    failedCount: number;
+    currentUpload: string | null;
+}
+
 interface LocalAgentContextType {
     /** Whether the WebSocket connection to the local agent is active */
     isConnected: boolean;
@@ -36,6 +58,14 @@ interface LocalAgentContextType {
     launchZoom: () => void;
     /** Whether a Zoom launch request is in progress */
     zoomLaunching: boolean;
+    /** Current recording state from the agent */
+    recordingState: AgentRecordingState | null;
+    /** Latest completed recording metadata */
+    latestRecording: AgentRecordingCompleted | null;
+    /** Upload queue status */
+    uploadQueueStatus: AgentUploadQueueStatus | null;
+    /** Send a command to the agent via WebSocket */
+    sendCommand: (command: Record<string, unknown>) => void;
 }
 
 // ── Context ─────────────────────────────────────────────────────────
@@ -52,6 +82,9 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
     const [zoomDetected, setZoomDetected] = useState(false);
     const [agentUptime, setAgentUptime] = useState(0);
     const [zoomLaunching, setZoomLaunching] = useState(false);
+    const [recordingState, setRecordingState] = useState<AgentRecordingState | null>(null);
+    const [latestRecording, setLatestRecording] = useState<AgentRecordingCompleted | null>(null);
+    const [uploadQueueStatus, setUploadQueueStatus] = useState<AgentUploadQueueStatus | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,6 +139,35 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                 setZoomLaunching(false);
                                 if (msg.zoomRunning) setZoomDetected(true);
                                 break;
+                            case 'recordingState':
+                                setRecordingState({
+                                    state: msg.state ?? 'idle',
+                                    fileName: msg.fileName ?? null,
+                                    phoneNumber: msg.phoneNumber ?? null,
+                                    duration: msg.duration ?? 0,
+                                    error: msg.error ?? null,
+                                });
+                                break;
+                            case 'recordingCompleted':
+                                setLatestRecording({
+                                    fileName: msg.fileName ?? '',
+                                    phoneNumber: msg.phoneNumber ?? '',
+                                    duration: msg.duration ?? 0,
+                                    fileSizeBytes: msg.fileSizeBytes ?? 0,
+                                    startTime: msg.startTime ?? '',
+                                });
+                                setRecordingState({ state: 'idle', fileName: null, phoneNumber: null, duration: 0, error: null });
+                                break;
+                            case 'recordingUploaded':
+                                // UI can react to this if needed
+                                break;
+                            case 'uploadQueueStatus':
+                                setUploadQueueStatus({
+                                    pendingCount: msg.pendingCount ?? 0,
+                                    failedCount: msg.failedCount ?? 0,
+                                    currentUpload: msg.currentUpload ?? null,
+                                });
+                                break;
                         }
                     } catch { /* ignore malformed messages */ }
                 };
@@ -155,6 +217,14 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
         };
     }, []);
 
+    const sendCommand = useCallback((command: Record<string, unknown>) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        try {
+            ws.send(JSON.stringify(command));
+        } catch { /* ignore send errors */ }
+    }, []);
+
     const launchAgent = useCallback(() => {
         try {
             // Use an anchor element to trigger the protocol handler
@@ -183,6 +253,8 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
             isConnected, callState, networkQuality,
             zoomDetected, agentUptime, launchAgent,
             launchZoom, zoomLaunching,
+            recordingState, latestRecording, uploadQueueStatus,
+            sendCommand,
         }}>
             {children}
         </LocalAgentContext.Provider>
@@ -205,5 +277,9 @@ export function useLocalAgent(): LocalAgentContextType {
         launchAgent: () => {},
         launchZoom: () => {},
         zoomLaunching: false,
+        recordingState: null,
+        latestRecording: null,
+        uploadQueueStatus: null,
+        sendCommand: () => {},
     };
 }

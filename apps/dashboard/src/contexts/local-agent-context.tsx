@@ -121,6 +121,13 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                             console.log('[LocalAgent] Sent upload config to agent');
                         }
                     } catch { /* ignore auth relay errors */ }
+
+                    // Enable agent-side auto-record so the agent records
+                    // independently of CRM commands (safety net)
+                    try {
+                        ws.send(JSON.stringify({ type: 'setAutoRecord', enabled: true, onRinging: false }));
+                        ws.send(JSON.stringify({ type: 'getRecordingStatus' }));
+                    } catch { /* ignore */ }
                 };
 
                 ws.onmessage = (event) => {

@@ -16,6 +16,7 @@ import { test, expect } from '@playwright/test';
 import { TEST_PREFIX } from './helpers/test-data';
 import {
     cleanupByPrefix,
+    createRecord,
     fetchRecords,
     deleteRecord,
 } from './helpers/pb-client';
@@ -50,6 +51,17 @@ test.describe('Agent Recording — Call Flow Integration', () => {
     test.setTimeout(60_000);
 
     let createdCallLogIds: string[] = [];
+    let testCompanyId: string;
+    const COMPANY_NAME = `${AGENT_PREFIX}TestCorp`;
+
+    test.beforeAll(async () => {
+        const company = await createRecord<{ id: string }>('companies', {
+            company_name: COMPANY_NAME,
+            source: 'Manual',
+            status: 'Cold No Reply',
+        });
+        testCompanyId = company.id;
+    });
 
     test.beforeEach(async ({ page }) => {
         await setupVirtualDialer(page, { ringDelay: 50, connectDelay: 150 });
@@ -69,9 +81,10 @@ test.describe('Agent Recording — Call Flow Integration', () => {
     });
 
     test.afterAll(async () => {
-        for (const id of createdCallLogIds) await deleteRecord('call_logs', id);
+        for (const id of createdCallLogIds) await deleteRecord('call_logs', id).catch(() => {});
         await cleanupByPrefix('call_logs', 'post_call_notes', AGENT_PREFIX);
         await cleanupByPrefix('cold_calling_sessions', 'session_notes', AGENT_PREFIX);
+        await cleanupByPrefix('companies', 'company_name', AGENT_PREFIX);
     });
 
     // ── 1. Complete call with agent recording ─────────────────────────────
@@ -136,13 +149,23 @@ test.describe('Agent Recording — Call Flow Integration', () => {
 
         await page.waitForTimeout(500);
 
-        // 5. End the call
+        // 5. End the call — agent must report 'ended' BEFORE simulating Zoom end,
+        // otherwise the false-disconnect suppression blocks the ended event.
+        await sendAgentCallState(page, {
+            state: 'ended',
+            phoneNumber: testPhone,
+            direction: 'outbound',
+            duration: 6,
+            confidence: 'high',
+        });
+        await page.waitForTimeout(200);
         await simulateCallEnd(page);
         await waitForCallState(page, 'idle', 5000).catch(() => {});
 
         // 6. Fill and submit the call form
         await waitForCallForm(page, 10_000);
         const submitted = await fillAndSubmitCallForm(page, {
+            companySearch: AGENT_PREFIX,
             outcome: 'Interested',
             notes: `${AGENT_PREFIX}complete call with recording test`,
         });
@@ -210,6 +233,7 @@ test.describe('Agent Recording — Call Flow Integration', () => {
 
             // Submit with No Answer outcome
             const submitted = await fillAndSubmitCallForm(page, {
+                companySearch: COMPANY_NAME,
                 outcome: 'No Answer',
                 notes: `${AGENT_PREFIX}no answer no link test`,
             });
@@ -292,6 +316,7 @@ test.describe('Agent Recording — Call Flow Integration', () => {
         try {
             await waitForCallForm(page, 10_000);
             const submitted = await fillAndSubmitCallForm(page, {
+                companySearch: COMPANY_NAME,
                 outcome: 'Interested',
                 notes: `${AGENT_PREFIX}agent disconnect mid-call test`,
             });

@@ -125,13 +125,19 @@ test.describe('Power Dialer — Agent Recording Tests', () => {
     async function loadPowerDialerQueue(page: import('@playwright/test').Page, numbers: { phone: string; label: string }[]) {
         // Open the power dialer panel
         const powerDialerToggle = page
-            .locator('button')
+            .locator('button, [class*="power"], summary')
             .filter({ hasText: /power dialer|queue/i })
             .first();
 
         if ((await powerDialerToggle.count()) > 0) {
             await powerDialerToggle.click();
             await page.waitForTimeout(500);
+        }
+
+        // Click "OR PASTE MANUALLY" link if the textarea isn't visible
+        const pasteManuallyLink = page.locator('text=paste manually').first();
+        if ((await pasteManuallyLink.count()) > 0 && (await pasteManuallyLink.isVisible())) {
+            // Already visible, textarea should be below
         }
 
         // Paste numbers into the textarea
@@ -141,13 +147,23 @@ test.describe('Power Dialer — Agent Recording Tests', () => {
             await textarea.fill(lines);
             await page.waitForTimeout(300);
 
-            // Click add/load button
-            const addBtn = page
+            // Step 1: Click "Preview Numbers" to parse the input
+            const previewBtn = page
                 .locator('button')
-                .filter({ hasText: /add|load|import|paste/i })
+                .filter({ hasText: /preview/i })
                 .first();
-            if ((await addBtn.count()) > 0) {
-                await addBtn.click();
+            if ((await previewBtn.count()) > 0) {
+                await previewBtn.click();
+                await page.waitForTimeout(500);
+            }
+
+            // Step 2: Click "Load N Numbers" to add them to the queue
+            const loadBtn = page
+                .locator('button')
+                .filter({ hasText: /load.*number/i })
+                .first();
+            if ((await loadBtn.count()) > 0) {
+                await loadBtn.click();
                 await page.waitForTimeout(500);
             }
         }
@@ -245,6 +261,7 @@ test.describe('Power Dialer — Agent Recording Tests', () => {
 
             // Fill and submit the call form
             await fillAndSubmitCallForm(page, {
+                companySearch: AGENT_PREFIX,
                 outcome: 'No Answer',
                 notes: `[${AGENT_PREFIX}] Recording test call ${i + 1}`,
             });

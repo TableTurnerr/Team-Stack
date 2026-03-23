@@ -16,6 +16,9 @@ public class InstallService
     private readonly DownloadService _downloadService;
     private readonly Dictionary<string, IToolTypeHandler> _handlers;
 
+    /// <summary>Local cache of downloaded release zips: {BaseDir}/cache/{tagPrefix}/v{version}.zip</summary>
+    public static readonly string CacheDir = Path.Combine(InstalledToolsRegistry.BaseDir, "cache");
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -35,33 +38,65 @@ public class InstallService
         };
     }
 
-    public async Task<bool> InstallOrUpdate(ToolInfo tool, IProgress<InstallProgress>? status = null, CancellationToken ct = default)
+    public async Task<bool> InstallOrUpdate(
+        ToolInfo tool,
+        IProgress<InstallProgress>? status = null,
+        string? overrideDownloadUrl = null,
+        Version? overrideVersion = null,
+        CancellationToken ct = default)
     {
         string? zipPath = null;
         string? stagingDir = null;
+        bool zipFromCache = false;
+
+        var downloadUrl = overrideDownloadUrl ?? tool.LatestDownloadUrl;
+        var targetVersion = overrideVersion ?? tool.LatestVersion;
 
         try
         {
-            // 1. Download with byte-level progress
-            status?.Report(new InstallProgress("Downloading...", 0));
-
-            var downloadProgress = new Progress<(long downloaded, long? total)>(p =>
+            // Check local cache first
+            var cachedZip = GetCachedZipPath(tool.TagPrefix, targetVersion);
+            if (File.Exists(cachedZip))
             {
-                if (p.total is > 0)
-                {
-                    var pct = (int)(p.downloaded * 100 / p.total.Value);
-                    var mb = p.downloaded / (1024.0 * 1024.0);
-                    var totalMb = p.total.Value / (1024.0 * 1024.0);
-                    status?.Report(new InstallProgress($"Downloading... {mb:F1} / {totalMb:F1} MB", pct));
-                }
-                else
-                {
-                    var mb = p.downloaded / (1024.0 * 1024.0);
-                    status?.Report(new InstallProgress($"Downloading... {mb:F1} MB", -1));
-                }
-            });
+                status?.Report(new InstallProgress("Using cached download...", 50));
+                zipPath = cachedZip;
+                zipFromCache = true;
+            }
+            else
+            {
+                // 1. Download with byte-level progress
+                status?.Report(new InstallProgress("Downloading...", 0));
 
-            zipPath = await _downloadService.DownloadAsync(tool.LatestDownloadUrl, downloadProgress, ct);
+                var downloadProgress = new Progress<(long downloaded, long? total)>(p =>
+                {
+                    if (p.total is > 0)
+                    {
+                        var pct = (int)(p.downloaded * 100 / p.total.Value);
+                        var mb = p.downloaded / (1024.0 * 1024.0);
+                        var totalMb = p.total.Value / (1024.0 * 1024.0);
+                        status?.Report(new InstallProgress($"Downloading... {mb:F1} / {totalMb:F1} MB", pct));
+                    }
+                    else
+                    {
+                        var mb = p.downloaded / (1024.0 * 1024.0);
+                        status?.Report(new InstallProgress($"Downloading... {mb:F1} MB", -1));
+                    }
+                });
+
+                zipPath = await _downloadService.DownloadAsync(downloadUrl, downloadProgress, ct);
+
+                // Cache the download for future use
+                try
+                {
+                    var cacheDir = Path.GetDirectoryName(cachedZip)!;
+                    Directory.CreateDirectory(cacheDir);
+                    File.Copy(zipPath, cachedZip, true);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Install] Cache copy failed (non-fatal): {ex.Message}");
+                }
+            }
 
             // 2. Extract to staging
             status?.Report(new InstallProgress("Extracting..."));
@@ -89,7 +124,7 @@ public class InstallService
                 Name = tool.DisplayName,
                 Description = tool.Description,
                 Type = tool.ToolType != "unknown" ? tool.ToolType : "windows-app",
-                Version = tool.LatestVersion.ToString(),
+                Version = targetVersion.ToString(),
             };
 
             // Update ToolInfo from manifest
@@ -121,7 +156,7 @@ public class InstallService
                 Id = manifest.Id,
                 Name = manifest.Name,
                 Type = manifest.Type,
-                Version = tool.LatestVersion.ToString(),
+                Version = targetVersion.ToString(),
                 InstallPath = installPath,
                 InstalledAt = _registry.GetByTagPrefix(tool.TagPrefix)?.InstalledAt ?? DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
@@ -129,7 +164,7 @@ public class InstallService
             });
 
             status?.Report(new InstallProgress("Done", 100));
-            Debug.WriteLine($"[Install] {manifest.Name} v{tool.LatestVersion} installed to {installPath}");
+            Debug.WriteLine($"[Install] {manifest.Name} v{targetVersion} installed to {installPath}");
             return true;
         }
         catch (Exception ex)
@@ -140,10 +175,10 @@ public class InstallService
         }
         finally
         {
-            // Always clean up temp files
+            // Always clean up temp files (but not cached zips)
             if (stagingDir != null)
                 try { Directory.Delete(stagingDir, true); } catch { }
-            if (zipPath != null)
+            if (zipPath != null && !zipFromCache)
                 try { File.Delete(zipPath); } catch { }
         }
     }
@@ -172,6 +207,56 @@ public class InstallService
             status?.Report(new InstallProgress($"Failed: {ex.Message}"));
             return false;
         }
+    }
+
+    // ── Local version cache management ──────────────────────
+
+    /// <summary>Get the cache path for a specific tool version zip.</summary>
+    public static string GetCachedZipPath(string tagPrefix, Version version)
+        => Path.Combine(CacheDir, tagPrefix, $"v{version}.zip");
+
+    /// <summary>List all locally cached versions for a tool.</summary>
+    public static List<(Version version, string path, long sizeBytes)> GetCachedVersions(string tagPrefix)
+    {
+        var dir = Path.Combine(CacheDir, tagPrefix);
+        if (!Directory.Exists(dir)) return [];
+
+        var result = new List<(Version, string, long)>();
+        foreach (var file in Directory.GetFiles(dir, "v*.zip"))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (name.StartsWith('v') && Version.TryParse(name[1..], out var ver))
+            {
+                var info = new FileInfo(file);
+                result.Add((ver, file, info.Length));
+            }
+        }
+        return result.OrderByDescending(x => x.Item1).ToList();
+    }
+
+    /// <summary>Delete a specific cached version zip.</summary>
+    public static bool DeleteCachedVersion(string tagPrefix, Version version)
+    {
+        var path = GetCachedZipPath(tagPrefix, version);
+        if (!File.Exists(path)) return false;
+        File.Delete(path);
+        return true;
+    }
+
+    /// <summary>Delete all cached versions for a tool.</summary>
+    public static void ClearCache(string tagPrefix)
+    {
+        var dir = Path.Combine(CacheDir, tagPrefix);
+        if (Directory.Exists(dir))
+            Directory.Delete(dir, true);
+    }
+
+    /// <summary>Get total cache size across all tools.</summary>
+    public static long GetTotalCacheSize()
+    {
+        if (!Directory.Exists(CacheDir)) return 0;
+        return Directory.GetFiles(CacheDir, "*.zip", SearchOption.AllDirectories)
+            .Sum(f => new FileInfo(f).Length);
     }
 
     private static void CopyDirectory(string source, string dest)

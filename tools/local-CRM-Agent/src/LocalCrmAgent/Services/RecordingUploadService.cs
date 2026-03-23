@@ -161,13 +161,15 @@ public class RecordingUploadService : IDisposable
             form.Add(new StringContent(entry.StartTime.ToString("yyyy-MM-dd HH:mm:ss.fffZ")), "recording_date");
             form.Add(new StringContent($"Recorded by CRM Agent on {entry.StartTime:yyyy-MM-dd} at {entry.StartTime:HH:mm}"), "note");
 
-            if (entry.CallLogId != null) form.Add(new StringContent(entry.CallLogId), "call_log");
+            // Use manifest callLogId, or extract from filename as fallback
+            var callLogId = entry.CallLogId ?? RecordingStorageManager.ExtractCallLogId(entry.FileName);
+            if (callLogId != null) form.Add(new StringContent(callLogId), "call_log");
             if (phoneNumberRecordId != null) form.Add(new StringContent(phoneNumberRecordId), "phone_number_record");
             if (companyId != null) form.Add(new StringContent(companyId), "company");
 
             var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{pocketbaseUrl}/api/collections/recordings/records");
-            request.Headers.Authorization = new AuthenticationHeaderValue(authToken);
+            request.Headers.TryAddWithoutValidation("Authorization", authToken);
             request.Content = form;
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -202,12 +204,12 @@ public class RecordingUploadService : IDisposable
             Debug.WriteLine($"[Upload] Uploaded: {entry.FileName} → {recordingId}");
 
             // Update call_log.has_recording if linked
-            if (entry.CallLogId != null)
+            if (callLogId != null)
             {
-                await UpdateCallLogHasRecording(pocketbaseUrl, authToken, entry.CallLogId, ct);
+                await UpdateCallLogHasRecording(pocketbaseUrl, authToken, callLogId, ct);
             }
 
-            UploadCompleted?.Invoke(entry.FileName, recordingId, entry.CallLogId, true, null);
+            UploadCompleted?.Invoke(entry.FileName, recordingId, callLogId, true, null);
         }
         catch (Exception ex)
         {
@@ -236,7 +238,7 @@ public class RecordingUploadService : IDisposable
 
             var url = $"{pocketbaseUrl}/api/collections/phone_numbers/records?filter=phone_number~\"{cleanNumber}\"&expand=company&perPage=1";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue(authToken);
+            request.Headers.TryAddWithoutValidation("Authorization", authToken);
 
             var response = await _httpClient.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode) return (null, null);
@@ -270,7 +272,7 @@ public class RecordingUploadService : IDisposable
         {
             var url = $"{pocketbaseUrl}/api/collections/call_logs/records/{callLogId}";
             var request = new HttpRequestMessage(HttpMethod.Patch, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue(authToken);
+            request.Headers.TryAddWithoutValidation("Authorization", authToken);
             request.Content = new StringContent(
                 JsonSerializer.Serialize(new { has_recording = true }),
                 System.Text.Encoding.UTF8,
@@ -287,11 +289,17 @@ public class RecordingUploadService : IDisposable
 
     /// <summary>
     /// Link a recording to a call log (called from WebSocket command).
+    /// Renames the file to include the call log ID so manual uploads auto-link.
     /// </summary>
     public void LinkRecording(string fileName, string callLogId)
     {
-        _storage.UpdateEntry(fileName, e => e.CallLogId = callLogId);
-        Debug.WriteLine($"[Upload] Linked {fileName} → call_log {callLogId}");
+        var newName = _storage.RenameWithCallLogId(fileName, callLogId);
+        if (newName == null)
+        {
+            // Rename failed — still update the manifest entry
+            _storage.UpdateEntry(fileName, e => e.CallLogId = callLogId);
+        }
+        Debug.WriteLine($"[Upload] Linked {fileName} → call_log {callLogId} (file: {newName ?? fileName})");
     }
 
     /// <summary>

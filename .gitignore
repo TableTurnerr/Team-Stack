@@ -55,6 +55,7 @@ coverage/
 
 # Others
 dist-dev/
+.dev-build-counter
 *.tsbuildinfo
 prompt.txt
 # Call Recorder V2 (separate project)

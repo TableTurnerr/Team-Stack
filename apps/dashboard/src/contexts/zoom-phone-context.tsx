@@ -171,6 +171,62 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     useEffect(() => { agentCallStateRef.current = agentCallState; }, [agentCallState]);
     useEffect(() => { agentConnectedRef.current = agentConnected; }, [agentConnected]);
 
+    // ── Agent-driven call end ────────────────────────────────────────
+    // When the suppression logic (below) blocks a Zoom "ended" event because
+    // the agent WASAPI still reported the call as active, we need a second
+    // path: once the agent itself transitions to ended/idle, honour that and
+    // end the call in the CRM.  Without this, the CRM stays stuck on
+    // "connected" after the real call drops.
+    useEffect(() => {
+        if (!agentConnected || !agentCallState) return;
+        if (agentCallState.state !== 'ended' && agentCallState.state !== 'idle') return;
+        if (callStatusRef.current !== 'ringing' && callStatusRef.current !== 'connected') return;
+
+        console.log('[Zoom Phone] Agent reports call', agentCallState.state, '— ending call in CRM');
+        callStatusRef.current = 'ended';
+        setCallStatus('ended');
+        setIsDialing(false);
+        pendingCallRef.current = null;
+        outboundIntentRef.current = false;
+        if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+        if (endedIdleTimerRef.current) clearTimeout(endedIdleTimerRef.current);
+        endedIdleTimerRef.current = setTimeout(() => {
+            endedIdleTimerRef.current = null;
+            callStatusRef.current = 'idle';
+            setCallStatus('idle');
+            setCallDirection(null);
+            setIncomingCallerNumber(null);
+        }, 500);
+    }, [agentConnected, agentCallState]);
+
+    // ── Agent disconnect fallback ────────────────────────────────────
+    // If the agent disconnects while the CRM is still in a call (i.e. an
+    // earlier Zoom "ended" event was suppressed), end the call now.
+    const prevAgentConnectedRef = useRef(agentConnected);
+    useEffect(() => {
+        const wasConnected = prevAgentConnectedRef.current;
+        prevAgentConnectedRef.current = agentConnected;
+
+        if (wasConnected && !agentConnected &&
+            (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected')) {
+            console.log('[Zoom Phone] Agent disconnected while in call — ending call in CRM');
+            callStatusRef.current = 'ended';
+            setCallStatus('ended');
+            setIsDialing(false);
+            pendingCallRef.current = null;
+            outboundIntentRef.current = false;
+            if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+            if (endedIdleTimerRef.current) clearTimeout(endedIdleTimerRef.current);
+            endedIdleTimerRef.current = setTimeout(() => {
+                endedIdleTimerRef.current = null;
+                callStatusRef.current = 'idle';
+                setCallStatus('idle');
+                setCallDirection(null);
+                setIncomingCallerNumber(null);
+            }, 500);
+        }
+    }, [agentConnected]);
+
     // Virtual dialer: when __TEST_VIRTUAL_DIALER is set on window, skip Zoom iframe
     // and dispatch synthetic call events. All state-machine logic still runs unchanged.
     const isVirtualDialer = typeof window !== 'undefined' && !!(window as any).__TEST_VIRTUAL_DIALER;

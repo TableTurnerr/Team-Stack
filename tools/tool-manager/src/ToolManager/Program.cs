@@ -1,6 +1,6 @@
 using System.Diagnostics;
+using System.Drawing;
 using System.Runtime.InteropServices;
-using Microsoft.Win32;
 using ToolManager.Models;
 using ToolManager.Services;
 using ToolManager.UI;
@@ -21,7 +21,16 @@ static class Program
     [DllImport("kernel32.dll")]
     private static extern bool SetConsoleCP(uint codepage);
 
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     private const uint CP_UTF8 = 65001;
+    private const uint WM_SETICON = 0x0080;
+    private static readonly IntPtr ICON_SMALL = IntPtr.Zero;
+    private static readonly IntPtr ICON_BIG = new(1);
 
     [STAThread]
     static async Task Main(string[] args)
@@ -43,14 +52,15 @@ static class Program
         }
         using var _ = mutex;
 
-        EnsureAutoStart();
-
         // Create services
+        var settingsService = new SettingsService();
+        settingsService.ApplyAutoStart(settingsService.Settings.AutoStartEnabled);
+
         var registry = new InstalledToolsRegistry();
         var github = new GitHubReleaseService(registry);
         var downloadService = new DownloadService();
         var installer = new InstallService(registry, downloadService);
-        var scheduler = new UpdateScheduler(github, installer, registry);
+        var scheduler = new UpdateScheduler(github, installer, registry, settingsService);
         var selfUpdater = new SelfUpdateService(github, downloadService);
 
         // ── Interactive CLI mode ──────────────────────────────
@@ -66,8 +76,9 @@ static class Program
             Console.SetIn(new StreamReader(Console.OpenStandardInput()));
             Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
             Console.Title = "TableTurnerr Tool Manager";
+            SetConsoleWindowIcon();
 
-            var cli = new CliApp(github, installer, registry, scheduler, selfUpdater);
+            var cli = new CliApp(github, installer, registry, scheduler, selfUpdater, settingsService);
             await cli.RunAsync();
 
             FreeConsole();
@@ -110,6 +121,30 @@ static class Program
     }
 
     /// <summary>
+    /// Set the console window icon to the embedded TableTurnerr logo.
+    /// </summary>
+    private static void SetConsoleWindowIcon()
+    {
+        try
+        {
+            var hwnd = GetConsoleWindow();
+            if (hwnd == IntPtr.Zero) return;
+
+            var stream = typeof(Program).Assembly
+                .GetManifestResourceStream("ToolManager.app.ico");
+            if (stream == null) return;
+
+            var icon = new Icon(stream);
+            SendMessage(hwnd, WM_SETICON, ICON_SMALL, icon.Handle);
+            SendMessage(hwnd, WM_SETICON, ICON_BIG, icon.Handle);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Main] Failed to set console icon: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Launch an interactive CLI session in a new process with its own console.
     /// Uses cmd.exe to avoid SmartScreen/UAC prompts on unsigned executables.
     /// </summary>
@@ -131,30 +166,6 @@ static class Program
         catch (Exception ex)
         {
             Debug.WriteLine($"[Main] Failed to launch interactive CLI: {ex.Message}");
-        }
-    }
-
-    private static void EnsureAutoStart()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Run", true);
-
-            var exePath = Environment.ProcessPath;
-            if (key == null || exePath == null) return;
-
-            var desired = $"\"{exePath}\" --background";
-            var existing = key.GetValue("ToolManager") as string;
-
-            if (string.Equals(existing, desired, StringComparison.OrdinalIgnoreCase)) return;
-
-            key.SetValue("ToolManager", desired);
-            Debug.WriteLine("[Main] Registered auto-start");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Main] Auto-start registration failed: {ex.Message}");
         }
     }
 }

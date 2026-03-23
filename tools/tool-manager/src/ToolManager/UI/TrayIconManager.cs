@@ -30,14 +30,14 @@ public class TrayIconManager : IDisposable
             ContextMenuStrip = BuildContextMenu(),
         };
 
-        // Load icon from embedded resource
+        // Load tray icon from embedded PNG (transparent background, looks best in tray)
         try
         {
-            using var stream = typeof(TrayIconManager).Assembly
+            using var pngStream = typeof(TrayIconManager).Assembly
                 .GetManifestResourceStream("ToolManager.icon.png");
-            if (stream != null)
+            if (pngStream != null)
             {
-                using var bmp = new Bitmap(stream);
+                using var bmp = new Bitmap(pngStream);
                 var hIcon = bmp.GetHicon();
                 _trayIcon.Icon = Icon.FromHandle(hIcon);
             }

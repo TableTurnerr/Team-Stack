@@ -19,6 +19,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +28,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="icon.png" LogicalName="ToolManager.icon.png" />
+    <EmbeddedResource Include="app.ico" LogicalName="ToolManager.app.ico" />
   </ItemGroup>
 
 </Project>

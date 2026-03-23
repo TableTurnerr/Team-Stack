@@ -387,12 +387,16 @@ export async function fillAndSubmitCallForm(
             // The dropdown renders as buttons inside a positioned div (no ARIA roles).
             const suggestion = page
                 .locator(
-                    '[role="option"], [role="listbox"] > *, .absolute.z-20 button',
+                    '[role="option"], [role="listbox"] > *, .absolute.z-20 button, [class*="absolute"] button, [class*="dropdown"] button',
                 )
                 .first();
             if ((await suggestion.count()) > 0 && (await suggestion.isVisible())) {
                 await suggestion.click();
                 await page.waitForTimeout(300);
+            } else {
+                // Dismiss any open dropdown before proceeding
+                await companyInput.press('Escape');
+                await page.waitForTimeout(200);
             }
         }
     }

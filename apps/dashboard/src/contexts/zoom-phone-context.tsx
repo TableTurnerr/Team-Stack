@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
-// import { useLocalAgent } from './local-agent-context';  // See NOTE in ZoomPhoneProvider
+import { useLocalAgent } from './local-agent-context';
 
 // ── Zoom Call Status ────────────────────────────────────────────────────
 export type ZoomCallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
@@ -163,10 +163,69 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     // When the local desktop agent is connected, its WASAPI-based call state
     // is ground truth. If the agent says the call is still connected, we
     // suppress false "ended" events from the Zoom iframe.
-    // NOTE: Local agent integration (useLocalAgent) was previously used here
-    // to suppress false Zoom ended events via WASAPI ground truth. Removed to
-    // avoid wasteful re-renders — re-add if agent-based call state verification
-    // is needed in the future.
+    // Uses refs (not state) to avoid re-render storms — the agent broadcasts
+    // call state every 1s during connected calls.
+    const { isConnected: agentConnected, callState: agentCallState } = useLocalAgent();
+    const agentCallStateRef = useRef(agentCallState);
+    const agentConnectedRef = useRef(agentConnected);
+    useEffect(() => { agentCallStateRef.current = agentCallState; }, [agentCallState]);
+    useEffect(() => { agentConnectedRef.current = agentConnected; }, [agentConnected]);
+
+    // ── Agent-driven call end ────────────────────────────────────────
+    // When the suppression logic (below) blocks a Zoom "ended" event because
+    // the agent WASAPI still reported the call as active, we need a second
+    // path: once the agent itself transitions to ended/idle, honour that and
+    // end the call in the CRM.  Without this, the CRM stays stuck on
+    // "connected" after the real call drops.
+    useEffect(() => {
+        if (!agentConnected || !agentCallState) return;
+        if (agentCallState.state !== 'ended' && agentCallState.state !== 'idle') return;
+        if (callStatusRef.current !== 'ringing' && callStatusRef.current !== 'connected') return;
+
+        console.log('[Zoom Phone] Agent reports call', agentCallState.state, '— ending call in CRM');
+        callStatusRef.current = 'ended';
+        setCallStatus('ended');
+        setIsDialing(false);
+        pendingCallRef.current = null;
+        outboundIntentRef.current = false;
+        if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+        if (endedIdleTimerRef.current) clearTimeout(endedIdleTimerRef.current);
+        endedIdleTimerRef.current = setTimeout(() => {
+            endedIdleTimerRef.current = null;
+            callStatusRef.current = 'idle';
+            setCallStatus('idle');
+            setCallDirection(null);
+            setIncomingCallerNumber(null);
+        }, 500);
+    }, [agentConnected, agentCallState]);
+
+    // ── Agent disconnect fallback ────────────────────────────────────
+    // If the agent disconnects while the CRM is still in a call (i.e. an
+    // earlier Zoom "ended" event was suppressed), end the call now.
+    const prevAgentConnectedRef = useRef(agentConnected);
+    useEffect(() => {
+        const wasConnected = prevAgentConnectedRef.current;
+        prevAgentConnectedRef.current = agentConnected;
+
+        if (wasConnected && !agentConnected &&
+            (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected')) {
+            console.log('[Zoom Phone] Agent disconnected while in call — ending call in CRM');
+            callStatusRef.current = 'ended';
+            setCallStatus('ended');
+            setIsDialing(false);
+            pendingCallRef.current = null;
+            outboundIntentRef.current = false;
+            if (outboundIntentTimerRef.current) { clearTimeout(outboundIntentTimerRef.current); outboundIntentTimerRef.current = null; }
+            if (endedIdleTimerRef.current) clearTimeout(endedIdleTimerRef.current);
+            endedIdleTimerRef.current = setTimeout(() => {
+                endedIdleTimerRef.current = null;
+                callStatusRef.current = 'idle';
+                setCallStatus('idle');
+                setCallDirection(null);
+                setIncomingCallerNumber(null);
+            }, 500);
+        }
+    }, [agentConnected]);
 
     // Virtual dialer: when __TEST_VIRTUAL_DIALER is set on window, skip Zoom iframe
     // and dispatch synthetic call events. All state-machine logic still runs unchanged.
@@ -473,9 +532,18 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                         }, 500);
                     };
 
-                    // Trust Zoom's ended event immediately — no grace period.
-                    // The agent's WASAPI polling now detects end within ~0.5s,
-                    // so delaying for the agent adds latency without benefit.
+                    // When the local agent is connected and says the call is still
+                    // active (WASAPI ground truth), suppress the Zoom ended event —
+                    // it's likely a false disconnect from iframe instability.
+                    const agentState = agentCallStateRef.current;
+                    if (agentConnectedRef.current && agentState &&
+                        (agentState.state === 'connected' || agentState.state === 'ringing') &&
+                        agentState.confidence !== 'low') {
+                        console.log('[Zoom Phone] Suppressed ended event — agent says call is', agentState.state,
+                            '(confidence:', agentState.confidence + ')');
+                        return;
+                    }
+
                     processCallEnded();
                 } else {
                     console.log('[Zoom Phone] Ignored end event (not in call):', type, '| status:', callStatusRef.current);
@@ -707,8 +775,22 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
         if (!cleaned || digits.length < 7) return;
 
-        // Prevent dialing if already in a call
-        if (callStatusRef.current !== 'idle') {
+        // Prevent dialing if already in a call.
+        // Allow dialing when status is 'ended' — the previous call is over,
+        // we just haven't transitioned to 'idle' yet (500ms delay timer).
+        // This fixes the power dialer race condition where auto-dial fires
+        // before the idle timer completes.
+        if (callStatusRef.current === 'ended') {
+            // Cancel the pending idle timer and force immediate transition
+            if (endedIdleTimerRef.current) {
+                clearTimeout(endedIdleTimerRef.current);
+                endedIdleTimerRef.current = null;
+            }
+            callStatusRef.current = 'idle';
+            setCallStatus('idle');
+            setCallDirection(null);
+            setIncomingCallerNumber(null);
+        } else if (callStatusRef.current !== 'idle') {
             console.warn('[Zoom Phone] Call already in progress, ignoring dial request');
             return;
         }

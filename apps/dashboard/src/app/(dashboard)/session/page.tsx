@@ -86,7 +86,7 @@ export default function SessionPage() {
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
-    const { isConnected: agentConnected, launchAgent, zoomDetected: agentZoomDetected, launchZoom, zoomLaunching } = useLocalAgent();
+    const { isConnected: agentConnected, launchAgent, zoomDetected: agentZoomDetected, launchZoom, zoomLaunching, recordingState: agentRecordingState, uploadQueueStatus: agentUploadQueue } = useLocalAgent();
 
     // Loading combined
     const loading = sessionLoading;
@@ -95,9 +95,14 @@ export default function SessionPage() {
     const [starting, setStarting] = useState(false);
     const [ending, setEnding] = useState(false);
     const [pausing, setPausing] = useState(false);
+    // True after session ends while agent still has pending uploads
+    const [uploadCooldown, setUploadCooldown] = useState(false);
     const [collectionMissing, setCollectionMissing] = useState(false);
     // Virtual dialer test mode: auto-confirm Zoom detection
     const isVirtualDialerMode = typeof window !== 'undefined' && !!(window as any).__TEST_VIRTUAL_DIALER;
+    // In virtual dialer mode (tests), skip agent/Zoom checks — telephony is mocked
+    const effectiveAgentConnected = agentConnected || isVirtualDialerMode;
+    const effectiveZoomDetected = agentZoomDetected || isVirtualDialerMode;
     const [zoomAppConfirmed, setZoomAppConfirmed] = useState(isVirtualDialerMode);
     const [zoomDetecting, setZoomDetecting] = useState(false);
     const [zoomDetected, setZoomDetected] = useState<boolean | null>(isVirtualDialerMode ? true : null);
@@ -949,19 +954,23 @@ export default function SessionPage() {
         }
     }, [isSessionActive, callStatus, recorderStatus, startRecording, enterDeferredMode]);
 
-    // Warn user before closing tab if session is active
+    // Warn user before closing tab if session is active OR uploads are pending
     useEffect(() => {
-        if (!session || session.status !== 'active') return;
+        const sessionActive = session && session.status === 'active';
+        if (!sessionActive && !uploadCooldown) return;
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             e.preventDefault();
-            e.returnValue = 'Your active session will end if you close this tab. Are you sure you want to leave?';
+            const msg = uploadCooldown
+                ? 'Recordings are still uploading. Closing now may lose recordings. Are you sure?'
+                : 'Your active session will end if you close this tab. Are you sure you want to leave?';
+            e.returnValue = msg;
             return e.returnValue;
         };
 
         window.addEventListener('beforeunload', handleBeforeUnload);
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, [session]);
+    }, [session, uploadCooldown]);
 
     // ---------------------------------------------------------------------------
     // Auto-end session after 15 minutes offline (network down while tab is open)
@@ -1098,6 +1107,13 @@ export default function SessionPage() {
                 status: 'completed',
                 on_call: false,
             });
+
+            // Check if agent has pending uploads — show cooldown if so
+            const hasPending = agentConnected && agentUploadQueue && agentUploadQueue.pendingCount > 0;
+            if (hasPending) {
+                setUploadCooldown(true);
+            }
+
             setSession(null);
             setLastCallLog(null);
             setLastCallCompanyName('');
@@ -1133,11 +1149,20 @@ export default function SessionPage() {
         } finally {
             setEnding(false);
         }
-    }, [session, elapsedSec, setSession, setContextPhoneNumber, endAudioSession]);
+    }, [session, elapsedSec, setSession, setContextPhoneNumber, endAudioSession, agentConnected, agentUploadQueue]);
 
     // Keep endSessionRef in sync so the offline watchdog can always call the
     // latest version without a stale closure (declared here, after endSession).
     useEffect(() => { endSessionRef.current = endSession; }, [endSession]);
+
+    // Clear upload cooldown once all pending uploads finish
+    useEffect(() => {
+        if (!uploadCooldown) return;
+        const noPending = !agentUploadQueue || agentUploadQueue.pendingCount === 0;
+        if (noPending) {
+            setUploadCooldown(false);
+        }
+    }, [uploadCooldown, agentUploadQueue]);
 
     // ---------------------------------------------------------------------------
     // Fetch last completed session (for resume feature)
@@ -1354,14 +1379,14 @@ export default function SessionPage() {
         }
 
         // Prevent dialing when agent is not connected
-        if (!agentConnected) {
+        if (!effectiveAgentConnected) {
             console.log('Agent not connected, blocking dial request');
             addToast('error', 'CRM Agent is not running — launch the agent to make calls');
             return;
         }
 
         // Prevent dialing when Zoom is not detected (agent reports no Zoom process)
-        if (!agentZoomDetected) {
+        if (!effectiveZoomDetected) {
             console.log('Zoom not detected, blocking dial request');
             addToast('error', 'Zoom is not running — open Zoom to make calls');
             return;
@@ -1372,13 +1397,16 @@ export default function SessionPage() {
         // Pass company suggestion from power dialer to the form
         setSuggestedCompanyName(companyName || '');
 
-        // NOTE: Do NOT start recording here — recording will begin automatically
-        // when Zoom confirms the call is ringing/connected (via callStatus effects).
-        // Starting recording before Zoom confirms causes false recording states
-        // when the iframe fails to process the dial command.
+        // Start recording immediately when dialing — captures ringing audio.
+        // The ringing/connected effects also call startRecording(), but the
+        // recorder guards against double-start (returns early if already recording).
+        if (isSessionActive) {
+            enterDeferredMode();
+            startRecording();
+        }
 
         dialNumber(phoneNumber);
-    }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at, agentConnected, agentZoomDetected, addToast]);
+    }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at, effectiveAgentConnected, effectiveZoomDetected, addToast, isSessionActive, enterDeferredMode, startRecording]);
 
     // Ref so power dialer timers always call the latest handleDial (avoids stale closures)
     const handleDialRef = useRef(handleDial);
@@ -1568,6 +1596,13 @@ export default function SessionPage() {
                         if (recordingId) {
                             pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
                                 has_recording: true,
+                            }).then(() => {
+                                // Update last call preview so the recording icon appears
+                                setLastCallLog(prev =>
+                                    prev?.id === callLog.id
+                                        ? { ...prev, has_recording: true }
+                                        : prev
+                                );
                             }).catch(err => console.error('Failed to mark has_recording:', err));
                         }
                     }).catch(err => console.error('Failed to submit recording:', err));
@@ -1765,8 +1800,22 @@ export default function SessionPage() {
     const handlePowerDialerResume = useCallback(() => {
         setPowerDialerPaused(false);
         powerDialerAutoPausedRef.current = false; // Manual resume clears auto-pause flag
-        // Next dial fires naturally on the next form-submit (positive delay) or call-end (negative delay)
-    }, []);
+
+        // Immediately dial the current entry unless the call form is unsubmitted
+        // or a call is already in progress
+        if (
+            !hasUnsavedCall &&
+            callStatus !== 'ringing' &&
+            callStatus !== 'connected' &&
+            powerDialerIndexRef.current < powerDialerQueueRef.current.length
+        ) {
+            const entry = powerDialerQueueRef.current[powerDialerIndexRef.current];
+            const delayMs = Math.max(0, powerDialerDelayRef.current) * 1000;
+            powerDialerTimerRef.current = setTimeout(() => {
+                handleDialRef.current(entry.number, entry.company);
+            }, delayMs);
+        }
+    }, [hasUnsavedCall, callStatus]);
 
     const handlePowerDialerStop = useCallback(() => {
         setPowerDialerActive(false);
@@ -1979,7 +2028,7 @@ export default function SessionPage() {
                                 )}
                                 <button
                                     onClick={startAudioSession}
-                                    disabled={!zoomAppConfirmed || !agentConnected}
+                                    disabled={!zoomAppConfirmed || !effectiveAgentConnected}
                                     className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                                 >
                                     Connect Audio & Start
@@ -2094,7 +2143,7 @@ export default function SessionPage() {
                                 </button>
                                 <button
                                     onClick={handleConnectAudioAndStart}
-                                    disabled={!zoomAppConfirmed || !agentConnected || starting}
+                                    disabled={!zoomAppConfirmed || !effectiveAgentConnected || starting}
                                     className="flex-[2] py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                                 >
                                     {starting ? 'Connecting...' : 'Connect Audio & Start'}
@@ -2142,7 +2191,27 @@ export default function SessionPage() {
                 );
             }
 
-            return <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} onStartTestSession={startTestSession} lastCompletedSession={lastCompletedSession} onResumeSession={resumeLastSession} resuming={resuming} />;
+            return (
+                <div className="space-y-4">
+                    {/* Upload cooldown banner — shown after session ends while recordings are still uploading */}
+                    {uploadCooldown && (
+                        <div className="bg-[var(--card-bg)] border border-blue-500/30 rounded-xl p-4 flex items-center gap-3">
+                            <Loader2 size={18} className="animate-spin text-blue-400 shrink-0" />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium">Uploading recordings...</p>
+                                <p className="text-xs text-[var(--muted)]">
+                                    {agentUploadQueue?.pendingCount ?? 0} recording{(agentUploadQueue?.pendingCount ?? 0) !== 1 ? 's' : ''} remaining.
+                                    Please keep this tab open until uploads complete.
+                                </p>
+                            </div>
+                            {agentUploadQueue && agentUploadQueue.failedCount > 0 && (
+                                <span className="text-xs text-[var(--error)] font-medium">{agentUploadQueue.failedCount} failed</span>
+                            )}
+                        </div>
+                    )}
+                    <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} onStartTestSession={startTestSession} lastCompletedSession={lastCompletedSession} onResumeSession={resumeLastSession} resuming={resuming} />
+                </div>
+            );
         }
 
         if (!isSessionActive && !isVirtualDialerMode) {
@@ -2264,7 +2333,7 @@ export default function SessionPage() {
                             )}
                             <button
                                 onClick={startAudioSession}
-                                disabled={!zoomAppConfirmed || !agentConnected}
+                                disabled={!zoomAppConfirmed || !effectiveAgentConnected}
                                 className="w-full py-3 rounded-xl bg-[var(--foreground)] text-[var(--background)] font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                             >
                                 Connect Audio
@@ -2315,7 +2384,7 @@ export default function SessionPage() {
                     <div className="flex items-center gap-2">
                         {session.paused_at ? (
                             (() => {
-                                const resumeBlocked = !agentConnected || !agentZoomDetected;
+                                const resumeBlocked = !effectiveAgentConnected || !effectiveZoomDetected;
                                 const resumeBtn = (
                                     <button
                                         onClick={resumeSession}
@@ -2326,8 +2395,8 @@ export default function SessionPage() {
                                         {pausing ? 'Resuming...' : 'Resume Session'}
                                     </button>
                                 );
-                                if (!agentConnected) return <Tooltip content="CRM Agent must be running to resume">{resumeBtn}</Tooltip>;
-                                if (!agentZoomDetected) return <Tooltip content="Zoom must be running to resume">{resumeBtn}</Tooltip>;
+                                if (!effectiveAgentConnected) return <Tooltip content="CRM Agent must be running to resume">{resumeBtn}</Tooltip>;
+                                if (!effectiveZoomDetected) return <Tooltip content="Zoom must be running to resume">{resumeBtn}</Tooltip>;
                                 return resumeBtn;
                             })()
                         ) : (
@@ -2399,23 +2468,80 @@ export default function SessionPage() {
                                 )}
                             </div>
                             <div className="flex items-center gap-6">
-                                {/* Recording Indicator & Manual Stop */}
-                                {recorderStatus === 'recording' && (
-                                    <div className="flex items-center gap-3 pr-6 border-r border-[var(--card-border)]">
-                                        <div className="flex flex-col items-end">
-                                            <div className="flex items-center gap-1.5">
-                                                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Recording</span>
+                                {/* Recording Status — always visible during call */}
+                                <div className="flex items-center gap-3 pr-6 border-r border-[var(--card-border)]">
+                                    {recorderStatus === 'recording' ? (
+                                        <>
+                                            <div className="flex flex-col items-end">
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                                    <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">
+                                                        {agentConnected ? 'Agent Recording' : 'Recording'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-mono font-medium">{Math.floor(recorderDuration / 60)}:{(recorderDuration % 60).toString().padStart(2, '0')}</span>
+                                                    {agentConnected && (
+                                                        <span className="text-[9px] text-green-500 font-medium">Saved locally</span>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <span className="text-xs font-mono font-medium">{Math.floor(recorderDuration / 60)}:{(recorderDuration % 60).toString().padStart(2, '0')}</span>
+                                            <button
+                                                onClick={() => stopRecording()}
+                                                className="p-2 rounded-lg bg-[var(--sidebar-bg)] border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all group"
+                                                title="Stop Recording"
+                                            >
+                                                <Square size={16} fill="currentColor" className="group-hover:fill-white" />
+                                            </button>
+                                        </>
+                                    ) : recorderStatus === 'stopping' || recorderStatus === 'uploading' ? (
+                                        <div className="flex flex-col items-end gap-0.5">
+                                            <div className="flex items-center gap-1.5">
+                                                <Loader2 size={14} className="animate-spin text-blue-400" />
+                                                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
+                                                    {recorderStatus === 'stopping' ? 'Stopping...' : 'Uploading...'}
+                                                </span>
+                                            </div>
+                                            {agentConnected && (
+                                                <span className="text-[9px] text-[var(--muted)]">File saved locally until uploaded</span>
+                                            )}
                                         </div>
-                                        <button
-                                            onClick={() => stopRecording()}
-                                            className="p-2 rounded-lg bg-[var(--sidebar-bg)] border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all group"
-                                            title="Stop Recording"
-                                        >
-                                            <Square size={16} fill="currentColor" className="group-hover:fill-white" />
-                                        </button>
+                                    ) : recorderStatus === 'error' ? (
+                                        <div className="flex flex-col items-end gap-0.5">
+                                            <div className="flex items-center gap-1.5">
+                                                <div className="w-2 h-2 rounded-full bg-red-500" />
+                                                <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Rec Failed</span>
+                                            </div>
+                                            {agentConnected && (
+                                                <span className="text-[9px] text-[var(--muted)]">Check agent logs</span>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-end gap-0.5">
+                                            <div className="flex items-center gap-1.5">
+                                                <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                                                <span className="text-[10px] font-bold text-yellow-500 uppercase tracking-wider">
+                                                    {isSessionActive ? 'Starting...' : 'No Recorder'}
+                                                </span>
+                                            </div>
+                                            {agentConnected && agentRecordingState && (
+                                                <span className="text-[9px] text-[var(--muted)]">Agent: {agentRecordingState.state}</span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                                {/* Upload queue indicator */}
+                                {agentConnected && agentUploadQueue && (agentUploadQueue.pendingCount > 0 || agentUploadQueue.failedCount > 0) && (
+                                    <div className="flex items-center gap-1.5 pr-6 border-r border-[var(--card-border)]">
+                                        <Loader2 size={12} className={agentUploadQueue.pendingCount > 0 ? 'animate-spin text-blue-400' : 'text-red-400'} />
+                                        <div className="flex flex-col">
+                                            {agentUploadQueue.pendingCount > 0 && (
+                                                <span className="text-[9px] text-blue-400 font-medium">{agentUploadQueue.pendingCount} uploading</span>
+                                            )}
+                                            {agentUploadQueue.failedCount > 0 && (
+                                                <span className="text-[9px] text-red-400 font-medium">{agentUploadQueue.failedCount} failed</span>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
 

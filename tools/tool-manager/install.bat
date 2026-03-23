@@ -38,7 +38,7 @@ echo  [2/5] Cleaning up legacy installs...
 :: Remove old standalone CRM Agent if it exists at the legacy path
 set "LEGACY_LCA=%LocalAppData%\TableTurnerr\LocalCrmAgent"
 if exist "!LEGACY_LCA!\LocalCrmAgent.exe" (
-    echo        Found legacy CRM Agent at !LEGACY_LCA! — migrating...
+    echo        Found legacy CRM Agent at !LEGACY_LCA! - migrating...
     taskkill /IM LocalCrmAgent.exe /F >nul 2>&1
     timeout /t 1 /nobreak >nul
     reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "LocalCrmAgent" /f >nul 2>&1
@@ -71,6 +71,6 @@ echo   Installation Complete!
 echo  =============================================
 echo.
 echo   The Tool Manager is now running. Pick which
-echo   tools to install — updates are automatic.
+echo   tools to install - updates are automatic.
 echo.
 pause

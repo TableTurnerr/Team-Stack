@@ -69,7 +69,14 @@ export async function setupMockAgent(page: Page) {
                     onmessage: null,
                     onclose: null,
                     onerror: null,
-                    send: () => {},
+                    send: (data: string) => {
+                        // Capture commands sent TO the agent
+                        try {
+                            const cmd = JSON.parse(data);
+                            (window as any).__mockAgentCommands = (window as any).__mockAgentCommands ?? [];
+                            (window as any).__mockAgentCommands.push(cmd);
+                        } catch {}
+                    },
                     close: () => {
                         mockWs.readyState = 3;
                         if (mockWs._heartbeatTimer) clearInterval(mockWs._heartbeatTimer);
@@ -107,13 +114,17 @@ export async function setupMockAgent(page: Page) {
                     if (mockWs.onopen) {
                         mockWs.onopen(new Event('open'));
                     }
-                    // Send initial heartbeat
+                    // Send initial heartbeat (with recording fields)
                     mockWs._dispatchMessage({
                         type: 'heartbeat',
                         version: '1.0.0-test',
                         uptime: 100,
                         zoomDetected: true,
                         connectedClients: 1,
+                        isRecording: false,
+                        recordingDuration: 0,
+                        uploadsPending: 0,
+                        uploadsFailed: 0,
                         timestamp: Date.now(),
                     });
                     // Send idle call state
@@ -226,4 +237,116 @@ export async function disconnectMockAgent(page: Page) {
 /** Check if the mock agent is connected. */
 export async function isMockAgentConnected(page: Page): Promise<boolean> {
     return page.evaluate(() => !!(window as any).__mockAgentConnected);
+}
+
+// ─── Recording message helpers ───────────────────────────────────────────────
+
+export interface MockRecordingState {
+    state: 'idle' | 'recording' | 'stopping' | 'error';
+    fileName?: string;
+    phoneNumber?: string;
+    duration?: number;
+    error?: string;
+}
+
+export interface MockRecordingCompleted {
+    fileName: string;
+    phoneNumber: string;
+    duration: number;
+    fileSizeBytes: number;
+    startTime: string;
+}
+
+export interface MockRecordingUploaded {
+    fileName: string;
+    pocketbaseRecordingId: string;
+    callLogId?: string;
+    success: boolean;
+    error?: string;
+}
+
+export interface MockUploadQueueStatus {
+    pendingCount: number;
+    failedCount: number;
+    currentUpload?: string;
+}
+
+/** Send a recordingState message through the mock WebSocket. */
+export async function sendAgentRecordingState(page: Page, state: MockRecordingState) {
+    await page.evaluate((s) => {
+        const ws = (window as any).__mockAgentWs;
+        if (ws && ws.readyState === 1) {
+            ws._dispatchMessage({
+                type: 'recordingState',
+                state: s.state,
+                fileName: s.fileName ?? null,
+                phoneNumber: s.phoneNumber ?? null,
+                duration: s.duration ?? 0,
+                error: s.error ?? null,
+                timestamp: Date.now(),
+            });
+        }
+    }, state);
+}
+
+/** Send a recordingCompleted message through the mock WebSocket. */
+export async function sendAgentRecordingCompleted(page: Page, completed: MockRecordingCompleted) {
+    await page.evaluate((c) => {
+        const ws = (window as any).__mockAgentWs;
+        if (ws && ws.readyState === 1) {
+            ws._dispatchMessage({
+                type: 'recordingCompleted',
+                fileName: c.fileName,
+                phoneNumber: c.phoneNumber,
+                duration: c.duration,
+                fileSizeBytes: c.fileSizeBytes,
+                startTime: c.startTime,
+                timestamp: Date.now(),
+            });
+        }
+    }, completed);
+}
+
+/** Send a recordingUploaded message through the mock WebSocket. */
+export async function sendAgentRecordingUploaded(page: Page, uploaded: MockRecordingUploaded) {
+    await page.evaluate((u) => {
+        const ws = (window as any).__mockAgentWs;
+        if (ws && ws.readyState === 1) {
+            ws._dispatchMessage({
+                type: 'recordingUploaded',
+                fileName: u.fileName,
+                pocketbaseRecordingId: u.pocketbaseRecordingId,
+                callLogId: u.callLogId ?? null,
+                success: u.success,
+                error: u.error ?? null,
+                timestamp: Date.now(),
+            });
+        }
+    }, uploaded);
+}
+
+/** Send an uploadQueueStatus message through the mock WebSocket. */
+export async function sendAgentUploadQueueStatus(page: Page, status: MockUploadQueueStatus) {
+    await page.evaluate((s) => {
+        const ws = (window as any).__mockAgentWs;
+        if (ws && ws.readyState === 1) {
+            ws._dispatchMessage({
+                type: 'uploadQueueStatus',
+                pendingCount: s.pendingCount,
+                failedCount: s.failedCount,
+                currentUpload: s.currentUpload ?? null,
+                timestamp: Date.now(),
+            });
+        }
+    }, status);
+}
+
+/** Capture commands sent TO the mock agent from the dashboard. */
+export async function captureAgentCommands(page: Page): Promise<any[]> {
+    return page.evaluate(() => (window as any).__mockAgentCommands ?? []);
+}
+
+/** Clear captured agent commands. */
+export async function clearAgentCommands(page: Page) {
+    await page.evaluate(() => { (window as any).__mockAgentCommands = []; });
 }

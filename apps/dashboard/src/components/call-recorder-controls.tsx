@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Loader2, CheckCircle2, AlertCircle, Phone, X } from 'lucide-react';
+import { Mic, Square, Loader2, CheckCircle2, AlertCircle, Phone, X, Radio } from 'lucide-react';
 import { useZoomPhone } from '@/contexts/zoom-phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
+import { useLocalAgent } from '@/contexts/local-agent-context';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +23,8 @@ function formatTimer(seconds: number): string {
  */
 export function CallRecorderControls() {
     const { lastDialedNumber, callStatus, activeCallNumber, customDialerNumber, registerDialCallback } = useZoomPhone();
-    
+    const { isConnected: agentConnected } = useLocalAgent();
+
     // Use the global context instead of a local hook instance
     const {
         isSessionActive,
@@ -106,7 +108,8 @@ export function CallRecorderControls() {
 
     // ── Render ──────────────────────────────────────────────────────
 
-    // Session not active — show nothing, session will auto-start on first dial
+    // When agent is connected, isSessionActive is always true (agent manages audio)
+    // When agent is offline and no browser session, show nothing
     if (!isSessionActive) {
         return null;
     }
@@ -123,9 +126,9 @@ export function CallRecorderControls() {
             {/* --- IDLE / SUCCESS / ERROR (Session Active but not currently recording) --- */}
             {(status === 'idle' || status === 'success' || status === 'error') && (
                 <>
-                    <span className="relative flex h-2 w-2 shrink-0" title="Recording session active">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                    <span className="relative flex h-2 w-2 shrink-0" title={agentConnected ? "Agent recording" : "Browser recording"}>
+                        <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", agentConnected ? "bg-blue-400" : "bg-green-400")} />
+                        <span className={cn("relative inline-flex rounded-full h-2 w-2", agentConnected ? "bg-blue-500" : "bg-green-500")} />
                     </span>
 
                     {status === 'success' ? (
@@ -143,7 +146,7 @@ export function CallRecorderControls() {
                             {error ? 'REC FAILED — Retry' : 'FAILED — Retry'}
                         </button>
                     ) : isAutoMode ? (
-                        <span className="text-[10px] text-green-400 font-semibold" title="Recording will start automatically when a call connects">
+                        <span className="text-[10px] text-green-400 font-semibold" title="Recording starts automatically when a call is dialed">
                             AUTO
                         </span>
                     ) : (

@@ -14,6 +14,11 @@ public class AgentWebSocketServer : IDisposable
     private readonly CallStateFusion _fusion;
     private readonly NetworkMonitor _networkMonitor;
     private readonly ZoomAudioMonitor _audioMonitor;
+    private AudioRecorderService? _recorder;
+    private RecordingUploadService? _uploader;
+    private RecordingStorageManager? _storage;
+    private MicrophoneManager? _micManager;
+    private ZoomWindowSuppressor? _zoomSuppressor;
     private WebSocketServer? _server;
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
@@ -36,6 +41,58 @@ public class AgentWebSocketServer : IDisposable
         _networkMonitor = networkMonitor;
         _audioMonitor = audioMonitor;
         Port = port;
+    }
+
+    /// <summary>
+    /// Set recording services after construction (avoids circular dependency).
+    /// </summary>
+    public void SetRecordingServices(AudioRecorderService recorder, RecordingUploadService uploader, RecordingStorageManager storage)
+    {
+        _recorder = recorder;
+        _uploader = uploader;
+        _storage = storage;
+
+        // Subscribe to recording events for broadcasting
+        _recorder.StateChanged += OnRecordingStateChanged;
+        _recorder.RecordingCompleted += OnRecordingCompleted;
+        _uploader.UploadCompleted += OnUploadCompleted;
+    }
+
+    /// <summary>
+    /// Set zoom window suppressor for keep-minimized toggle.
+    /// </summary>
+    public void SetZoomSuppressor(ZoomWindowSuppressor suppressor)
+    {
+        _zoomSuppressor = suppressor;
+    }
+
+    /// <summary>
+    /// Set microphone manager for device selection and alerts.
+    /// </summary>
+    public void SetMicrophoneManager(MicrophoneManager micManager)
+    {
+        _micManager = micManager;
+
+        _micManager.DeviceSwitched += info =>
+        {
+            var msg = new MicrophoneChangedMessage
+            {
+                Device = ToDto(info),
+                Reason = micManager.IsManualSelection ? "manual" : "auto",
+            };
+            Broadcast(msg);
+        };
+
+        _micManager.MicAlert += alertMessage =>
+        {
+            var msg = new MicrophoneAlertMessage { Message = alertMessage };
+            Broadcast(msg);
+        };
+
+        _micManager.DeviceListChanged += () =>
+        {
+            BroadcastMicrophoneList();
+        };
     }
 
     public void Start()
@@ -99,6 +156,42 @@ public class AgentWebSocketServer : IDisposable
                 case "checkZoom":
                     HandleCheckZoom(client);
                     break;
+                case "startRecording":
+                    HandleStartRecording(doc.RootElement);
+                    break;
+                case "stopRecording":
+                    HandleStopRecording();
+                    break;
+                case "discardRecording":
+                    HandleDiscardRecording();
+                    break;
+                case "setAutoRecord":
+                    HandleSetAutoRecord(doc.RootElement);
+                    break;
+                case "getRecordingStatus":
+                    HandleGetRecordingStatus(client);
+                    break;
+                case "linkRecording":
+                    HandleLinkRecording(doc.RootElement);
+                    break;
+                case "uploadRecording":
+                    HandleUploadRecording(doc.RootElement);
+                    break;
+                case "setUploadConfig":
+                    HandleSetUploadConfig(doc.RootElement);
+                    break;
+                case "getMicrophones":
+                    HandleGetMicrophones(client);
+                    break;
+                case "setMicrophone":
+                    HandleSetMicrophone(doc.RootElement);
+                    break;
+                case "setKeepZoomMinimized":
+                    HandleSetKeepZoomMinimized(doc.RootElement);
+                    break;
+                case "getKeepZoomMinimized":
+                    HandleGetKeepZoomMinimized(client);
+                    break;
                 default:
                     Debug.WriteLine($"[WS] Unknown command type: {type}");
                     break;
@@ -134,6 +227,209 @@ public class AgentWebSocketServer : IDisposable
             Message = isRunning ? "Zoom is running" : "Zoom is not running",
         };
         SendTo(client, response);
+    }
+
+    // ─── Recording command handlers ───────────────────────────────────────
+
+    private void HandleStartRecording(JsonElement root)
+    {
+        if (_recorder == null) return;
+        var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
+        var (success, error) = _recorder.StartRecording(phone);
+        Debug.WriteLine($"[WS] startRecording: success={success} error={error}");
+    }
+
+    private void HandleStopRecording()
+    {
+        _recorder?.StopRecording();
+    }
+
+    private void HandleDiscardRecording()
+    {
+        _recorder?.DiscardRecording();
+    }
+
+    private void HandleSetAutoRecord(JsonElement root)
+    {
+        if (_recorder == null) return;
+        if (root.TryGetProperty("enabled", out var enabled))
+            _recorder.AutoRecordEnabled = enabled.GetBoolean();
+        if (root.TryGetProperty("onRinging", out var onRinging))
+            _recorder.RecordOnRinging = onRinging.GetBoolean();
+        Debug.WriteLine($"[WS] setAutoRecord: enabled={_recorder.AutoRecordEnabled} onRinging={_recorder.RecordOnRinging}");
+    }
+
+    private void HandleGetRecordingStatus(IWebSocketConnection client)
+    {
+        if (_recorder == null) return;
+        var msg = BuildRecordingStateMessage();
+        SendTo(client, msg);
+    }
+
+    private void HandleLinkRecording(JsonElement root)
+    {
+        if (_uploader == null) return;
+        var fileName = root.TryGetProperty("fileName", out var f) ? f.GetString() : null;
+        var callLogId = root.TryGetProperty("callLogId", out var c) ? c.GetString() : null;
+        if (fileName != null && callLogId != null)
+            _uploader.LinkRecording(fileName, callLogId);
+    }
+
+    private void HandleUploadRecording(JsonElement root)
+    {
+        if (_uploader == null) return;
+        var fileName = root.TryGetProperty("fileName", out var f) ? f.GetString() : null;
+        if (fileName != null)
+            _uploader.EnqueueUpload(fileName);
+    }
+
+    private void HandleSetUploadConfig(JsonElement root)
+    {
+        if (_uploader == null) return;
+        var url = root.TryGetProperty("pocketbaseUrl", out var u) ? u.GetString() : null;
+        var token = root.TryGetProperty("authToken", out var t) ? t.GetString() : null;
+        var uploader = root.TryGetProperty("uploaderId", out var i) ? i.GetString() : null;
+        if (url != null && token != null && uploader != null)
+            _uploader.SetAuth(url, token, uploader);
+    }
+
+    // ─── Microphone command handlers ────────────────────────────────────────
+
+    private void HandleGetMicrophones(IWebSocketConnection client)
+    {
+        if (_micManager == null) return;
+        var devices = _micManager.GetDevices();
+        var msg = new MicrophoneListMessage
+        {
+            Devices = devices.Select(ToDto).ToList(),
+        };
+        SendTo(client, msg);
+    }
+
+    private void HandleSetMicrophone(JsonElement root)
+    {
+        if (_micManager == null) return;
+
+        // null or empty deviceId = revert to system default
+        string? deviceId = root.TryGetProperty("deviceId", out var d) ? d.GetString() : null;
+        if (string.IsNullOrEmpty(deviceId)) deviceId = null;
+
+        _micManager.SetDevice(deviceId);
+        Debug.WriteLine($"[WS] setMicrophone: {deviceId ?? "(default)"}");
+    }
+
+    // ─── Zoom suppressor command handlers ──────────────────────────────────
+
+    private void HandleSetKeepZoomMinimized(JsonElement root)
+    {
+        if (_zoomSuppressor == null) return;
+        if (root.TryGetProperty("enabled", out var enabled))
+        {
+            _zoomSuppressor.Enabled = enabled.GetBoolean();
+            Debug.WriteLine($"[WS] setKeepZoomMinimized: {_zoomSuppressor.Enabled}");
+        }
+    }
+
+    private void HandleGetKeepZoomMinimized(IWebSocketConnection client)
+    {
+        var msg = new KeepZoomMinimizedMessage
+        {
+            Enabled = _zoomSuppressor?.Enabled ?? false,
+        };
+        SendTo(client, msg);
+    }
+
+    /// <summary>Broadcast the current microphone device list to all clients.</summary>
+    public void BroadcastMicrophoneList()
+    {
+        if (_micManager == null) return;
+        var devices = _micManager.GetDevices();
+        var msg = new MicrophoneListMessage
+        {
+            Devices = devices.Select(ToDto).ToList(),
+        };
+        Broadcast(msg);
+    }
+
+    private static MicDeviceDto ToDto(MicDeviceInfo info) => new()
+    {
+        DeviceId = info.DeviceId,
+        Name = info.Name,
+        IsDefault = info.IsDefault,
+        IsSelected = info.IsSelected,
+        PeakLevel = info.PeakLevel,
+    };
+
+    // ─── Recording event handlers → broadcast ─────────────────────────────
+
+    private void OnRecordingStateChanged(RecordingState state, string? error)
+    {
+        var msg = BuildRecordingStateMessage();
+        Broadcast(msg);
+    }
+
+    private void OnRecordingCompleted(string fileName, string phoneNumber, int duration, long fileSize, DateTime startTime)
+    {
+        var msg = new RecordingCompletedMessage
+        {
+            FileName = fileName,
+            PhoneNumber = phoneNumber,
+            Duration = duration,
+            FileSizeBytes = fileSize,
+            StartTime = startTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+        };
+        Broadcast(msg);
+    }
+
+    private void OnUploadCompleted(string fileName, string? recordingId, string? callLogId, bool success, string? error)
+    {
+        var msg = new RecordingUploadedMessage
+        {
+            FileName = fileName,
+            PocketbaseRecordingId = recordingId,
+            CallLogId = callLogId,
+            Success = success,
+            Error = error,
+        };
+        Broadcast(msg);
+    }
+
+    private RecordingStateMessage BuildRecordingStateMessage()
+    {
+        return new RecordingStateMessage
+        {
+            State = _recorder?.CurrentState.ToString().ToLowerInvariant() ?? "idle",
+            FileName = _recorder?.CurrentFileName,
+            PhoneNumber = _recorder?.CurrentPhoneNumber,
+            Duration = _recorder?.DurationSeconds ?? 0,
+        };
+    }
+
+    /// <summary>
+    /// Broadcast recording state — called periodically by AgentService during recording.
+    /// </summary>
+    public void BroadcastRecordingState()
+    {
+        if (_recorder?.CurrentState == RecordingState.Recording)
+        {
+            var msg = BuildRecordingStateMessage();
+            Broadcast(msg);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast upload queue status.
+    /// </summary>
+    public void BroadcastUploadQueueStatus()
+    {
+        if (_storage == null) return;
+        var msg = new UploadQueueStatusMessage
+        {
+            PendingCount = _storage.PendingCount,
+            FailedCount = _storage.FailedCount,
+            CurrentUpload = _uploader?.CurrentUpload,
+        };
+        Broadcast(msg);
     }
 
     private void SendTo<T>(IWebSocketConnection client, T message) where T : AgentMessage
@@ -187,6 +483,10 @@ public class AgentWebSocketServer : IDisposable
             Uptime = uptimeSeconds,
             ZoomDetected = zoomDetected,
             ConnectedClients = ConnectionCount,
+            IsRecording = _recorder?.CurrentState == RecordingState.Recording,
+            RecordingDuration = _recorder?.DurationSeconds ?? 0,
+            UploadsPending = _storage?.PendingCount ?? 0,
+            UploadsFailed = _storage?.FailedCount ?? 0,
         };
         Broadcast(msg);
     }
@@ -216,6 +516,16 @@ public class AgentWebSocketServer : IDisposable
     public void Stop()
     {
         _fusion.StateChanged -= OnStateChanged;
+        if (_recorder != null)
+        {
+            _recorder.StateChanged -= OnRecordingStateChanged;
+            _recorder.RecordingCompleted -= OnRecordingCompleted;
+        }
+        if (_uploader != null)
+        {
+            _uploader.UploadCompleted -= OnUploadCompleted;
+        }
+        _micManager = null;
 
         List<IWebSocketConnection> snapshot;
         lock (_clientLock)

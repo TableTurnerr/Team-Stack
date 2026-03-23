@@ -2,10 +2,10 @@
 setlocal
 
 :: Extract version from csproj so the banner stays in sync automatically
-for /f "tokens=2 delims=><" %%v in ('findstr /r "<Version>" src\LocalCrmAgent\LocalCrmAgent.csproj') do set VERSION=%%v
+for /f "tokens=3 delims=><" %%v in ('findstr /r "<Version>" src\LocalCrmAgent\LocalCrmAgent.csproj') do set VERSION=%%v
 
 echo ============================================
-echo   Local CRM Agent v%VERSION% — Dev Build + Run
+echo   Local CRM Agent v%VERSION% - Dev Build + Run
 echo ============================================
 echo.
 

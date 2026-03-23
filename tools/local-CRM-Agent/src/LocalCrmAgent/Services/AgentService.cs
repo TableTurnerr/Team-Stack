@@ -13,6 +13,9 @@ public class AgentService : IDisposable
     private readonly AgentWebSocketServer _wsServer;
     private readonly NetworkMonitor _networkMonitor;
     private readonly ZoomAudioMonitor _audioMonitor;
+    private readonly AudioRecorderService? _recorder;
+    private readonly RecordingUploadService? _uploader;
+    private readonly MicrophoneManager? _micManager;
 
     private CancellationTokenSource? _cts;
     private Task? _broadcastTask;
@@ -36,12 +39,18 @@ public class AgentService : IDisposable
         CallStateFusion fusion,
         AgentWebSocketServer wsServer,
         NetworkMonitor networkMonitor,
-        ZoomAudioMonitor audioMonitor)
+        ZoomAudioMonitor audioMonitor,
+        AudioRecorderService? recorder = null,
+        RecordingUploadService? uploader = null,
+        MicrophoneManager? micManager = null)
     {
         _fusion = fusion;
         _wsServer = wsServer;
         _networkMonitor = networkMonitor;
         _audioMonitor = audioMonitor;
+        _recorder = recorder;
+        _uploader = uploader;
+        _micManager = micManager;
 
         _wsServer.ConnectionCountChanged += count =>
             ConnectionCountChanged?.Invoke(count);
@@ -56,6 +65,8 @@ public class AgentService : IDisposable
         // Start core components
         _fusion.Start();
         _wsServer.Start();
+        _uploader?.Start();
+        _micManager?.StartMonitoring();
 
         // Start periodic broadcast (state updates + heartbeat)
         _broadcastTask = Task.Run(() => BroadcastLoop(_cts.Token));
@@ -77,9 +88,12 @@ public class AgentService : IDisposable
         {
             try
             {
-                // Every second: broadcast current state (for live duration)
+                // Every second: broadcast current call state (for live duration)
                 if (_fusion.CurrentState.State == CallState.Connected)
                     _wsServer.BroadcastCurrentState();
+
+                // Every second: broadcast recording state (for live duration)
+                _wsServer.BroadcastRecordingState();
 
                 // Every 5 seconds: heartbeat
                 if (tick % 5 == 0)
@@ -107,6 +121,10 @@ public class AgentService : IDisposable
                         _zoomAutoLaunchAttempted = false;
                     }
                 }
+
+                // Every 10 seconds: upload queue status
+                if (tick % 10 == 0 && _wsServer.ConnectionCount > 0)
+                    _wsServer.BroadcastUploadQueueStatus();
 
                 tick++;
                 await Task.Delay(1000, ct);
@@ -155,6 +173,9 @@ public class AgentService : IDisposable
         try { Task.WhenAll(_broadcastTask ?? Task.CompletedTask, _networkTask ?? Task.CompletedTask).Wait(3000); }
         catch { }
 
+        _micManager?.Dispose();
+        _recorder?.Dispose();
+        _uploader?.Stop();
         _wsServer.Stop();
         _fusion.Stop();
         _cts?.Dispose();

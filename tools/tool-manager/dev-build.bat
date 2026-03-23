@@ -2,10 +2,10 @@
 setlocal
 
 :: Extract version from csproj
-for /f "tokens=2 delims=><" %%v in ('findstr /r "<Version>" src\ToolManager\ToolManager.csproj') do set VERSION=%%v
+for /f "tokens=3 delims=><" %%v in ('findstr /r "<Version>" src\ToolManager\ToolManager.csproj') do set VERSION=%%v
 
 echo ============================================
-echo   Tool Manager v%VERSION% — Dev Build + Run
+echo   Tool Manager v%VERSION% - Dev Build + Run
 echo ============================================
 echo.
 

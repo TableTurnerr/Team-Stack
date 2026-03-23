@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Play, Pause, Download, Loader2, Minimize2, Maximize2, CheckCircle2 } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Download, Loader2, CheckCircle2 } from 'lucide-react';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp } from '@/lib/types';
@@ -9,6 +9,7 @@ import { cn, timeAgo, formatDateTime, formatPhoneNumber } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
+import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
     FORM_OUTCOMES,
@@ -164,34 +165,46 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const callbackDropdownRef = useRef<HTMLDivElement>(null);
     const hungUpDropdownRef = useRef<HTMLDivElement>(null);
 
-    const { deferredSegments } = useCallRecording();
+    const { deferredSegments, latestRecording, uploadQueueStatus } = useCallRecording();
 
     // Recording playback
     const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
     const [playerBlob, setPlayerBlob] = useState<string | null>(null);
     const [playerLoading, setPlayerLoading] = useState<string | null>(null);
-    const [playerMinimized, setPlayerMinimized] = useState(false);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [isHoveringMic, setIsHoveringMic] = useState(false);
-    const audioRef = useRef<HTMLAudioElement | null>(null);
 
     const handlePlayRecording = async (call: CallLog) => {
         if (playerLoading === call.id) return;
-        
-        // If clicking the same one that's already loaded, just expand if minimized
+
+        // If clicking the same one that's already loaded, skip
         if (playerRecording?.call_log === call.id) {
-            setPlayerMinimized(false);
             return;
         }
 
         setPlayerLoading(call.id);
         setPlayerBlob(null); // Clear blob player
         try {
-            const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(`call_log = "${call.id}"`);
+            // Try by call_log first
+            let recording: Recording | null = null;
+            try {
+                recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(`call_log = "${call.id}"`);
+            } catch {
+                // Fallback: agent mode may upload before linking, so call_log isn't set on PB record.
+                // Try matching by phone number.
+                const phone = call.expand?.phone_number_record?.phone_number;
+                if (phone) {
+                    const digits = phone.replace(/\D/g, '').slice(-10);
+                    try {
+                        recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+                            `phone_number ~ "${digits}"`,
+                            { sort: '-created' },
+                        );
+                    } catch {
+                        // No recording found by phone either
+                    }
+                }
+            }
             if (recording && recording.file) {
                 setPlayerRecording(recording);
-                setPlayerMinimized(false);
-                setIsPlaying(true);
             }
         } catch (err) {
             console.error('Failed to fetch recording for prior call:', err);
@@ -209,43 +222,56 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         ? deferredSegments.find(s => normalizePhone(s.phone) === formDigits)
         : null;
 
-    const handlePlayUnsubmitted = () => {
-        if (!matchingSegment) return;
+    // Agent mode: check if the latest agent recording matches this form's phone number.
+    const agentRecordingMatch = !matchingSegment
+        && !!latestRecording
+        && !!formDigits
+        && normalizePhone(latestRecording.phoneNumber) === formDigits;
 
-        const url = URL.createObjectURL(matchingSegment.blob);
+    // Whether the agent is still uploading/processing the recording
+    const agentRecordingUploading = agentRecordingMatch
+        && ((uploadQueueStatus?.pendingCount ?? 0) > 0 || !!uploadQueueStatus?.currentUpload);
 
-        setPlayerRecording(null); // Clear PocketBase player
-        setPlayerBlob(url);
-        setPlayerMinimized(false);
-        setIsPlaying(true);
-    };
+    // Whether the agent recording is fully uploaded and ready to play
+    const agentRecordingReady = agentRecordingMatch && !agentRecordingUploading;
 
-    const togglePlayback = () => {
-        if (!audioRef.current) return;
-        if (isPlaying) {
-            audioRef.current.pause();
-        } else {
-            audioRef.current.play();
+    // Whether we have any recording available for playback (browser or agent)
+    const hasRecordingForPlayback = !!(matchingSegment || agentRecordingReady);
+
+    const handlePlayUnsubmitted = async () => {
+        // Browser mode: play from in-memory blob
+        if (matchingSegment) {
+            const url = URL.createObjectURL(matchingSegment.blob);
+            setPlayerRecording(null);
+            setPlayerBlob(url);
+            return;
         }
-        setIsPlaying(!isPlaying);
-    };
 
-    const formatTime = (seconds: number) => {
-        if (!isFinite(seconds) || isNaN(seconds)) return '00:00';
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        // Agent mode: fetch the recording from PocketBase by phone number
+        if (agentRecordingReady && latestRecording) {
+            setPlayerLoading('unsubmitted');
+            try {
+                // Query by phone number (most reliable — always set by agent on upload)
+                const digits = latestRecording.phoneNumber.replace(/\D/g, '').slice(-10);
+                const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+                    `phone_number ~ "${digits}"`,
+                    { sort: '-created' }
+                );
+                if (recording && recording.file) {
+                    setPlayerBlob(null);
+                    setPlayerRecording(recording);
+                }
+            } catch (err) {
+                console.error('Failed to fetch agent recording:', err);
+            } finally {
+                setPlayerLoading(null);
+            }
+        }
     };
 
     const closePlayer = () => {
-        audioRef.current?.pause();
-        if (playerBlob) {
-            URL.revokeObjectURL(playerBlob);
-        }
         setPlayerRecording(null);
         setPlayerBlob(null);
-        setPlayerMinimized(false);
-        setIsPlaying(false);
     };
 
     // Auto-fetch company state
@@ -766,14 +792,23 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             <span className="text-[10px] font-semibold text-[var(--warning)] uppercase tracking-wider">
                                 Recorded but unsubmitted
                             </span>
-                            {matchingSegment && (
+                            {agentRecordingUploading && (
+                                <span
+                                    className="flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warning)]/60 text-white ml-1"
+                                    title="Recording uploading…"
+                                >
+                                    <Loader2 size={12} className="animate-spin" />
+                                </span>
+                            )}
+                            {hasRecordingForPlayback && (
                                 <button
                                     type="button"
                                     onClick={handlePlayUnsubmitted}
-                                    className="flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warning)] text-white hover:scale-110 active:scale-95 transition-all ml-1 shadow-sm animate-pulse"
+                                    disabled={playerLoading === 'unsubmitted'}
+                                    className="flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warning)] text-white hover:scale-110 active:scale-95 transition-all ml-1 shadow-sm animate-pulse disabled:opacity-50 disabled:animate-none"
                                     title="Listen to unsubmitted recording"
                                 >
-                                    <Mic size={12} />
+                                    {playerLoading === 'unsubmitted' ? <Loader2 size={12} className="animate-spin" /> : <Mic size={12} />}
                                 </button>
                             )}
                         </div>
@@ -1604,133 +1639,11 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 variant="warning"
             />
 
-            {/* Recording Player Overlay */}
-            {(playerRecording || playerBlob) && (
-                <div 
-                    className={cn(
-                        "fixed z-[60] transition-all duration-500 ease-in-out",
-                        playerMinimized 
-                            ? "bottom-6 right-6 translate-x-0 translate-y-0" 
-                            : "inset-0 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm"
-                    )}
-                    onClick={!playerMinimized ? closePlayer : undefined}
-                >
-                    <div
-                        className={cn(
-                            "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl transition-all duration-500",
-                            playerMinimized 
-                                ? "p-3 flex items-center gap-3 border-[var(--primary)]/30 w-auto" 
-                                : "w-full max-w-md p-4 space-y-3"
-                        )}
-                        onClick={e => e.stopPropagation()}
-                    >
-                        {/* Player Header */}
-                        <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                                {playerMinimized ? (
-                                    <button 
-                                        onClick={togglePlayback}
-                                        onMouseEnter={() => setIsHoveringMic(true)}
-                                        onMouseLeave={() => setIsHoveringMic(false)}
-                                        className={cn(
-                                            "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all",
-                                            isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--warning-subtle)] text-[var(--warning)]"
-                                        )}
-                                    >
-                                        {isPlaying ? (
-                                            isHoveringMic ? (
-                                                <Pause size={16} fill="currentColor" />
-                                            ) : (
-                                                <Mic size={16} className="animate-pulse" />
-                                            )
-                                        ) : (
-                                            <Play size={16} fill="currentColor" className="ml-0.5" />
-                                        )}
-                                    </button>
-                                ) : (
-                                    <div className={cn(
-                                        "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-                                        isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--card-hover)] text-[var(--muted)]"
-                                    )}>
-                                        <Mic size={16} />
-                                    </div>
-                                )}
-                                <div className="flex flex-col min-w-0">
-                                    {!playerMinimized && (
-                                        <span className="text-sm font-medium truncate">
-                                            {playerRecording ? (playerRecording.note || playerRecording.original_filename || 'Call Recording') : 'Unsubmitted Recording'}
-                                        </span>
-                                    )}
-                                    {playerMinimized && (
-                                        <>
-                                            <span className={cn(
-                                                "text-[10px] font-bold uppercase tracking-widest leading-none mb-1",
-                                                isPlaying ? "text-[var(--primary)]" : "text-[var(--warning)]"
-                                            )}>
-                                                {isPlaying ? 'Playing' : 'Paused'}
-                                            </span>
-                                            <span className="text-xs font-medium truncate text-[var(--foreground)] max-w-[120px]">
-                                                {playerRecording ? (playerRecording.note || playerRecording.original_filename || 'Call Recording') : 'Unsubmitted Recording'}
-                                            </span>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                                {!playerMinimized && playerRecording?.file && (
-                                    <a
-                                        href={pb.files.getUrl(playerRecording, playerRecording.file)}
-                                        download
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
-                                        title="Download"
-                                    >
-                                        <Download size={15} />
-                                    </a>
-                                )}
-                                <button
-                                    onClick={() => setPlayerMinimized(!playerMinimized)}
-                                    className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
-                                    title={playerMinimized ? "Expand" : "Minimize"}
-                                >
-                                    {playerMinimized ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
-                                </button>
-                                <button
-                                    onClick={closePlayer}
-                                    className={cn(
-                                        "p-1.5 rounded-lg text-[var(--muted)] transition-colors",
-                                        playerMinimized ? "hover:text-[var(--error)] hover:bg-[var(--error)]/5" : "hover:text-[var(--foreground)] hover:bg-[var(--card-hover)]"
-                                    )}
-                                    title="Close"
-                                >
-                                    <X size={15} />
-                                </button>
-                            </div>
-                        </div>
-                        
-                        {/* Persistent Audio Element - Visible controls only when maximized */}
-                        {(playerRecording?.file || playerBlob) ? (
-                            <audio
-                                ref={audioRef}
-                                controls={!playerMinimized}
-                                autoPlay
-                                preload="metadata"
-                                className={cn(
-                                    "w-full h-10 transition-all",
-                                    playerMinimized ? "hidden" : "block"
-                                )}
-                                src={playerBlob || (playerRecording ? pb.files.getUrl(playerRecording, playerRecording.file as string) : '')}
-                                onEnded={closePlayer}
-                                onPlay={() => setIsPlaying(true)}
-                                onPause={() => setIsPlaying(false)}
-                            />
-                        ) : !playerMinimized && (
-                            <p className="text-sm text-[var(--muted)] text-center py-2">No audio file attached.</p>
-                        )}
-                    </div>
-                </div>
-            )}
+            <RecordingPlayerOverlay
+                recording={playerRecording}
+                blobUrl={playerBlob}
+                onClose={closePlayer}
+            />
         </div>
     );
 }

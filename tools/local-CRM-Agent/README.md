@@ -137,7 +137,7 @@ The agent broadcasts JSON messages to `ws://127.0.0.1:9876`:
 ```json
 {
   "type": "heartbeat",
-  "version": "1.0.4",
+  "version": "1.0.9",
   "uptime": 3600,
   "zoomDetected": true,
   "connectedClients": 1,

@@ -54,7 +54,7 @@ echo   Recommended: Push to the release branch
 echo   and GitHub Actions will create the release
 echo   automatically. The Tool Manager picks it up.
 echo.
-echo   Manual: Share the zip directly — teammates
+echo   Manual: Share the zip directly - teammates
 echo   extract and run install.bat.
 echo.
 pause

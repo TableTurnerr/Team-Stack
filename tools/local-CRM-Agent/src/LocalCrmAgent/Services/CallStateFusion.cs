@@ -228,8 +228,10 @@ public class CallStateFusion : IDisposable
                        : audioSessionActive ? SignalConfidence.Medium
                        : SignalConfidence.Low;
 
+        // Ceiling so sub-1s calls still report duration=1 (not 0, which would
+        // cause the recorder to discard them as "unanswered").
         int duration = _connectedAt.HasValue
-            ? (int)((_endedAt ?? DateTime.UtcNow) - _connectedAt.Value).TotalSeconds
+            ? (int)Math.Ceiling(((_endedAt ?? DateTime.UtcNow) - _connectedAt.Value).TotalSeconds)
             : 0;
 
         // Latch direction: once "inbound" is detected from the window title,

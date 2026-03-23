@@ -178,3 +178,60 @@ public class UploadQueueStatusMessage : AgentMessage
 
     public UploadQueueStatusMessage() => Type = "uploadQueueStatus";
 }
+
+// ─── Zoom Suppressor Messages ───────────────────────────────────────────────
+
+public class KeepZoomMinimizedMessage : AgentMessage
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    public KeepZoomMinimizedMessage() => Type = "keepZoomMinimized";
+}
+
+// ─── Microphone Messages ────────────────────────────────────────────────────
+
+public class MicDeviceDto
+{
+    [JsonPropertyName("deviceId")]
+    public string DeviceId { get; set; } = "";
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("isDefault")]
+    public bool IsDefault { get; set; }
+
+    [JsonPropertyName("isSelected")]
+    public bool IsSelected { get; set; }
+
+    [JsonPropertyName("peakLevel")]
+    public float PeakLevel { get; set; }
+}
+
+public class MicrophoneListMessage : AgentMessage
+{
+    [JsonPropertyName("devices")]
+    public List<MicDeviceDto> Devices { get; set; } = [];
+
+    public MicrophoneListMessage() => Type = "microphoneList";
+}
+
+public class MicrophoneChangedMessage : AgentMessage
+{
+    [JsonPropertyName("device")]
+    public MicDeviceDto Device { get; set; } = new();
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    public MicrophoneChangedMessage() => Type = "microphoneChanged";
+}
+
+public class MicrophoneAlertMessage : AgentMessage
+{
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    public MicrophoneAlertMessage() => Type = "microphoneAlert";
+}

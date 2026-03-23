@@ -17,6 +17,8 @@ public class AgentWebSocketServer : IDisposable
     private AudioRecorderService? _recorder;
     private RecordingUploadService? _uploader;
     private RecordingStorageManager? _storage;
+    private MicrophoneManager? _micManager;
+    private ZoomWindowSuppressor? _zoomSuppressor;
     private WebSocketServer? _server;
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
@@ -54,6 +56,43 @@ public class AgentWebSocketServer : IDisposable
         _recorder.StateChanged += OnRecordingStateChanged;
         _recorder.RecordingCompleted += OnRecordingCompleted;
         _uploader.UploadCompleted += OnUploadCompleted;
+    }
+
+    /// <summary>
+    /// Set zoom window suppressor for keep-minimized toggle.
+    /// </summary>
+    public void SetZoomSuppressor(ZoomWindowSuppressor suppressor)
+    {
+        _zoomSuppressor = suppressor;
+    }
+
+    /// <summary>
+    /// Set microphone manager for device selection and alerts.
+    /// </summary>
+    public void SetMicrophoneManager(MicrophoneManager micManager)
+    {
+        _micManager = micManager;
+
+        _micManager.DeviceSwitched += info =>
+        {
+            var msg = new MicrophoneChangedMessage
+            {
+                Device = ToDto(info),
+                Reason = micManager.IsManualSelection ? "manual" : "auto",
+            };
+            Broadcast(msg);
+        };
+
+        _micManager.MicAlert += alertMessage =>
+        {
+            var msg = new MicrophoneAlertMessage { Message = alertMessage };
+            Broadcast(msg);
+        };
+
+        _micManager.DeviceListChanged += () =>
+        {
+            BroadcastMicrophoneList();
+        };
     }
 
     public void Start()
@@ -140,6 +179,18 @@ public class AgentWebSocketServer : IDisposable
                     break;
                 case "setUploadConfig":
                     HandleSetUploadConfig(doc.RootElement);
+                    break;
+                case "getMicrophones":
+                    HandleGetMicrophones(client);
+                    break;
+                case "setMicrophone":
+                    HandleSetMicrophone(doc.RootElement);
+                    break;
+                case "setKeepZoomMinimized":
+                    HandleSetKeepZoomMinimized(doc.RootElement);
+                    break;
+                case "getKeepZoomMinimized":
+                    HandleGetKeepZoomMinimized(client);
                     break;
                 default:
                     Debug.WriteLine($"[WS] Unknown command type: {type}");
@@ -241,6 +292,73 @@ public class AgentWebSocketServer : IDisposable
         if (url != null && token != null && uploader != null)
             _uploader.SetAuth(url, token, uploader);
     }
+
+    // ─── Microphone command handlers ────────────────────────────────────────
+
+    private void HandleGetMicrophones(IWebSocketConnection client)
+    {
+        if (_micManager == null) return;
+        var devices = _micManager.GetDevices();
+        var msg = new MicrophoneListMessage
+        {
+            Devices = devices.Select(ToDto).ToList(),
+        };
+        SendTo(client, msg);
+    }
+
+    private void HandleSetMicrophone(JsonElement root)
+    {
+        if (_micManager == null) return;
+
+        // null or empty deviceId = revert to system default
+        string? deviceId = root.TryGetProperty("deviceId", out var d) ? d.GetString() : null;
+        if (string.IsNullOrEmpty(deviceId)) deviceId = null;
+
+        _micManager.SetDevice(deviceId);
+        Debug.WriteLine($"[WS] setMicrophone: {deviceId ?? "(default)"}");
+    }
+
+    // ─── Zoom suppressor command handlers ──────────────────────────────────
+
+    private void HandleSetKeepZoomMinimized(JsonElement root)
+    {
+        if (_zoomSuppressor == null) return;
+        if (root.TryGetProperty("enabled", out var enabled))
+        {
+            _zoomSuppressor.Enabled = enabled.GetBoolean();
+            Debug.WriteLine($"[WS] setKeepZoomMinimized: {_zoomSuppressor.Enabled}");
+        }
+    }
+
+    private void HandleGetKeepZoomMinimized(IWebSocketConnection client)
+    {
+        var msg = new KeepZoomMinimizedMessage
+        {
+            Enabled = _zoomSuppressor?.Enabled ?? false,
+        };
+        SendTo(client, msg);
+    }
+
+    /// <summary>Broadcast the current microphone device list to all clients.</summary>
+    public void BroadcastMicrophoneList()
+    {
+        if (_micManager == null) return;
+        var devices = _micManager.GetDevices();
+        var msg = new MicrophoneListMessage
+        {
+            Devices = devices.Select(ToDto).ToList(),
+        };
+        Broadcast(msg);
+    }
+
+    private static MicDeviceDto ToDto(MicDeviceInfo info) => new()
+    {
+        DeviceId = info.DeviceId,
+        Name = info.Name,
+        IsDefault = info.IsDefault,
+        IsSelected = info.IsSelected,
+        PeakLevel = info.PeakLevel,
+    };
 
     // ─── Recording event handlers → broadcast ─────────────────────────────
 
@@ -407,6 +525,7 @@ public class AgentWebSocketServer : IDisposable
         {
             _uploader.UploadCompleted -= OnUploadCompleted;
         }
+        _micManager = null;
 
         List<IWebSocketConnection> snapshot;
         lock (_clientLock)

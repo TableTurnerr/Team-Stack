@@ -55,6 +55,57 @@ public class RecordingStorageManager
         return Path.Combine(_recordingsDir, $".tmp_{timestamp}_{sanitized}.wav");
     }
 
+    /// <summary>
+    /// Rename a recording file to include the call log ID so that even a
+    /// manual upload can be auto-linked.  Returns the new file name.
+    /// Format: {timestamp}_{phone}_cl-{callLogId}.mp3
+    /// </summary>
+    public string? RenameWithCallLogId(string fileName, string callLogId)
+    {
+        lock (_lock)
+        {
+            var entry = _entries.Find(e => e.FileName == fileName);
+            if (entry == null) return null;
+
+            // Already renamed?
+            if (fileName.Contains($"_cl-{callLogId}")) return fileName;
+
+            var ext = Path.GetExtension(fileName);
+            var baseName = Path.GetFileNameWithoutExtension(fileName);
+            var newFileName = $"{baseName}_cl-{callLogId}{ext}";
+
+            var oldPath = Path.Combine(_recordingsDir, fileName);
+            var newPath = Path.Combine(_recordingsDir, newFileName);
+
+            try
+            {
+                if (File.Exists(oldPath))
+                    File.Move(oldPath, newPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Storage] Rename failed: {ex.Message}");
+                return null;
+            }
+
+            entry.FileName = newFileName;
+            entry.CallLogId = callLogId;
+            PersistManifest();
+            Debug.WriteLine($"[Storage] Renamed: {fileName} → {newFileName}");
+            return newFileName;
+        }
+    }
+
+    /// <summary>
+    /// Extract a call log ID from a filename containing the _cl-{id} pattern.
+    /// Returns null if no match.
+    /// </summary>
+    public static string? ExtractCallLogId(string fileName)
+    {
+        var match = Regex.Match(fileName, @"_cl-([a-zA-Z0-9]+)\.");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
     public RecordingEntry AddEntry(string fileName, string phoneNumber, DateTime startTime)
     {
         var entry = new RecordingEntry

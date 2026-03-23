@@ -191,7 +191,8 @@ export function useCallRecorder(
             const dateStr = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
             const timeStr = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
             const phoneStr = (phone || 'unknown').replace(/[^\d+]/g, '');
-            const fileName = `recording_${dateStr}_${timeStr}_${phoneStr}.webm`;
+            const callLogSuffix = callLogId ? `_cl-${callLogId}` : '';
+            const fileName = `recording_${dateStr}_${timeStr}_${phoneStr}${callLogSuffix}.webm`;
 
             const file = new File([blob], fileName, { type: blob.type || 'audio/webm' });
 

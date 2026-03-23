@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useRef, ReactNode } from 'react';
 import { useAuth } from './auth-context';
-import { useLocalAgent } from './local-agent-context';
+import { useLocalAgent, type AgentRecordingCompleted, type AgentUploadQueueStatus } from './local-agent-context';
 import { useAgentRecorder, type RecorderStatus } from '@/hooks/use-agent-recorder';
 import { useCallRecorder, type RecorderStatus as BrowserRecorderStatus } from '@/hooks/use-call-recorder';
 
@@ -24,6 +24,10 @@ interface CallRecordingContextType {
     discardDeferredRecording: () => void;
     isDeferredMode: boolean;
     deferredSegments: any[];
+    /** Latest completed recording from the local agent (null in browser mode) */
+    latestRecording: AgentRecordingCompleted | null;
+    /** Agent upload queue status (null in browser mode) */
+    uploadQueueStatus: AgentUploadQueueStatus | null;
 }
 
 const CallRecordingContext = createContext<CallRecordingContextType | undefined>(undefined);
@@ -55,7 +59,12 @@ export function CallRecordingProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <CallRecordingContext.Provider value={{ ...recorder, setPhoneNumber }}>
+        <CallRecordingContext.Provider value={{
+            ...recorder,
+            setPhoneNumber,
+            latestRecording: isConnected ? agentRecorder.latestRecording : null,
+            uploadQueueStatus: isConnected ? { pendingCount: agentRecorder.uploadPendingCount, failedCount: agentRecorder.uploadFailedCount, currentUpload: null } : null,
+        }}>
             {children}
         </CallRecordingContext.Provider>
     );

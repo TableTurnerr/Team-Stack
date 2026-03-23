@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using LocalCrmAgent.Models;
 using LocalCrmAgent.Services;
@@ -68,8 +69,12 @@ public class TrayIconManager : IDisposable
             RebuildMicSubmenu();
 
         var contextMenu = new ContextMenuStrip();
-        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-        var versionLabel = version != null ? $"CRM Agent v{version.Major}.{version.Minor}.{version.Build}" : "CRM Agent";
+        var versionDisplay = System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion
+            ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)
+            ?? "0.0.0";
+        var versionLabel = $"CRM Agent v{versionDisplay}";
         contextMenu.Items.Add(new ToolStripMenuItem(versionLabel) { Enabled = false, Font = new Font(contextMenu.Font, FontStyle.Bold) });
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(_statusItem);

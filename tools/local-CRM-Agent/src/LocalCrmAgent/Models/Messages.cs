@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json.Serialization;
 
 namespace LocalCrmAgent.Models;
@@ -60,7 +61,11 @@ public class NetworkQualityMessage : AgentMessage
 public class HeartbeatMessage : AgentMessage
 {
     [JsonPropertyName("version")]
-    public string Version { get; set; } = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+    public string Version { get; set; } = System.Reflection.Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+        ?.InformationalVersion
+        ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)
+        ?? "0.0.0";
 
     [JsonPropertyName("uptime")]
     public int Uptime { get; set; }

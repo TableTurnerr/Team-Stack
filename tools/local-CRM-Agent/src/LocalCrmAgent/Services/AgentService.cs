@@ -15,6 +15,7 @@ public class AgentService : IDisposable
     private readonly ZoomAudioMonitor _audioMonitor;
     private readonly AudioRecorderService? _recorder;
     private readonly RecordingUploadService? _uploader;
+    private readonly MicrophoneManager? _micManager;
 
     private CancellationTokenSource? _cts;
     private Task? _broadcastTask;
@@ -40,7 +41,8 @@ public class AgentService : IDisposable
         NetworkMonitor networkMonitor,
         ZoomAudioMonitor audioMonitor,
         AudioRecorderService? recorder = null,
-        RecordingUploadService? uploader = null)
+        RecordingUploadService? uploader = null,
+        MicrophoneManager? micManager = null)
     {
         _fusion = fusion;
         _wsServer = wsServer;
@@ -48,6 +50,7 @@ public class AgentService : IDisposable
         _audioMonitor = audioMonitor;
         _recorder = recorder;
         _uploader = uploader;
+        _micManager = micManager;
 
         _wsServer.ConnectionCountChanged += count =>
             ConnectionCountChanged?.Invoke(count);
@@ -63,6 +66,7 @@ public class AgentService : IDisposable
         _fusion.Start();
         _wsServer.Start();
         _uploader?.Start();
+        _micManager?.StartMonitoring();
 
         // Start periodic broadcast (state updates + heartbeat)
         _broadcastTask = Task.Run(() => BroadcastLoop(_cts.Token));
@@ -169,6 +173,7 @@ public class AgentService : IDisposable
         try { Task.WhenAll(_broadcastTask ?? Task.CompletedTask, _networkTask ?? Task.CompletedTask).Wait(3000); }
         catch { }
 
+        _micManager?.Dispose();
         _recorder?.Dispose();
         _uploader?.Stop();
         _wsServer.Stop();

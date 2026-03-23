@@ -31,21 +31,26 @@ static class Program
         var windowMonitor = new ZoomWindowMonitor();
         var networkMonitor = new NetworkMonitor();
         var fusion = new CallStateFusion(audioMonitor, windowMonitor);
+        var micManager = new MicrophoneManager(fusion);
         var storageManager = new RecordingStorageManager();
-        var recorder = new AudioRecorderService(storageManager, fusion);
+        var recorder = new AudioRecorderService(storageManager, fusion, micManager);
         var uploader = new RecordingUploadService(storageManager);
+        var zoomSuppressor = new ZoomWindowSuppressor();
         var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
         wsServer.SetRecordingServices(recorder, uploader, storageManager);
-        var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor, recorder, uploader);
+        wsServer.SetMicrophoneManager(micManager);
+        wsServer.SetZoomSuppressor(zoomSuppressor);
+        var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor, recorder, uploader, micManager);
         var autoUpdater = new AutoUpdateService();
 
         // ── Start agent ────────────────────────────────────────────
         agent.Start();
+        zoomSuppressor.Start();
         autoUpdater.Start();
         Debug.WriteLine("[Main] Agent started, entering message loop...");
 
         // ── Create tray icon (must be on STA/UI thread) ────────────
-        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater, recorder, storageManager);
+        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater, recorder, storageManager, micManager, zoomSuppressor);
 
         // ── Run WinForms message loop (blocks until Exit) ──────────
         Application.Run();
@@ -53,7 +58,9 @@ static class Program
         // ── Cleanup ────────────────────────────────────────────────
         autoUpdater.Dispose();
         agent.Stop();
+        zoomSuppressor.Dispose();
         networkMonitor.Dispose();
+        micManager.Dispose();
         Debug.WriteLine("[Main] Agent stopped, exiting.");
     }
 

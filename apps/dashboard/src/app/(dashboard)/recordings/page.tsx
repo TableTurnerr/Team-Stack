@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Mic, Upload, Search, RefreshCw, Trash2, Play, Pause, X, FileAudio, Pencil, Filter, History, Headphones, Download, Minimize2, Maximize2 } from 'lucide-react';
+import { Mic, Upload, Search, RefreshCw, Trash2, X, FileAudio, Pencil, Filter, History, Headphones, Download } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Recording } from '@/lib/types';
 import { formatDate, formatDateTime, formatDuration, formatPhoneNumber, cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting } from '@/lib/utils';
@@ -16,6 +16,7 @@ import { ZoomCallButton } from '@/components/zoom-call-button';
 import { TableContainer, IndexCell, HeaderIndexCell, ResizableTh, useResizableColumns, TablePagination, TableEmptyState } from '@/components/ui/data-table';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
+import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 
@@ -63,33 +64,9 @@ export default function RecordingsPage() {
 
   // Audio player state
   const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
-  const [playerMinimized, setPlayerMinimized] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isHoveringMic, setIsHoveringMic] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const closePlayer = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    setPlayingRecording(null);
-    setPlayerMinimized(false);
-    setIsPlaying(false);
-  };
-
-  const togglePlayback = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
-    setIsPlaying(!isPlaying);
-  };
 
   const handlePlayRecording = (recording: Recording) => {
     setPlayingRecording(recording);
-    setPlayerMinimized(false);
   };
 
   // Check for duplicate recordings by original_filename - batched with retry logic
@@ -233,8 +210,13 @@ export default function RecordingsPage() {
 
         const meta = extractMetadata(f.file.name);
         if (meta) {
-          formData.append('recording_date', meta.isoDate);
-          formData.append('note', `Call on ${meta.displayDate}`);
+          if (meta.isoDate) formData.append('recording_date', meta.isoDate);
+          if (meta.displayDate) formData.append('note', `Call on ${meta.displayDate}`);
+          // Auto-link to call log if _cl-{id} is in the filename
+          if (meta.callLogId) {
+            formData.append('call_log', meta.callLogId);
+            onLog?.(`Auto-linked to call log: ${meta.callLogId}`);
+          }
         }
 
         // Upload with retry and timeout
@@ -298,16 +280,36 @@ export default function RecordingsPage() {
   };
 
   const extractMetadata = (filename: string) => {
-    const pattern = /^recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})_(.+)$/;
-    const match = filename.replace(/\.[^/.]+$/, "").match(pattern);
-    if (match) {
-      const [, date, time, phone] = match;
+    const base = filename.replace(/\.[^/.]+$/, "");
+
+    // Extract call log ID from _cl-{id} suffix (works for both browser and agent filenames)
+    const clMatch = base.match(/_cl-([a-zA-Z0-9]+)$/);
+    const callLogId = clMatch ? clMatch[1] : null;
+    const baseCleaned = clMatch ? base.replace(/_cl-[a-zA-Z0-9]+$/, '') : base;
+
+    // Browser format: recording_DD-MM-YYYY_HH-MM-SS_{phone}
+    const browserPattern = /^recording_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{2})_(.+)$/;
+    const browserMatch = baseCleaned.match(browserPattern);
+    if (browserMatch) {
+      const [, date, time, phone] = browserMatch;
       const [day, month, year] = date.split('-');
       const formattedTime = time.replace(/-/g, ':');
       const isoDate = `${year}-${month}-${day}T${formattedTime}+05:00`;
-      return { phone, isoDate, displayDate: `${date} at ${formattedTime}` };
+      return { phone, isoDate, displayDate: `${date} at ${formattedTime}`, callLogId };
     }
-    return null;
+
+    // Agent format: YYYY-MM-DD_HH-mm-ss-fff_{phone}
+    const agentPattern = /^(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})-\d{3}_(.+)$/;
+    const agentMatch = baseCleaned.match(agentPattern);
+    if (agentMatch) {
+      const [, date, time, phone] = agentMatch;
+      const formattedTime = time.replace(/-/g, ':');
+      const isoDate = `${date}T${formattedTime}+05:00`;
+      const displayDate = `${date.split('-').reverse().join('-')} at ${formattedTime}`;
+      return { phone, isoDate, displayDate, callLogId };
+    }
+
+    return callLogId ? { phone: null, isoDate: null, displayDate: null, callLogId } : null;
   };
 
   const getAudioDuration = (file: File): Promise<number> => {
@@ -831,129 +833,10 @@ export default function RecordingsPage() {
         )}
       </TableContainer>
 
-      {/* Floating Recording Player */}
-      {playingRecording && (
-        <div 
-          className={cn(
-            "fixed z-50 transition-all duration-300",
-            playerMinimized 
-              ? "bottom-4 right-4 w-auto" 
-              : "inset-0 flex items-end justify-center sm:items-center p-4 bg-black/40 backdrop-blur-sm"
-          )}
-          onClick={!playerMinimized ? closePlayer : undefined}
-        >
-          <div
-            className={cn(
-              "bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-2xl transition-all duration-300 overflow-hidden",
-              playerMinimized 
-                ? "w-64 p-3 flex flex-col gap-2" 
-                : "w-full max-w-md p-4 space-y-3"
-            )}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                {playerMinimized ? (
-                  <button 
-                    onClick={togglePlayback}
-                    onMouseEnter={() => setIsHoveringMic(true)}
-                    onMouseLeave={() => setIsHoveringMic(false)}
-                    className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all",
-                      isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--warning-subtle)] text-[var(--warning)]"
-                    )}
-                  >
-                    {isPlaying ? (
-                      isHoveringMic ? (
-                        <Pause size={16} fill="currentColor" />
-                      ) : (
-                        <Mic size={16} className="animate-pulse" />
-                      )
-                    ) : (
-                      <Play size={16} fill="currentColor" className="ml-0.5" />
-                    )}
-                  </button>
-                ) : (
-                  <div className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-                    isPlaying ? "bg-[var(--primary)]/10 text-[var(--primary)]" : "bg-[var(--card-hover)] text-[var(--muted)]"
-                  )}>
-                    <Mic size={16} />
-                  </div>
-                )}
-                <div className="flex flex-col min-w-0">
-                  {playerMinimized ? (
-                    <span className="text-xs font-medium truncate text-[var(--foreground)]">
-                      {playingRecording.note || playingRecording.original_filename || 'Call Recording'}
-                    </span>
-                  ) : (
-                    <>
-                      <span className={cn(
-                        "text-[10px] font-bold uppercase tracking-widest leading-none mb-1",
-                        isPlaying ? "text-[var(--primary)]" : "text-[var(--muted)]"
-                      )}>
-                        {isPlaying ? 'Playing' : 'Paused'}
-                      </span>
-                      <span className="text-sm font-medium truncate">
-                        {playingRecording.note || playingRecording.original_filename || 'Call Recording'}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {!playerMinimized && playingRecording.file && (
-                  <a
-                    href={pb.files.getUrl(playingRecording, playingRecording.file)}
-                    download
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
-                    title="Download"
-                  >
-                    <Download size={15} />
-                  </a>
-                )}
-                <button
-                  onClick={() => setPlayerMinimized(!playerMinimized)}
-                  className="p-1.5 rounded-lg text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors"
-                  title={playerMinimized ? "Expand" : "Minimize"}
-                >
-                  {playerMinimized ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
-                </button>
-                <button
-                  onClick={closePlayer}
-                  className={cn(
-                    "p-1.5 rounded-lg text-[var(--muted)] transition-colors",
-                    playerMinimized ? "hover:text-[var(--error)] hover:bg-[var(--error)]/5" : "hover:text-[var(--foreground)] hover:bg-[var(--card-hover)]"
-                  )}
-                  title="Close"
-                >
-                  <X size={15} />
-                </button>
-              </div>
-            </div>
-            {playingRecording.file ? (
-              <audio
-                ref={audioRef}
-                controls={!playerMinimized}
-                autoPlay
-                preload="metadata"
-                className={cn(
-                  "w-full h-10 transition-all",
-                  playerMinimized ? "h-0 opacity-0 pointer-events-none" : "h-10 opacity-100"
-                )}
-                src={pb.files.getUrl(playingRecording, playingRecording.file)}
-                onEnded={closePlayer}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-              />
-            ) : !playerMinimized && (
-              <p className="text-sm text-[var(--muted)] text-center py-2">No audio file attached.</p>
-            )}
-          </div>
-        </div>
-      )}
+      <RecordingPlayerOverlay
+        recording={playingRecording}
+        onClose={() => setPlayingRecording(null)}
+      />
 
     </div>
   );

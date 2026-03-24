@@ -32,7 +32,6 @@ export function extractFirstPhone(phoneNumbers: string): string {
 
 interface ZoomCallButtonProps {
     phoneNumber: string;
-    callerId?: string;
     size?: 'sm' | 'md';
     className?: string;
 }
@@ -44,7 +43,6 @@ interface ZoomCallButtonProps {
  */
 export function ZoomCallButton({
     phoneNumber,
-    callerId,
     size = 'sm',
     className
 }: ZoomCallButtonProps) {

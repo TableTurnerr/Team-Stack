@@ -222,12 +222,7 @@ public class CliApp
         choices.Add("Settings");
         choices.Add("Exit");
 
-        return AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]What would you like to do?[/]")
-                .HighlightStyle(new Style(Color.DodgerBlue1, decoration: Decoration.Bold))
-                .PageSize(12)
-                .AddChoices(choices));
+        return NumberedMenu.Show("[bold]What would you like to do?[/]", choices, Color.DodgerBlue1);
     }
 
     // ── Action handlers ─────────────────────────────────────
@@ -335,12 +330,11 @@ public class CliApp
             return;
         }
 
-        var choice = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Select a tool to install:[/]")
-                .HighlightStyle(new Style(Color.Green))
-                .AddChoices(installable.Select(t => $"{t.DisplayName} (v{FormatVersionRaw(t.LatestVersion)})"))
-                .AddChoices("Cancel"));
+        var installChoices = installable
+            .Select(t => $"{t.DisplayName} (v{FormatVersionRaw(t.LatestVersion)})")
+            .Append("Cancel")
+            .ToList();
+        var choice = NumberedMenu.Show("[bold]Select a tool to install:[/]", installChoices, Color.Green);
 
         if (choice == "Cancel") return;
 
@@ -381,11 +375,7 @@ public class CliApp
 
         choices.Add("Cancel");
 
-        var choice = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Select a tool to update:[/]")
-                .HighlightStyle(new Style(Color.Yellow))
-                .AddChoices(choices));
+        var choice = NumberedMenu.Show("[bold]Select a tool to update:[/]", choices, Color.Yellow);
 
         if (choice == "Cancel") return;
 
@@ -439,13 +429,11 @@ public class CliApp
             return;
         }
 
-        var choice = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Select a tool to uninstall:[/]")
-                .HighlightStyle(new Style(Color.Red))
-                .AddChoices(tools.Select(t =>
-                    $"{t.DisplayName} (v{t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion)})"))
-                .AddChoices("Cancel"));
+        var uninstallChoices = tools
+            .Select(t => $"{t.DisplayName} (v{t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion)})")
+            .Append("Cancel")
+            .ToList();
+        var choice = NumberedMenu.Show("[bold]Select a tool to uninstall:[/]", uninstallChoices, Color.Red);
 
         if (choice == "Cancel") return;
 
@@ -496,11 +484,7 @@ public class CliApp
 
         choices.Add("Cancel");
 
-        var choice = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Switch which tool from dev build to release?[/]")
-                .HighlightStyle(new Style(Color.Cyan1))
-                .AddChoices(choices));
+        var choice = NumberedMenu.Show("[bold]Switch which tool from dev build to release?[/]", choices, Color.Cyan1);
 
         if (choice == "Cancel") return;
 
@@ -547,13 +531,11 @@ public class CliApp
             return;
         }
 
-        var choice = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Select a tool to manage:[/]")
-                .HighlightStyle(new Style(Color.DodgerBlue1))
-                .AddChoices(installed.Select(t =>
-                    $"{t.DisplayName} (v{t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion)})"))
-                .AddChoices("Cancel"));
+        var manageChoices = installed
+            .Select(t => $"{t.DisplayName} (v{t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion)})")
+            .Append("Cancel")
+            .ToList();
+        var choice = NumberedMenu.Show("[bold]Select a tool to manage:[/]", manageChoices, Color.DodgerBlue1);
 
         if (choice == "Cancel") return;
 
@@ -580,12 +562,7 @@ public class CliApp
             "Back",
         };
 
-        var action = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title($"[bold]Managing: {Markup.Escape(tool.DisplayName)}[/]")
-                .HighlightStyle(new Style(Color.DodgerBlue1))
-                .PageSize(12)
-                .AddChoices(actions));
+        var action = NumberedMenu.Show($"[bold]Managing: {Markup.Escape(tool.DisplayName)}[/]", actions, Color.DodgerBlue1);
 
         switch (action)
         {
@@ -685,11 +662,7 @@ public class CliApp
             .ToList();
         choices.Add("Cancel");
 
-        var choice = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]View release notes for which version?[/]")
-                .PageSize(15)
-                .AddChoices(choices));
+        var choice = NumberedMenu.Show("[bold]View release notes for which version?[/]", choices);
 
         if (choice == "Cancel") return;
 
@@ -941,10 +914,7 @@ public class CliApp
         AnsiConsole.WriteLine();
 
         var actions = new List<string> { "Delete a Version", "Clear All", "Back" };
-        var action = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Cache action:[/]")
-                .AddChoices(actions));
+        var action = NumberedMenu.Show("[bold]Cache action:[/]", actions);
 
         switch (action)
         {
@@ -952,10 +922,7 @@ public class CliApp
                 var versions = cached.Select(c => $"v{FormatVersionRaw(c.version)} ({c.sizeBytes / (1024.0 * 1024.0):F1} MB)").ToList();
                 versions.Add("Cancel");
 
-                var pick = AnsiConsole.Prompt(
-                    new SelectionPrompt<string>()
-                        .Title("[bold]Delete which cached version?[/]")
-                        .AddChoices(versions));
+                var pick = NumberedMenu.Show("[bold]Delete which cached version?[/]", versions);
 
                 if (pick == "Cancel") return;
 
@@ -995,16 +962,15 @@ public class CliApp
             var cacheSizeMb = cacheSize / (1024.0 * 1024.0);
             var cacheLabel = $"Clear Download Cache ({cacheSizeMb:F1} MB)";
 
-            var action = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[bold]Settings[/]")
-                    .HighlightStyle(new Style(Color.DodgerBlue1))
-                    .AddChoices(
-                        startupLabel,
-                        autoUpdateLabel,
-                        "Configure API Token",
-                        cacheLabel,
-                        "Back"));
+            var settingsChoices = new List<string>
+            {
+                startupLabel,
+                autoUpdateLabel,
+                "Configure API Token",
+                cacheLabel,
+                "Back",
+            };
+            var action = NumberedMenu.Show("[bold]Settings[/]", settingsChoices, Color.DodgerBlue1);
 
             if (action == "Back") break;
 
@@ -1078,10 +1044,7 @@ public class CliApp
             actions.AddRange(["Add Token", "Cancel"]);
         }
 
-        var action = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Token action:[/]")
-                .AddChoices(actions));
+        var action = NumberedMenu.Show("[bold]Token action:[/]", actions);
 
         switch (action)
         {
@@ -1175,12 +1138,7 @@ public class CliApp
             .ToList();
         choices.Add("Cancel");
 
-        var choice = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[bold]Install which version?[/]")
-                .PageSize(15)
-                .HighlightStyle(new Style(Color.Green))
-                .AddChoices(choices));
+        var choice = NumberedMenu.Show("[bold]Install which version?[/]", choices, Color.Green);
 
         if (choice == "Cancel") return (null, null);
 

@@ -17,6 +17,7 @@ import { FollowUpProvider } from '@/contexts/follow-up-context';
 import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
 import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
+import { ZoomLoginPrompt } from '@/components/zoom-login-prompt';
 import { RecycleBinProvider } from '@/contexts/recycle-bin-context';
 import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
@@ -89,6 +90,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       </div>
       {/* Floating dialer — always mounted for persistence, hidden on session page */}
       <ZoomPhoneDialer hidden={isSessionPage} />
+      {/* Zoom Smart Embed login prompt — shown when login check fails */}
+      <ZoomLoginPrompt />
     </div>
   );
 }

@@ -51,6 +51,20 @@ interface ZoomPhoneContextType {
     incomingCallerNumber: string | null;
     /** Whether Zoom reported an audio disconnect (Reconnect Audio screen) */
     isAudioDisconnected: boolean;
+    /** Whether the Zoom Smart Embed is confirmed as logged in */
+    zoomEmbedLoggedIn: boolean;
+    /** Whether the Zoom login prompt modal is currently shown */
+    showZoomLoginPrompt: boolean;
+    /** Show the Zoom login prompt (called when gating on login) */
+    requestZoomLogin: () => void;
+    /** Confirm the user has logged into Zoom embed */
+    confirmZoomLoggedIn: () => void;
+    /** Dismiss the Zoom login prompt without confirming */
+    dismissZoomLoginPrompt: () => void;
+    /** Whether a device mismatch was detected (call routed to a different device) */
+    deviceMismatchDetected: boolean;
+    /** Clear the device mismatch state */
+    clearDeviceMismatch: () => void;
 }
 
 const ZoomPhoneContext = createContext<ZoomPhoneContextType | null>(null);
@@ -77,6 +91,8 @@ export function useZoomPhoneOptional() {
 // whose caller matches our own number is a false positive (Zoom echoing our
 // outbound call) and gets suppressed.
 const OWN_PHONE_STORAGE_KEY = 'crm:zoom-own-phone-number';
+const ZOOM_EMBED_AUTH_KEY = 'crm:zoom-embed-auth';
+const ZOOM_EMBED_AUTH_TTL = 12 * 60 * 60 * 1000; // 12 hours
 
 /** Normalize to last 10 digits for comparison (strips country code, +, formatting) */
 function normalizeDigits(phone: string): string {
@@ -251,6 +267,18 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     // during an active call (Reconnect Audio screen), cleared on next call event
     const [isAudioDisconnected, setIsAudioDisconnected] = useState(false);
 
+    // ── Zoom Embed Login Detection ──────────────────────────────────────
+    const [zoomEmbedLoggedIn, setZoomEmbedLoggedIn] = useState(false);
+    const zoomEmbedLoggedInRef = useRef(false);
+    const [showZoomLoginPrompt, setShowZoomLoginPrompt] = useState(false);
+
+    // ── Device Mismatch Detection ────────────────────────────────────────
+    // When the CRM dials outbound and the local agent (WASAPI) doesn't detect
+    // call audio within 7 seconds, the Zoom embed is routing to another device.
+    const [deviceMismatchDetected, setDeviceMismatchDetected] = useState(false);
+    const deviceMismatchDetectedRef = useRef(false);
+    const deviceCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     // Call direction tracking
     const [callDirection, setCallDirection] = useState<'outbound' | 'inbound' | null>(null);
     const [incomingCallerNumber, setIncomingCallerNumber] = useState<string | null>(null);
@@ -282,6 +310,25 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         }
     }, [isVirtualDialer]);
 
+    // Load Zoom embed login state from localStorage (with TTL expiry)
+    useEffect(() => {
+        if (isVirtualDialer) {
+            zoomEmbedLoggedInRef.current = true;
+            setZoomEmbedLoggedIn(true);
+            return;
+        }
+        try {
+            const stored = localStorage.getItem(ZOOM_EMBED_AUTH_KEY);
+            if (stored) {
+                const { ts } = JSON.parse(stored);
+                if (Date.now() - ts < ZOOM_EMBED_AUTH_TTL) {
+                    zoomEmbedLoggedInRef.current = true;
+                    setZoomEmbedLoggedIn(true);
+                }
+            }
+        } catch { /* ignore */ }
+    }, [isVirtualDialer]);
+
     // Zoom Phone embed uses each user's own default outbound caller ID.
     // Do NOT override it — pushing a hardcoded number causes "No caller ID"
     // errors for any user whose Zoom account doesn't own that number.
@@ -298,6 +345,7 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         console.log('[Zoom Phone] Refreshing dialer — resetting all call state...');
         // Reset call state so stale ringing/connected status doesn't persist
         if (endedIdleTimerRef.current) { clearTimeout(endedIdleTimerRef.current); endedIdleTimerRef.current = null; }
+        if (deviceCheckTimerRef.current) { clearTimeout(deviceCheckTimerRef.current); deviceCheckTimerRef.current = null; }
         callStatusRef.current = 'idle';
         setCallStatus('idle');
         setIsDialing(false);
@@ -313,14 +361,27 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const toggleDialer = useCallback(() => {
+        if (!isVirtualDialer && !zoomEmbedLoggedInRef.current) {
+            setShowZoomLoginPrompt(true);
+            return;
+        }
         setIsDialerOpen(prev => !prev);
-    }, []);
+    }, [isVirtualDialer]);
 
     // ── Listen for postMessage events from the Zoom embed ───────────
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
             // Only accept messages from Zoom's origin (bypassed in virtual dialer test mode)
             if (!isVirtualDialer && event.origin !== 'https://applications.zoom.us') return;
+
+            // Auto-detect Zoom embed login: any postMessage from Zoom origin = authenticated
+            // Skip auto-detect during device mismatch — user must manually re-verify
+            if (!isVirtualDialer && !zoomEmbedLoggedInRef.current && !deviceMismatchDetectedRef.current) {
+                zoomEmbedLoggedInRef.current = true;
+                setZoomEmbedLoggedIn(true);
+                try { localStorage.setItem(ZOOM_EMBED_AUTH_KEY, JSON.stringify({ ts: Date.now() })); } catch { /* */ }
+                console.log('[Zoom Phone] Auto-detected Zoom embed login from postMessage');
+            }
 
             // Only process events from our primary iframe (prevents duplicate
             // events from the hidden layout iframe vs the docked session iframe).
@@ -392,6 +453,31 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
                     console.log('[Zoom Phone] Call ringing — direction:', direction, '| outboundIntent:', outboundIntentRef.current, '| ownNumber:', ownPhoneNumberRef.current);
                     setCallDirection(direction);
 
+                    // ── Device mismatch check ──
+                    // For outbound calls when the local agent is connected, verify
+                    // that the agent detects call audio within 7 seconds. If it stays
+                    // idle, the Zoom embed is routing to a different device.
+                    if (direction === 'outbound' && outboundIntentRef.current && agentConnectedRef.current && !isVirtualDialer) {
+                        if (deviceCheckTimerRef.current) clearTimeout(deviceCheckTimerRef.current);
+                        deviceCheckTimerRef.current = setTimeout(() => {
+                            deviceCheckTimerRef.current = null;
+                            const agState = agentCallStateRef.current;
+                            if (!agState || agState.state === 'idle') {
+                                console.log('[Zoom Phone] Device mismatch — agent did not detect call after 7s');
+                                deviceMismatchDetectedRef.current = true;
+                                setDeviceMismatchDetected(true);
+                                // Auto-hangup the misrouted call
+                                endCallRef.current();
+                                // Reset Zoom login so device verification is required again
+                                zoomEmbedLoggedInRef.current = false;
+                                setZoomEmbedLoggedIn(false);
+                                try { localStorage.removeItem(ZOOM_EMBED_AUTH_KEY); } catch { /* */ }
+                                // Show the login/device prompt
+                                setShowZoomLoginPrompt(true);
+                            }
+                        }, 7000);
+                    }
+
                     if (direction === 'inbound') {
                         const callerNum = extractCallerNumber(data || {});
                         if (callerNum) {
@@ -410,6 +496,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             } else if (eventLower.includes('connected') || eventLower.includes('answered')) {
                 // Cancel any pending idle-reset from a previous ended event
                 if (endedIdleTimerRef.current) { clearTimeout(endedIdleTimerRef.current); endedIdleTimerRef.current = null; }
+                // Cancel device mismatch check — call connected locally
+                if (deviceCheckTimerRef.current) { clearTimeout(deviceCheckTimerRef.current); deviceCheckTimerRef.current = null; }
                 // Clear audio disconnect flag — audio reconnected
                 setIsAudioDisconnected(false);
                 // Cancel any pending agent grace timer — call reconnected
@@ -445,6 +533,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             ) {
                 // Only process if we're actually in a call — ignore stale/duplicate end events
                 if (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected') {
+                    // Cancel device mismatch check
+                    if (deviceCheckTimerRef.current) { clearTimeout(deviceCheckTimerRef.current); deviceCheckTimerRef.current = null; }
                     // Helper to process the call-ended transition
                     const processCallEnded = () => {
                         // Guard: another event may have already transitioned us
@@ -495,6 +585,8 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             ) {
                 // Only process if we're actually in a call
                 if (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected') {
+                    // Cancel device mismatch check
+                    if (deviceCheckTimerRef.current) { clearTimeout(deviceCheckTimerRef.current); deviceCheckTimerRef.current = null; }
                     const processCallFailed = () => {
                         if (callStatusRef.current !== 'ringing' && callStatusRef.current !== 'connected') return;
                         console.log('[Zoom Phone] Call failed/rejected:', type);
@@ -596,34 +688,33 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
 
         const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
 
-        if (!iframe?.contentWindow) {
-            console.error('[Zoom Phone] Cannot end call: Iframe or contentWindow not found');
-            return;
+        if (iframe?.contentWindow) {
+            console.log('[Zoom Phone] Sending end call commands...');
+
+            const commands = [
+                'zp-hang-up',
+                'zp-terminate-call',
+                'zp-end-call',
+                'hangup',
+                'end-call',
+                'disconnect',
+                'zp-hangup'
+            ];
+
+            commands.forEach(cmd => {
+                iframe.contentWindow?.postMessage(
+                    { type: cmd, data: {} },
+                    'https://applications.zoom.us'
+                );
+            });
+
+            iframe.contentWindow?.postMessage({ action: 'endCall' }, 'https://applications.zoom.us');
+            iframe.contentWindow?.postMessage({ action: 'hangup' }, 'https://applications.zoom.us');
+        } else {
+            console.warn('[Zoom Phone] Iframe not found — forcing status update without postMessage');
         }
 
-        console.log('[Zoom Phone] Sending end call commands...');
-
-        const commands = [
-            'zp-hang-up',
-            'zp-terminate-call',
-            'zp-end-call',
-            'hangup',
-            'end-call',
-            'disconnect',
-            'zp-hangup'
-        ];
-
-        commands.forEach(cmd => {
-            iframe.contentWindow?.postMessage(
-                { type: cmd, data: {} },
-                'https://applications.zoom.us'
-            );
-        });
-
-        iframe.contentWindow?.postMessage({ action: 'endCall' }, 'https://applications.zoom.us');
-        iframe.contentWindow?.postMessage({ action: 'hangup' }, 'https://applications.zoom.us');
-
-        // Force status update if Zoom doesn't respond
+        // Force status update if Zoom doesn't respond (or iframe wasn't found)
         setTimeout(() => {
             if (callStatusRef.current === 'ringing' || callStatusRef.current === 'connected') {
                 console.log('[Zoom Phone] Zoom did not respond to end call, forcing status update');
@@ -648,6 +739,42 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             autoHangupSecondsRef.current = seconds;
             setAutoHangupSecondsState(seconds);
         }
+    }, []);
+
+    const requestZoomLogin = useCallback(() => {
+        setShowZoomLoginPrompt(true);
+    }, []);
+
+    const confirmZoomLoggedIn = useCallback(() => {
+        zoomEmbedLoggedInRef.current = true;
+        setZoomEmbedLoggedIn(true);
+        try { localStorage.setItem(ZOOM_EMBED_AUTH_KEY, JSON.stringify({ ts: Date.now() })); } catch { /* */ }
+        setShowZoomLoginPrompt(false);
+        // Clear any device mismatch — user has re-verified
+        deviceMismatchDetectedRef.current = false;
+        setDeviceMismatchDetected(false);
+        // Refresh the dialer iframe to pick up the new auth session
+        refreshDialer();
+    }, [refreshDialer]);
+
+    const dismissZoomLoginPrompt = useCallback(() => {
+        setShowZoomLoginPrompt(false);
+    }, []);
+
+    // Cancel device check timer when agent detects call activity (WASAPI confirmation)
+    useEffect(() => {
+        if (agentCallState &&
+            (agentCallState.state === 'ringing' || agentCallState.state === 'connected') &&
+            deviceCheckTimerRef.current) {
+            console.log('[Zoom Phone] Agent detected call — device check passed');
+            clearTimeout(deviceCheckTimerRef.current);
+            deviceCheckTimerRef.current = null;
+        }
+    }, [agentCallState]);
+
+    const clearDeviceMismatch = useCallback(() => {
+        deviceMismatchDetectedRef.current = false;
+        setDeviceMismatchDetected(false);
     }, []);
 
     // Keep endCall ref updated so the auto-hangup timer always calls the latest version
@@ -702,6 +829,12 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
     }, [iframeReady, sendDialMessage]);
 
     const dialNumber = useCallback((phoneNumber: string) => {
+        // Gate on Zoom embed login
+        if (!isVirtualDialer && !zoomEmbedLoggedInRef.current) {
+            setShowZoomLoginPrompt(true);
+            return;
+        }
+
         const hasPlus = phoneNumber.startsWith('+');
         const digits = phoneNumber.replace(/\D/g, '');
         const cleaned = hasPlus ? `+${digits}` : digits;
@@ -770,6 +903,9 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             autoHangupEnabled, autoHangupSeconds, setAutoHangup,
             callDirection, incomingCallerNumber,
             isAudioDisconnected,
+            zoomEmbedLoggedIn, showZoomLoginPrompt,
+            requestZoomLogin, confirmZoomLoggedIn, dismissZoomLoginPrompt,
+            deviceMismatchDetected, clearDeviceMismatch,
         }}>
             {children}
         </ZoomPhoneContext.Provider>

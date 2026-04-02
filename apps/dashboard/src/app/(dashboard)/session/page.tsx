@@ -82,7 +82,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup, isAudioDisconnected } = useZoomPhone();
+    const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup, isAudioDisconnected, zoomEmbedLoggedIn, requestZoomLogin } = useZoomPhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
@@ -103,6 +103,7 @@ export default function SessionPage() {
     // In virtual dialer mode (tests), skip agent/Zoom checks — telephony is mocked
     const effectiveAgentConnected = agentConnected || isVirtualDialerMode;
     const effectiveZoomDetected = agentZoomDetected || isVirtualDialerMode;
+    const effectiveZoomEmbedLoggedIn = zoomEmbedLoggedIn || isVirtualDialerMode;
     const [zoomAppConfirmed, setZoomAppConfirmed] = useState(isVirtualDialerMode);
     const [zoomDetecting, setZoomDetecting] = useState(false);
     const [zoomDetected, setZoomDetected] = useState<boolean | null>(isVirtualDialerMode ? true : null);
@@ -1026,17 +1027,25 @@ export default function SessionPage() {
     // Start session — step 1: show "Connect Audio" screen
     // ---------------------------------------------------------------------------
     const startSession = useCallback(() => {
+        if (!effectiveZoomEmbedLoggedIn) {
+            requestZoomLogin();
+            return;
+        }
         setPendingTestSession(false);
         setAwaitingAudioConnect(true);
-    }, []);
+    }, [effectiveZoomEmbedLoggedIn, requestZoomLogin]);
 
     // ---------------------------------------------------------------------------
     // Start test session — same flow but marks session as is_test
     // ---------------------------------------------------------------------------
     const startTestSession = useCallback(() => {
+        if (!effectiveZoomEmbedLoggedIn) {
+            requestZoomLogin();
+            return;
+        }
         setPendingTestSession(true);
         setAwaitingAudioConnect(true);
-    }, []);
+    }, [effectiveZoomEmbedLoggedIn, requestZoomLogin]);
 
     // ---------------------------------------------------------------------------
     // Connect audio & create PB session — step 2
@@ -1186,6 +1195,10 @@ export default function SessionPage() {
     // elapsed timer continues from exactly where it stopped.
     // ---------------------------------------------------------------------------
     const resumeLastSession = useCallback(async () => {
+        if (!effectiveZoomEmbedLoggedIn) {
+            requestZoomLogin();
+            return;
+        }
         if (!lastCompletedSession?.ended_at) return;
         try {
             setResuming(true);
@@ -1207,7 +1220,7 @@ export default function SessionPage() {
         } finally {
             setResuming(false);
         }
-    }, [lastCompletedSession, setSession]);
+    }, [lastCompletedSession, setSession, effectiveZoomEmbedLoggedIn, requestZoomLogin]);
 
     // ---------------------------------------------------------------------------
     // Test session cleanup — delete all data created during the test session
@@ -1349,8 +1362,12 @@ export default function SessionPage() {
     // Start standalone mode
     // ---------------------------------------------------------------------------
     const startStandalone = useCallback(() => {
+        if (!effectiveZoomEmbedLoggedIn) {
+            requestZoomLogin();
+            return;
+        }
         setStandaloneMode(true);
-    }, [setStandaloneMode]);
+    }, [setStandaloneMode, effectiveZoomEmbedLoggedIn, requestZoomLogin]);
 
     // ---------------------------------------------------------------------------
     // Exit standalone mode

@@ -77,7 +77,6 @@ export function useZoomPhoneOptional() {
 // whose caller matches our own number is a false positive (Zoom echoing our
 // outbound call) and gets suppressed.
 const OWN_PHONE_STORAGE_KEY = 'crm:zoom-own-phone-number';
-const DEFAULT_CALLER_ID = '+1808559006';
 
 /** Normalize to last 10 digits for comparison (strips country code, +, formatting) */
 function normalizeDigits(phone: string): string {
@@ -283,23 +282,9 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
         }
     }, [isVirtualDialer]);
 
-    // When iframe becomes ready, push caller ID to Zoom
-    useEffect(() => {
-        if (!iframeReady || isVirtualDialer) return;
-
-        // Small delay to let the embedded phone finish internal initialization
-        const timer = setTimeout(() => {
-            const iframe = iframeRef.current || (typeof document !== 'undefined' ? document.getElementById('zoom-iframe') as HTMLIFrameElement : null);
-            if (!iframe?.contentWindow) return;
-
-            console.log('[Zoom Phone] Pushing caller ID to Zoom embed:', DEFAULT_CALLER_ID);
-            iframe.contentWindow.postMessage({ type: 'zp-set-caller-id', data: { callerId: DEFAULT_CALLER_ID } }, 'https://applications.zoom.us');
-            iframe.contentWindow.postMessage({ type: 'zp-set-outbound-caller-id', data: { callerId: DEFAULT_CALLER_ID } }, 'https://applications.zoom.us');
-            iframe.contentWindow.postMessage({ type: 'zp-set-settings', data: { outboundCallerId: DEFAULT_CALLER_ID } }, 'https://applications.zoom.us');
-        }, 2000);
-
-        return () => clearTimeout(timer);
-    }, [iframeReady, isVirtualDialer]);
+    // Zoom Phone embed uses each user's own default outbound caller ID.
+    // Do NOT override it — pushing a hardcoded number causes "No caller ID"
+    // errors for any user whose Zoom account doesn't own that number.
 
     const registerDialCallback = useCallback((cb: (() => void) | null) => {
         dialCallbackRef.current = cb;
@@ -588,13 +573,12 @@ export function ZoomPhoneProvider({ children }: { children: ReactNode }) {
             return false;
         }
 
-        console.log('[Zoom Phone] Sending dial message for:', phoneNumber, '| callerId:', DEFAULT_CALLER_ID);
+        console.log('[Zoom Phone] Sending dial message for:', phoneNumber);
         iframe.contentWindow.postMessage(
             {
                 type: 'zp-make-call',
                 data: {
                     number: phoneNumber,
-                    callerId: DEFAULT_CALLER_ID,
                     autoDial: true
                 }
             },

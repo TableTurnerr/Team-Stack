@@ -17,6 +17,7 @@ public class TrayIconManager : IDisposable
     private readonly NotifyIcon _trayIcon;
     private readonly UpdateScheduler _scheduler;
     private readonly SelfUpdateService _selfUpdater;
+    private DateTime _lastLaunch = DateTime.MinValue;
 
     public TrayIconManager(UpdateScheduler scheduler, SelfUpdateService selfUpdater)
     {
@@ -47,8 +48,15 @@ public class TrayIconManager : IDisposable
             _trayIcon.Icon = SystemIcons.Application;
         }
 
-        // Double-click tray icon → open CLI
-        _trayIcon.DoubleClick += (_, _) => Program.LaunchInteractive();
+        // Single left-click tray icon → open CLI (with debounce to prevent double-launch)
+        _trayIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left && (DateTime.UtcNow - _lastLaunch).TotalSeconds > 1)
+            {
+                _lastLaunch = DateTime.UtcNow;
+                Program.LaunchInteractive();
+            }
+        };
 
         // Subscribe to update events for balloon notifications
         _scheduler.UpdatingTools += names =>

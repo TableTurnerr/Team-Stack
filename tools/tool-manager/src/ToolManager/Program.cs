@@ -52,6 +52,10 @@ static class Program
         }
         using var _ = mutex;
 
+        // Run one-time migrations (safe to run repeatedly)
+        if (!isInteractive)
+            RunMigrations();
+
         // Create services
         var settingsService = new SettingsService();
         settingsService.ApplyAutoStart(settingsService.Settings.AutoStartEnabled);
@@ -145,8 +149,88 @@ static class Program
     }
 
     /// <summary>
+    /// Run idempotent migrations so that updates (which only swap the exe) also
+    /// apply changes to shortcuts, registry entries, etc.
+    /// </summary>
+    private static void RunMigrations()
+    {
+        try
+        {
+            var startMenu = Environment.GetFolderPath(Environment.SpecialFolder.StartMenu);
+            var shortcutDir = Path.Combine(startMenu, "Programs", "TableTurnerr");
+            var oldShortcut = Path.Combine(shortcutDir, "Tool Manager.lnk");
+            var newShortcut = Path.Combine(shortcutDir, "TableTurnerr Tool Manager.lnk");
+
+            // Also check the roaming AppData path used by install.bat
+            var roamingDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                @"Microsoft\Windows\Start Menu\Programs\TableTurnerr");
+            var oldRoaming = Path.Combine(roamingDir, "Tool Manager.lnk");
+            var newRoaming = Path.Combine(roamingDir, "TableTurnerr Tool Manager.lnk");
+
+            // Migrate whichever location has the old shortcut
+            MigrateShortcut(oldShortcut, newShortcut, shortcutDir);
+            MigrateShortcut(oldRoaming, newRoaming, roamingDir);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Migration] Shortcut migration failed: {ex.Message}");
+        }
+    }
+
+    private static void MigrateShortcut(string oldPath, string newPath, string shortcutDir)
+    {
+        // If new shortcut already exists, just clean up the old one
+        if (File.Exists(newPath))
+        {
+            if (File.Exists(oldPath))
+            {
+                try { File.Delete(oldPath); } catch { }
+                Debug.WriteLine("[Migration] Deleted old shortcut (new already exists).");
+            }
+            return;
+        }
+
+        // If old shortcut exists, create the new one and delete the old
+        if (File.Exists(oldPath))
+        {
+            var exePath = Environment.ProcessPath;
+            if (exePath == null) return;
+
+            var installDir = Path.GetDirectoryName(exePath) ?? "";
+            Directory.CreateDirectory(shortcutDir);
+
+            try
+            {
+                using var ps = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -Command \"$ws = New-Object -ComObject WScript.Shell; " +
+                        $"$s = $ws.CreateShortcut('{newPath.Replace("'", "''")}'); " +
+                        $"$s.TargetPath = '{exePath.Replace("'", "''")}'; " +
+                        $"$s.IconLocation = '{exePath.Replace("'", "''")},0'; " +
+                        $"$s.Description = 'TableTurnerr Tool Manager - Manage and update TableTurnerr team tools'; " +
+                        $"$s.WorkingDirectory = '{installDir.Replace("'", "''")}'; " +
+                        $"$s.Save()\"",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                });
+                ps?.WaitForExit(5000);
+
+                File.Delete(oldPath);
+                Debug.WriteLine("[Migration] Renamed Start Menu shortcut to 'TableTurnerr Tool Manager'.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Migration] Shortcut rename failed: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Launch an interactive CLI session in a new process with its own console.
-    /// Uses cmd.exe to avoid SmartScreen/UAC prompts on unsigned executables.
+    /// The process is a WinExe so it starts without a console; AllocConsole() in
+    /// interactive mode creates exactly one console window.
     /// </summary>
     internal static void LaunchInteractive()
     {
@@ -157,10 +241,10 @@ static class Program
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = $"/c \"\"{exePath}\" --interactive\"",
+                FileName = exePath,
+                Arguments = "--interactive",
                 UseShellExecute = false,
-                CreateNoWindow = false,
+                CreateNoWindow = true,
             });
         }
         catch (Exception ex)

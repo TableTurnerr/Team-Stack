@@ -58,11 +58,13 @@ echo        Done.
 echo  [4/5] Creating Start Menu shortcut...
 set "SHORTCUT_DIR=%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr"
 if not exist "!SHORTCUT_DIR!" mkdir "!SHORTCUT_DIR!"
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\Tool Manager.lnk'); $s.TargetPath = '%INSTALL_DIR%\ToolManager.exe'; $s.IconLocation = '%INSTALL_DIR%\ToolManager.exe,0'; $s.Description = 'TableTurnerr Tool Manager'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Save()" >nul 2>&1
+:: Remove old shortcut name if it exists
+if exist "%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\Tool Manager.lnk" del "%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\Tool Manager.lnk" >nul 2>&1
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\TableTurnerr Tool Manager.lnk'); $s.TargetPath = '%INSTALL_DIR%\ToolManager.exe'; $s.IconLocation = '%INSTALL_DIR%\ToolManager.exe,0'; $s.Description = 'TableTurnerr Tool Manager - Manage and update TableTurnerr team tools'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Save()" >nul 2>&1
 echo        Done.
 
 echo  [5/5] Starting Tool Manager...
-start "" "%INSTALL_DIR%\ToolManager.exe"
+start /D "%INSTALL_DIR%" "" "%INSTALL_DIR%\ToolManager.exe"
 echo        Done.
 
 echo.

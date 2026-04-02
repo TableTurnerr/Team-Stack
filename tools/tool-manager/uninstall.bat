@@ -25,6 +25,9 @@ reg delete "HKCU\Software\Classes\crm-agent" /f >nul 2>&1
 echo        Done.
 
 echo  [4/5] Removing Start Menu shortcuts...
+if exist "%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\TableTurnerr Tool Manager.lnk" (
+    del "%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\TableTurnerr Tool Manager.lnk"
+)
 if exist "%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\Tool Manager.lnk" (
     del "%AppData%\Microsoft\Windows\Start Menu\Programs\TableTurnerr\Tool Manager.lnk"
 )

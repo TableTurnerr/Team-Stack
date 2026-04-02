@@ -136,7 +136,7 @@ public class SelfUpdateService : IDisposable
                     timeout /t 3 /nobreak >nul
                     copy /Y "{newExe}" "{targetExe}" >nul
                 )
-                start "" "{targetExe}"
+                start /D "{installDir}" "" "{targetExe}"
                 timeout /t 5 /nobreak >nul
                 rmdir /s /q "{tempDir}" >nul 2>&1
                 del "{zipPath}" >nul 2>&1

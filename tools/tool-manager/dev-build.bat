@@ -56,12 +56,12 @@ echo Installed version updated.
 echo.
 
 :: Start tray process (WinExe, no console window)
-start "" "%INSTALL_DIR%\ToolManager.exe"
+start /D "%INSTALL_DIR%" "" "%INSTALL_DIR%\ToolManager.exe"
 timeout /t 2 /nobreak >nul
 
 :: Open interactive CLI (allocates its own console)
 echo Opening Tool Manager CLI...
-start "" "%INSTALL_DIR%\ToolManager.exe" --interactive
+start /D "%INSTALL_DIR%" "" "%INSTALL_DIR%\ToolManager.exe" --interactive
 
 :done
 echo Tool Manager is running in the system tray.

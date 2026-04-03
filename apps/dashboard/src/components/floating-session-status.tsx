@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Phone, Power, ChevronLeft, Loader2 } from 'lucide-react';
 import { useSession } from '@/contexts/session-context';
-import { useZoomPhone } from '@/contexts/zoom-phone-context';
+import { usePhone } from '@/contexts/phone-context';
 import { useRouter } from 'next/navigation';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
@@ -37,7 +37,7 @@ const DIAL_PAD: { digit: string; letters: string }[] = [
  */
 export function FloatingSessionStatus() {
     const { session, setSession } = useSession();
-    const { callStatus, dialNumber, endCall, isDialing } = useZoomPhone();
+    const { callStatus, dialNumber, endCall, isDialing } = usePhone();
     const router = useRouter();
 
     const [isExpanded, setIsExpanded] = useState(false);

@@ -7,7 +7,7 @@ import { COLLECTIONS, type Company, type PhoneNumber, type ColdCallingSession, t
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
-import { useZoomPhone } from '@/contexts/zoom-phone-context';
+import { usePhone } from '@/contexts/phone-context';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
 import { CurrentCallForm, type CallFormData } from '@/app/(dashboard)/session/current-call-form';
@@ -15,7 +15,7 @@ import { useFollowUps } from '@/contexts/follow-up-context';
 import { useToast } from '@/components/ui/toast';
 
 export function IncomingCallHandler() {
-    const { callStatus, callDirection, incomingCallerNumber } = useZoomPhone();
+    const { callStatus, callDirection, incomingCallerNumber } = usePhone();
     const { session, setSession, isStandaloneMode } = useSession();
     const { user } = useAuth();
     const { completeFollowUp } = useFollowUps();

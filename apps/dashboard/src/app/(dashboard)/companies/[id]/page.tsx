@@ -40,7 +40,7 @@ import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
 import { CallLogForm } from '@/components/call-log-form';
-import { ZoomCallButton } from '@/components/zoom-call-button';
+import { CallButton } from '@/components/call-button';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { useFollowUps } from '@/contexts/follow-up-context';
@@ -727,7 +727,7 @@ export default function CompanyDetailPage() {
                               <div className="text-[10px] text-[var(--muted)] font-bold">{call.expand?.phone_number_record?.label}</div>
                             </div>
                             {call.expand?.phone_number_record?.phone_number && (
-                              <ZoomCallButton phoneNumber={call.expand.phone_number_record.phone_number} />
+                              <CallButton phoneNumber={call.expand.phone_number_record.phone_number} />
                             )}
                           </div>
                         </td>

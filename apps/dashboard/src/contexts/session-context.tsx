@@ -4,7 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, us
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { useAuth } from './auth-context';
-import { useZoomPhone } from './zoom-phone-context';
+import { usePhone } from './phone-context';
 
 interface SessionContextType {
     /** The current user's active session (if any) */
@@ -26,7 +26,7 @@ const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
     const { user, isAuthenticated } = useAuth();
-    const { callStatus } = useZoomPhone();
+    const { callStatus } = usePhone();
     const [session, setSession] = useState<ColdCallingSession | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isStandaloneMode, setStandaloneMode] = useState(false);

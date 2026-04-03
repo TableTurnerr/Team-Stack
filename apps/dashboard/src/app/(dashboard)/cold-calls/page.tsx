@@ -30,7 +30,7 @@ import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
-import { ZoomCallButton } from '@/components/zoom-call-button';
+import { CallButton } from '@/components/call-button';
 import { PhoneNumbersTab } from '@/components/phone-numbers-tab';
 import { RelativeTime } from '@/components/relative-time';
 import {
@@ -593,7 +593,7 @@ function CallLogsTable({
                             ) : (
                               <span className="text-sm font-mono">-</span>
                             )}
-                            {phoneNum && <ZoomCallButton phoneNumber={phoneNum} />}
+                            {phoneNum && <CallButton phoneNumber={phoneNum} />}
                           </div>
                         </td>
                       )}

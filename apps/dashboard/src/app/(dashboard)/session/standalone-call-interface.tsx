@@ -6,9 +6,9 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type PhoneNumber } from '@/lib/types';
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
-import { useZoomPhone } from '@/contexts/zoom-phone-context';
+import { usePhone } from '@/contexts/phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
-import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
+import { PhoneDialer } from '@/components/phone-dialer';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { SessionFollowUps } from './session-followups';
@@ -50,7 +50,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps) {
     const { user } = useAuth();
-    const { callStatus, endCall, activeCallNumber, dialNumber, setAutoHangup } = useZoomPhone();
+    const { callStatus, endCall, activeCallNumber, dialNumber, setAutoHangup } = usePhone();
     const {
         isSessionActive,
         status: recorderStatus,
@@ -507,7 +507,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                     <div className="space-y-8">
                         <div>
                             <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Dialer</h3>
-                            <ZoomPhoneDialer docked disabled={hasUnsavedCall} />
+                            <PhoneDialer docked disabled={hasUnsavedCall} />
                         </div>
 
                         <SessionFollowUps

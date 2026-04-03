@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Loader2, CheckCircle2, AlertCircle, Phone, X, Radio } from 'lucide-react';
-import { useZoomPhone } from '@/contexts/zoom-phone-context';
+import { usePhone } from '@/contexts/phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { useLocalAgent } from '@/contexts/local-agent-context';
 import { useAuth } from '@/contexts/auth-context';
@@ -22,7 +22,7 @@ function formatTimer(seconds: number): string {
  * Synchronized with the global CallRecordingContext.
  */
 export function CallRecorderControls() {
-    const { lastDialedNumber, callStatus, activeCallNumber, customDialerNumber, registerDialCallback } = useZoomPhone();
+    const { lastDialedNumber, callStatus, activeCallNumber, customDialerNumber, registerDialCallback } = usePhone();
     const { isConnected: agentConnected } = useLocalAgent();
 
     // Use the global context instead of a local hook instance

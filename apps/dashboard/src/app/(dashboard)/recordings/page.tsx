@@ -12,7 +12,7 @@ import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
-import { ZoomCallButton } from '@/components/zoom-call-button';
+import { CallButton } from '@/components/call-button';
 import { TableContainer, IndexCell, HeaderIndexCell, ResizableTh, useResizableColumns, TablePagination, TableEmptyState } from '@/components/ui/data-table';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
@@ -729,13 +729,13 @@ export default function RecordingsPage() {
                                   )}
                                 </div>
                               </div>
-                              <ZoomCallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
+                              <CallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
                             </div>
                           ) : (
                             <div className="flex items-center gap-1">
                               <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
                               {recording.phone_number && (
-                                <ZoomCallButton phoneNumber={recording.phone_number} />
+                                <CallButton phoneNumber={recording.phone_number} />
                               )}
                             </div>
                           )}

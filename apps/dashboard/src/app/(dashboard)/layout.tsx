@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { SidebarProvider, useSidebar } from '@/contexts/sidebar-context';
 
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
-import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
+import { PhoneProvider } from '@/contexts/phone-context';
 import { SessionProvider } from '@/contexts/session-context';
 import { CallRecordingProvider } from '@/contexts/call-recording-context';
 import { ToastProvider } from '@/components/ui/toast';
@@ -16,8 +16,7 @@ import { UnsavedChangesProvider } from '@/contexts/unsaved-changes-context';
 import { FollowUpProvider } from '@/contexts/follow-up-context';
 import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
-import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
-import { ZoomLoginPrompt } from '@/components/zoom-login-prompt';
+import { PhoneDialer } from '@/components/phone-dialer';
 import { RecycleBinProvider } from '@/contexts/recycle-bin-context';
 import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
@@ -89,9 +88,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       {/* Floating dialer — always mounted for persistence, hidden on session page */}
-      <ZoomPhoneDialer hidden={isSessionPage} />
-      {/* Zoom Smart Embed login prompt — shown when login check fails */}
-      <ZoomLoginPrompt />
+      <PhoneDialer hidden={isSessionPage} />
     </div>
   );
 }
@@ -106,7 +103,7 @@ export default function DashboardLayout({
       <AuthGuard>
         <ToastProvider>
           <LocalAgentProvider>
-          <ZoomPhoneProvider>
+          <PhoneProvider>
             <SessionProvider>
               <TeamPresenceProvider>
                 <CallRecordingProvider>
@@ -120,7 +117,7 @@ export default function DashboardLayout({
                 </CallRecordingProvider>
               </TeamPresenceProvider>
             </SessionProvider>
-          </ZoomPhoneProvider>
+          </PhoneProvider>
           </LocalAgentProvider>
         </ToastProvider>
       </AuthGuard>

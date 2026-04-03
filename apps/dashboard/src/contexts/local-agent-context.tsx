@@ -22,6 +22,7 @@ export interface AgentNetworkQuality {
 
 export interface AgentRecordingState {
     state: 'idle' | 'recording' | 'stopping' | 'error';
+    recordingId: string | null;
     fileName: string | null;
     phoneNumber: string | null;
     duration: number;
@@ -29,6 +30,7 @@ export interface AgentRecordingState {
 }
 
 export interface AgentRecordingCompleted {
+    recordingId: string;
     fileName: string;
     phoneNumber: string;
     duration: number;
@@ -163,6 +165,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                             case 'recordingState':
                                 setRecordingState({
                                     state: msg.state ?? 'idle',
+                                    recordingId: msg.recordingId ?? null,
                                     fileName: msg.fileName ?? null,
                                     phoneNumber: msg.phoneNumber ?? null,
                                     duration: msg.duration ?? 0,
@@ -171,16 +174,21 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                 break;
                             case 'recordingCompleted':
                                 setLatestRecording({
+                                    recordingId: msg.recordingId ?? '',
                                     fileName: msg.fileName ?? '',
                                     phoneNumber: msg.phoneNumber ?? '',
                                     duration: msg.duration ?? 0,
                                     fileSizeBytes: msg.fileSizeBytes ?? 0,
                                     startTime: msg.startTime ?? '',
                                 });
-                                setRecordingState({ state: 'idle', fileName: null, phoneNumber: null, duration: 0, error: null });
+                                setRecordingState({ state: 'idle', recordingId: null, fileName: null, phoneNumber: null, duration: 0, error: null });
                                 break;
                             case 'recordingUploaded':
                                 // UI can react to this if needed
+                                break;
+                            case 'endCallResult':
+                            case 'dialResult':
+                                console.log(`[LocalAgent] ${msg.type}:`, msg.success ? 'OK' : `FAILED: ${msg.error}`);
                                 break;
                             case 'uploadQueueStatus':
                                 setUploadQueueStatus({

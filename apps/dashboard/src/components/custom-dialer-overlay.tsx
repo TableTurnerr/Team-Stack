@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Phone, Delete } from 'lucide-react';
-import { useZoomPhone } from '@/contexts/zoom-phone-context';
+import { usePhone } from '@/contexts/phone-context';
 
 const DIAL_PAD: { digit: string; letters: string }[] = [
     { digit: '1', letters: '' },
@@ -20,16 +20,16 @@ const DIAL_PAD: { digit: string; letters: string }[] = [
 ];
 
 /**
- * Custom dialer overlay — near-identical replica of Zoom's native dialer.
- * Replaces the Zoom logo area with "Custom Dialer" branding and
- * adds an explanatory note at the bottom.
+ * Custom dialer overlay — number input + dial pad for initiating calls.
+ * Only shown when idle. During active calls, the Zoom Smart Embed
+ * is shown instead (handled by PhoneDialer).
  */
 export function CustomDialerOverlay({ onDial, onFocusChange, visible = true }: {
     onDial: (phoneNumber: string) => void;
     onFocusChange?: (focused: boolean) => void;
     visible?: boolean;
 }) {
-    const { lastDialedNumber, setCustomDialerNumber } = useZoomPhone();
+    const { lastDialedNumber, setCustomDialerNumber } = usePhone();
     const [number, setNumber] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -50,7 +50,6 @@ export function CustomDialerOverlay({ onDial, onFocusChange, visible = true }: {
     const appendDigit = useCallback((digit: string) => {
         setNumber(prev => {
             const next = prev + digit;
-            // Defer context update to avoid setState-during-render
             queueMicrotask(() => setCustomDialerNumber(next));
             return next;
         });
@@ -89,9 +88,7 @@ export function CustomDialerOverlay({ onDial, onFocusChange, visible = true }: {
 
     return (
         <div className="absolute inset-0 z-10 flex flex-col bg-white">
-
-
-            {/* ── Number input ── */}
+            {/* Number input */}
             <div className="flex items-center px-5 pt-5 pb-2">
                 <div className="flex items-center gap-2 flex-1">
                     <input
@@ -127,7 +124,7 @@ export function CustomDialerOverlay({ onDial, onFocusChange, visible = true }: {
                 </div>
             </div>
 
-            {/* ── Keypad grid ── */}
+            {/* Keypad grid */}
             <div className="flex-1 flex items-center justify-center px-7">
                 <div className="grid grid-cols-3 gap-x-5 gap-y-2.5 w-full max-w-[280px]">
                     {DIAL_PAD.map(({ digit, letters }) => {
@@ -176,7 +173,7 @@ export function CustomDialerOverlay({ onDial, onFocusChange, visible = true }: {
                 </div>
             </div>
 
-            {/* ── Dial button ── */}
+            {/* Dial button */}
             <div className="flex justify-center pt-1 pb-2">
                 <button
                     onClick={handleDial}
@@ -192,12 +189,11 @@ export function CustomDialerOverlay({ onDial, onFocusChange, visible = true }: {
                 </button>
             </div>
 
-            {/* ── Bottom note ── */}
+            {/* Bottom note */}
             <div className="px-5 pb-6 pt-1 text-center">
                 <p className="text-[11px] leading-tight text-[#a0a0b0]"
                     style={{ fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}
                 >
-                    Custom dialer is used to capture phone numbers for call recordings.
                     Numbers entered here are sent to Zoom for dialing.
                 </p>
             </div>

@@ -115,6 +115,9 @@ public class RecordingStateMessage : AgentMessage
     [JsonPropertyName("state")]
     public string State { get; set; } = "idle";
 
+    [JsonPropertyName("recordingId")]
+    public string? RecordingId { get; set; }
+
     [JsonPropertyName("fileName")]
     public string? FileName { get; set; }
 
@@ -132,6 +135,9 @@ public class RecordingStateMessage : AgentMessage
 
 public class RecordingCompletedMessage : AgentMessage
 {
+    [JsonPropertyName("recordingId")]
+    public string RecordingId { get; set; } = "";
+
     [JsonPropertyName("fileName")]
     public string FileName { get; set; } = "";
 
@@ -182,6 +188,33 @@ public class UploadQueueStatusMessage : AgentMessage
     public string? CurrentUpload { get; set; }
 
     public UploadQueueStatusMessage() => Type = "uploadQueueStatus";
+}
+
+// ─── Call Controller Messages ────────────────────────────────────────────────
+
+public class DialResultMessage : AgentMessage
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    [JsonPropertyName("phoneNumber")]
+    public string? PhoneNumber { get; set; }
+
+    public DialResultMessage() => Type = "dialResult";
+}
+
+public class EndCallResultMessage : AgentMessage
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    public EndCallResultMessage() => Type = "endCallResult";
 }
 
 // ─── Zoom Suppressor Messages ───────────────────────────────────────────────

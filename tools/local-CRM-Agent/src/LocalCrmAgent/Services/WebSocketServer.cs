@@ -19,6 +19,8 @@ public class AgentWebSocketServer : IDisposable
     private RecordingStorageManager? _storage;
     private MicrophoneManager? _micManager;
     private ZoomWindowSuppressor? _zoomSuppressor;
+    private ZoomCallController? _callController;
+    private ZoomPhoneApiService? _zoomApi;
     private WebSocketServer? _server;
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
@@ -64,6 +66,19 @@ public class AgentWebSocketServer : IDisposable
     public void SetZoomSuppressor(ZoomWindowSuppressor suppressor)
     {
         _zoomSuppressor = suppressor;
+    }
+
+    /// <summary>
+    /// Set call controller for dial/end/answer commands.
+    /// </summary>
+    public void SetCallController(ZoomCallController controller)
+    {
+        _callController = controller;
+    }
+
+    public void SetZoomApi(ZoomPhoneApiService api)
+    {
+        _zoomApi = api;
     }
 
     /// <summary>
@@ -192,6 +207,15 @@ public class AgentWebSocketServer : IDisposable
                 case "getKeepZoomMinimized":
                     HandleGetKeepZoomMinimized(client);
                     break;
+                case "dial":
+                    await HandleDial(doc.RootElement, client);
+                    break;
+                case "endCall":
+                    await HandleEndCall(client);
+                    break;
+                case "setZoomApiConfig":
+                    HandleSetZoomApiConfig(doc.RootElement);
+                    break;
                 default:
                     Debug.WriteLine($"[WS] Unknown command type: {type}");
                     break;
@@ -271,8 +295,9 @@ public class AgentWebSocketServer : IDisposable
         if (_uploader == null) return;
         var fileName = root.TryGetProperty("fileName", out var f) ? f.GetString() : null;
         var callLogId = root.TryGetProperty("callLogId", out var c) ? c.GetString() : null;
-        if (fileName != null && callLogId != null)
-            _uploader.LinkRecording(fileName, callLogId);
+        var recordingId = root.TryGetProperty("recordingId", out var r) ? r.GetString() : null;
+        if (callLogId != null && (fileName != null || recordingId != null))
+            _uploader.LinkRecording(fileName, callLogId, recordingId);
     }
 
     private void HandleUploadRecording(JsonElement root)
@@ -368,10 +393,11 @@ public class AgentWebSocketServer : IDisposable
         Broadcast(msg);
     }
 
-    private void OnRecordingCompleted(string fileName, string phoneNumber, int duration, long fileSize, DateTime startTime)
+    private void OnRecordingCompleted(string recordingId, string fileName, string phoneNumber, int duration, long fileSize, DateTime startTime)
     {
         var msg = new RecordingCompletedMessage
         {
+            RecordingId = recordingId,
             FileName = fileName,
             PhoneNumber = phoneNumber,
             Duration = duration,
@@ -399,6 +425,7 @@ public class AgentWebSocketServer : IDisposable
         return new RecordingStateMessage
         {
             State = _recorder?.CurrentState.ToString().ToLowerInvariant() ?? "idle",
+            RecordingId = _recorder?.CurrentRecordingId,
             FileName = _recorder?.CurrentFileName,
             PhoneNumber = _recorder?.CurrentPhoneNumber,
             Duration = _recorder?.DurationSeconds ?? 0,
@@ -512,6 +539,53 @@ public class AgentWebSocketServer : IDisposable
             }
         }
     }
+
+    // ─── Call controller command handlers ───────────────────────────────────
+
+    private async Task HandleDial(JsonElement root, IWebSocketConnection client)
+    {
+        if (_callController == null)
+        {
+            SendTo(client, new DialResultMessage { Success = false, Error = "Call controller not available" });
+            return;
+        }
+
+        var phoneNumber = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
+        if (string.IsNullOrWhiteSpace(phoneNumber))
+        {
+            SendTo(client, new DialResultMessage { Success = false, Error = "Phone number required" });
+            return;
+        }
+
+        var (success, error) = await _callController.DialAsync(phoneNumber);
+        SendTo(client, new DialResultMessage { Success = success, Error = error, PhoneNumber = phoneNumber });
+    }
+
+    private async Task HandleEndCall(IWebSocketConnection client)
+    {
+        if (_callController == null)
+        {
+            SendTo(client, new EndCallResultMessage { Success = false, Error = "Call controller not available" });
+            return;
+        }
+
+        // Pass the current phone number so the API can match the right call
+        var currentPhone = _fusion.CurrentState.PhoneNumber;
+        var (success, error) = await _callController.EndCallAsync(currentPhone);
+        SendTo(client, new EndCallResultMessage { Success = success, Error = error });
+    }
+
+    private void HandleSetZoomApiConfig(JsonElement root)
+    {
+        if (_zoomApi == null) return;
+        var accountId = root.TryGetProperty("accountId", out var a) ? a.GetString() : null;
+        var clientId = root.TryGetProperty("clientId", out var c) ? c.GetString() : null;
+        var clientSecret = root.TryGetProperty("clientSecret", out var s) ? s.GetString() : null;
+        var zoomUserId = root.TryGetProperty("zoomUserId", out var u) ? u.GetString() : null;
+        if (accountId != null && clientId != null && clientSecret != null && zoomUserId != null)
+            _zoomApi.SetCredentials(accountId, clientId, clientSecret, zoomUserId);
+    }
+
 
     public void Stop()
     {

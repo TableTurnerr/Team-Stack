@@ -48,6 +48,7 @@ public class AudioRecorderService : IDisposable
     private string? _targetMp3Path;
     private DateTime _recordingStartTime;
     private string? _currentPhoneNumber;
+    private string? _currentRecordingId;
     private RecordingState _state = RecordingState.Idle;
 
     // Safety: max recording duration (2 hours) — absolute ceiling.
@@ -95,8 +96,16 @@ public class AudioRecorderService : IDisposable
         }
     }
 
+    public string? CurrentRecordingId
+    {
+        get { lock (_lock) return _currentRecordingId; }
+    }
+
     public event Action<RecordingState, string?>? StateChanged;
-    public event Action<string, string, int, long, DateTime>? RecordingCompleted;
+    /// <summary>
+    /// Fired when recording is completed. Args: recordingId, fileName, phoneNumber, duration, fileSize, startTime.
+    /// </summary>
+    public event Action<string, string, string, int, long, DateTime>? RecordingCompleted;
 
     public AudioRecorderService(RecordingStorageManager storage, CallStateFusion fusion, MicrophoneManager? micManager = null)
     {
@@ -149,7 +158,7 @@ public class AudioRecorderService : IDisposable
             {
                 _currentPhoneNumber = phoneNumber;
                 _recordingStartTime = DateTime.UtcNow;
-
+                _currentRecordingId = Guid.NewGuid().ToString("N")[..12]; // short unique ID
 
                 // Generate file paths
                 _tempWavPath = _storage.GenerateTempWavPath(phoneNumber);
@@ -300,6 +309,7 @@ public class AudioRecorderService : IDisposable
             _tempWavPath = null;
             _targetMp3Path = null;
             _currentPhoneNumber = null;
+            _currentRecordingId = null;
         }
 
         _isRecordingActive = false;
@@ -438,6 +448,7 @@ public class AudioRecorderService : IDisposable
         string? tempWav;
         string? targetMp3;
         string? phoneNumber;
+        string? recordingId;
         DateTime startTime;
         lock (_lock)
         {
@@ -452,6 +463,7 @@ public class AudioRecorderService : IDisposable
             tempWav = _tempWavPath;
             targetMp3 = _targetMp3Path;
             phoneNumber = _currentPhoneNumber;
+            recordingId = _currentRecordingId;
             startTime = _recordingStartTime;
         }
 
@@ -470,7 +482,7 @@ public class AudioRecorderService : IDisposable
         // Add manifest entry immediately so "pending" count appears right away,
         // before the potentially slow WAV→MP3 conversion.
         var fileName = Path.GetFileName(targetMp3);
-        _storage.AddEntry(fileName, phoneNumber ?? "", startTime);
+        _storage.AddEntry(fileName, phoneNumber ?? "", startTime, recordingId);
 
         // Convert WAV to MP3 on a background thread
         _ = Task.Run(() =>
@@ -500,10 +512,11 @@ public class AudioRecorderService : IDisposable
                     _tempWavPath = null;
                     _targetMp3Path = null;
                     _currentPhoneNumber = null;
+                    _currentRecordingId = null;
                 }
 
                 StateChanged?.Invoke(RecordingState.Idle, null);
-                RecordingCompleted?.Invoke(fileName, phoneNumber ?? "", duration, fileInfo.Length, startTime);
+                RecordingCompleted?.Invoke(recordingId ?? "", fileName, phoneNumber ?? "", duration, fileInfo.Length, startTime);
             }
             catch (Exception ex)
             {

@@ -2,19 +2,22 @@
  * virtual-dialer.ts
  * Playwright helpers for the Virtual Dialer test mode.
  *
- * The virtual dialer replaces Zoom telephony during test runs. It works by
- * setting `window.__TEST_VIRTUAL_DIALER = true` before the page loads, which
- * tells ZoomPhoneProvider to:
- *   1. Bypass the Zoom iframe origin check on postMessage events
- *   2. Auto-mark the iframe as ready (no real iframe needed)
- *   3. Dispatch synthetic ringing/connected/ended events instead of sending
- *      postMessages to a real Zoom iframe
+ * The virtual dialer replaces real telephony during test runs. It works by:
+ *   1. Setting `window.__TEST_VIRTUAL_DIALER = true` so the session page
+ *      auto-confirms Zoom/agent checks and skips real screen-share recording.
+ *   2. Setting `window.__TEST_MOCK_AGENT = true` and injecting a mock WebSocket
+ *      so the LocalAgentProvider connects to a fake agent.
+ *   3. Storing `window.__TEST_DIALER_CONFIG` so the mock agent's `send` handler
+ *      auto-responds to `{ type: 'dial' }` commands with ringing/connected/ended
+ *      call state transitions.
  *
- * All state-machine logic (direction detection, auto-hangup, timing, retries)
- * runs exactly as in production — only the telephony boundary is replaced.
+ * Call state comes from the mock agent WebSocket (not postMessage). The
+ * PhoneProvider receives callState messages from the mock agent and drives
+ * the entire CRM call state machine exactly as in production.
  */
 
 import { type Page } from '@playwright/test';
+import { setupMockAgent, sendAgentCallState } from './mock-agent';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,15 +39,29 @@ export interface VirtualDialerConfig {
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 /**
- * Inject virtual dialer mode and screen-share mock before the page loads.
- * Call BEFORE page.goto().
+ * Inject virtual dialer mode, mock agent, and screen-share mock before the
+ * page loads. Call BEFORE page.goto().
+ *
+ * This sets up:
+ *   - `__TEST_VIRTUAL_DIALER` flag (session page uses this to bypass checks)
+ *   - `__TEST_MOCK_AGENT` flag (for test detection in phone-context)
+ *   - `__TEST_DIALER_CONFIG` (mock agent reads this to auto-respond to dials)
+ *   - Mock WebSocket interceptor (via setupMockAgent) for the local agent
+ *   - Mock getDisplayMedia/getUserMedia for recording sessions
+ *   - Route blocking for zoom.us domains
  */
 export async function setupVirtualDialer(page: Page, config?: VirtualDialerConfig) {
-    // Set virtual dialer flag + config before any page scripts run
+    // Set virtual dialer flags + config before any page scripts run
     await page.addInitScript((cfg) => {
         (window as any).__TEST_VIRTUAL_DIALER = true;
+        (window as any).__TEST_MOCK_AGENT = true;
         (window as any).__TEST_DIALER_CONFIG = cfg;
     }, config || {});
+
+    // Set up mock agent WebSocket intercept (must be before page.goto).
+    // The mock agent's send handler reads __TEST_DIALER_CONFIG to auto-respond
+    // to dial commands with ringing/connected/ended state transitions.
+    await setupMockAgent(page);
 
     // Mock getDisplayMedia / getUserMedia so recording sessions start without
     // a real browser screen-share dialog (produces silent audio tracks).
@@ -88,62 +105,86 @@ export async function updateDialerConfig(page: Page, config: Partial<VirtualDial
 
 /**
  * Simulate an incoming call from a given phone number.
- * Dispatches a ringing event with caller data, then optionally connects.
+ * Sends agent callState messages via the mock WebSocket.
  */
 export async function simulateIncomingCall(
     page: Page,
     callerNumber: string,
     opts?: { autoConnect?: boolean; connectDelay?: number; autoEndDelay?: number },
 ) {
-    await page.evaluate(
-        ({ number, options }) => {
-            const connectDelay = options?.connectDelay ?? 200;
-            // Emit ringing (inbound direction — no outboundIntent set)
-            window.postMessage(
-                {
-                    type: 'ringing',
-                    data: {
-                        caller: { phoneNumber: number },
-                        from: number,
-                        phoneNumber: number,
-                    },
-                },
-                '*',
-            );
-            // Auto-connect
-            if (options?.autoConnect !== false) {
-                setTimeout(() => {
-                    window.postMessage(
-                        { type: 'connected', data: { phoneNumber: number } },
-                        '*',
-                    );
-                }, connectDelay);
-            }
-            // Auto-end
-            if (options?.autoEndDelay) {
-                setTimeout(() => {
-                    window.postMessage({ type: 'ended', data: {} }, '*');
-                }, connectDelay + options.autoEndDelay);
-            }
-        },
-        { number: callerNumber, options: opts },
-    );
+    // Emit ringing (inbound direction)
+    await sendAgentCallState(page, {
+        state: 'ringing',
+        phoneNumber: callerNumber,
+        direction: 'inbound',
+        duration: 0,
+        confidence: 'high',
+    });
+
+    const connectDelay = opts?.connectDelay ?? 200;
+
+    // Auto-connect (default: true)
+    if (opts?.autoConnect !== false) {
+        await page.waitForTimeout(connectDelay);
+        await sendAgentCallState(page, {
+            state: 'connected',
+            phoneNumber: callerNumber,
+            direction: 'inbound',
+            duration: 0,
+            confidence: 'high',
+        });
+    }
+
+    // Auto-end
+    if (opts?.autoEndDelay) {
+        const totalDelay = opts?.autoConnect !== false ? opts.autoEndDelay : connectDelay + opts.autoEndDelay;
+        await page.waitForTimeout(totalDelay);
+        await sendAgentCallState(page, {
+            state: 'ended',
+            phoneNumber: callerNumber,
+            direction: 'inbound',
+            duration: 0,
+            confidence: 'high',
+        });
+        await page.waitForTimeout(200);
+        await sendAgentCallState(page, {
+            state: 'idle',
+            phoneNumber: undefined,
+            direction: undefined,
+            duration: 0,
+            confidence: 'high',
+        });
+    }
 }
 
-/** Manually dispatch a 'connected' event. */
+/** Manually send a 'connected' callState via the mock agent. */
 export async function simulateCallConnect(page: Page, number?: string) {
-    await page.evaluate((num) => {
-        window.postMessage(
-            { type: 'connected', data: num ? { targetNumber: num } : {} },
-            '*',
-        );
-    }, number ?? null);
+    await sendAgentCallState(page, {
+        state: 'connected',
+        phoneNumber: number,
+        direction: undefined,
+        duration: 0,
+        confidence: 'high',
+    });
 }
 
-/** Manually dispatch an 'ended' event. */
+/** Manually send 'ended' then 'idle' callState via the mock agent. */
 export async function simulateCallEnd(page: Page) {
-    await page.evaluate(() => {
-        window.postMessage({ type: 'ended', data: {} }, '*');
+    await sendAgentCallState(page, {
+        state: 'ended',
+        phoneNumber: undefined,
+        direction: undefined,
+        duration: 0,
+        confidence: 'high',
+    });
+    // Transition to idle after a short delay (mirrors agent behavior)
+    await page.waitForTimeout(200);
+    await sendAgentCallState(page, {
+        state: 'idle',
+        phoneNumber: undefined,
+        direction: undefined,
+        duration: 0,
+        confidence: 'high',
     });
 }
 
@@ -206,7 +247,7 @@ export async function waitForCallForm(page: Page, timeoutMs = 10_000) {
 
 /**
  * Navigate to /session and start a new call session.
- * Handles the SessionModeSelector → Connect Audio → Session Active flow.
+ * Handles the SessionModeSelector -> Connect Audio -> Session Active flow.
  */
 export async function startVirtualSession(page: Page) {
     // Retry the full session start flow up to 2 times to handle transient
@@ -237,13 +278,13 @@ export async function startVirtualSession(page: Page) {
         }
 
         // Handle "Connect Audio" screen — in virtual dialer mode the button should
-        // be auto-enabled because zoomAppConfirmed is set to true by the source code.
+        // be auto-enabled because the mock agent is connected and zoomDetected=true.
         const connectBtn = page
             .locator('button')
             .filter({ hasText: /connect audio/i })
             .first();
         if ((await connectBtn.count()) > 0) {
-            // Wait for the button to become enabled (virtual dialer auto-confirms Zoom)
+            // Wait for the button to become enabled (mock agent auto-confirms)
             await page.waitForFunction(
                 () => {
                     const btns = [...document.querySelectorAll('button')];
@@ -323,7 +364,12 @@ export async function expandDialer(page: Page) {
 
 /**
  * Dial a phone number using the custom dialer overlay UI.
- * Expands the dialer → types the number → clicks Dial.
+ * Expands the dialer -> types the number -> clicks Dial.
+ *
+ * In the agent-driven architecture, clicking Dial sends a
+ * `{ type: 'dial', phoneNumber }` command to the agent WebSocket.
+ * The mock agent's send handler auto-responds with call state
+ * transitions based on __TEST_DIALER_CONFIG.
  */
 export async function dialInUI(page: Page, number: string) {
     await expandDialer(page);
@@ -471,7 +517,7 @@ export async function fillAndSubmitCallForm(
 // ─── Full call cycle helper ───────────────────────────────────────────────────
 
 /**
- * Execute a complete call cycle: dial → wait for connect → wait for end → submit form.
+ * Execute a complete call cycle: dial -> wait for connect -> wait for end -> submit form.
  * Uses autoEndDelay to automatically end the call after a short duration.
  * Returns true if the form was submitted.
  */

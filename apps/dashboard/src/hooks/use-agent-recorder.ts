@@ -111,6 +111,7 @@ export function useAgentRecorder(
         if (callLogId) {
             sendCommand({
                 type: 'linkRecording',
+                recordingId: latestRecording.recordingId,
                 fileName: latestRecording.fileName,
                 callLogId,
             });

@@ -208,23 +208,29 @@ Modern Next.js 15 web application with:
   - `inline-edit-field.tsx` - Inline editing with Ctrl+Z undo
   - `bulk-upload-modal.tsx` - Drag-drop recording upload
   - `column-selector.tsx` - Table column visibility
-  - `zoom-call-button.tsx` - Click-to-call via Zoom Phone
-  - `zoom-phone-context.tsx` - Zoom Phone state management
+  - `phone-dialer.tsx` - Floating/docked dialer with Zoom Smart Embed, session stats, and drag-to-reposition
+  - `call-button.tsx` - Click-to-call from company rows and cold call entries
+  - `phone-context.tsx` - Call state machine with hybrid WASAPI + Smart Embed detection
   - `power-dialer-panel.tsx` - Automated sequential dialing from a queue
   - `block-editor/` - Tiptap 3 rich text editor with slash commands
   - `email/` - 18 email marketing components (campaign builder, sequence builder, template editor, etc.)
   - `financial/` - Financial dashboard components (cash flow charts, expense breakdowns, transaction management)
 
-- **Zoom Phone Integration**:
-  - Embedded Smart Embed dialer with postMessage API
-  - **Refined UI**: Minimized circular button with dynamic call status coloring
-  - **Active Session**: Always-visible session banner
-  - Auto-dial setting to route calls through Zoom desktop app
-  - Auto-record calls setting for automatic recording
-  - Native dialer toggle for switching between custom and Zoom dialers
-  - Call status tracking (idle, ringing, connected, ended)
-  - **Instant call end detection**: Zoom iframe events processed immediately (~20ms total latency)
-  - Configurable via Settings → Integrations
+- **Phone Dialer** (`phone-dialer.tsx`):
+  - Floating panel with drag-to-reposition and height adjustment (position persisted to localStorage)
+  - Zoom Smart Embed iframe shown during active calls; custom keypad when idle
+  - Session stats: dials, pickups, conversion rate
+  - Agent connection status indicator with one-click launch button
+  - Hybrid call detection: Primary WASAPI (Local Agent) + supplementary Smart Embed events
+  - Call status tracking: idle → ringing → connected → ended
+  - Configurable via Settings → Integrations → Zoom Phone
+
+- **Zoom Phone Webhook** (`app/api/zoom/webhook/`):
+  - Receives real-time call events from Zoom (answered, ringing, ended)
+  - HMAC-SHA256 signature verification against `ZOOM_WEBHOOK_SECRET_TOKEN`
+  - Stores raw events only — no CRM user identity (saved to `zoom_call_events` collection)
+  - Agents match events by phone number + timing to retrieve `call_id` for API operations
+  - 24-hour automatic cleanup of old events
 
 - **Local Agent Integration** (`local-agent-context.tsx`):
   - Localhost WebSocket (`ws://127.0.0.1:9876`) — sub-millisecond latency, zero internet dependency
@@ -247,6 +253,8 @@ Modern Next.js 15 web application with:
 - **Auto-Start**: Registers in Windows startup and `crm-agent://` protocol handler
 - **Self-Contained**: Single ~75MB exe, no .NET runtime install needed
 - **Distribution**: `build-release.bat` → zip `dist/` → team runs `install.bat`
+- **Zoom REST API Client** (`ZoomPhoneApiService.cs`): Server-to-Server OAuth, token caching, list and end active calls by ID or phone number
+- **Call Controller** (`ZoomCallController.cs`): Dial via local `zoomphonecall:` protocol, end calls via Zoom API (optional — requires `zoom-api.json` credentials)
 
 > **Detailed docs**: [`tools/local-CRM-Agent/README.md`](tools/local-CRM-Agent/README.md) | [`tools/local-CRM-Agent/SETUP.md`](tools/local-CRM-Agent/SETUP.md)
 
@@ -312,8 +320,13 @@ Chrome extension (Manifest V3) for Google Maps restaurant scraping:
 | Database schema | `packages/pocketbase-client/pb_db_schema.json` |
 | UI components | `apps/dashboard/src/components/` |
 | Page routes | `apps/dashboard/src/app/(dashboard)/` |
+| API routes | `apps/dashboard/src/app/api/` |
 | API utilities | `apps/dashboard/src/lib/` |
 | Environment vars | `.env.info.example` |
+| Phone dialing logic | `apps/dashboard/src/contexts/phone-context.tsx` |
+| Call state UI | `apps/dashboard/src/components/phone-dialer.tsx` |
+| Zoom webhook | `apps/dashboard/src/app/api/zoom/webhook/route.ts` |
+| Agent communication | `apps/dashboard/src/contexts/local-agent-context.tsx` |
 
 ---
 
@@ -326,13 +339,19 @@ Chrome extension (Manifest V3) for Google Maps restaurant scraping:
 POCKETBASE_URL=http://localhost:8090        # Local dev
 NEXT_PUBLIC_POCKETBASE_URL=http://localhost:8090  # Dashboard browser
 
-# PocketBase Admin (server-side tools only)
+# PocketBase Admin (server-side tools + dashboard webhook handler)
 PB_ADMIN_EMAIL=admin@example.com
 PB_ADMIN_PASSWORD=your_password
 
-# Gemini AI (transcriber only)
+# Gemini AI (transcriber + dashboard invoice parsing)
 GEMINI_API_KEY=your_api_key
 GEMINI_MODEL=gemini-2.5-flash
+
+# Zoom Phone Webhook (dashboard — receives real-time Zoom call events)
+ZOOM_WEBHOOK_SECRET_TOKEN=your_zoom_webhook_secret
+
+# PartnerStack (dashboard — affiliate/partner tracking, optional)
+PARTNERSTACK_API_KEY=
 
 # Discord bot (tools/discord-bot only)
 DISCORD_BOT_TOKEN=your_bot_token
@@ -346,7 +365,9 @@ Zoom Phone integration settings are stored in the browser's localStorage:
 
 - `zoom-phone-autodial` - Auto-dial through Zoom desktop app (default: `false`)
 - `call-recorder-auto-mode` - Auto-record calls (default: `true`)
-- `zoom-show-native-dialer` - Show native dialer toggle (default: `false`)
+- `zoom-show-native-dialer` - Show native Zoom dialer toggle (default: `false`)
+- `zoom-dialer-y-position` - Floating dialer vertical position (persisted automatically)
+- `zoom-dialer-height` - Floating dialer panel height (persisted automatically)
 
 These can be configured via **Settings → Integrations → Zoom Phone**.
 
@@ -374,7 +395,7 @@ pocketbase serve  # http://localhost:8090
 
 # 4. Start Dashboard
 cd apps/dashboard
-cp .env.example .env.local
+cp .env.local.example .env.local
 pnpm dev  # http://localhost:3000
 
 # 5. Install Tool Manager (handles Local CRM Agent + Lead Scraper + future tools)

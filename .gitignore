@@ -58,9 +58,14 @@ dist-dev/
 .dev-build-counter
 *.tsbuildinfo
 prompt.txt
+ideas.txt
+image.png
 
 # MCP configuration file (with API keys, should be ignored)
 .mcp.json 
+
+# Zoom API credentials (contains secrets)
+zoom-api.json
 
 # Call Recorder V2 (separate project)
 tools/call-recorder-v2/

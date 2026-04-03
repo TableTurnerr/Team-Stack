@@ -42,7 +42,9 @@ public class ZoomWindowSuppressor : IDisposable
         ["zoom", "cpthost", "zoomphone"];
 
     private readonly System.Threading.Timer _pollTimer;
+    private System.Threading.Timer? _burstTimer;
     private volatile bool _enabled;
+    private long _suspendedUntilTicks; // accessed via Interlocked
     private bool _disposed;
 
     public bool Enabled
@@ -70,9 +72,49 @@ public class ZoomWindowSuppressor : IDisposable
         _pollTimer.Change(0, 500);
     }
 
+    /// <summary>
+    /// Activate burst-mode suppression: poll at high frequency for a short duration
+    /// to catch Zoom windows that appear during tel: protocol dial or call answer.
+    /// Ensures the Zoom window is minimized within ~50ms (sub-perceptible).
+    /// </summary>
+    public void ActivateBurstMode(int durationMs = 3000, int intervalMs = 50)
+    {
+        Debug.WriteLine($"[ZoomSuppressor] Burst mode activated ({intervalMs}ms for {durationMs}ms)");
+
+        // Dispose existing burst timer if re-entrant
+        _burstTimer?.Dispose();
+
+        // Force-minimize immediately (don't wait for first tick)
+        PollAndMinimize(null);
+
+        // Start high-frequency polling
+        _burstTimer = new System.Threading.Timer(PollAndMinimize, null, intervalMs, intervalMs);
+
+        // Schedule auto-stop
+        Task.Delay(durationMs).ContinueWith(_ =>
+        {
+            _burstTimer?.Dispose();
+            _burstTimer = null;
+            Debug.WriteLine("[ZoomSuppressor] Burst mode deactivated");
+        });
+    }
+
+    /// <summary>
+    /// Temporarily suspend suppression so the call controller can interact
+    /// with Zoom windows without being fought.
+    /// </summary>
+    public void Suspend(int durationMs)
+    {
+        Interlocked.Exchange(ref _suspendedUntilTicks, DateTime.UtcNow.AddMilliseconds(durationMs).Ticks);
+        Debug.WriteLine($"[ZoomSuppressor] Suspended for {durationMs}ms");
+    }
+
+    public bool IsSuspended => DateTime.UtcNow.Ticks < Interlocked.Read(ref _suspendedUntilTicks);
+
     private void PollAndMinimize(object? state)
     {
         if (!_enabled) return;
+        if (IsSuspended) return; // controller is interacting with Zoom
 
         try
         {
@@ -118,5 +160,7 @@ public class ZoomWindowSuppressor : IDisposable
         _disposed = true;
         _pollTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _pollTimer.Dispose();
+        _burstTimer?.Dispose();
+        _burstTimer = null;
     }
 }

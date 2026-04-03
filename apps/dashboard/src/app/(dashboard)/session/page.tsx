@@ -20,7 +20,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences } from '@/lib/types';
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
-import { useZoomPhone } from '@/contexts/zoom-phone-context';
+import { usePhone } from '@/contexts/phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
@@ -29,7 +29,7 @@ import { LastCallPreview } from './last-call-preview';
 import { ManualAdjustmentModal } from './manual-adjustment-modal';
 import { SessionModeSelector } from '@/components/session-mode-selector';
 import { StandaloneCallInterface } from './standalone-call-interface';
-import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
+import { PhoneDialer } from '@/components/phone-dialer';
 import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { SessionFollowUps } from './session-followups';
 import { useFollowUps } from '@/contexts/follow-up-context';
@@ -50,7 +50,6 @@ import { useSession } from '@/contexts/session-context';
 
 // ... other imports
 
-const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
 const UNSAVED_CALL_STORAGE_KEY = 'crm:session:unsaved-call:v1';
 const SESSION_TAB_LOCK_KEY = 'crm:session:tab-lock';
 const SESSION_TAB_LOCK_TTL = 8000; // ms — another tab is considered active if heartbeat is this fresh
@@ -82,7 +81,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, callDirection, isDialing, iframeRef, setIframeReady, refreshDialer, activeCallNumber, setAutoHangup, isAudioDisconnected, zoomEmbedLoggedIn, requestZoomLogin } = useZoomPhone();
+    const { dialNumber, callStatus, callDirection, isDialing, activeCallNumber, setAutoHangup, endCall, agentRequired } = usePhone();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
@@ -103,7 +102,7 @@ export default function SessionPage() {
     // In virtual dialer mode (tests), skip agent/Zoom checks — telephony is mocked
     const effectiveAgentConnected = agentConnected || isVirtualDialerMode;
     const effectiveZoomDetected = agentZoomDetected || isVirtualDialerMode;
-    const effectiveZoomEmbedLoggedIn = zoomEmbedLoggedIn || isVirtualDialerMode;
+
     const [zoomAppConfirmed, setZoomAppConfirmed] = useState(isVirtualDialerMode);
     const [zoomDetecting, setZoomDetecting] = useState(false);
     const [zoomDetected, setZoomDetected] = useState<boolean | null>(isVirtualDialerMode ? true : null);
@@ -204,47 +203,22 @@ export default function SessionPage() {
     };
 
     // ---------------------------------------------------------------------------
-    // Zoom detection — agent-based (process scan + launch) when agent is
-    // connected, falls back to zoommtg:// protocol handler hack otherwise.
+    // Zoom detection — agent-based (process scan + launch)
     // ---------------------------------------------------------------------------
-    const verifyZoomRunning = useCallback(() => {
-        // If agent is connected, ask it to launch/verify Zoom
-        if (agentConnected) {
-            setZoomDetecting(true);
-            setZoomDetected(null);
-            launchZoom();
+    const verifyZoomRunning = useCallback(async () => {
+        setZoomDetecting(true);
+        if (agentConnected && agentZoomDetected) {
+            setZoomDetected(true);
+            setZoomAppConfirmed(true);
+            setZoomDetecting(false);
             return;
         }
-
-        // Fallback: protocol handler blur detection (no agent)
-        if (!document.hasFocus()) window.focus();
-        setZoomDetecting(true);
-        setZoomDetected(null);
-
-        let resolved = false;
-        const resolve = (detected: boolean) => {
-            if (resolved) return;
-            resolved = true;
-            window.removeEventListener('blur', onBlur);
-            setZoomDetecting(false);
-            setZoomDetected(detected);
-            if (detected) {
-                setZoomAppConfirmed(true);
-                refreshDialer();
-            }
-        };
-        const onBlur = () => resolve(true);
-        window.addEventListener('blur', onBlur);
-
-        const a = document.createElement('a');
-        a.href = 'zoommtg://zoom.us/';
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        setTimeout(() => resolve(false), 2000);
-    }, [agentConnected, launchZoom, refreshDialer]);
+        // Try launching zoom via agent
+        if (agentConnected) {
+            launchZoom();
+        }
+        setZoomDetecting(false);
+    }, [agentConnected, agentZoomDetected, launchZoom]);
 
     // Auto-launch Zoom when connect-audio screen appears and Zoom is not running.
     // The agent will find and start Zoom automatically — the session cannot proceed
@@ -291,13 +265,12 @@ export default function SessionPage() {
                 setZoomDetecting(false);
                 setZoomDetected(true);
                 setZoomAppConfirmed(true);
-                refreshDialer();
             } else {
                 setZoomDetecting(false);
                 setZoomDetected(false);
             }
         }
-    }, [zoomLaunching, agentConnected, agentZoomDetected, zoomDetecting, refreshDialer]);
+    }, [zoomLaunching, agentConnected, agentZoomDetected, zoomDetecting]);
 
     // ---------------------------------------------------------------------------
     // Mid-session Zoom recovery — when Zoom disappears during an active session,
@@ -329,12 +302,11 @@ export default function SessionPage() {
                 addToast('warning', 'Session auto-paused — Zoom not detected');
             }
         } else if (!prev && agentZoomDetected) {
-            // Zoom recovered — refresh the dialer and clear the warning (no auto-resume)
+            // Zoom recovered — clear the warning (no auto-resume)
             setZoomLostDuringSession(false);
-            refreshDialer();
-            addToast('success', 'Zoom detected — dialer refreshed. Resume session when ready.');
+            addToast('success', 'Zoom detected. Resume session when ready.');
         }
-    }, [agentConnected, agentZoomDetected, session, refreshDialer, addToast]);
+    }, [agentConnected, agentZoomDetected, session, addToast]);
 
     // ---------------------------------------------------------------------------
     // Mid-session agent loss — block calls when the local agent disconnects
@@ -368,39 +340,6 @@ export default function SessionPage() {
             addToast('success', 'CRM Agent reconnected. Resume session when ready.');
         }
     }, [agentConnected, session, addToast]);
-
-    // ---------------------------------------------------------------------------
-    // Audio disconnect (Reconnect Audio screen) — auto-pause when Zoom reports
-    // audio disconnection while NOT on an active call. If on a call, skip the
-    // pause so the call and recording can continue uninterrupted.
-    // ---------------------------------------------------------------------------
-    const prevAudioDisconnectedRef = useRef(false);
-
-    useEffect(() => {
-        if (!session || session.status !== 'active') {
-            prevAudioDisconnectedRef.current = false;
-            return;
-        }
-
-        const prev = prevAudioDisconnectedRef.current;
-        prevAudioDisconnectedRef.current = isAudioDisconnected;
-
-        const isOnCall = callStatus === 'ringing' || callStatus === 'connected';
-
-        if (!prev && isAudioDisconnected) {
-            if (isOnCall) {
-                // On a call — don't pause, let call and recording continue
-                addToast('warning', 'Reconnect Audio detected — call still active, session not paused');
-            } else if (!session.paused_at) {
-                // Not on a call — auto-pause
-                pauseSessionRef.current();
-                addToast('warning', 'Session auto-paused — Reconnect Audio detected');
-            }
-        } else if (prev && !isAudioDisconnected && !isOnCall) {
-            // Audio reconnected outside a call (no auto-resume)
-            addToast('success', 'Audio reconnected. Resume session when ready.');
-        }
-    }, [isAudioDisconnected, session, callStatus, addToast]);
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -1027,25 +966,25 @@ export default function SessionPage() {
     // Start session — step 1: show "Connect Audio" screen
     // ---------------------------------------------------------------------------
     const startSession = useCallback(() => {
-        if (!effectiveZoomEmbedLoggedIn) {
-            requestZoomLogin();
+        if (!agentConnected) {
+            console.log('[Session] Agent not connected, cannot start session');
             return;
         }
         setPendingTestSession(false);
         setAwaitingAudioConnect(true);
-    }, [effectiveZoomEmbedLoggedIn, requestZoomLogin]);
+    }, [agentConnected]);
 
     // ---------------------------------------------------------------------------
     // Start test session — same flow but marks session as is_test
     // ---------------------------------------------------------------------------
     const startTestSession = useCallback(() => {
-        if (!effectiveZoomEmbedLoggedIn) {
-            requestZoomLogin();
+        if (!agentConnected) {
+            console.log('[Session] Agent not connected, cannot start test session');
             return;
         }
         setPendingTestSession(true);
         setAwaitingAudioConnect(true);
-    }, [effectiveZoomEmbedLoggedIn, requestZoomLogin]);
+    }, [agentConnected]);
 
     // ---------------------------------------------------------------------------
     // Connect audio & create PB session — step 2
@@ -1195,8 +1134,8 @@ export default function SessionPage() {
     // elapsed timer continues from exactly where it stopped.
     // ---------------------------------------------------------------------------
     const resumeLastSession = useCallback(async () => {
-        if (!effectiveZoomEmbedLoggedIn) {
-            requestZoomLogin();
+        if (!agentConnected) {
+            console.log('[Session] Agent not connected, cannot resume session');
             return;
         }
         if (!lastCompletedSession?.ended_at) return;
@@ -1220,7 +1159,7 @@ export default function SessionPage() {
         } finally {
             setResuming(false);
         }
-    }, [lastCompletedSession, setSession, effectiveZoomEmbedLoggedIn, requestZoomLogin]);
+    }, [lastCompletedSession, setSession, agentConnected]);
 
     // ---------------------------------------------------------------------------
     // Test session cleanup — delete all data created during the test session
@@ -1362,12 +1301,12 @@ export default function SessionPage() {
     // Start standalone mode
     // ---------------------------------------------------------------------------
     const startStandalone = useCallback(() => {
-        if (!effectiveZoomEmbedLoggedIn) {
-            requestZoomLogin();
+        if (!agentConnected) {
+            console.log('[Session] Agent not connected, cannot start standalone mode');
             return;
         }
         setStandaloneMode(true);
-    }, [setStandaloneMode, effectiveZoomEmbedLoggedIn, requestZoomLogin]);
+    }, [setStandaloneMode, agentConnected]);
 
     // ---------------------------------------------------------------------------
     // Exit standalone mode
@@ -2614,7 +2553,7 @@ export default function SessionPage() {
 
                 {/* Docked Zoom Phone Dialer - Above Current Call section */}
                 <div className="relative">
-                    <ZoomPhoneDialer
+                    <PhoneDialer
                         docked
                         disabled={(hasUnsavedCall && callStatus !== 'ringing' && callStatus !== 'connected') || !!session.paused_at || zoomLostDuringSession || agentLostDuringSession}
                         disabledReason={

@@ -36,10 +36,15 @@ static class Program
         var recorder = new AudioRecorderService(storageManager, fusion, micManager);
         var uploader = new RecordingUploadService(storageManager);
         var zoomSuppressor = new ZoomWindowSuppressor();
+        var zoomApi = new ZoomPhoneApiService();
+        var callController = new ZoomCallController(zoomSuppressor, windowMonitor);
+        callController.SetApiService(zoomApi);
         var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
         wsServer.SetRecordingServices(recorder, uploader, storageManager);
         wsServer.SetMicrophoneManager(micManager);
         wsServer.SetZoomSuppressor(zoomSuppressor);
+        wsServer.SetCallController(callController);
+        wsServer.SetZoomApi(zoomApi);
         var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor, recorder, uploader, micManager);
         var autoUpdater = new AutoUpdateService();
 

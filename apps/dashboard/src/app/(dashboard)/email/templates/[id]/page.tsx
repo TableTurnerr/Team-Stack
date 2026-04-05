@@ -12,6 +12,7 @@ import dynamic from 'next/dynamic';
 import { SendTestModal } from '@/components/email/send-test-modal';
 import { TemplatePreview } from '@/components/email/template-preview';
 import { cn } from '@/lib/utils';
+import { PageGuard } from '@/components/page-guard';
 
 const TemplateEditor = dynamic(
   () => import('@/components/email/template-editor').then((m) => ({ default: m.TemplateEditor })),
@@ -119,6 +120,7 @@ export default function EditTemplatePage() {
   }
 
   return (
+    <PageGuard pageKey="email">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -281,5 +283,6 @@ export default function EditTemplatePage() {
         previewText={previewText}
       />
     </div>
+    </PageGuard>
   );
 }

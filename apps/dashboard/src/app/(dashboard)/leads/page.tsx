@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { PageGuard } from '@/components/page-guard';
 
 export default function LeadsPage() {
   const router = useRouter();
@@ -12,6 +13,7 @@ export default function LeadsPage() {
   }, [router]);
 
   return (
+    <PageGuard pageKey="leads">
     <div className="flex items-center justify-center min-h-[400px]">
       <div className="text-center">
         <p className="text-[var(--muted)]">Redirecting to Companies...</p>
@@ -20,5 +22,6 @@ export default function LeadsPage() {
         </p>
       </div>
     </div>
+    </PageGuard>
   );
 }

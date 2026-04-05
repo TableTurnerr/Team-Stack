@@ -19,6 +19,7 @@ import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
+import { PageGuard } from '@/components/page-guard';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -513,6 +514,7 @@ export default function RecordingsPage() {
   }
 
   return (
+    <PageGuard pageKey="recordings">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -839,5 +841,6 @@ export default function RecordingsPage() {
       />
 
     </div>
+    </PageGuard>
   );
 }

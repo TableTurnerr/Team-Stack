@@ -17,6 +17,7 @@ import {
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
+import { PageGuard } from '@/components/page-guard';
 
 const COLUMN_CONFIG = [
     { key: 'expand' },
@@ -197,6 +198,7 @@ export default function SessionLogsPage() {
     }
 
     return (
+        <PageGuard pageKey="session-logs">
         <div className="space-y-6">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -388,5 +390,6 @@ export default function SessionLogsPage() {
                 </TableContainer>
             )}
         </div>
+        </PageGuard>
     );
 }

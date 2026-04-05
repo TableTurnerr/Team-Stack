@@ -7,6 +7,7 @@ import { pb } from '@/lib/pocketbase';
 import { EMAIL_COLLECTIONS, type EmailSequence, type SequenceStatus } from '@/lib/email-types';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { PageGuard } from '@/components/page-guard';
 
 const STATUS_COLORS: Record<SequenceStatus, string> = {
   active: 'bg-[var(--success)]/10 text-[var(--success)] border-[var(--success)]/20',
@@ -125,6 +126,7 @@ export default function SequencesPage() {
   }
 
   return (
+    <PageGuard pageKey="email">
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -263,5 +265,6 @@ export default function SequencesPage() {
         </div>
       )}
     </div>
+    </PageGuard>
   );
 }

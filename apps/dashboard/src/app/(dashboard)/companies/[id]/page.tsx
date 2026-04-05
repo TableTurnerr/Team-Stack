@@ -48,6 +48,7 @@ import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
 import { RelativeTime } from '@/components/relative-time';
+import { PageGuard } from '@/components/page-guard';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
 import { EmailActivityFeed } from '@/components/email/email-activity-feed';
@@ -348,6 +349,7 @@ export default function CompanyDetailPage() {
   }
 
   return (
+    <PageGuard pageKey="companies">
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
       {/* Breadcrumbs & Header */}
       <div className="flex flex-col gap-4">
@@ -1058,5 +1060,6 @@ export default function CompanyDetailPage() {
       )}
 
     </div>
+    </PageGuard>
   );
 }

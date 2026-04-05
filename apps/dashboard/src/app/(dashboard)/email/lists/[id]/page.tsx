@@ -11,6 +11,7 @@ import { ListMembersTable } from '@/components/email/list-members-table';
 import { SuppressionManager } from '@/components/email/suppression-manager';
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
 import Link from 'next/link';
+import { PageGuard } from '@/components/page-guard';
 
 export default function ListDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -84,6 +85,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const TypeIcon = typeIcons[list.list_type] ?? Users;
 
   return (
+    <PageGuard pageKey="email">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -148,5 +150,6 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         />
       )}
     </div>
+    </PageGuard>
   );
 }

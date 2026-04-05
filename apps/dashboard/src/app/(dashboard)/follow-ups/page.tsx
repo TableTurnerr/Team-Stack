@@ -39,6 +39,7 @@ import {
   TableEmptyState,
   SelectionToolbar,
 } from '@/components/ui/data-table';
+import { PageGuard } from '@/components/page-guard';
 
 type StatusFilter = 'overdue' | 'upcoming' | 'completed' | 'dismissed';
 
@@ -278,6 +279,7 @@ export default function FollowUpsPage() {
   }
 
   return (
+    <PageGuard pageKey="follow-ups">
     <div className="space-y-6 animate-in fade-in duration-500">
 
       {/* ── Header ── */}
@@ -648,5 +650,6 @@ export default function FollowUpsPage() {
         </p>
       )}
     </div>
+    </PageGuard>
   );
 }

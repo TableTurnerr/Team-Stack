@@ -10,6 +10,7 @@ import { SearchInput } from '@/components/search-input';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
 import { TemplateCard } from '@/components/email/template-card';
 import { cn } from '@/lib/utils';
+import { PageGuard } from '@/components/page-guard';
 
 const CATEGORIES = ['All', 'Welcome', 'Follow-up', 'Promotion', 'Newsletter', 'Re-engagement', 'Other'];
 
@@ -78,6 +79,7 @@ export default function TemplatesPage() {
   if (loading) return <CardGridSkeleton />;
 
   return (
+    <PageGuard pageKey="email">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -153,5 +155,6 @@ export default function TemplatesPage() {
         </div>
       )}
     </div>
+    </PageGuard>
   );
 }

@@ -47,6 +47,7 @@ function formatDuration(seconds: number): string {
 }
 
 import { useSession } from '@/contexts/session-context';
+import { PageGuard } from '@/components/page-guard';
 
 // ... other imports
 
@@ -2655,7 +2656,7 @@ export default function SessionPage() {
     };
 
     return (
-        <>
+        <PageGuard pageKey="session">
             {renderContent()}
 
             {/* Follow-up notification toasts */}
@@ -2726,6 +2727,6 @@ export default function SessionPage() {
                     </div>
                 </div>
             )}
-        </>
+        </PageGuard>
     );
 }

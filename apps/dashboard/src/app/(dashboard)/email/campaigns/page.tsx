@@ -13,6 +13,7 @@ import { formatDateTime, sanitizeFilterValue } from '@/lib/utils';
 import { SearchInput } from '@/components/search-input';
 import { TableSkeleton } from '@/components/dashboard-skeletons';
 import Link from 'next/link';
+import { PageGuard } from '@/components/page-guard';
 
 const STATUS_TABS: { key: string; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -71,6 +72,7 @@ export default function CampaignsPage() {
   if (loading && campaigns.length === 0) return <TableSkeleton />;
 
   return (
+    <PageGuard pageKey="email">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -234,5 +236,6 @@ export default function CampaignsPage() {
         </div>
       )}
     </div>
+    </PageGuard>
   );
 }

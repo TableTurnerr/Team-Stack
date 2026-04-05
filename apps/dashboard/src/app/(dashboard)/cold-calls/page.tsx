@@ -31,6 +31,7 @@ import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { CallButton } from '@/components/call-button';
+import { PageGuard } from '@/components/page-guard';
 import { PhoneNumbersTab } from '@/components/phone-numbers-tab';
 import { RelativeTime } from '@/components/relative-time';
 import {
@@ -265,6 +266,7 @@ export default function ColdCallsPage() {
   }
 
   return (
+    <PageGuard pageKey="cold-calls">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -429,6 +431,7 @@ export default function ColdCallsPage() {
         <PhoneNumbersTab searchTerm={searchTerm} />
       )}
     </div>
+    </PageGuard>
   );
 }
 

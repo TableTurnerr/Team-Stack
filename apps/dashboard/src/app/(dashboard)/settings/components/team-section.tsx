@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { Loader2, UserPlus, Shield, ShieldAlert, ShieldCheck, MoreVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { UserRoleBadges } from '@/components/user-role-badges';
 
 const ROLE_STYLES: Record<string, { bg: string; text: string; icon: typeof ShieldCheck }> = {
     admin: { bg: 'bg-[var(--primary-subtle)]', text: 'text-[var(--primary)]', icon: ShieldCheck },
@@ -175,10 +176,13 @@ export function TeamSection() {
                                         </div>
                                     </td>
                                     <td className="px-4 py-3">
-                                        <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium', roleStyle.bg, roleStyle.text)}>
-                                            <RoleIcon size={12} />
-                                            {member.role || 'Member'}
-                                        </span>
+                                        <div className="flex flex-col gap-1.5">
+                                            <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium w-fit', roleStyle.bg, roleStyle.text)}>
+                                                <RoleIcon size={12} />
+                                                {member.role || 'Member'}
+                                            </span>
+                                            <UserRoleBadges userId={member.id} maxVisible={2} />
+                                        </div>
                                     </td>
                                     <td className="px-4 py-3">
                                         <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize', statusStyle.bg, statusStyle.text)}>

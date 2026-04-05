@@ -63,7 +63,7 @@ image.png
 
 # MCP configuration file (with API keys, should be ignored)
 .mcp.json 
-
+/.playwright-mcp
 # Zoom API credentials (contains secrets)
 zoom-api.json
 

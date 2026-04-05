@@ -22,6 +22,8 @@ import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
 import { IncomingCallHandler } from '@/components/incoming-call-handler';
 import { LocalAgentProvider } from '@/contexts/local-agent-context';
+import { RolePermissionProvider } from '@/contexts/role-permission-context';
+import { RolePreviewBanner } from '@/components/role-preview-banner';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -77,6 +79,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-[var(--background)]">
       <Sidebar />
       <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
+        <RolePreviewBanner />
         <FloatingSaveBar />
         <ActiveSessionBanner />
         <IncomingCallHandler />
@@ -106,6 +109,7 @@ export default function DashboardLayout({
           <PhoneProvider>
             <SessionProvider>
               <TeamPresenceProvider>
+              <RolePermissionProvider>
                 <CallRecordingProvider>
                   <UnsavedChangesProvider>
                     <FollowUpProvider>
@@ -115,6 +119,7 @@ export default function DashboardLayout({
                     </FollowUpProvider>
                   </UnsavedChangesProvider>
                 </CallRecordingProvider>
+              </RolePermissionProvider>
               </TeamPresenceProvider>
             </SessionProvider>
           </PhoneProvider>

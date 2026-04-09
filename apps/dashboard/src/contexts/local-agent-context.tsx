@@ -188,7 +188,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                 break;
                             case 'endCallResult':
                             case 'dialResult':
-                                console.log(`[LocalAgent] ${msg.type}:`, msg.success ? 'OK' : `FAILED: ${msg.error}`);
+                                console.log('[LocalAgent] %s: %s', msg.type, msg.success ? 'OK' : `FAILED: ${msg.error}`);
                                 break;
                             case 'uploadQueueStatus':
                                 setUploadQueueStatus({

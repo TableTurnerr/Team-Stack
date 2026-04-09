@@ -34,6 +34,7 @@ import { ExportLeadsModal } from '@/components/export-leads-modal';
 import { ImportLeadsModal } from '@/components/import-leads-modal';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
+import { PageGuard } from '@/components/page-guard';
 import {
   TableContainer,
   IndexCell,
@@ -705,6 +706,7 @@ export default function CompaniesPage() {
   }
 
   return (
+    <PageGuard pageKey="companies">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -874,6 +876,7 @@ export default function CompaniesPage() {
       />
 
     </div>
+    </PageGuard>
 
   );
 

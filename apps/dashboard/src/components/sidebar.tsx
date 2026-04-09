@@ -28,6 +28,7 @@ import {
   LayoutDashboard,
   Search,
   Trash2,
+  ShieldCheck,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
@@ -40,7 +41,8 @@ import { useSidebar } from '@/contexts/sidebar-context';
 import { useTeamPresenceOptional } from '@/contexts/team-presence-context';
 import { MasterSearch } from './master-search';
 import { pb } from '@/lib/pocketbase';
-import type { User } from '@/lib/types';
+import type { User, PageKey } from '@/lib/types';
+import { usePermissionsOptional } from '@/contexts/role-permission-context';
 import dashboardPkg from '../../package.json';
 import rootPkg from '../../../../package.json';
 
@@ -267,6 +269,7 @@ interface NavChild {
   href: string;
   label: string;
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  pageKey?: PageKey;
 }
 
 interface NavCategory {
@@ -277,6 +280,7 @@ interface NavCategory {
   children?: NavChild[];    // sub-items for expandable categories
   comingSoon?: boolean;
   adminOnly?: boolean;
+  pageKey?: PageKey;        // for role-based page access
 }
 
 const navCategories: NavCategory[] = [
@@ -284,11 +288,12 @@ const navCategories: NavCategory[] = [
     key: 'cold-calls',
     label: 'Cold Calls',
     icon: Phone,
+    pageKey: 'cold-calls',
     children: [
-      { href: '/cold-calls', label: 'Cold Calls', icon: Phone },
-      { href: '/session', label: 'Call Session', icon: Headphones },
-      { href: '/recordings', label: 'Recordings', icon: Mic },
-      { href: '/session-logs', label: 'Session Logs', icon: History },
+      { href: '/cold-calls', label: 'Cold Calls', icon: Phone, pageKey: 'cold-calls' },
+      { href: '/session', label: 'Call Session', icon: Headphones, pageKey: 'session' },
+      { href: '/recordings', label: 'Recordings', icon: Mic, pageKey: 'recordings' },
+      { href: '/session-logs', label: 'Session Logs', icon: History, pageKey: 'session-logs' },
     ],
   },
   {
@@ -296,14 +301,16 @@ const navCategories: NavCategory[] = [
     label: 'Notes',
     icon: StickyNote,
     href: '/notes',
+    pageKey: 'notes',
   },
   {
     key: 'overview',
     label: 'Overview',
     icon: LayoutDashboard,
+    pageKey: 'overview',
     children: [
-      { href: '/financial', label: 'Financial Overview', icon: TrendingUp },
-      { href: '/team', label: 'Team Overview', icon: Users },
+      { href: '/financial', label: 'Financial Overview', icon: TrendingUp, pageKey: 'financial' },
+      { href: '/team', label: 'Team Overview', icon: Users, pageKey: 'team' },
     ],
   },
   {
@@ -311,25 +318,35 @@ const navCategories: NavCategory[] = [
     label: 'Follow-Ups',
     icon: CalendarClock,
     href: '/follow-ups',
+    pageKey: 'follow-ups',
   },
   {
     key: 'companies',
     label: 'Companies',
     icon: Building2,
     href: '/companies',
+    pageKey: 'companies',
   },
   {
     key: 'email',
     label: 'Email Marketing',
     icon: Mail,
     href: '/email',
+    pageKey: 'email',
   },
   {
     key: 'recycle-bin',
     label: 'Recycle Bin',
     icon: Trash2,
     href: '/recycle-bin',
-    adminOnly: true,
+    pageKey: 'recycle-bin',
+  },
+  {
+    key: 'roles',
+    label: 'Roles',
+    icon: ShieldCheck,
+    href: '/roles',
+    pageKey: 'roles',
   },
 ];
 
@@ -347,6 +364,7 @@ export function Sidebar() {
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const { user, logout } = useAuth();
   const { preferences, updatePreferences } = useUserPreferences();
+  const permissions = usePermissionsOptional();
   const [showTzSelector, setShowTzSelector] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
@@ -671,7 +689,23 @@ export function Sidebar() {
         )}
 
         <div className="space-y-0.5">
-          {navCategories.filter(c => !c.adminOnly || user?.role === 'admin').map(renderCategory)}
+          {navCategories.filter(c => {
+            // If permissions system isn't loaded yet, fall back to old adminOnly check
+            if (!permissions) return !c.adminOnly || user?.role === 'admin';
+            // Use role-based page access
+            if (c.pageKey) return permissions.canAccessPage(c.pageKey);
+            return true;
+          }).map(cat => {
+            // For categories with children, filter children by page access too
+            if (cat.children && permissions) {
+              const filteredChildren = cat.children.filter(child =>
+                !child.pageKey || permissions.canAccessPage(child.pageKey)
+              );
+              if (filteredChildren.length === 0) return null;
+              return renderCategory({ ...cat, children: filteredChildren });
+            }
+            return renderCategory(cat);
+          })}
         </div>
 
         {/* Coming Soon */}

@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 import { extractPlainText } from '@/components/block-editor/helpers';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
 import { SearchInput } from '@/components/search-input';
+import { PageGuard } from '@/components/page-guard';
 
 // Dynamic import — keeps Tiptap + ProseMirror out of the server bundle
 const BlockEditor = dynamic(
@@ -236,6 +237,7 @@ export default function NotesPage() {
 
   // ─── List view ────────────────────────────────────────────────────────────
   return (
+    <PageGuard pageKey="notes">
     <div className="space-y-6">
       {/* View Note Modal */}
       {viewingNote && (
@@ -465,5 +467,6 @@ export default function NotesPage() {
         )}
       </div>
     </div>
+    </PageGuard>
   );
 }

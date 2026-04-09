@@ -7,6 +7,7 @@ import { EMAIL_COLLECTIONS, type EmailCampaign, type EmailEvent } from '@/lib/em
 import { cn } from '@/lib/utils';
 import { CampaignStatsCards } from '@/components/email/campaign-stats-cards';
 import { CampaignChart } from '@/components/email/campaign-chart';
+import { PageGuard } from '@/components/page-guard';
 
 type PeriodOption = 7 | 14 | 30;
 
@@ -86,6 +87,7 @@ export default function EmailAnalyticsPage() {
   }
 
   return (
+    <PageGuard pageKey="email">
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -174,5 +176,6 @@ export default function EmailAnalyticsPage() {
         )}
       </div>
     </div>
+    </PageGuard>
   );
 }

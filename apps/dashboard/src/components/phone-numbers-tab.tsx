@@ -20,7 +20,7 @@ import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-v
 import { ColumnSelector } from '@/components/column-selector';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
-import { ZoomCallButton } from '@/components/zoom-call-button';
+import { CallButton } from '@/components/call-button';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 
 const PHONE_NUMBER_COLUMNS: ColumnDefinition[] = [
@@ -212,7 +212,7 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
                               <PhoneHoverCard phoneRecord={pn}>
                                 <span className="text-sm font-mono font-medium cursor-default">{formatPhoneNumber(pn.phone_number)}</span>
                               </PhoneHoverCard>
-                              <ZoomCallButton phoneNumber={pn.phone_number} />
+                              <CallButton phoneNumber={pn.phone_number} />
                             </div>
                           </td>
                         )}

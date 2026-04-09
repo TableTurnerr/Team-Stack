@@ -3,7 +3,7 @@
 import { Phone } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { useZoomPhoneOptional } from '@/contexts/zoom-phone-context';
+import { usePhoneOptional } from '@/contexts/phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { useSession } from '@/contexts/session-context';
 
@@ -13,9 +13,7 @@ import { useSession } from '@/contexts/session-context';
  *      "1234567890 (Branch)" → "1234567890"
  */
 export function cleanPhoneForUri(raw: string): string {
-    // Take only the part before any parenthesized label like "(Branch)"
     const beforeParen = raw.split('(')[0].trim();
-    // Keep leading + if present, strip everything else that isn't a digit
     const hasPlus = beforeParen.startsWith('+');
     const digits = beforeParen.replace(/\D/g, '');
     return hasPlus ? `+${digits}` : digits;
@@ -30,26 +28,24 @@ export function extractFirstPhone(phoneNumbers: string): string {
     return first;
 }
 
-interface ZoomCallButtonProps {
+interface CallButtonProps {
     phoneNumber: string;
-    callerId?: string;
     size?: 'sm' | 'md';
     className?: string;
 }
 
 /**
- * A small clickable phone icon that initiates a Zoom Phone call.
+ * A small clickable phone icon that initiates a phone call via the CRM agent.
  * Checks for screen share before allowing the call.
  * If no session is active, starts standalone mode.
  */
-export function ZoomCallButton({
+export function CallButton({
     phoneNumber,
-    callerId,
     size = 'sm',
     className
-}: ZoomCallButtonProps) {
+}: CallButtonProps) {
     const router = useRouter();
-    const zoomPhone = useZoomPhoneOptional();
+    const phone = usePhoneOptional();
     const { isSessionActive } = useCallRecording();
     const { session, setStandaloneMode } = useSession();
     const cleaned = cleanPhoneForUri(phoneNumber);
@@ -60,31 +56,25 @@ export function ZoomCallButton({
         e.preventDefault();
         e.stopPropagation();
 
-        // Check if screen share is active (recording session started)
         if (!isSessionActive) {
-            // Show alert asking user to start screen share first
             const shouldNavigate = window.confirm(
                 'Screen sharing is required to make and record calls.\n\n' +
                 'Click OK to go to the Call Session page and start screen sharing.'
             );
-
             if (shouldNavigate) {
                 router.push('/session');
             }
             return;
         }
 
-        // If no active session, enable standalone mode
         if (!session) {
             setStandaloneMode(true);
         }
 
-        // Initiate the call
-        if (zoomPhone) {
-            zoomPhone.dialNumber(cleaned);
+        if (phone) {
+            phone.dialNumber(cleaned);
         }
 
-        // Navigate to session page to show the call
         router.push('/session');
     };
 
@@ -100,9 +90,11 @@ export function ZoomCallButton({
                 size === 'sm' ? "p-1" : "p-1.5",
                 className
             )}
-            title="Call via Zoom Phone"
+            title="Call"
         >
             <Phone size={iconSize} />
         </button>
     );
 }
+
+

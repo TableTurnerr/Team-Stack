@@ -106,13 +106,14 @@ public class RecordingStorageManager
         return match.Success ? match.Groups[1].Value : null;
     }
 
-    public RecordingEntry AddEntry(string fileName, string phoneNumber, DateTime startTime)
+    public RecordingEntry AddEntry(string fileName, string phoneNumber, DateTime startTime, string? recordingId = null)
     {
         var entry = new RecordingEntry
         {
             FileName = fileName,
             PhoneNumber = phoneNumber,
             StartTime = startTime,
+            RecordingId = recordingId,
         };
 
         lock (_lock)
@@ -156,15 +157,42 @@ public class RecordingStorageManager
     }
 
     /// <summary>
-    /// Get recordings that need uploading (not yet uploaded, no error).
+    /// Get recordings that need uploading.
+    /// Only recordings linked to a CRM call log (has CallLogId) are eligible.
+    /// Un-linked recordings remain on disk but won't be uploaded.
     /// </summary>
     public List<RecordingEntry> GetPendingUploads()
     {
         lock (_lock)
         {
             return _entries
-                .Where(e => !e.Uploaded && e.Error == null && e.RetryCount < 10)
+                .Where(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null)
                 .ToList();
+        }
+    }
+
+    /// <summary>
+    /// Get recordings that have not been linked to a call log yet.
+    /// </summary>
+    public int UnlinkedCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _entries.Count(e => !e.Uploaded && e.CallLogId == null && e.Error == null);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Find a recording entry by its recording ID.
+    /// </summary>
+    public RecordingEntry? GetEntryByRecordingId(string recordingId)
+    {
+        lock (_lock)
+        {
+            return _entries.Find(e => e.RecordingId == recordingId);
         }
     }
 
@@ -258,6 +286,9 @@ public class RecordingStorageManager
 
 public class RecordingEntry
 {
+    [JsonPropertyName("recordingId")]
+    public string? RecordingId { get; set; }
+
     [JsonPropertyName("fileName")]
     public string FileName { get; set; } = "";
 

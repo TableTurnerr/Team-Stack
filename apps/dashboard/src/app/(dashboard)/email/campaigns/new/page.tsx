@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { CampaignBuilder } from '@/components/email/campaign-builder';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import { PageGuard } from '@/components/page-guard';
 
 export default function NewCampaignPage() {
   const { isAuthenticated } = useAuth();
@@ -11,6 +12,7 @@ export default function NewCampaignPage() {
   if (!isAuthenticated) return null;
 
   return (
+    <PageGuard pageKey="email">
     <div className="space-y-6">
       <div className="flex items-start gap-3">
         <Link
@@ -29,5 +31,6 @@ export default function NewCampaignPage() {
 
       <CampaignBuilder />
     </div>
+    </PageGuard>
   );
 }

@@ -6,6 +6,7 @@ import { ChevronLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SequenceBuilder } from '@/components/email/sequence-builder';
 import { EnrollmentTable } from '@/components/email/enrollment-table';
+import { PageGuard } from '@/components/page-guard';
 
 type TabType = 'builder' | 'enrollments';
 
@@ -15,6 +16,7 @@ export default function SequenceDetailPage() {
   const [activeTab, setActiveTab] = useState<TabType>('builder');
 
   return (
+    <PageGuard pageKey="email">
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
       {/* Back button */}
       <button
@@ -55,5 +57,6 @@ export default function SequenceDetailPage() {
         {activeTab === 'enrollments' && <EnrollmentTable sequenceId={id} />}
       </div>
     </div>
+    </PageGuard>
   );
 }

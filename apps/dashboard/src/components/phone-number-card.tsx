@@ -7,8 +7,8 @@ import { cn, formatDate, formatPhoneNumber } from '@/lib/utils';
 import type { PhoneNumber, CallLog } from '@/lib/types';
 import { COLLECTIONS } from '@/lib/types';
 import { pb } from '@/lib/pocketbase';
-import { ZoomCallButton } from '@/components/zoom-call-button';
-import { useZoomPhoneOptional } from '@/contexts/zoom-phone-context';
+import { CallButton } from '@/components/call-button';
+import { usePhoneOptional } from '@/contexts/phone-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { useSession } from '@/contexts/session-context';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
@@ -41,7 +41,7 @@ export function PhoneNumberCard({
   const router = useRouter();
   const [showHistory, setShowHistory] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const zoomPhone = useZoomPhoneOptional();
+  const phone = usePhoneOptional();
   const { isSessionActive } = useCallRecording();
   const { session, setStandaloneMode } = useSession();
   const recycleBin = useRecycleBinOptional();
@@ -100,7 +100,7 @@ export function PhoneNumberCard({
               )}>
                 {formatPhoneNumber(phoneNumber.phone_number)}
               </span>
-              {!isDisassociated && <ZoomCallButton phoneNumber={phoneNumber.phone_number} />}
+              {!isDisassociated && <CallButton phoneNumber={phoneNumber.phone_number} />}
               {phoneNumber.label && (
                 <span className={cn(
                   "px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border",
@@ -203,9 +203,9 @@ export function PhoneNumberCard({
                   return;
                 }
                 if (!session) setStandaloneMode(true);
-                if (zoomPhone) {
+                if (phone) {
                   const cleaned = phoneNumber.phone_number.replace(/\D/g, '');
-                  zoomPhone.dialNumber(cleaned);
+                  phone.dialNumber(cleaned);
                 }
                 router.push('/session');
               }}

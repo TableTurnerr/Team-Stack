@@ -9,6 +9,8 @@ import { useTeamPresence } from '@/contexts/team-presence-context';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type User, type ColdCallingSession } from '@/lib/types';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
+import { PageGuard } from '@/components/page-guard';
+import { UserRoleBadges } from '@/components/user-role-badges';
 
 interface UserStats {
   calls: number;
@@ -182,6 +184,7 @@ export default function TeamPage() {
   if (isLoading) return <CardGridSkeleton />;
 
   return (
+    <PageGuard pageKey="team">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -292,8 +295,9 @@ export default function TeamPage() {
                     )}
                   </div>
 
-                  <div className="text-xs text-[var(--muted)] mb-3 px-1">
+                  <div className="text-xs text-[var(--muted)] mb-1 px-1 flex flex-wrap items-center gap-2">
                     <span className="capitalize">{user.role}</span>
+                    <UserRoleBadges userId={user.id} maxVisible={2} size="xs" />
                   </div>
 
                   {/* Live session panel */}
@@ -374,5 +378,6 @@ export default function TeamPage() {
         )}
       </div>
     </div>
+    </PageGuard>
   );
 }

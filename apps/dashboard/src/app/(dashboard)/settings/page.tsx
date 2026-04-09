@@ -16,6 +16,7 @@ import { DataPrivacySection } from './components/data-privacy-section';
 import { ToastProvider, useToast } from '@/components/ui/toast';
 import { Loader2 } from 'lucide-react';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
+import { PageGuard } from '@/components/page-guard';
 
 function SettingsContent() {
   const { addToast } = useToast();
@@ -92,8 +93,10 @@ function SettingsContent() {
 
 export default function SettingsPage() {
   return (
+    <PageGuard pageKey="settings">
     <ToastProvider>
       <SettingsContent />
     </ToastProvider>
+    </PageGuard>
   );
 }

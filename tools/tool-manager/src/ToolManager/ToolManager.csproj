@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>ToolManager</RootNamespace>
     <AssemblyName>ToolManager</AssemblyName>
-    <Version>2.0.4</Version>
+    <Version>2.0.5</Version>
     <Company>TableTurnerr</Company>
     <Product>TableTurnerr Tool Manager</Product>
     <Description>Discovers, installs, and auto-updates all TableTurnerr team tools from GitHub Releases.</Description>
@@ -19,6 +19,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +28,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="icon.png" LogicalName="ToolManager.icon.png" />
+    <EmbeddedResource Include="app.ico" LogicalName="ToolManager.app.ico" />
   </ItemGroup>
 
 </Project>

@@ -16,6 +16,7 @@ import {
 } from '@/lib/types';
 import { useExchangeRates, SUPPORTED_CURRENCIES, CURRENCY_SYMBOLS, CURRENCY_LABELS } from '@/hooks/use-exchange-rates';
 import { cn } from '@/lib/utils';
+import { PageGuard } from '@/components/page-guard';
 
 // Components
 import { AccountCard } from '@/components/financial/account-card';
@@ -802,6 +803,7 @@ export default function FinancialPage() {
   if (!user) return null;
 
   return (
+    <PageGuard pageKey="financial">
     <div className="min-h-screen bg-[var(--background)] p-6">
       {/* Page header */}
       <div className="flex items-start justify-between mb-6">
@@ -1440,5 +1442,6 @@ export default function FinancialPage() {
         />
       )}
     </div>
+    </PageGuard>
   );
 }

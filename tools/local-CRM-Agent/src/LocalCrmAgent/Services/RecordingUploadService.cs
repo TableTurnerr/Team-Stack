@@ -7,6 +7,12 @@ namespace LocalCrmAgent.Services;
 /// <summary>
 /// Background service that uploads recordings to PocketBase.
 /// Uses auth token relayed from the dashboard via WebSocket.
+///
+/// Performance design:
+/// - Event-driven: wakes immediately when a recording is linked (no polling delay)
+/// - Parallel uploads: processes up to 3 recordings concurrently
+/// - Non-blocking backoff: skips recordings in cooldown, processes others immediately
+/// - Phone number resolution runs in parallel with upload prep
 /// </summary>
 public class RecordingUploadService : IDisposable
 {
@@ -21,8 +27,17 @@ public class RecordingUploadService : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _uploadTask;
 
+    // Signal the upload loop to wake up immediately
+    private readonly SemaphoreSlim _wakeSignal = new(0, int.MaxValue);
+
+    // Track last attempt time per file for non-blocking backoff
+    private readonly Dictionary<string, DateTime> _lastAttemptTime = new();
+
     // Exponential backoff delays (in seconds)
-    private static readonly int[] BackoffDelays = [10, 30, 60, 300, 900, 1800];
+    private static readonly int[] BackoffDelays = [5, 15, 30, 60, 300, 900];
+
+    // Max concurrent uploads
+    private const int MaxConcurrent = 3;
 
     public event Action<string, string?, string?, bool, string?>? UploadCompleted;
     public event Action? UploadAuthExpired;
@@ -39,9 +54,6 @@ public class RecordingUploadService : IDisposable
         _storage = storage;
     }
 
-    /// <summary>
-    /// Set PocketBase auth configuration (relayed from dashboard).
-    /// </summary>
     public void SetAuth(string pocketbaseUrl, string authToken, string uploaderId)
     {
         lock (_lock)
@@ -51,11 +63,9 @@ public class RecordingUploadService : IDisposable
             _uploaderId = uploaderId;
         }
         Debug.WriteLine($"[Upload] Auth configured for {pocketbaseUrl}");
+        Wake(); // process any pending uploads immediately
     }
 
-    /// <summary>
-    /// Start the background upload processing loop.
-    /// </summary>
     public void Start()
     {
         _cts = new CancellationTokenSource();
@@ -63,9 +73,12 @@ public class RecordingUploadService : IDisposable
         Debug.WriteLine("[Upload] Service started");
     }
 
-    /// <summary>
-    /// Process pending uploads in a loop.
-    /// </summary>
+    /// <summary>Wake the upload loop immediately (called after linking, auth, etc).</summary>
+    private void Wake()
+    {
+        try { _wakeSignal.Release(); } catch { /* already at max */ }
+    }
+
     private async Task ProcessLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -74,42 +87,73 @@ public class RecordingUploadService : IDisposable
             {
                 if (!IsConfigured)
                 {
-                    await Task.Delay(5000, ct);
+                    // Wait for auth — wake signal or 5s timeout
+                    await WaitForSignal(5000, ct);
                     continue;
                 }
 
                 var pending = _storage.GetPendingUploads();
                 if (pending.Count == 0)
                 {
-                    await Task.Delay(5000, ct);
+                    // Nothing to upload — wait for wake signal or 2s poll
+                    await WaitForSignal(2000, ct);
                     continue;
                 }
 
-                foreach (var entry in pending)
+                // Filter out recordings still in backoff cooldown
+                var ready = pending.Where(e => !IsInBackoff(e)).ToList();
+                if (ready.Count == 0)
                 {
-                    if (ct.IsCancellationRequested) break;
-
-                    // Check backoff
-                    if (entry.RetryCount > 0)
-                    {
-                        var delayIdx = Math.Min(entry.RetryCount - 1, BackoffDelays.Length - 1);
-                        var delaySec = BackoffDelays[delayIdx];
-                        // Skip if not enough time has passed since last attempt
-                        // We use a simple approach: just delay before retry
-                        await Task.Delay(delaySec * 1000, ct);
-                    }
-
-                    CurrentUpload = entry.FileName;
-                    await UploadRecording(entry, ct);
-                    CurrentUpload = null;
+                    // All pending are in backoff — wait shortest remaining cooldown
+                    var minWait = pending.Min(e => GetRemainingBackoffMs(e));
+                    await WaitForSignal(Math.Max(500, minWait), ct);
+                    continue;
                 }
+
+                // Upload up to MaxConcurrent recordings in parallel
+                var batch = ready.Take(MaxConcurrent).ToList();
+                var tasks = batch.Select(entry => UploadRecording(entry, ct)).ToList();
+                await Task.WhenAll(tasks);
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Upload] Loop error: {ex.Message}");
-                try { await Task.Delay(10000, ct); } catch { break; }
+                await WaitForSignal(5000, ct);
             }
+        }
+    }
+
+    /// <summary>Wait for wake signal OR timeout, whichever comes first.</summary>
+    private async Task WaitForSignal(int timeoutMs, CancellationToken ct)
+    {
+        try { await _wakeSignal.WaitAsync(timeoutMs, ct); }
+        catch (OperationCanceledException) { throw; }
+        catch { /* timeout is fine */ }
+    }
+
+    private bool IsInBackoff(RecordingEntry entry)
+    {
+        if (entry.RetryCount == 0) return false;
+        lock (_lastAttemptTime)
+        {
+            if (!_lastAttemptTime.TryGetValue(entry.FileName, out var lastAttempt))
+                return false;
+            var delayIdx = Math.Min(entry.RetryCount - 1, BackoffDelays.Length - 1);
+            return DateTime.UtcNow < lastAttempt.AddSeconds(BackoffDelays[delayIdx]);
+        }
+    }
+
+    private int GetRemainingBackoffMs(RecordingEntry entry)
+    {
+        if (entry.RetryCount == 0) return 0;
+        lock (_lastAttemptTime)
+        {
+            if (!_lastAttemptTime.TryGetValue(entry.FileName, out var lastAttempt))
+                return 0;
+            var delayIdx = Math.Min(entry.RetryCount - 1, BackoffDelays.Length - 1);
+            var remaining = lastAttempt.AddSeconds(BackoffDelays[delayIdx]) - DateTime.UtcNow;
+            return Math.Max(0, (int)remaining.TotalMilliseconds);
         }
     }
 
@@ -133,21 +177,36 @@ public class RecordingUploadService : IDisposable
             return;
         }
 
+        // Track attempt time for non-blocking backoff
+        lock (_lastAttemptTime) { _lastAttemptTime[entry.FileName] = DateTime.UtcNow; }
+
+        // Resolve call log ID and phone number in parallel
+        var callLogId = entry.CallLogId ?? RecordingStorageManager.ExtractCallLogId(entry.FileName);
+
         try
         {
-            // Resolve phone number record and company
-            string? phoneNumberRecordId = null;
-            string? companyId = null;
-            await ResolvePhoneNumber(pocketbaseUrl, authToken, entry.PhoneNumber, ct)
-                .ContinueWith(t =>
-                {
-                    if (t.IsCompletedSuccessfully)
-                    {
-                        (phoneNumberRecordId, companyId) = t.Result;
-                    }
-                }, ct);
+            // Run phone resolution and call log verification in parallel
+            var resolveTask = ResolvePhoneNumber(pocketbaseUrl, authToken, entry.PhoneNumber, ct);
+            var verifyTask = callLogId != null
+                ? VerifyCallLogExists(pocketbaseUrl, authToken, callLogId, ct)
+                : Task.FromResult(true);
+
+            await Task.WhenAll(resolveTask, verifyTask);
+
+            var (phoneNumberRecordId, companyId) = resolveTask.Result;
+
+            if (callLogId != null && !verifyTask.Result)
+            {
+                Debug.WriteLine($"[Upload] Call log {callLogId} deleted — discarding {entry.FileName}");
+                _storage.RemoveEntry(entry.FileName);
+                try { File.Delete(filePath); } catch { }
+                UploadCompleted?.Invoke(entry.FileName, null, callLogId, false, "Call log deleted");
+                return;
+            }
 
             // Upload recording
+            CurrentUpload = entry.FileName;
+
             using var form = new MultipartFormDataContent();
             using var fileStream = File.OpenRead(filePath);
             var fileContent = new StreamContent(fileStream);
@@ -161,8 +220,6 @@ public class RecordingUploadService : IDisposable
             form.Add(new StringContent(entry.StartTime.ToString("yyyy-MM-dd HH:mm:ss.fffZ")), "recording_date");
             form.Add(new StringContent($"Recorded by CRM Agent on {entry.StartTime:yyyy-MM-dd} at {entry.StartTime:HH:mm}"), "note");
 
-            // Use manifest callLogId, or extract from filename as fallback
-            var callLogId = entry.CallLogId ?? RecordingStorageManager.ExtractCallLogId(entry.FileName);
             if (callLogId != null) form.Add(new StringContent(callLogId), "call_log");
             if (phoneNumberRecordId != null) form.Add(new StringContent(phoneNumberRecordId), "phone_number_record");
             if (companyId != null) form.Add(new StringContent(companyId), "company");
@@ -174,6 +231,8 @@ public class RecordingUploadService : IDisposable
 
             var response = await _httpClient.SendAsync(request, ct);
 
+            CurrentUpload = null;
+
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
                 Debug.WriteLine("[Upload] Auth expired (401)");
@@ -184,16 +243,15 @@ public class RecordingUploadService : IDisposable
             response.EnsureSuccessStatusCode();
 
             // Parse response for the created record ID
-            var responseJson = await response.Content.ReadAsStringAsync(ct);
             string? recordingId = null;
             try
             {
+                var responseJson = await response.Content.ReadAsStringAsync(ct);
                 using var doc = JsonDocument.Parse(responseJson);
                 recordingId = doc.RootElement.GetProperty("id").GetString();
             }
             catch { }
 
-            // Update manifest
             _storage.UpdateEntry(entry.FileName, e =>
             {
                 e.Uploaded = true;
@@ -203,16 +261,20 @@ public class RecordingUploadService : IDisposable
 
             Debug.WriteLine($"[Upload] Uploaded: {entry.FileName} → {recordingId}");
 
-            // Update call_log.has_recording if linked
+            // Update call_log.has_recording (fire and forget — don't block next upload)
             if (callLogId != null)
             {
-                await UpdateCallLogHasRecording(pocketbaseUrl, authToken, callLogId, ct);
+                _ = UpdateCallLogHasRecording(pocketbaseUrl, authToken, callLogId, ct);
             }
+
+            // Clean up backoff tracking
+            lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
 
             UploadCompleted?.Invoke(entry.FileName, recordingId, callLogId, true, null);
         }
         catch (Exception ex)
         {
+            CurrentUpload = null;
             Debug.WriteLine($"[Upload] Failed: {entry.FileName} — {ex.Message}");
             _storage.UpdateEntry(entry.FileName, e =>
             {
@@ -232,7 +294,6 @@ public class RecordingUploadService : IDisposable
     {
         try
         {
-            // Strip formatting, keep digits and +
             var cleanNumber = new string(phoneNumber.Where(c => char.IsDigit(c) || c == '+').ToArray());
             if (string.IsNullOrEmpty(cleanNumber)) return (null, null);
 
@@ -253,9 +314,7 @@ public class RecordingUploadService : IDisposable
             string? companyId = null;
 
             if (first.TryGetProperty("company", out var companyProp) && companyProp.ValueKind == JsonValueKind.String)
-            {
                 companyId = companyProp.GetString();
-            }
 
             return (phoneId, companyId);
         }
@@ -263,6 +322,23 @@ public class RecordingUploadService : IDisposable
         {
             Debug.WriteLine($"[Upload] Phone resolution failed: {ex.Message}");
             return (null, null);
+        }
+    }
+
+    private async Task<bool> VerifyCallLogExists(string pocketbaseUrl, string authToken, string callLogId, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"{pocketbaseUrl}/api/collections/call_logs/records/{callLogId}?fields=id";
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("Authorization", authToken);
+
+            var response = await _httpClient.SendAsync(request, ct);
+            return response.StatusCode != System.Net.HttpStatusCode.NotFound;
+        }
+        catch
+        {
+            return true; // assume exists on network error
         }
     }
 
@@ -279,7 +355,6 @@ public class RecordingUploadService : IDisposable
                 "application/json");
 
             await _httpClient.SendAsync(request, ct);
-            Debug.WriteLine($"[Upload] Updated call_log {callLogId} has_recording=true");
         }
         catch (Exception ex)
         {
@@ -288,23 +363,34 @@ public class RecordingUploadService : IDisposable
     }
 
     /// <summary>
-    /// Link a recording to a call log (called from WebSocket command).
-    /// Renames the file to include the call log ID so manual uploads auto-link.
+    /// Link a recording to a call log. Triggers immediate upload.
     /// </summary>
-    public void LinkRecording(string fileName, string callLogId)
+    public void LinkRecording(string? fileName, string callLogId, string? recordingId = null)
     {
-        var newName = _storage.RenameWithCallLogId(fileName, callLogId);
-        if (newName == null)
+        string? resolvedFileName = null;
+        if (recordingId != null)
         {
-            // Rename failed — still update the manifest entry
-            _storage.UpdateEntry(fileName, e => e.CallLogId = callLogId);
+            var entry = _storage.GetEntryByRecordingId(recordingId);
+            if (entry != null) resolvedFileName = entry.FileName;
         }
-        Debug.WriteLine($"[Upload] Linked {fileName} → call_log {callLogId} (file: {newName ?? fileName})");
+        resolvedFileName ??= fileName;
+
+        if (resolvedFileName == null)
+        {
+            Debug.WriteLine($"[Upload] LinkRecording: no recording found for id={recordingId} file={fileName}");
+            return;
+        }
+
+        var newName = _storage.RenameWithCallLogId(resolvedFileName, callLogId);
+        if (newName == null)
+            _storage.UpdateEntry(resolvedFileName, e => e.CallLogId = callLogId);
+
+        Debug.WriteLine($"[Upload] Linked {resolvedFileName} → call_log {callLogId}");
+
+        // Wake the upload loop immediately — don't wait for next poll
+        Wake();
     }
 
-    /// <summary>
-    /// Manually trigger upload for a specific file.
-    /// </summary>
     public void EnqueueUpload(string fileName)
     {
         _storage.UpdateEntry(fileName, e =>
@@ -312,6 +398,7 @@ public class RecordingUploadService : IDisposable
             e.Error = null;
             e.RetryCount = 0;
         });
+        Wake();
     }
 
     public void Stop()
@@ -326,6 +413,7 @@ public class RecordingUploadService : IDisposable
     public void Dispose()
     {
         Stop();
+        _wakeSignal.Dispose();
         _httpClient.Dispose();
     }
 }

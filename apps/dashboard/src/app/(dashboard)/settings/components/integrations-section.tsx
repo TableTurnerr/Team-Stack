@@ -11,7 +11,6 @@ import Link from 'next/link';
 const ZOOM_AUTODIAL_KEY = 'zoom-phone-autodial';
 const ZOOM_AUTORECORD_KEY = 'call-recorder-auto-mode';
 const ZOOM_SHOW_NATIVE_KEY = 'zoom-show-native-dialer';
-const ZOOM_CALLER_ID_KEY = 'crm:zoom-outbound-caller-id';
 
 
 interface IntegrationsSectionProps {
@@ -30,7 +29,6 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
     const [autoDial, setAutoDial] = useState(false);
     const [autoRecord, setAutoRecord] = useState(true);
     const [showNativeDialer, setShowNativeDialer] = useState(false);
-    const [callerId, setCallerId] = useState('');
 
     // Load settings from localStorage on mount
     useEffect(() => {
@@ -44,8 +42,6 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
             const savedNative = localStorage.getItem(ZOOM_SHOW_NATIVE_KEY);
             if (savedNative !== null) setShowNativeDialer(JSON.parse(savedNative));
 
-            const savedCallerId = localStorage.getItem(ZOOM_CALLER_ID_KEY);
-            if (savedCallerId) setCallerId(savedCallerId);
         } catch {
             // ignore
         }
@@ -87,21 +83,6 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
         addToast('success', enabled
             ? 'Zoom native dialer toggle enabled in the dialer header'
             : 'Zoom native dialer toggle hidden'
-        );
-    };
-
-    const handleCallerIdSave = () => {
-        const cleaned = callerId.trim();
-        try {
-            if (cleaned) {
-                localStorage.setItem(ZOOM_CALLER_ID_KEY, cleaned);
-            } else {
-                localStorage.removeItem(ZOOM_CALLER_ID_KEY);
-            }
-        } catch { /* ignore */ }
-        addToast('success', cleaned
-            ? `Outbound caller ID set to ${cleaned}`
-            : 'Outbound caller ID cleared — will use auto-detected number'
         );
     };
 
@@ -235,45 +216,6 @@ export function IntegrationsSection({ preferences, updatePreferences, isSaving }
                         </button>
                     </div>
 
-                    <hr className="border-[var(--card-border)]" />
-
-                    {/* Outbound Caller ID */}
-                    <div className="space-y-2">
-                        <div>
-                            <p className="text-sm font-medium">Outbound Caller ID</p>
-                            <p className="text-xs text-[var(--muted)] max-w-md">
-                                Your Zoom phone number shown to call recipients. Default is
-                                +1 808 559006. Override here if using a different number.
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="tel"
-                                value={callerId}
-                                onChange={(e) => setCallerId(e.target.value)}
-                                placeholder="+1808559006 (default)"
-                                className="flex-1 max-w-xs px-3 py-1.5 text-sm rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                            <button
-                                onClick={handleCallerIdSave}
-                                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-colors"
-                            >
-                                Save
-                            </button>
-                            {callerId && (
-                                <button
-                                    onClick={() => {
-                                        setCallerId('');
-                                        try { localStorage.removeItem(ZOOM_CALLER_ID_KEY); } catch { /* */ }
-                                        addToast('success', 'Outbound caller ID cleared');
-                                    }}
-                                    className="px-3 py-1.5 text-sm font-medium rounded-lg btn-ghost border border-[var(--card-border)] text-[var(--muted)] hover:text-[var(--foreground)]"
-                                >
-                                    Clear
-                                </button>
-                            )}
-                        </div>
-                    </div>
                 </div>
             </div>
 

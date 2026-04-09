@@ -13,8 +13,10 @@
 5. [Dashboard Setup](#5-dashboard-setup)
 6. [Transcriber Setup](#6-transcriber-setup)
 7. [Zoom Phone Configuration](#7-zoom-phone-configuration)
+   - [7.1 Zoom Phone Webhook Setup (Optional)](#71-zoom-phone-webhook-setup-optional)
 8. [Tool Manager Setup (Recommended)](#8-tool-manager-setup-recommended)
 9. [Local CRM Agent Setup (Manual)](#9-local-crm-agent-setup-manual--alternative-to-tool-manager)
+   - [Optional: Zoom Phone API](#optional-zoom-phone-api-end-call-via-api)
 10. [Automated Testing (Playwright)](#10-automated-testing-playwright)
 11. [Production Deployment](#11-production-deployment)
 12. [Troubleshooting](#12-troubleshooting)
@@ -108,12 +110,28 @@ The main web interface for the CRM.
 cd apps/dashboard
 pnpm install
 
-cp .env.example .env.local
+cp .env.local.example .env.local
 ```
 
 Edit `.env.local`:
 ```env
+# PocketBase
 NEXT_PUBLIC_POCKETBASE_URL=http://localhost:8090
+
+# Gemini AI — used for invoice parsing on the financial dashboard (optional)
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+
+# Zoom Phone Webhook — receives real-time Zoom call events (optional)
+# See Section 7.1 for setup instructions
+ZOOM_WEBHOOK_SECRET_TOKEN=your_zoom_webhook_secret
+
+# PocketBase admin — required when ZOOM_WEBHOOK_SECRET_TOKEN is set
+PB_ADMIN_EMAIL=admin@example.com
+PB_ADMIN_PASSWORD=your_password
+
+# PartnerStack affiliate tracking (optional)
+PARTNERSTACK_API_KEY=
 ```
 
 ### Start Development Server
@@ -160,18 +178,45 @@ python transcribe_calls.py test_audio.mp3 --dry-run
 
 Configuring the browser-based dialer integration.
 
+### Phone Dialer
+
+The Phone Dialer is a floating panel on the right side of the dashboard. It is always visible during an active call session and can be:
+- **Dragged** vertically to reposition (saved to localStorage)
+- **Resized** by dragging the bottom edge (height saved to localStorage)
+- **Idle state**: shows a custom keypad for dialing
+- **Active call**: shows the Zoom Smart Embed iframe for in-call controls
+
 ### Settings Location
 Access via **Settings → Integrations → Zoom Phone**.
 
 ### Available Options
 1. **Auto-Dial** (Default: `Off`)
-   - When enabled, clicking phone buttons routes calls through the Zoom desktop app.
-   - **Note**: "Active Call Session" requires screen sharing to be started manually.
-   - When disabled, numbers populate in the web-based custom dialer.
+   - When enabled, clicking call buttons dials via the Zoom desktop app (`zoomphonecall:` protocol).
+   - When disabled, the number opens in the embedded Smart Embed keypad.
+   - **Note**: The Local CRM Agent must be running for the Session page to become active.
 2. **Auto-Record Calls** (Default: `On`)
-   - Automatically starts/stops recording when calls connect/end.
+   - Automatically starts/stops the local WASAPI recorder when calls connect/end.
 3. **Show Zoom Native Dialer Toggle** (Default: `Off`)
-   - Adds a "swap" button to the dialer header to access the standard Zoom dialer interface.
+   - Adds a "swap" button in the dialer header to access the standard Zoom Phone interface.
+
+### 7.1 Zoom Phone Webhook Setup (Optional)
+
+The webhook enables real-time call event delivery from Zoom to the dashboard. It's used by the Local CRM Agent to match local calls to Zoom `call_id`s — required for the "End Call via API" feature.
+
+1. Go to [Zoom Marketplace](https://marketplace.zoom.us/) and create a **Server-to-Server OAuth** app.
+2. In the app's **Feature** tab, enable **Event Subscriptions**.
+3. Add a subscription with endpoint URL: `https://your-domain.com/api/zoom/webhook`
+4. Subscribe to events: `phone.callee_ringing`, `phone.callee_answered`, `phone.call_ended`, and `phone.caller_ringing`.
+5. Copy the **Secret Token** from the webhook settings.
+6. Set it in your dashboard environment:
+   ```env
+   ZOOM_WEBHOOK_SECRET_TOKEN=your_secret_token
+   PB_ADMIN_EMAIL=admin@example.com
+   PB_ADMIN_PASSWORD=your_password
+   ```
+7. Redeploy the dashboard. Zoom will validate the endpoint by sending a `endpoint.url_validation` challenge.
+
+> **Without the webhook**: The dashboard still functions fully. Dialing, recording, and call state detection (via WASAPI) all work. The webhook is only needed if you want the agent to end calls via the Zoom REST API.
 
 ---
 
@@ -244,6 +289,26 @@ build-release.bat
 3. On the **Session** page, the agent must show a green checkmark before starting a call session.
 4. During calls, if Zoom's iframe fires a false "disconnect" event but the agent confirms the call is still active (via WASAPI audio), the disconnect is suppressed — preventing recording drops.
 5. The dialer UI shows agent connection status and a "Click to launch" button if offline.
+
+### Optional: Zoom Phone API (End Call via API)
+
+By default, the agent can detect and dial calls without any Zoom credentials. To also enable **ending calls via the Zoom REST API**, configure a `zoom-api.json` file:
+
+1. Create a **Server-to-Server OAuth** app at [Zoom Marketplace](https://marketplace.zoom.us/).
+2. Grant it the `phone:write:call:admin` scope (or `phone:write:call` depending on your plan).
+3. Note your **Account ID**, **Client ID**, **Client Secret**, and the Zoom user email you dial from.
+4. Create the config file at `%AppData%\CRM Agent\zoom-api.json`:
+   ```json
+   {
+     "accountId": "YOUR_ZOOM_ACCOUNT_ID",
+     "clientId": "YOUR_S2S_OAUTH_CLIENT_ID",
+     "clientSecret": "YOUR_S2S_OAUTH_CLIENT_SECRET",
+     "zoomUserId": "user@yourcompany.com"
+   }
+   ```
+5. Restart the agent. Without valid credentials, the agent still works — only the "End Call via API" feature is unavailable.
+
+> **Template**: A `zoom-api.example.json` is included in the source at `tools/local-CRM-Agent/src/LocalCrmAgent/`.
 
 ### Updating
 
@@ -367,6 +432,7 @@ pnpm test:headed tests/12-live-call-flow.spec.ts
 - [ ] **Power Dialer**: Paste phone numbers → start → verify sequential dialing → test pause/resume/stop → try negative delay mode
 - [ ] **Transcriber**: Place an `.mp3` in `tools/audio-recorder/recordings/` → run `python tools/transcriber/transcribe_calls.py` → verify transcript appears in Dashboard
 - [ ] **Google Maps Scraper**: Open extension → scrape a restaurant page → verify company appears in `/companies`
+- [ ] **Phone Dialer**: Verify floating panel appears on right side of dashboard → drag to reposition → confirm position is restored after page reload → make a call → confirm Smart Embed iframe appears during call
 - [ ] **Local CRM Agent**: Run `install.bat` → verify system tray icon appears → start a call session in dashboard → confirm agent shows green checkmark → place a call → verify tray icon turns green
 
 ---
@@ -423,4 +489,4 @@ Recommended architecture:
 - **Fix**: Ensure the Local CRM Agent is running. The agent uses WASAPI audio monitoring (OS-level, network-independent) to confirm calls are still active and suppress false disconnects.
 
 ---
-*Last updated: March 2026*
+*Last updated: April 2026*

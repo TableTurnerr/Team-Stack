@@ -6,13 +6,15 @@ namespace ToolManager.Services;
 /// <summary>
 /// Automatic update scheduler for already-installed tools only.
 /// New tools are never auto-installed — the user picks those from the UI.
-/// - On startup + hourly: auto-updates installed tools silently.
+/// - On startup + every 15 min: auto-updates installed tools silently.
+/// Respects the AutoUpdateEnabled setting.
 /// </summary>
 public class UpdateScheduler : IDisposable
 {
     private readonly GitHubReleaseService _github;
     private readonly InstallService _installer;
     private readonly InstalledToolsRegistry _registry;
+    private readonly SettingsService _settings;
 
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
@@ -29,11 +31,16 @@ public class UpdateScheduler : IDisposable
 
     public DateTime LastCheckTime => _lastCheck;
 
-    public UpdateScheduler(GitHubReleaseService github, InstallService installer, InstalledToolsRegistry registry)
+    public UpdateScheduler(
+        GitHubReleaseService github,
+        InstallService installer,
+        InstalledToolsRegistry registry,
+        SettingsService settings)
     {
         _github = github;
         _installer = installer;
         _registry = registry;
+        _settings = settings;
     }
 
     public void Start()
@@ -60,12 +67,20 @@ public class UpdateScheduler : IDisposable
     /// <summary>
     /// Check for updates to already-installed tools and apply them automatically.
     /// Never installs new tools — that's the user's choice via the UI.
+    /// Skips auto-update if disabled in settings (still refreshes the tool list).
     /// </summary>
     public async Task CheckAndUpdateInstalled(CancellationToken ct = default)
     {
         Debug.WriteLine("[UpdateScheduler] Checking installed tools for updates...");
         var tools = await _github.FetchToolsAsync(forceRefresh: true, ct: ct);
         _lastCheck = DateTime.UtcNow;
+
+        if (!_settings.Settings.AutoUpdateEnabled)
+        {
+            Debug.WriteLine("[UpdateScheduler] Auto-update disabled, skipping installs");
+            UpdatesChecked?.Invoke();
+            return;
+        }
 
         // Only update tools the user has already installed
         var toUpdate = tools.Where(t => t.IsInstalled && t.UpdateAvailable).ToList();

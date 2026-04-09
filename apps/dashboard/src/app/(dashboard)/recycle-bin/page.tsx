@@ -4,10 +4,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { Trash2, RotateCcw, Clock, Loader2, AlertTriangle, Building2, Phone, FileText, Headphones, X } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type RecycleBinItem, type RecycleBinItemType } from '@/lib/types';
-import { useAuth } from '@/contexts/auth-context';
 import { useRecycleBin } from '@/contexts/recycle-bin-context';
-import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { PageGuard } from '@/components/page-guard';
 
 const TYPE_CONFIG: Record<RecycleBinItemType, { icon: typeof Building2; label: string; color: string }> = {
   company: { icon: Building2, label: 'Company', color: 'text-purple-400 bg-purple-500/10' },
@@ -32,16 +31,12 @@ function daysUntilExpiry(expiresAt: string): number {
 }
 
 export default function RecycleBinPage() {
-  const { user } = useAuth();
-  const router = useRouter();
   const { restoreItem, permanentlyDelete } = useRecycleBin();
   const [items, setItems] = useState<RecycleBinItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<RecycleBinItemType | 'all'>('all');
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-
-  const isAdmin = user?.role === 'admin';
 
   const fetchItems = useCallback(async () => {
     try {
@@ -64,12 +59,8 @@ export default function RecycleBinPage() {
   }, [filter]);
 
   useEffect(() => {
-    if (!isAdmin) {
-      router.push('/');
-      return;
-    }
     fetchItems();
-  }, [isAdmin, router, fetchItems]);
+  }, [fetchItems]);
 
   const handleRestore = async (item: RecycleBinItem) => {
     setActionId(item.id);
@@ -96,9 +87,8 @@ export default function RecycleBinPage() {
     }
   };
 
-  if (!isAdmin) return null;
-
   return (
+    <PageGuard pageKey="recycle-bin">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -249,5 +239,6 @@ export default function RecycleBinPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

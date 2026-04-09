@@ -544,7 +544,81 @@ export const COLLECTIONS = {
 
   // Recycle bin
   RECYCLE_BIN: 'recycle_bin',
+
+  // Roles
+  ROLES: 'roles',
 } as const;
+
+// ============================================================================
+// Role & Permission Types
+// ============================================================================
+
+/** All page keys that can be controlled by roles */
+export type PageKey =
+  | 'overview'
+  | 'cold-calls'
+  | 'session'
+  | 'recordings'
+  | 'session-logs'
+  | 'companies'
+  | 'leads'
+  | 'notes'
+  | 'follow-ups'
+  | 'email'
+  | 'financial'
+  | 'team'
+  | 'recycle-bin'
+  | 'settings'
+  | 'roles';
+
+/** Granular feature-level permissions */
+export interface RolePermissions {
+  can_create_companies?: boolean;
+  can_edit_companies?: boolean;
+  can_delete_companies?: boolean;
+  can_manage_team?: boolean;
+  can_manage_roles?: boolean;
+  can_view_financial?: boolean;
+  can_export_data?: boolean;
+  can_bulk_actions?: boolean;
+  can_manage_email_campaigns?: boolean;
+  can_view_recordings?: boolean;
+  can_delete_recordings?: boolean;
+  can_manage_sessions?: boolean;
+}
+
+/** Data-level access control */
+export interface RoleDataAccess {
+  companies?: {
+    mode: 'all' | 'assigned' | 'none';
+    company_ids?: string[];
+  };
+  leads?: {
+    mode: 'all' | 'assigned' | 'none';
+    lead_ids?: string[];
+  };
+}
+
+export interface Role extends RecordModel {
+  name: string;
+  color?: string;
+  icon?: string;
+  position: number;
+  is_default?: boolean;
+  members?: string[];
+  page_access?: Record<PageKey, boolean>;
+  permissions?: RolePermissions;
+  data_access?: RoleDataAccess;
+  created_by?: string;
+  expand?: {
+    members?: User[];
+    created_by?: User;
+  };
+}
+
+// ============================================================================
+// Recycle Bin Types
+// ============================================================================
 
 export type RecycleBinItemType = 'company' | 'phone_number' | 'call_log' | 'session';
 

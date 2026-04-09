@@ -18,6 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { CardGridSkeleton } from '@/components/dashboard-skeletons';
+import { PageGuard } from '@/components/page-guard';
 
 export default function EmailHubPage() {
   const { isAuthenticated } = useAuth();
@@ -81,6 +82,7 @@ export default function EmailHubPage() {
   };
 
   return (
+    <PageGuard pageKey="email">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -232,5 +234,6 @@ export default function EmailHubPage() {
         )}
       </div>
     </div>
+    </PageGuard>
   );
 }

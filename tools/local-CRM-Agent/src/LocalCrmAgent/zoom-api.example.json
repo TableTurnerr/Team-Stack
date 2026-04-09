@@ -1,0 +1,6 @@
+{
+  "accountId": "YOUR_ZOOM_ACCOUNT_ID",
+  "clientId": "YOUR_S2S_OAUTH_CLIENT_ID",
+  "clientSecret": "YOUR_S2S_OAUTH_CLIENT_SECRET",
+  "zoomUserId": "user@yourcompany.com"
+}

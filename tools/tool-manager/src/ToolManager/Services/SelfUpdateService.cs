@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Reflection;
 
 namespace ToolManager.Services;
 
@@ -21,8 +22,17 @@ public class SelfUpdateService : IDisposable
     public Version CurrentVersion { get; } =
         System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
 
+    /// <summary>Full version string including pre-release suffix (e.g. "2.0.4-dev.20260323.1").</summary>
+    public string CurrentVersionDisplay { get; } =
+        System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+
+    /// <summary>True when running a local dev build.</summary>
+    public bool IsDevBuild => CurrentVersionDisplay.Contains("-dev.", StringComparison.OrdinalIgnoreCase);
+
     public Version? LatestVersion { get; private set; }
-    public bool UpdateAvailable => LatestVersion != null && LatestVersion > CurrentVersion;
+    public bool UpdateAvailable => LatestVersion != null && !IsDevBuild && LatestVersion > CurrentVersion;
 
     public event Action<Version>? UpdateFound;
 
@@ -82,6 +92,15 @@ public class SelfUpdateService : IDisposable
         // Use cached result from CheckNow/Loop to avoid redundant API call
         var (version, url) = _lastCheck.version != null ? _lastCheck : await _github.CheckSelfUpdate();
         if (version == null || url == null) return false;
+        return await ApplySpecificVersion(version, url);
+    }
+
+    /// <summary>
+    /// Apply a specific version by URL. Used for switching from dev build to release
+    /// when the numeric version matches (so normal ApplyUpdate won't find it).
+    /// </summary>
+    public async Task<bool> ApplySpecificVersion(Version version, string url)
+    {
 
         string? zipPath = null;
         string? tempDir = null;
@@ -117,7 +136,7 @@ public class SelfUpdateService : IDisposable
                     timeout /t 3 /nobreak >nul
                     copy /Y "{newExe}" "{targetExe}" >nul
                 )
-                start "" "{targetExe}"
+                start /D "{installDir}" "" "{targetExe}"
                 timeout /t 5 /nobreak >nul
                 rmdir /s /q "{tempDir}" >nul 2>&1
                 del "{zipPath}" >nul 2>&1

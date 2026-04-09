@@ -13,6 +13,7 @@ import { COLLECTIONS } from '@/lib/types';
 import type { EventLog } from '@/lib/types';
 import { timeAgo, formatSessionDuration } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { PageGuard } from '@/components/page-guard';
 
 const PAGE_META: Record<string, { label: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
   '/cold-calls': { label: 'Cold Calls', icon: Phone },
@@ -308,6 +309,7 @@ export default function OverviewPage() {
   }
 
   return (
+    <PageGuard pageKey="overview">
     <div className="space-y-8">
       {/* Page Header */}
       <div>
@@ -416,5 +418,6 @@ export default function OverviewPage() {
         </div>
       </div>
     </div>
+    </PageGuard>
   );
 }

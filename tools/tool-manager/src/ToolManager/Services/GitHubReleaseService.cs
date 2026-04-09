@@ -345,9 +345,6 @@ public partial class GitHubReleaseService
                 continue;
             }
 
-            // Only keep the latest version per prefix (API returns newest first)
-            if (toolMap.ContainsKey(prefix)) continue;
-
             // Find zip asset
             string? downloadUrl = null;
             foreach (var asset in release.GetProperty("assets").EnumerateArray())
@@ -362,11 +359,36 @@ public partial class GitHubReleaseService
 
             if (downloadUrl == null) continue;
 
+            var publishedStr = release.GetProperty("published_at").GetString();
+            DateTime? publishedAt = publishedStr != null ? DateTime.Parse(publishedStr) : null;
+            var releaseBody = release.GetProperty("body").GetString();
+
+            var releaseVersion = new ReleaseVersion
+            {
+                Version = version,
+                DownloadUrl = downloadUrl,
+                ReleaseBody = releaseBody,
+                PublishedAt = publishedAt,
+                TagName = tag,
+            };
+
+            // Append additional versions to existing tool (API returns newest first)
+            if (toolMap.ContainsKey(prefix))
+            {
+                toolMap[prefix].AllVersions.Add(releaseVersion);
+                continue;
+            }
+
             var releaseName = release.GetProperty("name").GetString() ?? tag;
             var displayName = Regex.Replace(releaseName, @"\s*v[\d.]+\s*$", "").Trim();
             if (string.IsNullOrEmpty(displayName)) displayName = prefix;
 
             var installed = _registry.GetByTagPrefix(prefix);
+
+            Version? installedVer = null;
+            bool installedIsDev = false;
+            if (installed != null)
+                VersionHelper.TryParse(installed.Version, out installedVer, out installedIsDev);
 
             toolMap[prefix] = new ToolInfo
             {
@@ -376,10 +398,13 @@ public partial class GitHubReleaseService
                 ToolType = installed?.Type ?? "unknown",
                 LatestVersion = version,
                 LatestDownloadUrl = downloadUrl,
-                ReleaseBody = release.GetProperty("body").GetString(),
+                ReleaseBody = releaseBody,
                 IsInstalled = installed != null,
-                InstalledVersion = installed != null && Version.TryParse(installed.Version, out var iv) ? iv : null,
+                InstalledVersion = installedVer,
+                InstalledVersionRaw = installed?.Version,
+                IsDevBuild = installedIsDev,
                 InstallPath = installed?.InstallPath,
+                AllVersions = [releaseVersion],
             };
         }
 
@@ -464,6 +489,50 @@ public partial class GitHubReleaseService
     }
 
     /// <summary>
+    /// Get the latest Tool Manager release URL regardless of version comparison.
+    /// Used to switch from a dev build back to the release even when the numeric version matches.
+    /// </summary>
+    public async Task<(Version? version, string? url)> GetLatestSelfRelease(CancellationToken ct = default)
+    {
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _http.GetAsync(
+                $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases?per_page=30", ct);
+            _lastApiCall = DateTime.UtcNow;
+            ReadRateLimitHeaders(resp);
+        }
+        catch { return (null, null); }
+
+        if (!resp.IsSuccessStatusCode) return (null, null);
+
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        var tagStart = $"{SelfTagPrefix}-v";
+
+        foreach (var release in doc.RootElement.EnumerateArray())
+        {
+            var tag = release.GetProperty("tag_name").GetString();
+            if (tag == null || !tag.StartsWith(tagStart)) continue;
+            if (release.GetProperty("draft").GetBoolean()) continue;
+
+            if (!Version.TryParse(tag[tagStart.Length..], out var version)) continue;
+
+            foreach (var asset in release.GetProperty("assets").EnumerateArray())
+            {
+                var name = asset.GetProperty("name").GetString() ?? "";
+                if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    var url = asset.GetProperty("browser_download_url").GetString();
+                    return (version, url);
+                }
+            }
+            break;
+        }
+
+        return (null, null);
+    }
+
+    /// <summary>
     /// Refresh installed status on cached tools from the registry
     /// without making any GitHub API call. Call after install/uninstall/update.
     /// </summary>
@@ -480,7 +549,18 @@ public partial class GitHubReleaseService
                 {
                     var installed = _registry.GetByTagPrefix(tool.TagPrefix);
                     tool.IsInstalled = installed != null;
-                    tool.InstalledVersion = installed != null && Version.TryParse(installed.Version, out var iv) ? iv : null;
+                    if (installed != null && VersionHelper.TryParse(installed.Version, out var iv, out var isDev))
+                    {
+                        tool.InstalledVersion = iv;
+                        tool.InstalledVersionRaw = installed.Version;
+                        tool.IsDevBuild = isDev;
+                    }
+                    else
+                    {
+                        tool.InstalledVersion = null;
+                        tool.InstalledVersionRaw = installed?.Version;
+                        tool.IsDevBuild = false;
+                    }
                     tool.InstallPath = installed?.InstallPath;
                     if (installed?.Name != null) tool.DisplayName = installed.Name;
                     if (installed?.Manifest?.Description != null) tool.Description = installed.Manifest.Description;

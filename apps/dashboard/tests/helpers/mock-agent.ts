@@ -43,6 +43,11 @@ export interface MockAgentNetworkQuality {
  */
 export async function setupMockAgent(page: Page) {
     await page.addInitScript(() => {
+        // Guard: only set up once per page load (allows calling setupMockAgent
+        // multiple times safely — e.g. from setupVirtualDialer AND directly)
+        if ((window as any).__mockAgentSetupDone) return;
+        (window as any).__mockAgentSetupDone = true;
+
         const AGENT_URL = 'ws://127.0.0.1:9876';
         const OriginalWebSocket = window.WebSocket;
 
@@ -75,6 +80,62 @@ export async function setupMockAgent(page: Page) {
                             const cmd = JSON.parse(data);
                             (window as any).__mockAgentCommands = (window as any).__mockAgentCommands ?? [];
                             (window as any).__mockAgentCommands.push(cmd);
+
+                            // Auto-respond to dial commands when virtual dialer config is set
+                            if (cmd.type === 'dial' && (window as any).__TEST_DIALER_CONFIG) {
+                                const cfg = (window as any).__TEST_DIALER_CONFIG;
+                                const phoneNumber = cmd.phoneNumber;
+
+                                if (cfg.shouldFail) {
+                                    // Simulate immediate failure
+                                    setTimeout(() => {
+                                        mockWs._dispatchMessage({
+                                            type: 'callState', state: 'ended',
+                                            phoneNumber, direction: 'outbound',
+                                            duration: 0, confidence: 'high', timestamp: Date.now(),
+                                        });
+                                    }, cfg.failDelay ?? 200);
+                                } else {
+                                    // Ringing
+                                    setTimeout(() => {
+                                        mockWs._dispatchMessage({
+                                            type: 'callState', state: 'ringing',
+                                            phoneNumber, direction: 'outbound',
+                                            duration: 0, confidence: 'high', timestamp: Date.now(),
+                                        });
+                                    }, cfg.ringDelay ?? 50);
+
+                                    // Connect (unless shouldConnect is explicitly false)
+                                    if (cfg.shouldConnect !== false) {
+                                        setTimeout(() => {
+                                            mockWs._dispatchMessage({
+                                                type: 'callState', state: 'connected',
+                                                phoneNumber, direction: 'outbound',
+                                                duration: 0, confidence: 'high', timestamp: Date.now(),
+                                            });
+                                        }, cfg.connectDelay ?? 150);
+                                    }
+
+                                    // Auto-end
+                                    if (cfg.autoEndDelay && cfg.shouldConnect !== false) {
+                                        const endAt = (cfg.connectDelay ?? 150) + cfg.autoEndDelay;
+                                        setTimeout(() => {
+                                            mockWs._dispatchMessage({
+                                                type: 'callState', state: 'ended',
+                                                phoneNumber, direction: 'outbound',
+                                                duration: 0, confidence: 'high', timestamp: Date.now(),
+                                            });
+                                        }, endAt);
+                                        setTimeout(() => {
+                                            mockWs._dispatchMessage({
+                                                type: 'callState', state: 'idle',
+                                                phoneNumber: null, direction: null,
+                                                duration: 0, confidence: 'high', timestamp: Date.now(),
+                                            });
+                                        }, endAt + 200);
+                                    }
+                                }
+                            }
                         } catch {}
                     },
                     close: () => {

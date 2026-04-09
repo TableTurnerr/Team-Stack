@@ -21,6 +21,7 @@ import { SearchInput } from '@/components/search-input';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
 import Link from 'next/link';
+import { PageGuard } from '@/components/page-guard';
 
 const STATUS_CONFIG: Record<CampaignStatus, { icon: typeof Mail; color: string; label: string }> = {
   draft: { icon: Mail, color: 'bg-[var(--card-hover)] text-[var(--muted)]', label: 'Draft' },
@@ -141,6 +142,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     : '0';
 
   return (
+    <PageGuard pageKey="email">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -349,5 +351,6 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         isLoading={actionLoading}
       />
     </div>
+    </PageGuard>
   );
 }

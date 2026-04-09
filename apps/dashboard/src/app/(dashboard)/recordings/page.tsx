@@ -12,13 +12,14 @@ import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { BulkUploadModal, type PendingFile, type DuplicateInfo, type UploadProgress } from '@/components/bulk-upload-modal';
-import { ZoomCallButton } from '@/components/zoom-call-button';
+import { CallButton } from '@/components/call-button';
 import { TableContainer, IndexCell, HeaderIndexCell, ResizableTh, useResizableColumns, TablePagination, TableEmptyState } from '@/components/ui/data-table';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
+import { PageGuard } from '@/components/page-guard';
 
 const RECORDING_COLUMNS: ColumnDefinition[] = [
   { key: 'recording_date', label: 'Date', defaultVisible: true },
@@ -513,6 +514,7 @@ export default function RecordingsPage() {
   }
 
   return (
+    <PageGuard pageKey="recordings">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -729,13 +731,13 @@ export default function RecordingsPage() {
                                   )}
                                 </div>
                               </div>
-                              <ZoomCallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
+                              <CallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
                             </div>
                           ) : (
                             <div className="flex items-center gap-1">
                               <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
                               {recording.phone_number && (
-                                <ZoomCallButton phoneNumber={recording.phone_number} />
+                                <CallButton phoneNumber={recording.phone_number} />
                               )}
                             </div>
                           )}
@@ -839,5 +841,6 @@ export default function RecordingsPage() {
       />
 
     </div>
+    </PageGuard>
   );
 }

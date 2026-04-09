@@ -22,6 +22,7 @@ import { COLLECTIONS, type CallLog, type ColdCall, type Company, type ColdCallin
 import { formatDate, formatPhoneNumber, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { getOutcomeColors } from '@/lib/call-outcomes';
+import { PageGuard } from '@/components/page-guard';
 
 function formatDuration(seconds?: number): string {
   if (!seconds || seconds === 0) return '-';
@@ -112,15 +113,11 @@ export default function ColdCallDetailPage() {
     );
   }
 
-  if (callLog) {
-    return <CallLogDetail log={callLog} />;
-  }
-
-  if (coldCall) {
-    return <ColdCallDetail call={coldCall} />;
-  }
-
-  return null;
+  return (
+    <PageGuard pageKey="cold-calls">
+      {callLog ? <CallLogDetail log={callLog} /> : coldCall ? <ColdCallDetail call={coldCall} /> : null}
+    </PageGuard>
+  );
 }
 
 // ─── Call Log Detail View ────────────────────────────────────────────────────

@@ -102,10 +102,10 @@ The dashboard integration lives in these files:
 | File | Purpose |
 |------|---------|
 | `apps/dashboard/src/contexts/local-agent-context.tsx` | WebSocket client, auto-reconnect, state management |
-| `apps/dashboard/src/contexts/zoom-phone-context.tsx` | Uses agent state to suppress false iframe disconnects |
+| `apps/dashboard/src/contexts/phone-context.tsx` | Phone state machine, WASAPI-driven call detection |
 | `apps/dashboard/src/app/(dashboard)/layout.tsx` | Wraps app in `LocalAgentProvider` |
 | `apps/dashboard/src/app/(dashboard)/session/page.tsx` | Agent verification on session start |
-| `apps/dashboard/src/components/zoom-phone-dialer.tsx` | Agent status indicator in dialer UI |
+| `apps/dashboard/src/components/phone-dialer.tsx` | Dialer UI with Zoom Smart Embed for in-call control |
 
 **Connection flow:**
 1. Dashboard opens WebSocket to `ws://127.0.0.1:9876`
@@ -113,6 +113,26 @@ The dashboard integration lives in these files:
 3. Agent broadcasts state updates, heartbeats, and network quality
 4. If connection drops, dashboard retries with exponential backoff (1s, 2s, 4s, 8s, 15s, 30s)
 5. If agent not running, dashboard shows "Click to launch" which triggers `crm-agent://launch`
+
+### Optional: Zoom Phone API (End Call via API)
+
+By default, the agent works without any Zoom credentials. To enable ending calls via the Zoom REST API, create a `zoom-api.json` config file:
+
+**File location** (either works — the agent checks exe directory first, then AppData):
+- Dev: `tools/local-CRM-Agent/src/LocalCrmAgent/zoom-api.json`
+- Production: `%AppData%\CRM Agent\zoom-api.json`
+
+**Contents** (see `zoom-api.example.json` for the template):
+```json
+{
+  "accountId": "YOUR_ZOOM_ACCOUNT_ID",
+  "clientId": "YOUR_S2S_OAUTH_CLIENT_ID",
+  "clientSecret": "YOUR_S2S_OAUTH_CLIENT_SECRET",
+  "zoomUserId": "user@yourcompany.com"
+}
+```
+
+Create a **Server-to-Server OAuth** app at [Zoom Marketplace](https://marketplace.zoom.us/) with the `phone:write:call:admin` scope to get these values. Restart the agent after placing the file — no reinstall needed.
 
 ### Requirements
 

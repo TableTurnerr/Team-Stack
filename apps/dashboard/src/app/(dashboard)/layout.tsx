@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { SidebarProvider, useSidebar } from '@/contexts/sidebar-context';
 
 import { DashboardSkeleton } from '@/components/dashboard-skeletons';
-import { ZoomPhoneProvider } from '@/contexts/zoom-phone-context';
+import { PhoneProvider } from '@/contexts/phone-context';
 import { SessionProvider } from '@/contexts/session-context';
 import { CallRecordingProvider } from '@/contexts/call-recording-context';
 import { ToastProvider } from '@/components/ui/toast';
@@ -16,12 +16,14 @@ import { UnsavedChangesProvider } from '@/contexts/unsaved-changes-context';
 import { FollowUpProvider } from '@/contexts/follow-up-context';
 import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
-import { ZoomPhoneDialer } from '@/components/zoom-phone-dialer';
+import { PhoneDialer } from '@/components/phone-dialer';
 import { RecycleBinProvider } from '@/contexts/recycle-bin-context';
 import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
 import { IncomingCallHandler } from '@/components/incoming-call-handler';
 import { LocalAgentProvider } from '@/contexts/local-agent-context';
+import { RolePermissionProvider } from '@/contexts/role-permission-context';
+import { RolePreviewBanner } from '@/components/role-preview-banner';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -77,6 +79,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-[var(--background)]">
       <Sidebar />
       <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
+        <RolePreviewBanner />
         <FloatingSaveBar />
         <ActiveSessionBanner />
         <IncomingCallHandler />
@@ -88,7 +91,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       {/* Floating dialer — always mounted for persistence, hidden on session page */}
-      <ZoomPhoneDialer hidden={isSessionPage} />
+      <PhoneDialer hidden={isSessionPage} />
     </div>
   );
 }
@@ -103,9 +106,10 @@ export default function DashboardLayout({
       <AuthGuard>
         <ToastProvider>
           <LocalAgentProvider>
-          <ZoomPhoneProvider>
+          <PhoneProvider>
             <SessionProvider>
               <TeamPresenceProvider>
+              <RolePermissionProvider>
                 <CallRecordingProvider>
                   <UnsavedChangesProvider>
                     <FollowUpProvider>
@@ -115,9 +119,10 @@ export default function DashboardLayout({
                     </FollowUpProvider>
                   </UnsavedChangesProvider>
                 </CallRecordingProvider>
+              </RolePermissionProvider>
               </TeamPresenceProvider>
             </SessionProvider>
-          </ZoomPhoneProvider>
+          </PhoneProvider>
           </LocalAgentProvider>
         </ToastProvider>
       </AuthGuard>

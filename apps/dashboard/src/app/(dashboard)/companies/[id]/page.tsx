@@ -46,6 +46,7 @@ import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
+import { useUnsavedChanges } from '@/contexts/unsaved-changes-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
 import { RelativeTime } from '@/components/relative-time';
 import { PageGuard } from '@/components/page-guard';
@@ -66,6 +67,7 @@ export default function CompanyDetailPage() {
   const recycleBin = useRecycleBinOptional();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const { changes, hasUnsavedChanges, saveAll, isSaving: isSavingAll } = useUnsavedChanges();
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
@@ -432,10 +434,30 @@ export default function CompanyDetailPage() {
               {isEditingAll ? 'Cancel Editing' : 'Edit Details'}
             </button>
             <button
-              onClick={() => setIsEditingAll(false)}
-              className="px-6 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-sm font-bold hover:opacity-90 transition-all shadow-lg"
+              onClick={async () => {
+                const companyChanges: Record<string, string> = {};
+                for (const change of changes.values()) {
+                  if (change.collection === COLLECTIONS.COMPANIES && change.recordId === id) {
+                    companyChanges[change.field] = change.currentValue;
+                  }
+                }
+                const result = await saveAll();
+                if (result.success) {
+                  if (Object.keys(companyChanges).length > 0) {
+                    setCompany(prev => prev ? { ...prev, ...companyChanges } : prev);
+                  }
+                  setIsEditingAll(false);
+                }
+              }}
+              disabled={!hasUnsavedChanges || isSavingAll}
+              className={cn(
+                "px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-lg",
+                hasUnsavedChanges && !isSavingAll
+                  ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 cursor-pointer"
+                  : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+              )}
             >
-              Save Changes
+              {isSavingAll ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </div>
@@ -490,6 +512,9 @@ export default function CompanyDetailPage() {
                     value={company.company_name}
                     onSave={(v) => handleUpdateCompany('company_name', v)}
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="company_name"
                   />
                   <InlineEditField
                     id={`company_${id}_owner`}
@@ -498,6 +523,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('owner_name', v)}
                     placeholder="Enter owner name..."
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="owner_name"
                   />
                   <div>
                     <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-1 block">CRM Status</label>
@@ -522,6 +550,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('instagram_handle', v)}
                     placeholder="@username"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="instagram_handle"
                   />
                   <InlineEditField
                     id={`company_${id}_email`}
@@ -530,6 +561,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('email', v)}
                     placeholder="contact@company.com"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="email"
                   />
                   <InlineEditField
                     id={`company_${id}_rating`}
@@ -538,6 +572,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('google_rating', v)}
                     placeholder="e.g. 4.5"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="google_rating"
                   />
                   <InlineEditField
                     id={`company_${id}_reviews`}
@@ -546,6 +583,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('google_reviews_count', v)}
                     placeholder="e.g. 128"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="google_reviews_count"
                   />
                 </div>
               </div>

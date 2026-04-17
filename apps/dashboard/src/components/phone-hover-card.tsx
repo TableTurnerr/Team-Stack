@@ -134,7 +134,7 @@ export function PhoneHoverCard({ phoneRecord, phoneNumber, children, className, 
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     hideTimeoutRef.current = setTimeout(() => {
       setIsVisible(false);
-    }, 150);
+    }, 350);
   }, []);
 
   const cancelHide = useCallback(() => {

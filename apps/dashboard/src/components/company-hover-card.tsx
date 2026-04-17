@@ -54,7 +54,7 @@ export function CompanyHoverCard({ company, children, className, side = 'top' }:
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     hideTimeoutRef.current = setTimeout(() => {
       setIsVisible(false);
-    }, 150);
+    }, 350);
   }, []);
 
   const cancelHide = useCallback(() => {
@@ -143,7 +143,7 @@ export function CompanyHoverCard({ company, children, className, side = 'top' }:
                 <Building2 size={16} className="text-[var(--muted)]" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold truncate" title={company.company_name}>{formatCompanyName(company.company_name)}</p>
+                <p className="text-sm font-semibold truncate">{formatCompanyName(company.company_name)}</p>
                 {hasOwner && (
                   <div className="flex items-center gap-1 mt-0.5">
                     <User size={10} className="text-[var(--muted)] flex-shrink-0" />
@@ -225,7 +225,6 @@ export function CompanyHoverCard({ company, children, className, side = 'top' }:
                     rel="noopener noreferrer"
                     className="text-[var(--primary)] hover:underline truncate"
                     onClick={(e) => e.stopPropagation()}
-                    title={company.website}
                   >
                     {company.website!.replace(/^https?:\/\//, '').replace(/\/$/, '')}
                   </a>

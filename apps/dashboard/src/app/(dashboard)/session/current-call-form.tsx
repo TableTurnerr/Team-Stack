@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Download, Loader2, CheckCircle2 } from 'lucide-react';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp } from '@/lib/types';
+import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp, type CompanyNote } from '@/lib/types';
 import { cn, timeAgo, formatDateTime, formatPhoneNumber } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
@@ -286,6 +286,11 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [callHistoryLoading, setCallHistoryLoading] = useState(false);
     const lastFetchedHistoryCompanyId = useRef('');
 
+    // Pre-call notes for the matched company
+    const [preCallNotes, setPreCallNotes] = useState<CompanyNote[]>([]);
+    const [preCallNotesLoading, setPreCallNotesLoading] = useState(false);
+    const lastFetchedNotesCompanyId = useRef('');
+
     // Prior calls attention pulse
     const priorCallsRef = useRef<HTMLDivElement>(null);
     const ownerNameRef = useRef<HTMLDivElement>(null);
@@ -548,6 +553,28 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             setCallHistory(logs);
         }).catch(console.error).finally(() => {
             setCallHistoryLoading(false);
+        });
+    }, [autoFetchedCompany]);
+
+    // Fetch pre-call notes for the auto-matched company
+    useEffect(() => {
+        if (!autoFetchedCompany) {
+            setPreCallNotes([]);
+            lastFetchedNotesCompanyId.current = '';
+            return;
+        }
+        if (autoFetchedCompany.id === lastFetchedNotesCompanyId.current) return;
+        lastFetchedNotesCompanyId.current = autoFetchedCompany.id;
+
+        setPreCallNotesLoading(true);
+        pb.collection(COLLECTIONS.COMPANY_NOTES).getFullList<CompanyNote>({
+            filter: `company = "${autoFetchedCompany.id}" && note_type = "pre_call"`,
+            sort: '-created',
+            expand: 'created_by',
+        }).then(notes => {
+            setPreCallNotes(notes);
+        }).catch(console.error).finally(() => {
+            setPreCallNotesLoading(false);
         });
     }, [autoFetchedCompany]);
 
@@ -870,6 +897,46 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     <span className="text-xs text-[var(--success)] font-medium">
                         Auto-matched to {autoFetchedCompany.company_name} from phone number
                     </span>
+                </div>
+            )}
+
+            {/* Pre-call notes panel — shown when company is auto-matched */}
+            {autoFetchedCompany && selectedCompany?.id === autoFetchedCompany.id && (preCallNotesLoading || preCallNotes.length > 0) && (
+                <div className="border border-[var(--card-border)] rounded-lg overflow-hidden text-sm">
+                    <div className="px-3 py-1.5 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] flex items-center justify-between">
+                        <span className="font-semibold uppercase tracking-wider text-[var(--muted)] text-xs flex items-center gap-1.5">
+                            <StickyNote size={12} />
+                            Pre-Call Notes
+                        </span>
+                        {preCallNotesLoading ? (
+                            <span className="text-xs text-[var(--muted)]">Loading…</span>
+                        ) : (
+                            <span className="text-xs text-[var(--muted)]">{preCallNotes.length} total</span>
+                        )}
+                    </div>
+                    {!preCallNotesLoading && (
+                        <div className="divide-y divide-[var(--card-border)] max-h-48 overflow-y-auto">
+                            {preCallNotes.map(note => (
+                                <div key={note.id} className="px-3 py-2 space-y-0.5">
+                                    <div className="flex items-center gap-1.5 text-xs">
+                                        <Tooltip content={`${formatDateTime(note.created)} (Your Time)`}>
+                                            <span className="text-[var(--muted)] whitespace-nowrap shrink-0 cursor-help">
+                                                {timeAgo(note.created)}
+                                            </span>
+                                        </Tooltip>
+                                        {note.expand?.created_by && (
+                                            <span className="text-[var(--foreground)]/80 whitespace-nowrap shrink-0 font-medium">
+                                                {note.expand.created_by.name}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="text-[var(--foreground)]/80 text-xs whitespace-pre-wrap">
+                                        {note.content}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 

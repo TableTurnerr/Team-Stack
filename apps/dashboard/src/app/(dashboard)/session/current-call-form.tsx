@@ -5,7 +5,7 @@ import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, Cal
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp, type CompanyNote } from '@/lib/types';
-import { cn, timeAgo, formatDateTime, formatPhoneNumber } from '@/lib/utils';
+import { cn, timeAgo, formatDateTime, formatPhoneNumber, extractWebsiteFromName } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
@@ -713,12 +713,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             let companyName: string;
 
             if (isNewCompany) {
+                const trimmedName = companySearch.trim();
                 const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>({
-                    company_name: companySearch.trim(),
+                    company_name: trimmedName,
                     owner_name: ownerName || undefined,
                     source: 'Cold Call',
                     first_contacted: new Date().toISOString(),
                     last_contacted: new Date().toISOString(),
+                    website: extractWebsiteFromName(trimmedName),
                 });
                 companyId = newCompany.id;
                 companyName = newCompany.company_name;

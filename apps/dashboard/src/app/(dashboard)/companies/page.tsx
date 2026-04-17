@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
-import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting, formatCompanyName } from '@/lib/utils';
+import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting, formatCompanyName, extractWebsiteFromName } from '@/lib/utils';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
@@ -435,7 +435,9 @@ function AddCompanyModal({
     e.preventDefault();
     if (!formData.company_name.trim()) return;
 
-    onAdd(formData as Partial<Company>, phoneEntries.filter(entry => entry.phone.trim()));
+    const data = { ...formData };
+    if (!data.website) data.website = extractWebsiteFromName(data.company_name) ?? '';
+    onAdd(data as Partial<Company>, phoneEntries.filter(entry => entry.phone.trim()));
 
     // Reset form
     setFormData({

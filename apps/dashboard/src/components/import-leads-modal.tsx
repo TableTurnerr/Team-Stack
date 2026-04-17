@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, extractWebsiteFromName } from '@/lib/utils';
 import {
   parseLeadsCSV,
   buildDiff,
@@ -828,7 +828,7 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
       owner_name: row.owner_name || undefined,
       company_location: row.company_location || undefined,
       google_maps_link: row.google_maps_link || undefined,
-
+      website: extractWebsiteFromName(row.company_name),
       source: row.source || undefined,
       instagram_handle: row.instagram_handle || undefined,
       email: row.email || undefined,

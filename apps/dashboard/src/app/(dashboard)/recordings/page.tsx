@@ -378,7 +378,7 @@ export default function RecordingsPage() {
   const perPage = 20;
 
   // Column visibility
-  const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('recordings', RECORDING_COLUMNS);
+  const { visibleColumns, toggleColumn, isColumnVisible, columns, resetToDefault } = useColumnVisibility('recordings', RECORDING_COLUMNS);
 
   const { widths, resize, getWidth } = useResizableColumns('recordings', [
     { key: 'recording_date', initialWidth: 130 },
@@ -561,6 +561,7 @@ export default function RecordingsPage() {
             columns={columns}
             visibleColumns={visibleColumns}
             onToggle={toggleColumn}
+            onReset={resetToDefault}
           />
 
           <button

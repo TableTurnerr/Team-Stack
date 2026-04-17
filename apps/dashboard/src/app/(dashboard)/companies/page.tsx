@@ -663,7 +663,7 @@ export default function CompaniesPage() {
   const perPage = 25;
 
   // Column visibility
-  const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('companies', COMPANY_COLUMNS);
+  const { visibleColumns, toggleColumn, isColumnVisible, columns, resetToDefault } = useColumnVisibility('companies', COMPANY_COLUMNS);
 
   // Table selection
   const selection = useTableSelection(companies);
@@ -787,6 +787,7 @@ export default function CompaniesPage() {
             columns={columns}
             visibleColumns={visibleColumns}
             onToggle={toggleColumn}
+            onReset={resetToDefault}
           />
 
           <button

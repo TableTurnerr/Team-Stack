@@ -13,6 +13,7 @@ interface UseColumnVisibilityReturn {
   visibleColumns: Set<string>;
   toggleColumn: (key: string) => void;
   isColumnVisible: (key: string) => boolean;
+  resetToDefault: () => void;
   columns: ColumnDefinition[];
 }
 
@@ -77,6 +78,15 @@ export function useColumnVisibility(
     });
   }, [columnDefinitions]);
 
+  const resetToDefault = useCallback(() => {
+    const defaultVisible = new Set(
+      columnDefinitions
+        .filter((col) => col.defaultVisible !== false)
+        .map((col) => col.key)
+    );
+    setVisibleColumns(defaultVisible);
+  }, [columnDefinitions]);
+
   const isColumnVisible = useCallback(
     (key: string) => {
       const col = columnDefinitions.find((c) => c.key === key);
@@ -90,6 +100,7 @@ export function useColumnVisibility(
     visibleColumns,
     toggleColumn,
     isColumnVisible,
+    resetToDefault,
     columns: columnDefinitions,
   };
 }

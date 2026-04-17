@@ -317,6 +317,7 @@ export default function ColdCallsPage() {
                 columns={callLogCols.columns}
                 visibleColumns={callLogCols.visibleColumns}
                 onToggle={callLogCols.toggleColumn}
+                onReset={callLogCols.resetToDefault}
               />
 
               <button

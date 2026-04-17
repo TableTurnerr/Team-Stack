@@ -6,6 +6,16 @@ import { ThemeProvider } from 'next-themes';
 export const metadata: Metadata = {
   title: 'CRM Tableturnerr',
   description: 'Unified CRM - Cold Call Monitoring + Instagram Outreach',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    title: 'Tableturnerr',
+    statusBarStyle: 'black-translucent',
+  },
+};
+
+export const viewport = {
+  themeColor: '#0a0a0a',
 };
 
 export default function RootLayout({

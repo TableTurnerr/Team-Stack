@@ -30,6 +30,21 @@ const FollowUpContext = createContext<FollowUpContextType | undefined>(undefined
 
 const POLL_INTERVAL = 60000; // 60 seconds
 
+async function callFollowUpApi(path: string, followUpId: string) {
+  try {
+    await fetch(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pb.authStore.token}`,
+      },
+      body: JSON.stringify({ followUpId }),
+    });
+  } catch (err) {
+    console.error(`[follow-up] ${path} failed`, err);
+  }
+}
+
 export function FollowUpProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
   const [pendingFollowUps, setPendingFollowUps] = useState<FollowUp[]>([]);
@@ -118,12 +133,16 @@ export function FollowUpProvider({ children }: { children: ReactNode }) {
       console.error('Failed to create follow-up alerts:', err);
     }
 
+    // Schedule background push via QStash (no-op if unconfigured).
+    void callFollowUpApi('/api/follow-ups/schedule-push', followUp.id);
+
     // Refresh list
     await fetchPendingFollowUps();
     return followUp;
   }, [user, fetchPendingFollowUps]);
 
   const completeFollowUp = useCallback(async (id: string) => {
+    void callFollowUpApi('/api/follow-ups/cancel-push', id);
     await pb.collection(COLLECTIONS.FOLLOW_UPS).update(id, {
       status: 'completed',
       completed_at: new Date().toISOString(),
@@ -141,6 +160,7 @@ export function FollowUpProvider({ children }: { children: ReactNode }) {
   }, [fetchPendingFollowUps]);
 
   const dismissFollowUp = useCallback(async (id: string) => {
+    void callFollowUpApi('/api/follow-ups/cancel-push', id);
     await pb.collection(COLLECTIONS.FOLLOW_UPS).update(id, {
       status: 'dismissed',
     });

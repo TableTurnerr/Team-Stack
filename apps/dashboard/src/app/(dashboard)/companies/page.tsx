@@ -52,13 +52,13 @@ import {
 const COMPANY_COLUMNS: ColumnDefinition[] = [
   { key: 'company_name', label: 'Company Name', defaultVisible: true },
   { key: 'owner_name', label: 'Owner', defaultVisible: true },
-  { key: 'instagram_handle', label: 'Instagram', defaultVisible: true },      // NEW
-  { key: 'status', label: 'Status', defaultVisible: true },                   // NEW
-  { key: 'email', label: 'Email', defaultVisible: false },                    // NEW
+  { key: 'instagram_handle', label: 'Instagram', defaultVisible: false },
+  { key: 'status', label: 'Status', defaultVisible: true },
+  { key: 'email', label: 'Email', defaultVisible: true },
   { key: 'company_location', label: 'Location', defaultVisible: false },
   { key: 'website', label: 'Website', defaultVisible: true },
   { key: 'source', label: 'Source', defaultVisible: true },
-  { key: 'last_contacted', label: 'Last Contact', defaultVisible: true },     // NEW
+  { key: 'last_contacted', label: 'Last Contact', defaultVisible: true },
   { key: 'actions', label: 'Actions', alwaysVisible: true },
 ];
 

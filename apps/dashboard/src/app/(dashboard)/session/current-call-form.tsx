@@ -127,22 +127,16 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         }).catch(() => {});
     }, []);
 
-    /** Toggle an outcome tag respecting No Answer exclusivity and max-3 rules */
+    /** Toggle an outcome tag respecting max-3 rules */
     const toggleOutcome = (outcome: string) => {
         setCallOutcome(prev => {
             // Deselect if already selected
             if (prev.includes(outcome)) {
                 return prev.filter(o => o !== outcome);
             }
-            // "No Answer" is exclusive
-            if (outcome === NO_ANSWER) {
-                return [NO_ANSWER];
-            }
-            // Selecting a non-No-Answer tag removes No Answer
-            const without = prev.filter(o => o !== NO_ANSWER);
             // Enforce max
-            if (without.length >= MAX_OUTCOMES) return without;
-            return [...without, outcome];
+            if (prev.length >= MAX_OUTCOMES) return prev;
+            return [...prev, outcome];
         });
     };
     const [postCallNotes, setPostCallNotes] = useState('');
@@ -793,7 +787,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
     const isHungUpOutcome = callOutcome.includes(HUNG_UP_PRIMARY) || callOutcome.includes(HUNG_UP_OTHER);
     const isAtMaxOutcomes = callOutcome.length >= MAX_OUTCOMES;
-    const hasNoAnswer = callOutcome.includes(NO_ANSWER);
 
     return (
         <div className={cn(
@@ -1270,7 +1263,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         if (outcome === 'Other +') {
                             // "Other +" opens an inline input to type a custom outcome
                             const otherPlusColors = getOutcomeColors('Other +');
-                            const isDisabled = hasNoAnswer || isAtMaxOutcomes;
+                            const isDisabled = isAtMaxOutcomes;
                             return (
                                 <div key="other-plus" className="relative">
                                     <button
@@ -1365,7 +1358,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                         }
                         const colors = getOutcomeColors(outcome);
                         const isSelected = callOutcome.includes(outcome);
-                        const isDisabled = !isSelected && (hasNoAnswer || (outcome !== NO_ANSWER && isAtMaxOutcomes));
+                        const isDisabled = !isSelected && isAtMaxOutcomes;
                         return (
                             <button
                                 key={outcome}
@@ -1408,7 +1401,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             const activeHungUp = callOutcome.includes(HUNG_UP_PRIMARY) ? HUNG_UP_PRIMARY
                                 : callOutcome.includes(HUNG_UP_OTHER) ? HUNG_UP_OTHER
                                     : null;
-                            const hungUpDisabled = !activeHungUp && (hasNoAnswer || isAtMaxOutcomes);
+                            const hungUpDisabled = !activeHungUp && isAtMaxOutcomes;
                             const hungColors = activeHungUp ? getOutcomeColors(activeHungUp) : null;
                             return (
                                 <>

@@ -23,6 +23,7 @@ import {
   CalendarCheck,
   Trash2,
   Send,
+  Globe,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import {
@@ -35,7 +36,7 @@ import {
   type FollowUp,
   type ColdCall,
 } from '@/lib/types';
-import { cn, formatPhoneNumber } from '@/lib/utils';
+import { cn, formatPhoneNumber, formatCompanyName } from '@/lib/utils';
 import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
@@ -365,8 +366,8 @@ export default function CompanyDetailPage() {
 
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div className="space-y-1">
-            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
-              {company.company_name}
+            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3" title={company.company_name}>
+              {formatCompanyName(company.company_name)}
               {Array.isArray(company.status) && company.status.length > 0 && (
                 <span className="flex gap-1 flex-wrap">
                   {company.status.map(s => {
@@ -403,6 +404,18 @@ export default function CompanyDetailPage() {
                     </a>
                   )}
                 </div>
+              )}
+              {company.website && (
+                <a
+                  href={company.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 hover:text-[var(--foreground)] min-w-0"
+                  title={company.website}
+                >
+                  <Globe size={14} className="shrink-0" />
+                  <span className="truncate">{company.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}</span>
+                </a>
               )}
             </div>
           </div>
@@ -543,6 +556,17 @@ export default function CompanyDetailPage() {
                     </div>
                     <p className="text-[10px] text-[var(--muted)] mt-1">Auto-computed from last call per phone number</p>
                   </div>
+                  <InlineEditField
+                    id={`company_${id}_website`}
+                    label="Website"
+                    value={company.website || ''}
+                    onSave={(v) => handleUpdateCompany('website', v)}
+                    placeholder="https://example.com"
+                    isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="website"
+                  />
                   <InlineEditField
                     id={`company_${id}_ig`}
                     label="Instagram Handle"

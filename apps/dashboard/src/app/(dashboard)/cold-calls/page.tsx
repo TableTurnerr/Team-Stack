@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog } from '@/lib/types';
-import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilterValue, stripPhoneFormatting } from '@/lib/utils';
+import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilterValue, stripPhoneFormatting, formatCompanyName } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { getOutcomeColors } from '@/lib/call-outcomes';
@@ -574,11 +574,11 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('company') && (
-                        <td className="py-3 px-4 overflow-visible">
+                        <td className="py-3 px-4 overflow-hidden">
                           {log.expand?.company ? (
-                            <CompanyHoverCard company={log.expand.company}>
+                            <CompanyHoverCard company={log.expand.company} className="block min-w-0 max-w-full">
                               <Link href={`/companies/${log.expand.company.id}`} className="block truncate font-medium hover:text-[var(--primary)] transition-colors" title={log.expand.company.company_name}>
-                                {log.expand.company.company_name}
+                                {formatCompanyName(log.expand.company.company_name)}
                               </Link>
                             </CompanyHoverCard>
                           ) : (

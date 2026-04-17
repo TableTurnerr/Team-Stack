@@ -18,11 +18,12 @@ import {
   MessageSquare,
   Calendar,
   Download,
-  Upload
+  Upload,
+  Globe
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
-import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting } from '@/lib/utils';
+import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting, formatCompanyName } from '@/lib/utils';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
@@ -55,6 +56,7 @@ const COMPANY_COLUMNS: ColumnDefinition[] = [
   { key: 'status', label: 'Status', defaultVisible: true },                   // NEW
   { key: 'email', label: 'Email', defaultVisible: false },                    // NEW
   { key: 'company_location', label: 'Location', defaultVisible: false },
+  { key: 'website', label: 'Website', defaultVisible: true },
   { key: 'source', label: 'Source', defaultVisible: true },
   { key: 'last_contacted', label: 'Last Contact', defaultVisible: true },     // NEW
   { key: 'actions', label: 'Actions', alwaysVisible: true },
@@ -97,6 +99,7 @@ function CompanyRow({
     company_location: company.company_location || '',
     instagram_handle: company.instagram_handle || '',
     email: company.email || '',
+    website: company.website || '',
   });
 
   const handleSave = () => {
@@ -111,6 +114,7 @@ function CompanyRow({
       company_location: company.company_location || '',
       instagram_handle: company.instagram_handle || '',
       email: company.email || '',
+      website: company.website || '',
     });
     setIsEditing(false);
   };
@@ -189,6 +193,17 @@ function CompanyRow({
             />
           </td>
         )}
+        {isColumnVisible('website') && (
+          <td className="py-3 px-4">
+            <input
+              type="url"
+              value={editData.website}
+              onChange={(e) => setEditData(p => ({ ...p, website: e.target.value }))}
+              className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+              placeholder="https://example.com"
+            />
+          </td>
+        )}
         {isColumnVisible('source') && (
           <td className="py-3 px-4">
             <span className={cn(
@@ -238,10 +253,10 @@ function CompanyRow({
         forceCheckbox={hasSelection}
       />
       {isColumnVisible('company_name') && (
-        <td className="py-3 px-4 overflow-visible">
-          <CompanyHoverCard company={company}>
+        <td className="py-3 px-4 overflow-hidden">
+          <CompanyHoverCard company={company} className="block min-w-0 max-w-full">
             <Link href={`/companies/${company.id}`} className="block truncate font-medium hover:text-[var(--primary)] transition-colors" title={company.company_name}>
-              {company.company_name}
+              {formatCompanyName(company.company_name)}
             </Link>
           </CompanyHoverCard>
         </td>
@@ -313,6 +328,24 @@ function CompanyRow({
           </div>
         </td>
       )}
+      {isColumnVisible('website') && (
+        <td className="py-3 px-4 overflow-hidden">
+          <span className="text-sm">
+            {company.website ? (
+              <a
+                href={company.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--primary)] hover:underline flex items-center gap-1 min-w-0"
+                title={company.website}
+              >
+                <Globe size={12} className="shrink-0" />
+                <span className="truncate">{company.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</span>
+              </a>
+            ) : <span className="text-[var(--muted)]">-</span>}
+          </span>
+        </td>
+      )}
       {isColumnVisible('source') && (
         <td className="py-3 px-4">
           <span className={cn(
@@ -370,6 +403,7 @@ function AddCompanyModal({
     owner_name: '',
     company_location: '',
     google_maps_link: '',
+    website: '',
     source: 'Manual',
     instagram_handle: '',
     email: '',
@@ -409,6 +443,7 @@ function AddCompanyModal({
       owner_name: '',
       company_location: '',
       google_maps_link: '',
+      website: '',
       source: 'Manual',
       instagram_handle: '',
       email: '',
@@ -550,6 +585,17 @@ function AddCompanyModal({
               />
             </div>
 
+            <div className="col-span-1 sm:col-span-2">
+              <label className="text-sm text-[var(--muted)] block mb-1">Website</label>
+              <input
+                type="url"
+                value={formData.website}
+                onChange={(e) => setFormData(p => ({ ...p, website: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                placeholder="https://example.com"
+              />
+            </div>
+
             <div>
               <label className="text-sm text-[var(--muted)] block mb-1">Source</label>
               <select
@@ -628,6 +674,7 @@ export default function CompaniesPage() {
     { key: 'status', initialWidth: 150, minWidth: 80 },
     { key: 'email', initialWidth: 180, minWidth: 100 },
     { key: 'company_location', initialWidth: 150, minWidth: 80 },
+    { key: 'website', initialWidth: 180, minWidth: 100 },
     { key: 'source', initialWidth: 100, minWidth: 70 },
     { key: 'last_contacted', initialWidth: 130, minWidth: 80 },
     { key: 'actions', initialWidth: 100, minWidth: 70 },
@@ -814,6 +861,9 @@ export default function CompaniesPage() {
                     )}
                     {isColumnVisible('company_location') && (
                       <ResizableTh width={getWidth('company_location')} minWidth={80} onResize={(w) => resize('company_location', w)}>Location</ResizableTh>
+                    )}
+                    {isColumnVisible('website') && (
+                      <ResizableTh width={getWidth('website')} minWidth={100} onResize={(w) => resize('website', w)}>Website</ResizableTh>
                     )}
                     {isColumnVisible('source') && (
                       <ResizableTh width={getWidth('source')} minWidth={70} onResize={(w) => resize('source', w)}>Source</ResizableTh>

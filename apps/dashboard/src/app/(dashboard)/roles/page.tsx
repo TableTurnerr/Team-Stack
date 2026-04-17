@@ -107,6 +107,15 @@ function RolesContent() {
 
   const selectedRole = roles.find(r => r.id === selectedRoleId) || null;
 
+  const isRoleDirty = selectedRole ? (
+    editName !== selectedRole.name ||
+    editColor !== (selectedRole.color || '#5865F2') ||
+    JSON.stringify(editPageAccess) !== JSON.stringify({ ...DEFAULT_PAGE_ACCESS, ...(selectedRole.page_access || {}) }) ||
+    JSON.stringify(editPermissions) !== JSON.stringify({ ...DEFAULT_PERMISSIONS, ...(selectedRole.permissions || {}) }) ||
+    JSON.stringify(editMembers) !== JSON.stringify(selectedRole.members || []) ||
+    JSON.stringify(editDataAccess) !== JSON.stringify(selectedRole.data_access || { companies: { mode: 'all' }, leads: { mode: 'all' } })
+  ) : false;
+
   // Fetch all users for member assignment
   useEffect(() => {
     pb.collection(COLLECTIONS.USERS).getFullList<User>({ sort: 'name' })
@@ -490,8 +499,13 @@ function RolesContent() {
                 </button>
                 <button
                   onClick={handleSave}
-                  disabled={isSaving || !editName.trim()}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg btn-primary disabled:opacity-50"
+                  disabled={isSaving || !editName.trim() || !isRoleDirty}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+                    isRoleDirty && editName.trim() && !isSaving
+                      ? "btn-primary cursor-pointer"
+                      : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+                  )}
                 >
                   {isSaving && <Loader2 size={14} className="animate-spin" />}
                   Save Changes

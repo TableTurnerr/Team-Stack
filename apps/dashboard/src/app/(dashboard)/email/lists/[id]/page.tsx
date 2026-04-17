@@ -117,16 +117,19 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        {hasChanges && (
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg btn-primary disabled:opacity-50"
-          >
-            {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-            Save Changes
-          </button>
-        )}
+        <button
+          onClick={handleSave}
+          disabled={saving || !hasChanges}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors",
+            hasChanges && !saving
+              ? "btn-primary cursor-pointer"
+              : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+          )}
+        >
+          {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+          Save Changes
+        </button>
       </div>
 
       {/* Dynamic list: filter builder */}

@@ -48,6 +48,15 @@ export function AddAccountModal({ onClose, onSaved, editAccount, userId }: AddAc
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const isDirty = editAccount ? (
+    name !== (editAccount.name ?? '') ||
+    currency !== (editAccount.currency ?? 'USD') ||
+    accountType !== (editAccount.account_type ?? 'checking') ||
+    color !== (editAccount.color ?? '') ||
+    notes !== (editAccount.notes ?? '') ||
+    isActive !== (editAccount.is_active ?? true)
+  ) : true;
+
   async function handleSave() {
     if (!name.trim()) { setError('Account name is required'); return; }
     const balanceNum = parseFloat(balance);
@@ -202,8 +211,13 @@ export function AddAccountModal({ onClose, onSaved, editAccount, userId }: AddAc
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
-            className="flex-1 px-4 py-2.5 text-sm bg-[var(--foreground)] text-[var(--background)] rounded-lg hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+            disabled={saving || !isDirty}
+            className={cn(
+              "flex-1 px-4 py-2.5 text-sm rounded-lg transition-all flex items-center justify-center gap-2",
+              isDirty && !saving
+                ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 cursor-pointer"
+                : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+            )}
           >
             {saving && <Loader2 size={14} className="animate-spin" />}
             {editAccount ? 'Save Changes' : 'Add Account'}

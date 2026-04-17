@@ -163,6 +163,27 @@ export function AddTransactionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const isDirty = isEditMode && editTransaction ? (
+    type !== (editTransaction.type ?? defaultType) ||
+    accountId !== (editTransaction.bank_account ?? '') ||
+    amount !== String(editTransaction.amount) ||
+    currency !== (editTransaction.currency ?? 'USD') ||
+    feeAmount !== (editTransaction.fee_amount ? String(editTransaction.fee_amount) : '') ||
+    description !== (editTransaction.description ?? '') ||
+    status !== (editTransaction.status ?? 'cleared') ||
+    date !== editTransaction.date.split(' ')[0] ||
+    expectedClearDate !== (editTransaction.expected_clear_date ? editTransaction.expected_clear_date.split(' ')[0] : '') ||
+    JSON.stringify(tags) !== JSON.stringify(Array.isArray(editTransaction.tags) ? editTransaction.tags : []) ||
+    JSON.stringify(splits) !== JSON.stringify(
+      editTransaction.category_splits && editTransaction.category_splits.length > 1
+        ? editTransaction.category_splits
+        : editTransaction.category
+          ? [{ category_id: editTransaction.category, percentage: 100 }]
+          : [{ category_id: '', percentage: 100 }]
+    ) ||
+    receiptFile !== null
+  ) : true;
+
   // Sync currency when account changes (only in create mode)
   useEffect(() => {
     if (!isEditMode) {
@@ -504,8 +525,13 @@ export function AddTransactionModal({
           <button onClick={onClose} className="flex-1 px-4 py-2.5 text-sm border border-[var(--card-border)] rounded-lg hover:bg-[var(--card-hover)] transition-colors">Cancel</button>
           <button
             onClick={handleSave}
-            disabled={saving}
-            className="flex-1 px-4 py-2.5 text-sm bg-[var(--foreground)] text-[var(--background)] rounded-lg hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+            disabled={saving || !isDirty}
+            className={cn(
+              "flex-1 px-4 py-2.5 text-sm rounded-lg transition-all flex items-center justify-center gap-2",
+              isDirty && !saving
+                ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 cursor-pointer"
+                : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+            )}
           >
             {saving && <Loader2 size={14} className="animate-spin" />}
             {isEditMode ? 'Save Changes' : 'Log Transaction'}

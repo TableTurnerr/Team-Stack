@@ -330,11 +330,14 @@ export default function RecordingsPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNote, setEditNote] = useState('');
+  const [originalNote, setOriginalNote] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
+  const isNoteDirty = editNote !== originalNote;
 
   const openEdit = (recording: Recording) => {
     setEditingId(recording.id);
     setEditNote(recording.note || '');
+    setOriginalNote(recording.note || '');
     setIsEditOpen(true);
   };
 
@@ -614,8 +617,13 @@ export default function RecordingsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isUpdating}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--foreground)] text-[var(--background)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  disabled={isUpdating || !isNoteDirty}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                    isNoteDirty && !isUpdating
+                      ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 cursor-pointer"
+                      : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+                  )}
                 >
                   {isUpdating && <RefreshCw size={14} className="animate-spin" />}
                   {isUpdating ? 'Saving...' : 'Save Changes'}

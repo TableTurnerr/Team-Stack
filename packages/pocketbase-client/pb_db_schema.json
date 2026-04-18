@@ -3146,6 +3146,20 @@
                 "type": "bool"
             },
             {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_qstash_message_id",
+                "max": 200,
+                "min": 0,
+                "name": "qstash_message_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
                 "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
@@ -6734,5 +6748,138 @@
         "system": false,
         "created": "2026-04-06 00:00:00.000Z",
         "updated": "2026-04-06 00:00:00.000Z"
+    },
+    {
+        "id": "pbc_push_subs_01",
+        "listRule": "@request.auth.id != '' && user = @request.auth.id",
+        "viewRule": "@request.auth.id != '' && user = @request.auth.id",
+        "createRule": "@request.auth.id != '' && user = @request.auth.id",
+        "updateRule": "@request.auth.id != '' && user = @request.auth.id",
+        "deleteRule": "@request.auth.id != '' && user = @request.auth.id",
+        "name": "push_subscriptions",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "cascadeDelete": true,
+                "collectionId": "_pb_users_auth_",
+                "hidden": false,
+                "id": "relation_push_user",
+                "maxSelect": 1,
+                "minSelect": 1,
+                "name": "user",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_push_endpoint",
+                "max": 2000,
+                "min": 1,
+                "name": "endpoint",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_push_p256dh",
+                "max": 500,
+                "min": 1,
+                "name": "p256dh",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_push_auth",
+                "max": 500,
+                "min": 1,
+                "name": "auth",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_push_ua",
+                "max": 500,
+                "min": 0,
+                "name": "user_agent",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "date_push_last_success",
+                "max": "",
+                "min": "",
+                "name": "last_success",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE UNIQUE INDEX `idx_push_endpoint` ON `push_subscriptions` (`endpoint`)",
+            "CREATE INDEX `idx_push_user` ON `push_subscriptions` (`user`)"
+        ],
+        "system": false,
+        "created": "2026-04-18 00:00:00.000Z",
+        "updated": "2026-04-18 00:00:00.000Z"
     }
 ]

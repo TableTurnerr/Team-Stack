@@ -197,6 +197,15 @@ function CategoryManager({
 
   function cancelEdit() { setEditingId(null); }
 
+  const editingCat = editingId ? categories.find(c => c.id === editingId) : null;
+  const isCategoryEditDirty = editingCat ? (
+    editName !== editingCat.name ||
+    editType !== (editingCat.type as 'income' | 'expense' | 'both') ||
+    editColor !== (editingCat.color || defaultColorForType(editingCat.type as 'income' | 'expense' | 'both')) ||
+    editBudgetLimit !== (editingCat.budget_limit ? String(editingCat.budget_limit) : '') ||
+    editBudgetCurrency !== ((editingCat.budget_currency as SupportedCurrency) || 'USD')
+  ) : false;
+
   function handleTypeChange(t: 'income' | 'expense' | 'both') {
     setType(t);
     setColor(prev => {
@@ -397,8 +406,13 @@ function CategoryManager({
                             <div className="flex gap-2">
                               <button
                                 onClick={saveEdit}
-                                disabled={editSaving || !editName.trim()}
-                                className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs bg-[var(--foreground)] text-[var(--background)] rounded-lg disabled:opacity-50 font-medium"
+                                disabled={editSaving || !editName.trim() || !isCategoryEditDirty}
+                                className={cn(
+                                  "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs rounded-lg font-medium transition-colors",
+                                  isCategoryEditDirty && editName.trim() && !editSaving
+                                    ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 cursor-pointer"
+                                    : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+                                )}
                               >
                                 <Check size={11} />{editSaving ? 'Saving…' : 'Save Changes'}
                               </button>

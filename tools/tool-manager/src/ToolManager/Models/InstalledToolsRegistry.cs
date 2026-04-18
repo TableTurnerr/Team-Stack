@@ -154,7 +154,7 @@ public class InstalledToolsRegistry
                         Executable = "LocalCrmAgent.exe",
                         ProcessName = "LocalCrmAgent",
                         AutoStart = true,
-                        RegistryAutoStart = new RegistryAutoStartConfig { Key = "LocalCrmAgent", Args = "--background" },
+                        RegistryAutoStart = new RegistryAutoStartConfig { Key = "LocalCrmAgent" },
                         ProtocolHandler = "crm-agent",
                         StartMenuFolder = "TableTurnerr",
                         StartMenuName = "CRM Agent",

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, ArrowLeft, Check, User, Crown, Mic, X, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, ArrowLeft, Check, User, Crown, Mic, X, Loader2, Pencil } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type CallLog, type Company, type Recording } from '@/lib/types';
+import { COLLECTIONS, type CallLog, type Company, type Recording, type CompanyNote } from '@/lib/types';
+import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
@@ -26,6 +27,7 @@ interface LastCallPreviewProps {
 const LAST_CALL_STORAGE_KEY = 'crm:session:last-call:v1';
 
 export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPreviewProps) {
+    const { user } = useAuth();
     const [isExpanded, setIsExpanded] = useState(true);
     const [localCallLog, setLocalCallLog] = useState<CallLog | null>(null);
     const [localCompanyName, setLocalCompanyName] = useState('');
@@ -120,6 +122,14 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
     const [receptionistName, setReceptionistName] = useState('');
     const [ownerName, setOwnerName] = useState('');
 
+    // Pre-call notes for the company
+    const [preCallNotes, setPreCallNotes] = useState<CompanyNote[]>([]);
+    const [preCallNotesLoading, setPreCallNotesLoading] = useState(false);
+    const [editingPreCallNote, setEditingPreCallNote] = useState(false);
+    const [preCallNoteDraft, setPreCallNoteDraft] = useState('');
+    const [savingPreCallNote, setSavingPreCallNote] = useState(false);
+    const lastFetchedPreCallCompanyId = useRef('');
+
     // Track which call we're showing
     const displayCall = viewingCall || localCallLog;
     const displayCompany = viewingCall ? viewingCompanyName : localCompanyName;
@@ -179,6 +189,85 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
             setPlayerRecording(null);
         }
     }, [displayCall, trackedCallId]);
+
+    // Fetch pre-call notes when the displayed call's company changes
+    const displayCompanyId = displayCall?.expand?.company?.id || displayCall?.company || '';
+    useEffect(() => {
+        if (!displayCompanyId) {
+            setPreCallNotes([]);
+            lastFetchedPreCallCompanyId.current = '';
+            setEditingPreCallNote(false);
+            setPreCallNoteDraft('');
+            return;
+        }
+        if (displayCompanyId === lastFetchedPreCallCompanyId.current) return;
+        lastFetchedPreCallCompanyId.current = displayCompanyId;
+        setEditingPreCallNote(false);
+        setPreCallNoteDraft('');
+        setPreCallNotesLoading(true);
+        pb.collection(COLLECTIONS.COMPANY_NOTES).getFullList<CompanyNote>({
+            filter: `company = "${displayCompanyId}" && note_type = "pre_call"`,
+            sort: '-created',
+            expand: 'created_by',
+        }).then(notes => setPreCallNotes(notes))
+            .catch(console.error)
+            .finally(() => setPreCallNotesLoading(false));
+    }, [displayCompanyId]);
+
+    const combinedPreCallNote = preCallNotes.map(n => n.content).join('\n\n');
+    const mostRecentPreCallNote = preCallNotes[0] ?? null;
+
+    const handleStartEditPreCallNote = useCallback(() => {
+        setPreCallNoteDraft(combinedPreCallNote);
+        setEditingPreCallNote(true);
+    }, [combinedPreCallNote]);
+
+    const handleCancelEditPreCallNote = useCallback(() => {
+        setEditingPreCallNote(false);
+        setPreCallNoteDraft('');
+    }, []);
+
+    const handleSavePreCallNote = useCallback(async () => {
+        if (!displayCompanyId || !user) return;
+        const trimmed = preCallNoteDraft.trim();
+        setSavingPreCallNote(true);
+        try {
+            if (trimmed.length === 0) {
+                await Promise.all(preCallNotes.map(n =>
+                    pb.collection(COLLECTIONS.COMPANY_NOTES).delete(n.id)
+                ));
+                setPreCallNotes([]);
+            } else if (mostRecentPreCallNote) {
+                const updated = await pb.collection(COLLECTIONS.COMPANY_NOTES).update<CompanyNote>(
+                    mostRecentPreCallNote.id,
+                    { content: trimmed },
+                    { expand: 'created_by' }
+                );
+                const older = preCallNotes.slice(1);
+                await Promise.all(older.map(n =>
+                    pb.collection(COLLECTIONS.COMPANY_NOTES).delete(n.id)
+                ));
+                setPreCallNotes([updated]);
+            } else {
+                const created = await pb.collection(COLLECTIONS.COMPANY_NOTES).create<CompanyNote>(
+                    {
+                        company: displayCompanyId,
+                        note_type: 'pre_call',
+                        content: trimmed,
+                        created_by: user.id,
+                    },
+                    { expand: 'created_by' }
+                );
+                setPreCallNotes([created]);
+            }
+            setEditingPreCallNote(false);
+            setPreCallNoteDraft('');
+        } catch (err) {
+            console.error('Failed to save pre-call note:', err);
+        } finally {
+            setSavingPreCallNote(false);
+        }
+    }, [displayCompanyId, user, preCallNoteDraft, preCallNotes, mostRecentPreCallNote]);
 
     // Fetch all calls in session
     const fetchAllCalls = useCallback(async () => {
@@ -417,11 +506,70 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                         </div>
                     </div>
 
-                    {/* Editable notes */}
+                    {/* Pre-call note (company-level, editable inline) */}
                     <div>
                         <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-1">
                             <StickyNote size={10} />
-                            <span>Notes</span>
+                            <span>Pre-Call Note</span>
+                        </label>
+                        {preCallNotesLoading ? (
+                            <div className="px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-xs text-[var(--muted)]">
+                                Loading…
+                            </div>
+                        ) : editingPreCallNote ? (
+                            <div className="space-y-1.5">
+                                <textarea
+                                    value={preCallNoteDraft}
+                                    onChange={e => setPreCallNoteDraft(e.target.value)}
+                                    autoFocus
+                                    rows={2}
+                                    placeholder="Add a pre-call note for this company…"
+                                    className="w-full px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm focus:outline-none focus:border-[var(--primary)] transition-colors resize-none"
+                                />
+                                <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEditPreCallNote}
+                                        disabled={savingPreCallNote}
+                                        className="px-2 py-1 rounded-md text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--card-hover)] transition-colors disabled:opacity-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSavePreCallNote}
+                                        disabled={savingPreCallNote}
+                                        className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--primary)] text-white hover:opacity-90 active:scale-[0.97] transition-all disabled:opacity-50 flex items-center gap-1"
+                                    >
+                                        {savingPreCallNote && <Loader2 size={10} className="animate-spin" />}
+                                        Save
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={handleStartEditPreCallNote}
+                                className="w-full px-3 py-2 bg-[var(--sidebar-bg)] border border-[var(--card-border)] rounded-lg text-sm text-left hover:bg-[var(--card-hover)] transition-colors group flex items-start gap-1.5"
+                                title={combinedPreCallNote ? 'Click to edit pre-call note' : 'Click to add a pre-call note'}
+                            >
+                                <span className="flex-1 min-w-0">
+                                    {combinedPreCallNote ? (
+                                        <span className="text-[var(--foreground)]/80 whitespace-pre-wrap break-words">{combinedPreCallNote}</span>
+                                    ) : (
+                                        <span className="text-[var(--muted)] italic">None</span>
+                                    )}
+                                </span>
+                                <Pencil size={11} className="shrink-0 text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Editable post-call notes */}
+                    <div>
+                        <label className="text-xs text-[var(--muted)] mb-1 flex items-center gap-1">
+                            <StickyNote size={10} />
+                            <span>Post-Call Notes</span>
                         </label>
                         <textarea
                             value={notes}

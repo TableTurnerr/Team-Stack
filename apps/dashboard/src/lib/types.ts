@@ -34,6 +34,9 @@ export interface Company extends RecordModel {
   google_rating?: string;
   google_reviews_count?: string;
 
+  // Web presence
+  website?: string;
+
   // Email suppression
   do_not_contact?: boolean;
 }
@@ -269,6 +272,9 @@ export interface FollowUp extends RecordModel {
   notes?: string;
   status: 'pending' | 'completed' | 'dismissed';
   completed_at?: string;
+  reminder_sent?: boolean;
+  overdue_notified?: boolean;
+  qstash_message_id?: string;
   expand?: {
     call_log?: CallLog;
     company?: Company;

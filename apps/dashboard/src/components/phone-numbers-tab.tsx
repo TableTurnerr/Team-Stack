@@ -55,7 +55,7 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
   const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'last_called', dir: 'desc' });
   const perPage = 20;
 
-  const { columns, visibleColumns, isColumnVisible, toggleColumn } = useColumnVisibility('cold-calls-phone-numbers', PHONE_NUMBER_COLUMNS);
+  const { columns, visibleColumns, isColumnVisible, toggleColumn, resetToDefault } = useColumnVisibility('cold-calls-phone-numbers', PHONE_NUMBER_COLUMNS);
 
   const fetchPhoneNumbers = useCallback(async () => {
     try {
@@ -135,6 +135,7 @@ export function PhoneNumbersTab({ searchTerm = '' }: PhoneNumbersTabProps) {
           columns={columns}
           visibleColumns={visibleColumns}
           onToggle={toggleColumn}
+          onReset={resetToDefault}
         />
       </div>
 

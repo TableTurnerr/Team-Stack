@@ -4,6 +4,28 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
+/**
+ * Display-only cleanup for company names that were ingested as URLs.
+ * Strips a leading "https://www." (or http/www variants) so the UI shows
+ * the bare domain/path instead of the full URL.
+ */
+export function formatCompanyName(name: string | undefined | null): string {
+  if (!name) return '';
+  return name.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+}
+
+const URL_NAME_RE = /^\s*(https?:\/\/|www\.)/i;
+
+/**
+ * If a company name looks like a URL, returns a normalised https:// URL to
+ * store in the website field. Returns undefined otherwise.
+ */
+export function extractWebsiteFromName(name: string | undefined | null): string | undefined {
+  if (!name || !URL_NAME_RE.test(name)) return undefined;
+  const v = name.trim();
+  return /^https?:\/\//i.test(v) ? v : `https://${v.replace(/^\/+/, '')}`;
+}
+
 export function formatDate(date: string | Date): string {
   return new Date(date).toLocaleDateString('en-US', {
     year: 'numeric',

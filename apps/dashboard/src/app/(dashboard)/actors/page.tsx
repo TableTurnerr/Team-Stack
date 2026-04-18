@@ -59,7 +59,7 @@ export default function ActorsPage() {
   const [loading, setLoading] = useState(true);
 
   // Column visibility
-  const { visibleColumns, toggleColumn, isColumnVisible, columns } = useColumnVisibility('actors', ACTORS_COLUMNS);
+  const { visibleColumns, toggleColumn, isColumnVisible, columns, resetToDefault } = useColumnVisibility('actors', ACTORS_COLUMNS);
 
   // Row selection
   const selection = useTableSelection(actors);
@@ -129,6 +129,7 @@ export default function ActorsPage() {
             columns={columns}
             visibleColumns={visibleColumns}
             onToggle={toggleColumn}
+            onReset={resetToDefault}
           />
 
           <button

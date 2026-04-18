@@ -108,8 +108,10 @@ static class Program
         }
 
         // ── Tray mode (default): no console, just tray icon ──
+        var startupWatchdog = new StartupWatchdog(settingsService);
         scheduler.Start();
         selfUpdater.Start();
+        startupWatchdog.Start();
         Debug.WriteLine("[Main] Services started (tray mode)");
 
         Application.EnableVisualStyles();
@@ -119,6 +121,7 @@ static class Program
         Application.Run();
 
         // Cleanup
+        startupWatchdog.Dispose();
         selfUpdater.Dispose();
         scheduler.Dispose();
         Debug.WriteLine("[Main] Exiting");

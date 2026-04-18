@@ -86,7 +86,7 @@ export default function SessionPage() {
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
-    const { isConnected: agentConnected, launchAgent, zoomDetected: agentZoomDetected, launchZoom, zoomLaunching, recordingState: agentRecordingState, uploadQueueStatus: agentUploadQueue } = useLocalAgent();
+    const { isConnected: agentConnected, launchAgent, zoomDetected: agentZoomDetected, launchZoom, zoomLaunching, recordingState: agentRecordingState, uploadQueueStatus: agentUploadQueue, sendCommand: sendAgentCommand } = useLocalAgent();
 
     // Loading combined
     const loading = sessionLoading;
@@ -151,6 +151,19 @@ export default function SessionPage() {
     // Tracks the exact moment the call ended so duration calculation uses real end time,
     // not the (possibly much later) form submission time.
     const callEndTimeRef = useRef<number | null>(null);
+    // Snapshot of the ending call's timing + pickup state. Captured on transition to
+    // 'ended' so we can reset the counter state for the NEXT call (negative-delay power
+    // dialer overlap, where call N+1 starts ringing before the user submits call N's
+    // form). Without this, call N+1's dial/pickup increments are skipped because the
+    // effect's `!ringStartTime` / `!connectTime` / `!dialCountIncremented` guards
+    // still see call N's values.
+    const pendingCallSnapshotRef = useRef<{
+        ringStartTime: number | null;
+        connectTime: number | null;
+        endTime: number;
+        pickupIncremented: boolean;
+    } | null>(null);
+    const prevCallStatusForResetRef = useRef(callStatus);
 
     // Track unsaved call state — true when call ended but form not yet submitted
     const [hasUnsavedCall, setHasUnsavedCall] = useState(false);
@@ -674,6 +687,9 @@ export default function SessionPage() {
     // Track call status and timing
     // ---------------------------------------------------------------------------
     useEffect(() => {
+        const prevCallStatus = prevCallStatusForResetRef.current;
+        prevCallStatusForResetRef.current = callStatus;
+
         // Inbound calls are handled exclusively by IncomingCallHandler — skip here
         if (callDirection === 'inbound') return;
 
@@ -739,9 +755,39 @@ export default function SessionPage() {
                 }
             }
         } else if (callStatus === 'ended') {
-            // Record the exact call-end time so duration calculations are accurate
-            // regardless of when the user actually submits the form.
-            callEndTimeRef.current = Date.now();
+            // Only run the capture+reset on the TRANSITION into 'ended' — the
+            // effect re-fires below when we reset ringStartTime/connectTime/etc.,
+            // and we must not clobber the snapshot or overwrite the end time.
+            if (prevCallStatus !== 'ended') {
+                // Record the exact call-end time so duration calculations are accurate
+                // regardless of when the user actually submits the form.
+                const endTime = Date.now();
+                callEndTimeRef.current = endTime;
+
+                // Capture this call's timing/pickup state so the NEXT call (negative-
+                // delay power dialer overlap) can reset state and track its own counts
+                // without losing this call's data for handleSaveCall's duration calc.
+                // Don't overwrite an existing snapshot: if the user is slow and a third
+                // call ends before the first form is submitted, the first snapshot is
+                // the one handleSaveCall needs.
+                if (!pendingCallSnapshotRef.current) {
+                    pendingCallSnapshotRef.current = {
+                        ringStartTime,
+                        connectTime,
+                        endTime,
+                        pickupIncremented: pickupCountIncremented,
+                    };
+                }
+
+                // Reset counter state so the next call (started before this form is
+                // submitted, in negative-delay mode) doesn't get its dial/pickup
+                // increments silently skipped by the !ringStartTime / !dialCountIncremented
+                // guards above.
+                setRingStartTime(null);
+                setConnectTime(null);
+                setDialCountIncremented(false);
+                setPickupCountIncremented(false);
+            }
 
             if (currentPhoneNumber) {
                 setHasUnsavedCall(true);
@@ -1195,6 +1241,15 @@ export default function SessionPage() {
             // 4. Delete all call logs
             await Promise.allSettled(callLogs.map(l => pb.collection(COLLECTIONS.CALL_LOGS).delete(l.id)));
 
+            // 4b. Tell the local agent to drop any pending uploads tied to these
+            // call logs — otherwise the upload banner keeps spinning while the
+            // agent slowly discovers each deleted log via 404s.
+            if (callLogIds.length > 0) {
+                sendAgentCommand({ type: 'cancelPendingUploads', callLogIds });
+            }
+            // Close the "Uploading recordings..." cooldown banner immediately.
+            setUploadCooldown(false);
+
             // 5. Delete companies that were created solely during this test session
             //    (i.e. they have no call logs outside this session)
             const companyIds = [...new Set(callLogs.map(l => l.company).filter(Boolean))];
@@ -1235,7 +1290,7 @@ export default function SessionPage() {
         } finally {
             setCleaningUp(false);
         }
-    }, [testSessionCleanupId]);
+    }, [testSessionCleanupId, sendAgentCommand]);
 
     const handleKeepTestData = useCallback(() => {
         setShowTestCleanupModal(false);
@@ -1386,6 +1441,10 @@ export default function SessionPage() {
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
         callEndTimeRef.current = null;
+        // Drop the just-ended leg's snapshot — the new leg will capture its own
+        // on 'ended', and handleSaveCall should use the final (most recent) leg's
+        // timing, matching the original behavior of reading live state.
+        pendingCallSnapshotRef.current = null;
 
         // The previous leg's recording is already queued (added in onstop when the call ended).
         // Deferred mode remains active so the new leg will also be queued.
@@ -1402,12 +1461,16 @@ export default function SessionPage() {
         if (!session || !user) return;
 
         // Capture timing values before clearing state.
-        // Use callEndTimeRef for the end time so we measure when the call actually
-        // ended, not when the user happened to submit the form (which could be minutes later).
-        const capturedRingStart = ringStartTime;
-        const capturedConnectTime = connectTime;
-        const capturedEndTime = callEndTimeRef.current ?? Date.now();
-        const capturedPickupIncremented = pickupCountIncremented;
+        // Prefer the pending-call snapshot (captured at callStatus='ended' transition)
+        // over live state, so that in negative-delay power dialer overlap — where the
+        // next call may have already started and overwritten live state — we still save
+        // THIS call's real ring/connect/end timing and pickup-incremented flag.
+        const snapshot = pendingCallSnapshotRef.current;
+        const capturedRingStart = snapshot?.ringStartTime ?? ringStartTime;
+        const capturedConnectTime = snapshot?.connectTime ?? connectTime;
+        const capturedEndTime = snapshot?.endTime ?? callEndTimeRef.current ?? Date.now();
+        const capturedPickupIncremented = snapshot?.pickupIncremented ?? pickupCountIncremented;
+        pendingCallSnapshotRef.current = null;
 
         // Determine if this call involved callbacks
         const hasCallbacks = (data.callbackEvents?.length ?? 0) > 0;
@@ -1687,6 +1750,7 @@ export default function SessionPage() {
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
         callEndTimeRef.current = null;
+        pendingCallSnapshotRef.current = null;
         window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
         // Cancel any pending power dialer auto-dial
@@ -2164,6 +2228,17 @@ export default function SessionPage() {
                             {agentUploadQueue && agentUploadQueue.failedCount > 0 && (
                                 <span className="text-xs text-[var(--error)] font-medium">{agentUploadQueue.failedCount} failed</span>
                             )}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!confirm('Cancel all pending recording uploads? The local recording files will be deleted.')) return;
+                                    sendAgentCommand({ type: 'cancelPendingUploads' });
+                                    setUploadCooldown(false);
+                                }}
+                                className="text-xs px-2.5 py-1.5 rounded-lg border border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors shrink-0"
+                            >
+                                Cancel uploads
+                            </button>
                         </div>
                     )}
                     <SessionModeSelector onStartSession={startSession} onStartStandalone={startStandalone} onStartTestSession={startTestSession} lastCompletedSession={lastCompletedSession} onResumeSession={resumeLastSession} resuming={resuming} />
@@ -2599,7 +2674,7 @@ export default function SessionPage() {
                     {/* Left column — 60% */}
                     <div className="lg:col-span-3 space-y-6">
                         <CurrentCallForm
-                            phoneNumber={hasUnsavedCall ? (pinnedFormPhoneNumber || currentPhoneNumber) : currentPhoneNumber}
+                            phoneNumber={hasUnsavedCall ? (pinnedFormPhoneNumber || currentPhoneNumber) : (currentPhoneNumber || powerDialerQueue[powerDialerIndex]?.number || '')}
                             onSave={handleSaveCall}
                             saving={savingCall}
                             hasUnsavedCall={hasUnsavedCall}

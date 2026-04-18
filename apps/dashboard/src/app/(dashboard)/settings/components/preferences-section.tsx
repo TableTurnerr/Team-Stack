@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { UserPreferences } from '@/lib/types';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
+import { PushNotificationsToggle } from '@/components/push-notifications-toggle';
 import { Table, Calendar, Phone, Building2, Bell } from 'lucide-react';
 
 interface PreferencesSectionProps {
@@ -201,6 +202,8 @@ export function PreferencesSection({ preferences, updatePreferences, isSaving }:
                         description="Play a ding sound when a follow-up becomes due"
                         disabled={isSaving}
                     />
+
+                    <PushNotificationsToggle />
                 </div>
             </div>
 

@@ -85,7 +85,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         <IncomingCallHandler />
         <UndoDeleteToast />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[var(--background)]">
-          <div className="container mx-auto px-4 py-8 lg:px-8 max-w-[1600px]">
+          <div className="w-full px-4 py-8 lg:px-8">
             {children}
           </div>
         </main>

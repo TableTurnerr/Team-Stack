@@ -9,9 +9,10 @@ interface ColumnSelectorProps {
     columns: ColumnDefinition[];
     visibleColumns: Set<string>;
     onToggle: (key: string) => void;
+    onReset: () => void;
 }
 
-export function ColumnSelector({ columns, visibleColumns, onToggle }: ColumnSelectorProps) {
+export function ColumnSelector({ columns, visibleColumns, onToggle, onReset }: ColumnSelectorProps) {
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -48,7 +49,15 @@ export function ColumnSelector({ columns, visibleColumns, onToggle }: ColumnSele
             {isOpen && (
                 <div className="absolute right-0 top-full mt-2 w-56 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl z-50 overflow-hidden">
                     <div className="px-4 py-3 border-b border-[var(--card-border)]">
-                        <p className="text-sm font-medium">Toggle columns</p>
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium">Toggle columns</p>
+                            <button
+                                onClick={onReset}
+                                className="text-xs underline text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                            >
+                                default
+                            </button>
+                        </div>
                         <p className="text-xs text-[var(--muted)] mt-0.5">Choose which columns to display</p>
                     </div>
 

@@ -192,6 +192,9 @@ public class AgentWebSocketServer : IDisposable
                 case "uploadRecording":
                     HandleUploadRecording(doc.RootElement);
                     break;
+                case "cancelPendingUploads":
+                    HandleCancelPendingUploads(doc.RootElement);
+                    break;
                 case "setUploadConfig":
                     HandleSetUploadConfig(doc.RootElement);
                     break;
@@ -306,6 +309,29 @@ public class AgentWebSocketServer : IDisposable
         var fileName = root.TryGetProperty("fileName", out var f) ? f.GetString() : null;
         if (fileName != null)
             _uploader.EnqueueUpload(fileName);
+    }
+
+    private void HandleCancelPendingUploads(JsonElement root)
+    {
+        if (_storage == null) return;
+
+        List<string>? callLogIds = null;
+        if (root.TryGetProperty("callLogIds", out var idsProp) && idsProp.ValueKind == JsonValueKind.Array)
+        {
+            callLogIds = new List<string>();
+            foreach (var item in idsProp.EnumerateArray())
+            {
+                var id = item.GetString();
+                if (!string.IsNullOrEmpty(id)) callLogIds.Add(id);
+            }
+        }
+
+        var count = _storage.CancelPending(callLogIds);
+        Debug.WriteLine($"[WS] cancelPendingUploads: cancelled {count} entries (filter={(callLogIds == null || callLogIds.Count == 0 ? "all" : $"{callLogIds.Count} ids")})");
+
+        // Push updated queue state immediately so the UI reflects the cancellation
+        // without waiting for the 10-second broadcast tick.
+        BroadcastUploadQueueStatus();
     }
 
     private void HandleSetUploadConfig(JsonElement root)

@@ -24,6 +24,13 @@ export function PhoneNumberEditModal({ isOpen, onClose, phoneNumber, onUpdated }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const isDirty =
+    phoneNum !== phoneNumber.phone_number ||
+    label !== (phoneNumber.label || '') ||
+    locationName !== (phoneNumber.location_name || '') ||
+    locationAddress !== (phoneNumber.location_address || '') ||
+    receptionistName !== (phoneNumber.receptionist_name || '');
+
   useEffect(() => {
     if (isOpen) {
       setPhoneNum(phoneNumber.phone_number);
@@ -181,8 +188,13 @@ export function PhoneNumberEditModal({ isOpen, onClose, phoneNumber, onUpdated }
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2.5 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-sm font-bold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            disabled={saving || !isDirty}
+            className={cn(
+              "px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2",
+              isDirty && !saving
+                ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 cursor-pointer"
+                : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+            )}
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             {saving ? 'Saving...' : 'Save Changes'}

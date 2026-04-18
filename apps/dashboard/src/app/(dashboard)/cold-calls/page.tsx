@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   Phone,
@@ -19,14 +20,15 @@ import {
   PhoneForwarded,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type CallLog } from '@/lib/types';
-import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilterValue, stripPhoneFormatting } from '@/lib/utils';
+import { COLLECTIONS, type CallLog, type User } from '@/lib/types';
+import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilterValue, stripPhoneFormatting, formatCompanyName } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { ColdCallsTableSkeleton } from '@/components/dashboard-skeletons';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
+import { Tooltip } from '@/components/ui/tooltip';
 import { SearchInput } from '@/components/search-input';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
@@ -38,8 +40,6 @@ import {
   TableContainer,
   IndexCell,
   HeaderIndexCell,
-  ResizableTh,
-  useResizableColumns,
   useTableSelection,
   TablePagination,
   TableEmptyState,
@@ -54,10 +54,9 @@ const CALL_LOG_COLUMNS: ColumnDefinition[] = [
   { key: 'recipient', label: 'Recipient', defaultVisible: true },
   { key: 'call_outcome', label: 'Outcome', defaultVisible: true },
   { key: 'duration', label: 'Duration', defaultVisible: true },
-  { key: 'performance', label: 'Performance', defaultVisible: true },
   { key: 'session', label: 'Session', defaultVisible: true },
-  { key: 'ai_transcript', label: 'AI', defaultVisible: true },
-  { key: 'caller', label: 'Caller', defaultVisible: false },
+  { key: 'ai_transcript', label: 'AI', defaultVisible: false },
+  { key: 'caller', label: 'Caller', defaultVisible: true },
   { key: 'notes', label: 'Notes', defaultVisible: false },
   { key: 'actions', label: 'Actions', alwaysVisible: true },
 ];
@@ -134,22 +133,8 @@ export default function ColdCallsPage() {
   // Column visibility
   const callLogCols = useColumnVisibility('cold-calls-logs', CALL_LOG_COLUMNS);
 
-  // Selection & resizable columns
+  // Selection
   const selection = useTableSelection(callLogs);
-  const { widths: colWidths, resize: resizeCol } = useResizableColumns('cold-calls', [
-    { key: 'call_time', initialWidth: 130, minWidth: 90 },
-    { key: 'company', initialWidth: 160, minWidth: 100 },
-    { key: 'phone', initialWidth: 140, minWidth: 100 },
-    { key: 'recipient', initialWidth: 130, minWidth: 80 },
-    { key: 'call_outcome', initialWidth: 150, minWidth: 90 },
-    { key: 'duration', initialWidth: 90, minWidth: 70 },
-    { key: 'performance', initialWidth: 100, minWidth: 70 },
-    { key: 'session', initialWidth: 130, minWidth: 80 },
-    { key: 'ai_transcript', initialWidth: 70, minWidth: 50 },
-    { key: 'caller', initialWidth: 100, minWidth: 70 },
-    { key: 'notes', initialWidth: 150, minWidth: 80 },
-    { key: 'actions', initialWidth: 60, minWidth: 50 },
-  ]);
 
   const pageOffset = (callLogsPage - 1) * perPage;
 
@@ -317,6 +302,7 @@ export default function ColdCallsPage() {
                 columns={callLogCols.columns}
                 visibleColumns={callLogCols.visibleColumns}
                 onToggle={callLogCols.toggleColumn}
+                onReset={callLogCols.resetToDefault}
               />
 
               <button
@@ -421,8 +407,6 @@ export default function ColdCallsPage() {
             totalPages={callLogsTotalPages}
             onPageChange={setCallLogsPage}
             selection={selection}
-            colWidths={colWidths}
-            resizeCol={resizeCol}
             pageOffset={pageOffset}
             timezones={preferences?.timezones}
           />
@@ -432,6 +416,81 @@ export default function ColdCallsPage() {
       )}
     </div>
     </PageGuard>
+  );
+}
+
+// ─── Caller Avatar with hover card ───────────────────────────────────────────
+
+function CallerAvatar({ caller }: { caller: User }) {
+  const [hovered, setHovered] = useState(false);
+  const avatarUrl = caller.avatar ? pb.files.getUrl(caller, caller.avatar) : null;
+
+  const statusColor =
+    caller.status === 'suspended' ? 'bg-[var(--muted)]' :
+    caller.status === 'online'    ? 'bg-[var(--success)]' :
+                                    'bg-[var(--muted-foreground)]';
+
+  const statusLabel =
+    caller.status === 'suspended' ? 'Suspended' :
+    caller.status === 'online'    ? 'Online' : 'Offline';
+
+  const lastSeen = (() => {
+    if (caller.status === 'online' || !caller.last_activity) return null;
+    const mins = Math.floor((Date.now() - new Date(caller.last_activity).getTime()) / 60_000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  })();
+
+  return (
+    <div
+      className="relative inline-flex"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="w-8 h-8 rounded-full border-2 border-[var(--card-bg)] flex items-center justify-center overflow-hidden relative flex-shrink-0 cursor-default">
+        {avatarUrl ? (
+          <Image src={avatarUrl} alt={caller.name} fill sizes="32px" className="object-cover" />
+        ) : (
+          <div className="w-full h-full bg-[var(--primary)] flex items-center justify-center">
+            <span className="text-white text-[10px] font-bold">{caller.name?.charAt(0).toUpperCase() || '?'}</span>
+          </div>
+        )}
+      </div>
+      <div className={cn('absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[var(--card-bg)]', statusColor)} />
+
+      {hovered && (
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[60] min-w-[200px] p-3 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-lg pointer-events-none">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden relative flex-shrink-0">
+              {avatarUrl ? (
+                <Image src={avatarUrl} alt={caller.name} fill sizes="40px" className="object-cover" />
+              ) : (
+                <div className="w-full h-full bg-[var(--primary)] flex items-center justify-center">
+                  <span className="text-white text-sm font-bold">{caller.name?.charAt(0).toUpperCase() || '?'}</span>
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate">{caller.name}</p>
+              <p className="text-[11px] text-[var(--muted)] truncate">{caller.email}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-[var(--card-border)]">
+            <div className={cn('w-2 h-2 rounded-full flex-shrink-0', statusColor)} />
+            <span className="text-[11px] text-[var(--muted)]">
+              {statusLabel}
+              {statusLabel === 'Offline' && lastSeen && (
+                <span className="opacity-70"> - Last seen {lastSeen}</span>
+              )}
+            </span>
+          </div>
+          <p className="text-[10px] text-[var(--muted)] mt-1 capitalize">{caller.role}</p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -447,8 +506,6 @@ function CallLogsTable({
   totalPages,
   onPageChange,
   selection,
-  colWidths,
-  resizeCol,
   pageOffset,
   timezones,
 }: {
@@ -461,8 +518,6 @@ function CallLogsTable({
   totalPages: number;
   onPageChange: (page: number) => void;
   selection: ReturnType<typeof useTableSelection<CallLog>>;
-  colWidths: Record<string, number>;
-  resizeCol: (key: string, newWidth: number) => void;
   pageOffset: number;
   timezones?: { timezone: string; label: string }[];
 }) {
@@ -478,7 +533,7 @@ function CallLogsTable({
         />
       ) : (
         <>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-hidden">
             <table className="w-full" style={{ tableLayout: 'fixed' }}>
               <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                 <tr>
@@ -488,63 +543,58 @@ function CallLogsTable({
                     onToggleAll={selection.toggleAll}
                   />
                   {isColumnVisible('call_time') && (
-                    <ResizableTh width={colWidths.call_time} minWidth={90} onResize={(w) => resizeCol('call_time', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 95 }}>
                       <SortLabel label="Date" field="call_time" currentSort={sort} onSort={onSort} />
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('company') && (
-                    <ResizableTh width={colWidths.company} minWidth={100} onResize={(w) => resizeCol('company', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left">
                       Company
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('phone') && (
-                    <ResizableTh width={colWidths.phone} minWidth={100} onResize={(w) => resizeCol('phone', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 138 }}>
                       Phone
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('recipient') && (
-                    <ResizableTh width={colWidths.recipient} minWidth={80} onResize={(w) => resizeCol('recipient', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 105 }}>
                       Recipient
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('call_outcome') && (
-                    <ResizableTh width={colWidths.call_outcome} minWidth={90} onResize={(w) => resizeCol('call_outcome', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 145 }}>
                       <SortLabel label="Outcome" field="call_outcome" currentSort={sort} onSort={onSort} />
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('duration') && (
-                    <ResizableTh width={colWidths.duration} minWidth={70} onResize={(w) => resizeCol('duration', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 110 }}>
                       <SortLabel label="Duration" field="duration" currentSort={sort} onSort={onSort} />
-                    </ResizableTh>
-                  )}
-                  {isColumnVisible('performance') && (
-                    <ResizableTh width={colWidths.performance} minWidth={70} onResize={(w) => resizeCol('performance', w)}>
-                      Performance
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('session') && (
-                    <ResizableTh width={colWidths.session} minWidth={80} onResize={(w) => resizeCol('session', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 115 }}>
                       Session
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('ai_transcript') && (
-                    <ResizableTh width={colWidths.ai_transcript} minWidth={50} onResize={(w) => resizeCol('ai_transcript', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 50 }}>
                       AI
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('caller') && (
-                    <ResizableTh width={colWidths.caller} minWidth={70} onResize={(w) => resizeCol('caller', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 54 }}>
                       Caller
-                    </ResizableTh>
+                    </th>
                   )}
                   {isColumnVisible('notes') && (
-                    <ResizableTh width={colWidths.notes} minWidth={80} onResize={(w) => resizeCol('notes', w)}>
+                    <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left">
                       Notes
-                    </ResizableTh>
+                    </th>
                   )}
-                  <ResizableTh width={colWidths.actions} minWidth={50} onResize={(w) => resizeCol('actions', w)} resizable={false}>
-                    Actions
-                  </ResizableTh>
+                  <th className="py-3 px-4 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left" style={{ width: 148 }}>
+                    Other
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -565,7 +615,7 @@ function CallLogsTable({
                         forceCheckbox={selection.hasSelection}
                       />
                       {isColumnVisible('call_time') && (
-                        <td className="py-3 px-4 overflow-hidden">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           {log.call_time ? (
                             <RelativeTime date={log.call_time} timezones={timezones} className="text-sm" />
                           ) : (
@@ -574,11 +624,11 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('company') && (
-                        <td className="py-3 px-4 overflow-visible">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           {log.expand?.company ? (
-                            <CompanyHoverCard company={log.expand.company}>
-                              <Link href={`/companies/${log.expand.company.id}`} className="block truncate font-medium hover:text-[var(--primary)] transition-colors" title={log.expand.company.company_name}>
-                                {log.expand.company.company_name}
+                            <CompanyHoverCard company={log.expand.company} className="block min-w-0 max-w-full">
+                              <Link href={`/companies/${log.expand.company.id}`} className="block truncate font-medium hover:text-[var(--primary)] transition-colors">
+                                {formatCompanyName(log.expand.company.company_name)}
                               </Link>
                             </CompanyHoverCard>
                           ) : (
@@ -587,7 +637,7 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('phone') && (
-                        <td className="py-3 px-4 overflow-visible">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           <div className="flex items-center gap-1 min-w-0">
                             {phoneNum ? (
                               <PhoneHoverCard phoneRecord={log.expand?.phone_number_record} phoneNumber={phoneNum}>
@@ -601,19 +651,26 @@ function CallLogsTable({
                         </td>
                       )}
                       {isColumnVisible('recipient') && (
-                        <td className="py-3 px-4 overflow-hidden">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-sm truncate">{log.owner_name_found || '-'}</span>
-                            {log.owner_reached && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] font-semibold uppercase shrink-0">
-                                Owner
-                              </span>
-                            )}
-                          </div>
+                        <td className="py-3.5 px-4 overflow-hidden">
+                          <Tooltip content={
+                            <div className="text-[11px]">
+                              <div className="font-semibold">{log.owner_name_found || 'No contact recorded'}</div>
+                              {log.owner_reached && <div className="text-[var(--success)] mt-0.5">Owner reached</div>}
+                            </div>
+                          }>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-sm truncate">{log.owner_name_found || '-'}</span>
+                              {log.owner_reached && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--success-subtle)] text-[var(--success)] font-semibold uppercase shrink-0">
+                                  Owner
+                                </span>
+                              )}
+                            </div>
+                          </Tooltip>
                         </td>
                       )}
                       {isColumnVisible('call_outcome') && (
-                        <td className="py-3 px-4 overflow-hidden">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {(Array.isArray(log.call_outcome) ? log.call_outcome : log.call_outcome ? [log.call_outcome] : []).map(oc => {
                               const colors = getOutcomeColors(oc);
@@ -624,101 +681,130 @@ function CallLogsTable({
                               );
                             })}
                             {(log.callback_events?.length ?? 0) > 0 && (
-                              <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/30"
-                                title={`${log.callback_events!.length} callback(s): ${log.callback_events!.map(e => e.reason).join(', ')}`}
-                              >
-                                <PhoneForwarded size={9} />
-                                Callback
-                              </span>
+                              <Tooltip content={
+                                <div className="text-[11px]">
+                                  <div className="font-semibold mb-1">{log.callback_events!.length} callback{log.callback_events!.length !== 1 ? 's' : ''}</div>
+                                  {log.callback_events!.map((e, i) => (
+                                    <div key={i} className="text-[var(--muted)]">{e.reason}</div>
+                                  ))}
+                                </div>
+                              } className="whitespace-normal max-w-[200px]">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/30">
+                                  <PhoneForwarded size={9} />
+                                  Callback
+                                </span>
+                              </Tooltip>
                             )}
                           </div>
                         </td>
                       )}
                       {isColumnVisible('duration') && (
-                        <td className="py-3 px-4 overflow-hidden">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           <div className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
                             <Clock size={12} className="shrink-0" />
                             <span className="truncate">{formatCallDuration(log.duration)}</span>
                           </div>
                         </td>
                       )}
-                      {isColumnVisible('performance') && (
-                        <td className="py-3 px-4 overflow-hidden">
-                          <div className="flex items-center gap-1">
-                            {log.owner_reached && (
-                              <span className="p-1 rounded bg-[var(--success-subtle)]" title="Owner Reached">
-                                <UserCheck size={12} className="text-[var(--success)]" />
-                              </span>
-                            )}
-                            {log.pitch_completed && (
-                              <span className="p-1 rounded bg-[var(--info-subtle)]" title="Pitch Completed">
-                                <Target size={12} className="text-[var(--info)]" />
-                              </span>
-                            )}
-                            {log.appointment_set && (
-                              <span className="p-1 rounded bg-[var(--warning-subtle)]" title="Appointment Set">
-                                <CalendarCheck size={12} className="text-[var(--warning)]" />
-                              </span>
-                            )}
-                            {!log.owner_reached && !log.pitch_completed && !log.appointment_set && (
-                              <span className="text-xs text-[var(--muted)]">-</span>
-                            )}
-                          </div>
-                        </td>
-                      )}
                       {isColumnVisible('session') && (
-                        <td className="py-3 px-4 overflow-hidden">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           {session ? (
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-xs font-medium text-[var(--foreground)] truncate">
-                                {session.started_at ? formatDate(session.started_at) : '-'}
-                              </span>
-                              <span className="text-[10px] text-[var(--muted)] truncate">
-                                {session.total_dials || 0} dials &middot; {session.total_pickups || 0} pickups
-                              </span>
-                            </div>
+                            <Tooltip content={
+                              <div className="text-[11px] flex flex-col gap-1 py-0.5">
+                                <div className="font-semibold">{session.started_at ? formatDate(session.started_at) : 'Unknown date'}</div>
+                                <div className="text-[var(--muted)]">{session.total_dials || 0} dials · {session.total_pickups || 0} pickups</div>
+                                {session.total_duration != null && <div className="text-[var(--muted)]">{formatCallDuration(session.total_duration)} total</div>}
+                              </div>
+                            } className="whitespace-normal min-w-[160px]">
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-xs font-medium text-[var(--foreground)] truncate">
+                                  {session.started_at ? formatDate(session.started_at) : '-'}
+                                </span>
+                                <span className="text-[10px] text-[var(--muted)] truncate">
+                                  {session.total_dials || 0} dials &middot; {session.total_pickups || 0} pickups
+                                </span>
+                              </div>
+                            </Tooltip>
                           ) : (
                             <span className="text-xs text-[var(--muted)] italic">Standalone</span>
                           )}
                         </td>
                       )}
                       {isColumnVisible('ai_transcript') && (
-                        <td className="py-3 px-4">
+                        <td className="py-3.5 px-4 overflow-hidden">
                           {coldCall ? (
-                            <Link
-                              href={`/cold-calls/${coldCall.id}`}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--info-subtle)] text-[var(--info)] text-xs font-medium hover:opacity-80 transition-opacity"
-                              title="View AI Transcript"
-                            >
-                              <Zap size={10} />
-                              AI
-                            </Link>
+                            <Tooltip content="View AI Transcript">
+                              <Link
+                                href={`/cold-calls/${coldCall.id}`}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--info-subtle)] text-[var(--info)] text-xs font-medium hover:opacity-80 transition-opacity"
+                              >
+                                <Zap size={10} />
+                                AI
+                              </Link>
+                            </Tooltip>
                           ) : (
                             <span className="text-xs text-[var(--muted)]">-</span>
                           )}
                         </td>
                       )}
                       {isColumnVisible('caller') && (
-                        <td className="py-3 px-4 overflow-hidden">
-                          <span className="text-sm block truncate">{log.expand?.caller?.name || '-'}</span>
+                        <td className="py-3.5 px-4 overflow-visible">
+                          {log.expand?.caller ? (
+                            <CallerAvatar caller={log.expand.caller} />
+                          ) : (
+                            <span className="text-xs text-[var(--muted)]">-</span>
+                          )}
                         </td>
                       )}
                       {isColumnVisible('notes') && (
-                        <td className="py-3 px-4 overflow-hidden">
-                          <span className="text-xs text-[var(--muted)] block truncate" title={log.post_call_notes || undefined}>
-                            {log.post_call_notes || '-'}
-                          </span>
+                        <td className="py-3.5 px-4 overflow-hidden">
+                          {log.post_call_notes ? (
+                            <Tooltip content={
+                              <div className="text-[11px] max-w-[260px] whitespace-pre-wrap leading-relaxed">
+                                {log.post_call_notes}
+                              </div>
+                            } className="whitespace-normal max-w-[260px]">
+                              <span className="text-xs text-[var(--muted)] block truncate cursor-default">
+                                {log.post_call_notes}
+                              </span>
+                            </Tooltip>
+                          ) : (
+                            <span className="text-xs text-[var(--muted)]">-</span>
+                          )}
                         </td>
                       )}
-                      <td className="py-3 px-4">
-                        <Link
-                          href={`/cold-calls/${log.id}?type=log`}
-                          className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors inline-block"
-                          title="View Details"
-                        >
-                          <Eye size={16} />
-                        </Link>
+                      <td className="py-3.5 px-4 overflow-hidden">
+                        <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                          {log.owner_reached && (
+                            <Tooltip content="Owner Reached">
+                              <span className="p-1 rounded bg-[var(--success-subtle)] inline-flex items-center justify-center">
+                                <UserCheck size={12} className="text-[var(--success)]" />
+                              </span>
+                            </Tooltip>
+                          )}
+                          {log.pitch_completed && (
+                            <Tooltip content="Pitch Completed">
+                              <span className="p-1 rounded bg-[var(--info-subtle)] inline-flex items-center justify-center">
+                                <Target size={12} className="text-[var(--info)]" />
+                              </span>
+                            </Tooltip>
+                          )}
+                          {log.appointment_set && (
+                            <Tooltip content="Appointment Set">
+                              <span className="p-1 rounded bg-[var(--warning-subtle)] inline-flex items-center justify-center">
+                                <CalendarCheck size={12} className="text-[var(--warning)]" />
+                              </span>
+                            </Tooltip>
+                          )}
+                          <Tooltip content="View Details">
+                            <Link
+                              href={`/cold-calls/${log.id}?type=log`}
+                              className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors inline-block"
+                            >
+                              <Eye size={16} />
+                            </Link>
+                          </Tooltip>
+                        </div>
                       </td>
                     </tr>
                   );

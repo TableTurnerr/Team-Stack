@@ -23,6 +23,7 @@ import {
   CalendarCheck,
   Trash2,
   Send,
+  Globe,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import {
@@ -35,7 +36,7 @@ import {
   type FollowUp,
   type ColdCall,
 } from '@/lib/types';
-import { cn, formatPhoneNumber } from '@/lib/utils';
+import { cn, formatPhoneNumber, formatCompanyName } from '@/lib/utils';
 import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
 import { PhoneNumberCard } from '@/components/phone-number-card';
@@ -46,6 +47,7 @@ import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
+import { useUnsavedChanges } from '@/contexts/unsaved-changes-context';
 import { PhoneNumberEditModal } from '@/components/phone-number-edit-modal';
 import { RelativeTime } from '@/components/relative-time';
 import { PageGuard } from '@/components/page-guard';
@@ -66,6 +68,7 @@ export default function CompanyDetailPage() {
   const recycleBin = useRecycleBinOptional();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const { changes, hasUnsavedChanges, saveAll, isSaving: isSavingAll } = useUnsavedChanges();
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
@@ -363,8 +366,8 @@ export default function CompanyDetailPage() {
 
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div className="space-y-1">
-            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
-              {company.company_name}
+            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3" title={company.company_name}>
+              {formatCompanyName(company.company_name)}
               {Array.isArray(company.status) && company.status.length > 0 && (
                 <span className="flex gap-1 flex-wrap">
                   {company.status.map(s => {
@@ -402,6 +405,18 @@ export default function CompanyDetailPage() {
                   )}
                 </div>
               )}
+              {company.website && (
+                <a
+                  href={company.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 hover:text-[var(--foreground)] min-w-0"
+                  title={company.website}
+                >
+                  <Globe size={14} className="shrink-0" />
+                  <span className="truncate">{company.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}</span>
+                </a>
+              )}
             </div>
           </div>
 
@@ -432,10 +447,30 @@ export default function CompanyDetailPage() {
               {isEditingAll ? 'Cancel Editing' : 'Edit Details'}
             </button>
             <button
-              onClick={() => setIsEditingAll(false)}
-              className="px-6 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-sm font-bold hover:opacity-90 transition-all shadow-lg"
+              onClick={async () => {
+                const companyChanges: Record<string, string> = {};
+                for (const change of changes.values()) {
+                  if (change.collection === COLLECTIONS.COMPANIES && change.recordId === id) {
+                    companyChanges[change.field] = change.currentValue;
+                  }
+                }
+                const result = await saveAll();
+                if (result.success) {
+                  if (Object.keys(companyChanges).length > 0) {
+                    setCompany(prev => prev ? { ...prev, ...companyChanges } : prev);
+                  }
+                  setIsEditingAll(false);
+                }
+              }}
+              disabled={!hasUnsavedChanges || isSavingAll}
+              className={cn(
+                "px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-lg",
+                hasUnsavedChanges && !isSavingAll
+                  ? "bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 cursor-pointer"
+                  : "bg-[var(--card-hover)] text-[var(--muted)] border border-[var(--card-border)] cursor-not-allowed opacity-60"
+              )}
             >
-              Save Changes
+              {isSavingAll ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </div>
@@ -448,7 +483,7 @@ export default function CompanyDetailPage() {
           { id: 'phones', label: 'Locations & Phones', icon: Phone },
           { id: 'calls', label: 'Call History', icon: History, count: aiAnalyzedCount > 0 ? aiAnalyzedCount : undefined },
           { id: 'follow_ups', label: 'Follow-Ups', icon: CalendarClock, count: followUps.length > 0 ? followUps.length : undefined },
-          { id: 'notes', label: 'Pre-Call Notes', icon: StickyNote },
+          { id: 'notes', label: 'Notes', icon: StickyNote },
           { id: 'timeline', label: 'Timeline', icon: MessageSquare },
           { id: 'email_activity', label: 'Email Activity', icon: Send },
         ].map((tab) => (
@@ -490,6 +525,9 @@ export default function CompanyDetailPage() {
                     value={company.company_name}
                     onSave={(v) => handleUpdateCompany('company_name', v)}
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="company_name"
                   />
                   <InlineEditField
                     id={`company_${id}_owner`}
@@ -498,6 +536,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('owner_name', v)}
                     placeholder="Enter owner name..."
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="owner_name"
                   />
                   <div>
                     <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-1 block">CRM Status</label>
@@ -516,12 +557,26 @@ export default function CompanyDetailPage() {
                     <p className="text-[10px] text-[var(--muted)] mt-1">Auto-computed from last call per phone number</p>
                   </div>
                   <InlineEditField
+                    id={`company_${id}_website`}
+                    label="Website"
+                    value={company.website || ''}
+                    onSave={(v) => handleUpdateCompany('website', v)}
+                    placeholder="https://example.com"
+                    isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="website"
+                  />
+                  <InlineEditField
                     id={`company_${id}_ig`}
                     label="Instagram Handle"
                     value={company.instagram_handle || ''}
                     onSave={(v) => handleUpdateCompany('instagram_handle', v)}
                     placeholder="@username"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="instagram_handle"
                   />
                   <InlineEditField
                     id={`company_${id}_email`}
@@ -530,6 +585,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('email', v)}
                     placeholder="contact@company.com"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="email"
                   />
                   <InlineEditField
                     id={`company_${id}_rating`}
@@ -538,6 +596,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('google_rating', v)}
                     placeholder="e.g. 4.5"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="google_rating"
                   />
                   <InlineEditField
                     id={`company_${id}_reviews`}
@@ -546,6 +607,9 @@ export default function CompanyDetailPage() {
                     onSave={(v) => handleUpdateCompany('google_reviews_count', v)}
                     placeholder="e.g. 128"
                     isEditing={isEditingAll}
+                    collection={COLLECTIONS.COMPANIES}
+                    recordId={id}
+                    fieldName="google_reviews_count"
                   />
                 </div>
               </div>
@@ -610,40 +674,63 @@ export default function CompanyDetailPage() {
                 </div>
               </div>
 
-              <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-[var(--muted)] uppercase tracking-widest">Pre-Call Notes</h3>
-                  <button
-                    onClick={() => {
-                      setActiveTab('notes');
-                      setIsAddingNote(true);
-                    }}
-                    className="p-1.5 rounded-lg bg-[var(--card-hover)] text-[var(--foreground)] hover:bg-[var(--sidebar-hover)] transition-all"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
+              {(() => {
+                const overviewMerged: Array<
+                  | { kind: 'pre_call'; id: string; date: string; content: string }
+                  | { kind: 'call_note'; id: string; date: string; content: string }
+                > = [
+                  ...notes.map(n => ({ kind: 'pre_call' as const, id: `n_${n.id}`, date: n.created, content: n.content })),
+                  ...callLogs
+                    .filter(c => c.post_call_notes && c.post_call_notes.trim().length > 0)
+                    .map(c => ({ kind: 'call_note' as const, id: `c_${c.id}`, date: c.call_time || c.created, content: c.post_call_notes as string })),
+                ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-                <div className="space-y-3">
-                  {notes.slice(0, 2).map(note => (
-                    <div key={note.id} className="text-sm p-3 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
-                      <p className="line-clamp-3 text-[var(--foreground)] font-medium leading-relaxed">{note.content}</p>
-                      <p className="text-[10px] text-[var(--muted)] mt-2 font-bold"><RelativeTime date={note.created} timezones={preferences?.timezones} className="text-[10px]" /></p>
+                return (
+                  <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-[var(--muted)] uppercase tracking-widest">Notes</h3>
+                      <button
+                        onClick={() => {
+                          setActiveTab('notes');
+                          setIsAddingNote(true);
+                        }}
+                        className="p-1.5 rounded-lg bg-[var(--card-hover)] text-[var(--foreground)] hover:bg-[var(--sidebar-hover)] transition-all"
+                      >
+                        <Plus size={14} />
+                      </button>
                     </div>
-                  ))}
-                  {notes.length === 0 && (
-                    <p className="text-xs text-[var(--muted)] italic py-4 text-center">No pre-call notes found.</p>
-                  )}
-                  {notes.length > 2 && (
-                    <button
-                      onClick={() => setActiveTab('notes')}
-                      className="text-xs text-[var(--primary)] font-bold hover:underline w-full text-center"
-                    >
-                      View all notes
-                    </button>
-                  )}
-                </div>
-              </div>
+
+                    <div className="space-y-3">
+                      {overviewMerged.slice(0, 2).map(entry => (
+                        <div key={entry.id} className="text-sm p-3 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            {entry.kind === 'pre_call' ? (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--primary-subtle)] text-[var(--primary)] font-bold uppercase tracking-wider">Pre-Call</span>
+                            ) : (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--info-subtle)] text-[var(--info)] font-bold uppercase tracking-wider">Call</span>
+                            )}
+                            <span className="text-[10px] text-[var(--muted)] font-bold">
+                              <RelativeTime date={entry.date} timezones={preferences?.timezones} className="text-[10px]" />
+                            </span>
+                          </div>
+                          <p className="line-clamp-3 text-[var(--foreground)] font-medium leading-relaxed">{entry.content}</p>
+                        </div>
+                      ))}
+                      {overviewMerged.length === 0 && (
+                        <p className="text-xs text-[var(--muted)] italic py-4 text-center">No notes found.</p>
+                      )}
+                      {overviewMerged.length > 2 && (
+                        <button
+                          onClick={() => setActiveTab('notes')}
+                          className="text-xs text-[var(--primary)] font-bold hover:underline w-full text-center"
+                        >
+                          View all notes
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -926,10 +1013,21 @@ export default function CompanyDetailPage() {
           </div>
         )}
 
-        {activeTab === 'notes' && (
+        {activeTab === 'notes' && (() => {
+          const mergedNotes: Array<
+            | { kind: 'pre_call'; id: string; date: string; note: CompanyNote }
+            | { kind: 'call_note'; id: string; date: string; call: CallLog }
+          > = [
+            ...notes.map(n => ({ kind: 'pre_call' as const, id: `n_${n.id}`, date: n.created, note: n })),
+            ...callLogs
+              .filter(c => c.post_call_notes && c.post_call_notes.trim().length > 0)
+              .map(c => ({ kind: 'call_note' as const, id: `c_${c.id}`, date: c.call_time || c.created, call: c })),
+          ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+          return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold">Pre-Call Notes</h3>
+              <h3 className="text-lg font-bold">Notes</h3>
               <button
                 onClick={() => setIsAddingNote(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--foreground)] text-[var(--background)] text-xs font-bold hover:opacity-90 transition-all shadow-sm"
@@ -974,30 +1072,88 @@ export default function CompanyDetailPage() {
             )}
 
             <div className="grid grid-cols-1 gap-4">
-              {notes.map(note => (
-                <div key={note.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-3 hover:border-[var(--sidebar-border)] transition-all">
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 rounded-lg bg-[var(--primary-subtle)] text-[var(--primary)]">
-                        <StickyNote size={16} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-[var(--muted)] font-bold uppercase tracking-wider">{note.note_type.replace('_', ' ')}</p>
+              {mergedNotes.map(entry => {
+                if (entry.kind === 'pre_call') {
+                  const note = entry.note;
+                  return (
+                    <div key={entry.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-3 hover:border-[var(--sidebar-border)] transition-all">
+                      <div className="flex justify-between items-start">
                         <div className="flex items-center gap-2">
-                          <p className="text-[10px] text-[var(--muted)]"><RelativeTime date={note.created} timezones={preferences?.timezones} className="text-[10px]" /></p>
-                          {note.expand?.created_by && (
-                            <span className="text-[10px] text-[var(--muted)] flex items-center gap-1">
-                              • by <span className="font-bold text-[var(--foreground)]">{note.expand.created_by.name}</span>
+                          <div className="p-2 rounded-lg bg-[var(--primary-subtle)] text-[var(--primary)]">
+                            <StickyNote size={16} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--primary-subtle)] text-[var(--primary)] font-bold uppercase tracking-wider">Pre-Call Note</span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <p className="text-[10px] text-[var(--muted)]"><RelativeTime date={note.created} timezones={preferences?.timezones} className="text-[10px]" /></p>
+                              {note.expand?.created_by && (
+                                <span className="text-[10px] text-[var(--muted)] flex items-center gap-1">
+                                  • by <span className="font-bold text-[var(--foreground)]">{note.expand.created_by.name}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap text-[var(--foreground)]">{note.content}</p>
+                    </div>
+                  );
+                }
+                const call = entry.call;
+                return (
+                  <div key={entry.id} className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-6 space-y-3 hover:border-[var(--sidebar-border)] transition-all">
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-lg bg-[var(--info-subtle)] text-[var(--info)]">
+                          <Phone size={16} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--info-subtle)] text-[var(--info)] font-bold uppercase tracking-wider">Call Note</span>
+                            <span className="text-[10px] text-[var(--muted)]">
+                              from call <RelativeTime date={call.call_time || call.created} timezones={preferences?.timezones} className="text-[10px]" />
                             </span>
-                          )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            {call.expand?.phone_number_record?.phone_number && (
+                              <span className="text-[10px] text-[var(--muted)] font-mono">
+                                {formatPhoneNumber(call.expand.phone_number_record.phone_number)}
+                              </span>
+                            )}
+                            {call.expand?.caller && (
+                              <span className="text-[10px] text-[var(--muted)] flex items-center gap-1">
+                                • by <span className="font-bold text-[var(--foreground)]">{call.expand.caller.name}</span>
+                              </span>
+                            )}
+                            <div className="flex gap-1 flex-wrap">
+                              {(Array.isArray(call.call_outcome) ? call.call_outcome : call.call_outcome ? [call.call_outcome] : []).map((outcome: string) => {
+                                const colors = getOutcomeColors(outcome);
+                                return (
+                                  <span
+                                    key={outcome}
+                                    className={cn(
+                                      "px-1.5 py-0.5 rounded text-[9px] font-semibold border leading-none",
+                                      colors.bg,
+                                      colors.text,
+                                      colors.border
+                                    )}
+                                  >
+                                    {outcome}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
+                    <p className="text-sm whitespace-pre-wrap text-[var(--foreground)]">{call.post_call_notes}</p>
                   </div>
-                  <p className="text-sm whitespace-pre-wrap text-[var(--foreground)]">{note.content}</p>
-                </div>
-              ))}
-              {notes.length === 0 && !isAddingNote && (
+                );
+              })}
+              {mergedNotes.length === 0 && !isAddingNote && (
                 <div className="py-24 text-center bg-[var(--sidebar-bg)] border-2 border-dashed border-[var(--card-border)] rounded-2xl">
                   <StickyNote size={48} className="mx-auto text-[var(--card-border)] mb-4" />
                   <p className="text-[var(--muted)] font-medium">No notes yet. Add one to prepare for your next call.</p>
@@ -1005,7 +1161,8 @@ export default function CompanyDetailPage() {
               )}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'email_activity' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">

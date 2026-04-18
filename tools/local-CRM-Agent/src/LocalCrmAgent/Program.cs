@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using LocalCrmAgent.Services;
 using LocalCrmAgent.UI;
-using Microsoft.Win32;
 
 namespace LocalCrmAgent;
 
@@ -10,6 +9,14 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Self-heal the Run key + protocol handler on every launch, *before*
+        // the single-instance gate. Running the exe a second time is the
+        // user's natural way to repair a broken install (e.g. after the Run
+        // entry was removed by a cleanup utility), so this must work even
+        // when another instance already holds the mutex.
+        StartupRegistrar.EnsureAutoStart();
+        StartupRegistrar.EnsureProtocolHandler();
+
         // ── Single instance enforcement ────────────────────────────
         using var mutex = new Mutex(true, @"Global\LocalCrmAgent_SingleInstance", out bool createdNew);
         if (!createdNew)
@@ -21,10 +28,6 @@ static class Program
         Application.EnableVisualStyles();
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.SetCompatibleTextRenderingDefault(false);
-
-        // ── Auto-start registration ────────────────────────────────
-        EnsureAutoStart();
-        RegisterProtocolHandler();
 
         // ── Create services ────────────────────────────────────────
         var audioMonitor = new ZoomAudioMonitor();
@@ -47,11 +50,13 @@ static class Program
         wsServer.SetZoomApi(zoomApi);
         var agent = new AgentService(fusion, wsServer, networkMonitor, audioMonitor, recorder, uploader, micManager);
         var autoUpdater = new AutoUpdateService();
+        var startupWatchdog = new StartupWatchdog();
 
         // ── Start agent ────────────────────────────────────────────
         agent.Start();
         zoomSuppressor.Start();
         autoUpdater.Start();
+        startupWatchdog.Start();
         Debug.WriteLine("[Main] Agent started, entering message loop...");
 
         // ── Create tray icon (must be on STA/UI thread) ────────────
@@ -61,68 +66,12 @@ static class Program
         Application.Run();
 
         // ── Cleanup ────────────────────────────────────────────────
+        startupWatchdog.Dispose();
         autoUpdater.Dispose();
         agent.Stop();
         zoomSuppressor.Dispose();
         networkMonitor.Dispose();
         micManager.Dispose();
         Debug.WriteLine("[Main] Agent stopped, exiting.");
-    }
-
-    /// <summary>
-    /// Register the agent to auto-start when the user logs into Windows.
-    /// </summary>
-    private static void EnsureAutoStart()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Run", true);
-
-            var exePath = Environment.ProcessPath;
-            if (key == null || exePath == null) return;
-
-            var desired = $"\"{exePath}\" --background";
-            var existing = key.GetValue("LocalCrmAgent") as string;
-
-            // Update if not registered or if the exe path has changed (e.g. dev vs release build)
-            if (string.Equals(existing, desired, StringComparison.OrdinalIgnoreCase)) return;
-
-            key.SetValue("LocalCrmAgent", desired);
-            Debug.WriteLine("[Main] Registered auto-start");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Main] Auto-start registration failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Register the crm-agent:// protocol handler so the CRM dashboard
-    /// can launch the agent from the browser.
-    /// </summary>
-    private static void RegisterProtocolHandler()
-    {
-        try
-        {
-            var exePath = Environment.ProcessPath;
-            if (exePath == null) return;
-
-            using var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\crm-agent");
-            key.SetValue("", "URL:CRM Agent Protocol");
-            key.SetValue("URL Protocol", "");
-
-            using var iconKey = key.CreateSubKey(@"DefaultIcon");
-            iconKey.SetValue("", $"\"{exePath}\",0");
-
-            using var cmdKey = key.CreateSubKey(@"shell\open\command");
-            cmdKey.SetValue("", $"\"{exePath}\" \"%1\"");
-
-            Debug.WriteLine("[Main] Registered crm-agent:// protocol handler");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Main] Protocol handler registration failed: {ex.Message}");
-        }
     }
 }

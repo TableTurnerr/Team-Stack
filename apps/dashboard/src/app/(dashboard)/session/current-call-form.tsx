@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Download, Loader2, CheckCircle2 } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Download, Loader2, CheckCircle2, Pencil } from 'lucide-react';
+import { useAuth } from '@/contexts/auth-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp, type CompanyNote } from '@/lib/types';
@@ -106,6 +107,7 @@ interface CurrentCallFormProps {
 const EMPTY_CALLBACK_EVENTS: Array<{ reason: string; timestamp: string }> = [];
 
 export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS, suggestedCompanyName }: CurrentCallFormProps) {
+    const { user } = useAuth();
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -284,6 +286,11 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [preCallNotes, setPreCallNotes] = useState<CompanyNote[]>([]);
     const [preCallNotesLoading, setPreCallNotesLoading] = useState(false);
     const lastFetchedNotesCompanyId = useRef('');
+
+    // Inline edit state for the pre-call note line inside the Notes panel
+    const [editingPreCallNote, setEditingPreCallNote] = useState(false);
+    const [preCallNoteDraft, setPreCallNoteDraft] = useState('');
+    const [savingPreCallNote, setSavingPreCallNote] = useState(false);
 
     // Prior calls attention pulse
     const priorCallsRef = useRef<HTMLDivElement>(null);
@@ -555,10 +562,14 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         if (!autoFetchedCompany) {
             setPreCallNotes([]);
             lastFetchedNotesCompanyId.current = '';
+            setEditingPreCallNote(false);
+            setPreCallNoteDraft('');
             return;
         }
         if (autoFetchedCompany.id === lastFetchedNotesCompanyId.current) return;
         lastFetchedNotesCompanyId.current = autoFetchedCompany.id;
+        setEditingPreCallNote(false);
+        setPreCallNoteDraft('');
 
         setPreCallNotesLoading(true);
         pb.collection(COLLECTIONS.COMPANY_NOTES).getFullList<CompanyNote>({
@@ -775,10 +786,73 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setShowDiscardConfirm(false);
     }, [onDiscard, onDraftChange, resetForm]);
 
+    // Combine all pre-call notes into one string for inline display/edit.
+    // Most recent first (DB query sorts by '-created').
+    const combinedPreCallNote = preCallNotes.map(n => n.content).join('\n\n');
+    const mostRecentPreCallNote = preCallNotes[0] ?? null;
+
+    const handleStartEditPreCallNote = useCallback(() => {
+        setPreCallNoteDraft(combinedPreCallNote);
+        setEditingPreCallNote(true);
+    }, [combinedPreCallNote]);
+
+    const handleCancelEditPreCallNote = useCallback(() => {
+        setEditingPreCallNote(false);
+        setPreCallNoteDraft('');
+    }, []);
+
+    const handleSavePreCallNote = useCallback(async () => {
+        if (!selectedCompany || !user) return;
+        const trimmed = preCallNoteDraft.trim();
+        setSavingPreCallNote(true);
+        try {
+            if (trimmed.length === 0) {
+                // Delete all existing pre-call notes if cleared
+                await Promise.all(preCallNotes.map(n =>
+                    pb.collection(COLLECTIONS.COMPANY_NOTES).delete(n.id)
+                ));
+                setPreCallNotes([]);
+            } else if (mostRecentPreCallNote) {
+                // Update existing most-recent note; delete older duplicates
+                const updated = await pb.collection(COLLECTIONS.COMPANY_NOTES).update<CompanyNote>(
+                    mostRecentPreCallNote.id,
+                    { content: trimmed },
+                    { expand: 'created_by' }
+                );
+                const older = preCallNotes.slice(1);
+                await Promise.all(older.map(n =>
+                    pb.collection(COLLECTIONS.COMPANY_NOTES).delete(n.id)
+                ));
+                setPreCallNotes([updated]);
+            } else {
+                // Create new note
+                const created = await pb.collection(COLLECTIONS.COMPANY_NOTES).create<CompanyNote>(
+                    {
+                        company: selectedCompany.id,
+                        note_type: 'pre_call',
+                        content: trimmed,
+                        created_by: user.id,
+                    },
+                    { expand: 'created_by' }
+                );
+                setPreCallNotes([created]);
+            }
+            setEditingPreCallNote(false);
+            setPreCallNoteDraft('');
+        } catch (err) {
+            console.error('Failed to save pre-call note:', err);
+        } finally {
+            setSavingPreCallNote(false);
+        }
+    }, [selectedCompany, user, preCallNoteDraft, preCallNotes, mostRecentPreCallNote]);
+
     const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
     const hasPhoneNumber = !!phoneNumber;
     const hasOutcome = callOutcome.length > 0;
-    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving && (!isCallLive || hasUnsavedCall);
+    // Only allow save after a call has actually happened (hasUnsavedCall === true).
+    // During a live call: allow only if there's a previous unsaved call (callback scenario).
+    // Before any call is made: always disabled.
+    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving && hasUnsavedCall;
 
     const handleCallbackSelect = (reason: CallbackReason) => {
         setShowCallbackDropdown(false);
@@ -787,6 +861,12 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
     const isHungUpOutcome = callOutcome.includes(HUNG_UP_PRIMARY) || callOutcome.includes(HUNG_UP_OTHER);
     const isAtMaxOutcomes = callOutcome.length >= MAX_OUTCOMES;
+
+    const isRealNotesMode = !!(autoFetchedCompany && selectedCompany?.id === autoFetchedCompany.id);
+    const displayCompany = isRealNotesMode ? autoFetchedCompany : null;
+    const displayCallHistory = callHistory;
+    const displayCallHistoryLoading = callHistoryLoading;
+    const displayPreCallNotesLoading = preCallNotesLoading;
 
     return (
         <div className={cn(
@@ -895,51 +975,21 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 </div>
             )}
 
-            {/* Pre-call notes panel — shown when company is auto-matched */}
-            {autoFetchedCompany && selectedCompany?.id === autoFetchedCompany.id && (preCallNotesLoading || preCallNotes.length > 0) && (
-                <div className="border border-[var(--card-border)] rounded-lg overflow-hidden text-sm">
-                    <div className="px-3 py-1.5 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] flex items-center justify-between">
-                        <span className="font-semibold uppercase tracking-wider text-[var(--muted)] text-xs flex items-center gap-1.5">
-                            <StickyNote size={12} />
-                            Pre-Call Notes
-                        </span>
-                        {preCallNotesLoading ? (
-                            <span className="text-xs text-[var(--muted)]">Loading…</span>
-                        ) : (
-                            <span className="text-xs text-[var(--muted)]">{preCallNotes.length} total</span>
-                        )}
-                    </div>
-                    {!preCallNotesLoading && (
-                        <div className="divide-y divide-[var(--card-border)] max-h-48 overflow-y-auto">
-                            {preCallNotes.map(note => (
-                                <div key={note.id} className="px-3 py-2 space-y-0.5">
-                                    <div className="flex items-center gap-1.5 text-xs">
-                                        <Tooltip content={`${formatDateTime(note.created)} (Your Time)`}>
-                                            <span className="text-[var(--muted)] whitespace-nowrap shrink-0 cursor-help">
-                                                {timeAgo(note.created)}
-                                            </span>
-                                        </Tooltip>
-                                        {note.expand?.created_by && (
-                                            <span className="text-[var(--foreground)]/80 whitespace-nowrap shrink-0 font-medium">
-                                                {note.expand.created_by.name}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="text-[var(--foreground)]/80 text-xs whitespace-pre-wrap">
-                                        {note.content}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+            {/* Phone not found in DB */}
+            {phoneNumber && companyLookupState === 'not-found' && !selectedCompany && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--card-hover)] border border-[var(--card-border)]">
+                    <AlertCircle size={14} className="text-[var(--muted)] shrink-0" />
+                    <span className="text-xs text-[var(--muted)]">
+                        {formatPhoneNumber(phoneNumber)} is not in the database
+                    </span>
                 </div>
             )}
 
-            {/* Brief call history panel — shown when company is auto-matched */}
-            {autoFetchedCompany && selectedCompany?.id === autoFetchedCompany.id && (callHistoryLoading || callHistory.length > 0) && (() => {
+            {/* Notes panel — pre-call notes + brief call history, shown when company is auto-matched */}
+            {displayCompany && (() => {
                 // Group logs by phone_number_record (or 'unknown')
                 const byPhone = new Map<string, { phone: string; calls: CallLog[] }>();
-                for (const log of callHistory) {
+                for (const log of displayCallHistory) {
                     const key = log.phone_number_record || 'unknown';
                     const display = log.expand?.phone_number_record?.phone_number || 'Unknown';
                     if (!byPhone.has(key)) byPhone.set(key, { phone: display, calls: [] });
@@ -950,16 +1000,80 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 return (
                     <div ref={priorCallsRef} className={cn("border border-[var(--card-border)] rounded-lg overflow-hidden text-sm", priorCallsPulsing && "animate-[prior-call-pulse_1.8s_ease-in-out_2]")}>
                         <div className="px-3 py-1.5 bg-[var(--sidebar-bg)] border-b border-[var(--card-border)] flex items-center justify-between">
-                            <span className="font-semibold uppercase tracking-wider text-[var(--muted)] text-xs">
-                                Prior Calls
+                            <span className="font-semibold uppercase tracking-wider text-[var(--muted)] text-xs flex items-center gap-1.5">
+                                <StickyNote size={12} />
+                                Notes
                             </span>
-                            {callHistoryLoading ? (
+                            {displayCallHistoryLoading ? (
                                 <span className="text-xs text-[var(--muted)]">Loading…</span>
                             ) : (
-                                <span className="text-xs text-[var(--muted)]">{callHistory.length} total</span>
+                                <span className="text-xs text-[var(--muted)]">{displayCallHistory.length} call{displayCallHistory.length !== 1 ? 's' : ''}</span>
                             )}
                         </div>
-                        {!callHistoryLoading && (
+
+                        {/* Pre-call note line (editable inline) */}
+                        {displayPreCallNotesLoading ? (
+                            <div className="px-3 py-2 text-xs text-[var(--muted)] border-b border-[var(--card-border)]">
+                                Loading pre-call notes…
+                            </div>
+                        ) : editingPreCallNote ? (
+                            <div className="px-3 py-2 space-y-1.5 border-b border-[var(--card-border)]">
+                                <label className="text-[10px] uppercase tracking-wider text-[var(--muted)] font-semibold">
+                                    Pre-call note
+                                </label>
+                                <textarea
+                                    value={preCallNoteDraft}
+                                    onChange={(e) => setPreCallNoteDraft(e.target.value)}
+                                    autoFocus
+                                    rows={3}
+                                    placeholder="Add a pre-call note for this company…"
+                                    className="w-full text-xs bg-[var(--card-bg)] border border-[var(--card-border)] rounded-md px-2 py-1.5 resize-y focus:outline-none focus:border-[var(--primary)] text-[var(--foreground)]"
+                                />
+                                <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEditPreCallNote}
+                                        disabled={savingPreCallNote}
+                                        className="px-2 py-1 rounded-md text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--card-hover)] transition-colors disabled:opacity-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSavePreCallNote}
+                                        disabled={savingPreCallNote}
+                                        className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--primary)] text-white hover:opacity-90 active:scale-[0.97] transition-all disabled:opacity-50 flex items-center gap-1"
+                                    >
+                                        {savingPreCallNote && <Loader2 size={10} className="animate-spin" />}
+                                        Save
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={handleStartEditPreCallNote}
+                                className="w-full px-3 py-2 text-xs text-left border-b border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors group flex items-start gap-1.5"
+                                title={combinedPreCallNote ? 'Click to edit pre-call note' : 'Click to add a pre-call note'}
+                            >
+                                <span className="flex-1 min-w-0">
+                                    <span className="font-semibold text-[var(--muted)]">Pre call note: </span>
+                                    {combinedPreCallNote ? (
+                                        <span className="text-[var(--foreground)]/80 whitespace-pre-wrap break-words">{combinedPreCallNote}</span>
+                                    ) : (
+                                        <span className="text-[var(--muted)] italic">None</span>
+                                    )}
+                                </span>
+                                <Pencil size={11} className="shrink-0 text-[var(--muted)] opacity-0 group-hover:opacity-100 transition-opacity mt-0.5" />
+                            </button>
+                        )}
+
+                        {!displayCallHistoryLoading && displayCallHistory.length === 0 && (
+                            <div className="px-3 py-2 text-xs text-[var(--muted)] italic">
+                                No prior calls
+                            </div>
+                        )}
+                        {!displayCallHistoryLoading && displayCallHistory.length > 0 && (
                             <div className="divide-y divide-[var(--card-border)] max-h-48 overflow-y-auto">
                                 {groups.map(([key, { phone, calls }]) => {
                                     const notedCalls = calls.filter(c => c.post_call_notes);
@@ -992,11 +1106,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                     })}
                                                 </div>
                                             </div>
-                                            {(notedCalls.length > 0 || calls.some(c => c.receptionist_name)) && (
-                                                <div className="space-y-1 ml-1.5 border-l border-[var(--card-border)] pl-2">
-                                                    {calls.slice(0, 3).map((call, idx) => (
-                                                        (call.post_call_notes || call.receptionist_name || (Array.isArray(call.call_outcome) ? call.call_outcome.length > 0 : call.call_outcome)) && (
-                                                            <div key={call.id} className="space-y-0.5">
+                                            <div className="space-y-1 ml-1.5 border-l border-[var(--card-border)] pl-2">
+                                                {calls.slice(0, 3).map((call, idx) => (
+                                                        <div key={call.id} className="space-y-0.5">
                                                                 <div className="flex items-center gap-1.5 text-xs flex-wrap">
                                                                     <Tooltip content={`${formatDateTime(call.call_time)} (Your Time)`}>
                                                                         <span className="text-[var(--muted)] whitespace-nowrap shrink-0 cursor-help">
@@ -1050,10 +1162,8 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                                     </div>
                                                                 )}
                                                             </div>
-                                                        )
                                                     ))}
                                                 </div>
-                                            )}
                                         </div>
                                     );
                                 })}
@@ -1669,7 +1779,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 <button
                     type="button"
                     onClick={() => setShowDiscardConfirm(true)}
-                    disabled={!hasDraftValues && !hasUnsavedCall}
+                    disabled={isCallLive || !hasUnsavedCall}
                     className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all border border-[var(--card-border)] bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-hover)] hover:text-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                     Discard

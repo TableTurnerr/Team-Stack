@@ -34,39 +34,46 @@ public class SettingsService
     /// <summary>
     /// Apply the auto-start setting to the Windows registry.
     /// Called on startup and when the setting changes.
+    /// Returns true when the registry was touched (added, corrected, or removed).
     /// </summary>
-    public void ApplyAutoStart(bool enabled)
+    public bool ApplyAutoStart(bool enabled)
     {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Run", true);
-            if (key == null) return;
+            // CreateSubKey ensures we still succeed on the rare systems where
+            // the Run key itself has been deleted. It behaves like OpenSubKey
+            // with write access when the key already exists.
+            using var key = Registry.CurrentUser.CreateSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Run");
+            if (key == null) return false;
 
             if (enabled)
             {
                 var exePath = Environment.ProcessPath;
-                if (exePath == null) return;
+                if (exePath == null) return false;
                 var desired = $"\"{exePath}\"";
-                var existing = key.GetValue("ToolManager") as string;
-                if (!string.Equals(existing, desired, StringComparison.OrdinalIgnoreCase))
+                if (key.GetValue("ToolManager") is string existing
+                    && string.Equals(existing, desired, StringComparison.OrdinalIgnoreCase))
                 {
-                    key.SetValue("ToolManager", desired);
-                    Debug.WriteLine("[Settings] Registered auto-start");
+                    return false;
                 }
+                key.SetValue("ToolManager", desired);
+                Debug.WriteLine("[Settings] Registered auto-start");
+                return true;
             }
-            else
+
+            if (key.GetValue("ToolManager") != null)
             {
-                if (key.GetValue("ToolManager") != null)
-                {
-                    key.DeleteValue("ToolManager", false);
-                    Debug.WriteLine("[Settings] Removed auto-start");
-                }
+                key.DeleteValue("ToolManager", false);
+                Debug.WriteLine("[Settings] Removed auto-start");
+                return true;
             }
+            return false;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[Settings] Auto-start toggle failed: {ex.Message}");
+            return false;
         }
     }
 }

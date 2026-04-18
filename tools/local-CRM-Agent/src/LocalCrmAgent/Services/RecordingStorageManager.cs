@@ -231,7 +231,11 @@ public class RecordingStorageManager
         {
             lock (_lock)
             {
-                return _entries.Count(e => !e.Uploaded && e.Error == null && e.RetryCount < 10);
+                // Only count recordings that are actually eligible for upload.
+                // Unlinked recordings (no CallLogId) are filtered out by
+                // GetPendingUploads and would never upload — counting them
+                // here would mislead users into thinking uploads are stuck.
+                return _entries.Count(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null);
             }
         }
     }
@@ -245,6 +249,53 @@ public class RecordingStorageManager
                 return _entries.Count(e => !e.Uploaded && (e.Error != null || e.RetryCount >= 10));
             }
         }
+    }
+
+    /// <summary>
+    /// Cancel pending uploads. Removes matching entries from the manifest and
+    /// deletes the associated local files on disk.
+    ///
+    /// - If <paramref name="callLogIds"/> is null or empty, cancels ALL non-uploaded entries.
+    /// - Otherwise, cancels only entries whose CallLogId matches one of the provided IDs.
+    ///
+    /// Returns the number of entries cancelled.
+    /// </summary>
+    public int CancelPending(IReadOnlyCollection<string>? callLogIds = null)
+    {
+        List<RecordingEntry> toRemove;
+        lock (_lock)
+        {
+            bool matchAll = callLogIds == null || callLogIds.Count == 0;
+            toRemove = _entries
+                .Where(e => !e.Uploaded && (matchAll ||
+                    (e.CallLogId != null && callLogIds!.Contains(e.CallLogId))))
+                .ToList();
+
+            if (toRemove.Count > 0)
+            {
+                foreach (var entry in toRemove)
+                    _entries.Remove(entry);
+                PersistManifest();
+            }
+        }
+
+        // Delete local files outside the lock to avoid blocking on slow I/O
+        foreach (var entry in toRemove)
+        {
+            try
+            {
+                var path = Path.Combine(_recordingsDir, entry.FileName);
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Storage] Failed to delete {entry.FileName}: {ex.Message}");
+            }
+        }
+
+        if (toRemove.Count > 0)
+            Debug.WriteLine($"[Storage] Cancelled {toRemove.Count} pending uploads");
+        return toRemove.Count;
     }
 
     private void LoadManifest()

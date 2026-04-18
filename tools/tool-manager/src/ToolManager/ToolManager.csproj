@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>ToolManager</RootNamespace>
     <AssemblyName>ToolManager</AssemblyName>
-    <Version>2.0.5</Version>
+    <Version>2.0.6</Version>
     <Company>TableTurnerr</Company>
     <Product>TableTurnerr Tool Manager</Product>
     <Description>Discovers, installs, and auto-updates all TableTurnerr team tools from GitHub Releases.</Description>

@@ -24,9 +24,10 @@ echo.
 echo Output: dist\LocalCrmAgent.exe
 echo.
 
-:: Copy installer scripts next to the built exe
+:: Copy installer scripts + tool manifest next to the built exe
 copy /Y install.bat dist\install.bat >nul 2>&1
 copy /Y uninstall.bat dist\uninstall.bat >nul 2>&1
+copy /Y tool.json dist\tool.json >nul 2>&1
 
 :: Extract version from .csproj
 for /f "usebackq delims=" %%a in (`powershell -NoProfile -Command "([xml](Get-Content 'src\LocalCrmAgent\LocalCrmAgent.csproj')).Project.PropertyGroup.Version"`) do set VERSION=%%a

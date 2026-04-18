@@ -62,7 +62,7 @@ echo        Done.
 
 :: Register auto-start in Windows registry
 echo  [2/5] Registering auto-start...
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "LocalCrmAgent" /t REG_SZ /d "\"%INSTALL_DIR%\LocalCrmAgent.exe\" --background" /f >nul 2>&1
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "LocalCrmAgent" /t REG_SZ /d "\"%INSTALL_DIR%\LocalCrmAgent.exe\"" /f >nul 2>&1
 echo        Done.
 
 :: Register crm-agent:// protocol handler

@@ -1,0 +1,15 @@
+{
+  "id": "local-crm-agent",
+  "name": "Local CRM Agent",
+  "description": "Desktop agent that monitors Zoom Phone call state and serves signals to the CRM dashboard.",
+  "type": "windows-app",
+  "executable": "LocalCrmAgent.exe",
+  "processName": "LocalCrmAgent",
+  "autoStart": true,
+  "registryAutoStart": {
+    "key": "LocalCrmAgent"
+  },
+  "protocolHandler": "crm-agent",
+  "startMenuFolder": "TableTurnerr",
+  "startMenuName": "CRM Agent"
+}

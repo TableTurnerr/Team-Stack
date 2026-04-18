@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Search, Filter, Building2, Phone, Check, ChevronDown, ChevronUp, Plus, Trash2, MapPin, User, Loader2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
 import type { Company, PhoneNumber } from '@/lib/types';
 import { sanitizeFilterValue } from '@/lib/utils';
-import { getOutcomeColors } from '@/lib/call-outcomes';
+import { getOutcomeColors, DEFAULT_OUTCOMES } from '@/lib/call-outcomes';
+
+const COMPANY_STATUSES = ['Cold No Reply', 'Replied', 'Warm', 'Booked', 'Paid', 'Client', 'Excluded'] as const;
 
 export interface CRMImportEntry {
     number: string;
@@ -27,15 +30,42 @@ interface FilterRule {
     value: string;
 }
 
-const FILTER_FIELDS = [
-    // Status is now a JSON array (auto-computed from calls) — not filterable via PB select query
-    { key: 'source', label: 'Source', type: 'text' },
-    { key: 'company_location', label: 'Location', type: 'text' },
-    { key: 'google_rating', label: 'Google Rating', type: 'text' },
-    { key: 'first_contacted', label: 'First Contacted', type: 'date' },
-    { key: 'last_contacted', label: 'Last Contacted', type: 'date' },
-    { key: 'do_not_contact', label: 'Do Not Contact', type: 'boolean' },
-] as const;
+type FilterField = {
+    key: string;
+    label: string;
+    type: 'text' | 'boolean' | 'date' | 'select' | 'json_array' | 'rel_select' | 'rel_text' | 'rel_boolean';
+    options?: readonly string[];
+    group?: string;
+};
+
+const FILTER_FIELDS: readonly FilterField[] = [
+    // ── Company info ──
+    { key: 'company_name', label: 'Company Name', type: 'text', group: 'Company' },
+    { key: 'owner_name', label: 'Owner Name', type: 'text', group: 'Company' },
+    { key: 'status', label: 'Status', type: 'json_array', options: COMPANY_STATUSES, group: 'Company' },
+    { key: 'source', label: 'Source', type: 'text', group: 'Company' },
+    { key: 'company_location', label: 'Location', type: 'text', group: 'Company' },
+    { key: 'industry', label: 'Industry', type: 'text', group: 'Company' },
+    { key: 'price_range', label: 'Price Range', type: 'text', group: 'Company' },
+    { key: 'google_rating', label: 'Google Rating', type: 'text', group: 'Company' },
+    { key: 'notes', label: 'Notes Include', type: 'text', group: 'Company' },
+    { key: 'first_contacted', label: 'First Contacted', type: 'date', group: 'Company' },
+    { key: 'last_contacted', label: 'Last Contacted', type: 'date', group: 'Company' },
+    { key: 'email', label: 'Has Email', type: 'boolean', group: 'Company' },
+    { key: 'website', label: 'Has Website', type: 'boolean', group: 'Company' },
+    { key: 'do_not_contact', label: 'Do Not Contact', type: 'boolean', group: 'Company' },
+
+    // ── Call history (any call) ──
+    { key: 'call_logs_via_company.call_outcome', label: 'Call Outcome Includes', type: 'rel_select', options: [...DEFAULT_OUTCOMES, 'Other'], group: 'Calls' },
+    { key: 'call_logs_via_company.post_call_notes', label: 'Post-Call Notes Include', type: 'rel_text', group: 'Calls' },
+    { key: 'call_logs_via_company.status_changed_to', label: 'Call Status Changed To', type: 'rel_select', options: COMPANY_STATUSES, group: 'Calls' },
+    { key: 'call_logs_via_company.owner_reached', label: 'Owner Reached On Call', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.appointment_set', label: 'Appointment Set', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.call_time', label: 'Last Call Date', type: 'date', group: 'Calls' },
+
+    // ── Company notes (pre-call / research) ──
+    { key: 'company_notes_via_company.content', label: 'Pre-Call Note Includes', type: 'rel_text', group: 'Notes' },
+];
 
 const OPERATORS: Record<string, { key: string; label: string }[]> = {
     select: [
@@ -57,30 +87,108 @@ const OPERATORS: Record<string, { key: string; label: string }[]> = {
         { key: '>', label: 'after' },
         { key: '<', label: 'before' },
     ],
+    json_array: [
+        { key: '?=', label: 'includes' },
+        { key: '?!=', label: 'excludes' },
+    ],
+    rel_select: [
+        { key: '?=', label: 'includes' },
+        { key: '?!=', label: 'excludes' },
+    ],
+    rel_text: [
+        { key: '?~', label: 'contains' },
+        { key: '?=', label: 'equals' },
+    ],
+    rel_boolean: [
+        { key: '?=', label: 'is true' },
+        { key: '?!=', label: 'is false or missing' },
+    ],
 };
 
-function getFieldType(fieldKey: string): string {
+function getFieldType(fieldKey: string): FilterField['type'] {
     const field = FILTER_FIELDS.find(f => f.key === fieldKey);
     return field?.type ?? 'text';
 }
 
 function getFieldOptions(fieldKey: string): string[] | undefined {
     const field = FILTER_FIELDS.find(f => f.key === fieldKey);
-    return field && 'options' in field ? [...(field as { options: readonly string[] }).options] : undefined;
+    return field?.options ? [...field.options] : undefined;
 }
 
-function buildFilter(filters: FilterRule[]): string {
+function isRelFilter(f: FilterRule): boolean {
+    return f.field.includes('_via_');
+}
+
+// Build a "quoted JSON token" filter clause for a field stored as a JSON array.
+// PB's `?=` isn't supported on this server, so we fall back to substring-matching
+// the JSON-encoded value (with surrounding quotes) to get exact-token semantics.
+function buildJsonArrayClause(field: string, op: string, value: string): string {
+    const wrapped = `"${value}"`;
+    const safeValue = sanitizeFilterValue(wrapped);
+    const likeOp = op === '?=' || op === '=' ? '~' : op === '?!=' || op === '!=' ? '!~' : op;
+    return `${field} ${likeOp} "${safeValue}"`;
+}
+
+function buildDirectFilter(filters: FilterRule[]): string {
     return filters
-        .filter(f => f.field && f.operator)
+        .filter(f => f.field && f.operator && !isRelFilter(f))
         .map(f => {
             const type = getFieldType(f.field);
             if (type === 'boolean') {
                 return f.operator === '!=' ? `${f.field} != ""` : `${f.field} = ""`;
             }
+            if (type === 'json_array') {
+                if (!f.value) return '';
+                return buildJsonArrayClause(f.field, f.operator, f.value);
+            }
             const safeValue = sanitizeFilterValue(f.value);
             return `${f.field} ${f.operator} "${safeValue}"`;
         })
+        .filter(Boolean)
         .join(' && ');
+}
+
+// Fields on related collections stored as JSON arrays (multi-select).
+// PB's `?=` is unreliable here, so we match the JSON-encoded token via `~`.
+const ARRAY_REL_FIELDS = new Set(['call_outcome', 'objections', 'pain_points']);
+
+// Fetch the set of company IDs matching a single cross-table filter rule.
+async function fetchCompanyIdsForRelFilter(f: FilterRule): Promise<Set<string>> {
+    const [backRelName, ...rest] = f.field.split('.');
+    const relField = rest.join('.');
+    const collectionName = backRelName.replace('_via_company', '');
+
+    const type = getFieldType(f.field);
+    const directOp = f.operator.startsWith('?') ? f.operator.slice(1) : f.operator;
+
+    let filterStr: string;
+    if (type === 'rel_boolean') {
+        filterStr = directOp === '=' ? `${relField} = true` : `${relField} != true`;
+    } else {
+        if (!f.value) return new Set();
+        if (type === 'rel_select' && ARRAY_REL_FIELDS.has(relField)) {
+            filterStr = buildJsonArrayClause(relField, f.operator, f.value);
+        } else {
+            const safeValue = sanitizeFilterValue(f.value);
+            filterStr = `${relField} ${directOp} "${safeValue}"`;
+        }
+    }
+
+    // Scope "Pre-Call Note Includes" to note_type = "pre_call"
+    if (f.field === 'company_notes_via_company.content') {
+        filterStr = `(${filterStr}) && note_type = "pre_call"`;
+    }
+
+    try {
+        const records = await pb.collection(collectionName).getFullList<{ id: string; company: string }>({
+            filter: filterStr,
+            batch: 500,
+        });
+        return new Set(records.map(r => r.company).filter(Boolean));
+    } catch (err) {
+        console.error('[CRM filter] query failed', { filterStr, collectionName, err });
+        return new Set();
+    }
 }
 
 // ── Types for internal state ──
@@ -193,12 +301,82 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
     const doFilterSearch = useCallback(async (page: number) => {
         setFilterLoading(true);
         try {
-            const filterStr = buildFilter(filters);
-            const hasDoNotContactFilter = filters.some(f => f.field === 'do_not_contact');
-            const base = hasDoNotContactFilter ? filterStr : [filterStr, 'do_not_contact != true'].filter(Boolean).join(' && ');
+            // 1. Resolve any cross-table filters to company IDs
+            const relFilters = filters.filter(isRelFilter);
+            let allowedIds: Set<string> | null = null;
+            for (const rf of relFilters) {
+                const type = getFieldType(rf.field);
+                if (type !== 'rel_boolean' && !rf.value) continue; // skip empty rules
+                const ids = await fetchCompanyIdsForRelFilter(rf);
+                if (allowedIds === null) {
+                    allowedIds = ids;
+                } else {
+                    const prev: Set<string> = allowedIds;
+                    allowedIds = new Set(Array.from(prev).filter(id => ids.has(id)));
+                }
+                if (allowedIds.size === 0) break; // short-circuit
+            }
 
+            // 2. Build direct filter
+            const filterStr = buildDirectFilter(filters);
+            const hasDoNotContactFilter = filters.some(f => f.field === 'do_not_contact');
+            const baseParts = [filterStr];
+            if (!hasDoNotContactFilter) baseParts.push('do_not_contact != true');
+            const baseFilter = baseParts.filter(Boolean).join(' && ');
+
+            // 3. When cross-table filters resolved to a finite set of IDs, fetch
+            //    companies in chunks to avoid URL-length limits with large id lists.
+            if (allowedIds !== null) {
+                if (allowedIds.size === 0) {
+                    setFilterMatchCount(0);
+                    setFilterTotalPages(1);
+                    setFilterResults([]);
+                    return;
+                }
+                const idList = [...allowedIds];
+                const CHUNK = 50;
+                const chunks: string[][] = [];
+                for (let i = 0; i < idList.length; i += CHUNK) chunks.push(idList.slice(i, i + CHUNK));
+
+                const chunkResults = await Promise.all(chunks.map(chunk => {
+                    const idClause = chunk.map(id => `id = "${id}"`).join(' || ');
+                    const chunkFilter = [baseFilter, `(${idClause})`].filter(Boolean).join(' && ');
+                    return pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
+                        filter: chunkFilter,
+                        sort: '-updated',
+                    });
+                }));
+                const allCompanies = chunkResults.flat();
+                // De-dupe + sort (already sorted within chunks, merge-sort by updated desc)
+                const seen = new Set<string>();
+                const unique = allCompanies.filter(c => (seen.has(c.id) ? false : (seen.add(c.id), true)));
+                unique.sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
+                const total = unique.length;
+                const pageItems = unique.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+                setFilterMatchCount(total);
+                setFilterTotalPages(Math.max(1, Math.ceil(total / PER_PAGE)));
+
+                if (pageItems.length === 0) {
+                    setFilterResults([]);
+                    return;
+                }
+                const companyIds = pageItems.map(c => c.id);
+                const phoneFilter = companyIds.map(id => `company = "${id}"`).join(' || ');
+                const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({ filter: phoneFilter });
+                const phoneMap = new Map<string, PhoneNumber[]>();
+                for (const p of phones) {
+                    if (p.disassociated) continue;
+                    const arr = phoneMap.get(p.company) ?? [];
+                    arr.push(p);
+                    phoneMap.set(p.company, arr);
+                }
+                setFilterResults(pageItems.map(c => ({ company: c, phones: phoneMap.get(c.id) ?? [], expanded: false })));
+                return;
+            }
+
+            // 4. No cross-table filters — standard paginated query
             const companies = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, PER_PAGE, {
-                filter: base || undefined,
+                filter: baseFilter || undefined,
                 sort: '-updated',
             });
             setFilterMatchCount(companies.totalItems);
@@ -233,15 +411,23 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
         }
     }, [filters]);
 
-    // Auto-count when filters change
+    // A filter rule is "ready" if it has a value — or is a value-less boolean type
+    const filterIsReady = (f: FilterRule) => {
+        const t = getFieldType(f.field);
+        if (t === 'boolean' || t === 'rel_boolean') return true;
+        return f.value.trim() !== '';
+    };
+    const allFiltersReady = filters.length > 0 && filters.every(filterIsReady);
+
+    // Auto-count when filters change — only when every rule has a value
     useEffect(() => {
-        if (tab !== 'filters' || filters.length === 0) {
+        if (tab !== 'filters' || filters.length === 0 || !allFiltersReady) {
             setFilterMatchCount(null);
             return;
         }
         const timeout = setTimeout(() => doFilterSearch(1), 500);
         return () => clearTimeout(timeout);
-    }, [filters, tab, doFilterSearch]);
+    }, [filters, tab, doFilterSearch, allFiltersReady]);
 
     // ── Selection helpers ──
 
@@ -304,7 +490,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
     // ── Filter UI helpers ──
 
     const addFilter = () => {
-        setFilters([...filters, { field: 'status', operator: '=', value: '' }]);
+        setFilters([...filters, { field: 'company_name', operator: '~', value: '' }]);
     };
 
     const removeFilter = (index: number) => {
@@ -326,15 +512,16 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
     };
 
     if (!open) return null;
+    if (typeof document === 'undefined') return null;
 
     const currentResults = tab === 'search' ? searchResults : filterResults;
     const totalPhones = currentResults.reduce((sum, r) => sum + r.phones.length, 0);
     const allResultPhonesSelected = totalPhones > 0 && currentResults.every(r => r.phones.every(p => selected.has(p.id)));
 
-    return (
+    return createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center">
             {/* Backdrop */}
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
 
             {/* Modal */}
             <div className="relative bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
@@ -426,11 +613,19 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                                             <select
                                                 value={filter.field}
                                                 onChange={e => updateFilter(index, { field: e.target.value })}
-                                                className="px-2.5 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                                                className="px-2.5 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] max-w-[180px]"
                                             >
-                                                {FILTER_FIELDS.map(f => (
-                                                    <option key={f.key} value={f.key}>{f.label}</option>
-                                                ))}
+                                                {['Company', 'Calls', 'Notes'].map(group => {
+                                                    const items = FILTER_FIELDS.filter(f => (f.group ?? 'Other') === group);
+                                                    if (items.length === 0) return null;
+                                                    return (
+                                                        <optgroup key={group} label={group}>
+                                                            {items.map(f => (
+                                                                <option key={f.key} value={f.key}>{f.label}</option>
+                                                            ))}
+                                                        </optgroup>
+                                                    );
+                                                })}
                                             </select>
                                             <select
                                                 value={filter.operator}
@@ -441,7 +636,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                                                     <option key={op.key} value={op.key}>{op.label}</option>
                                                 ))}
                                             </select>
-                                            {fieldType !== 'boolean' && (
+                                            {fieldType !== 'boolean' && fieldType !== 'rel_boolean' && (
                                                 <>
                                                     {options ? (
                                                         <select
@@ -497,6 +692,8 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                                             <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Counting...</span>
                                         ) : filterMatchCount !== null ? (
                                             <><span className="font-semibold text-[var(--foreground)]">{filterMatchCount}</span> companies match</>
+                                        ) : !allFiltersReady ? (
+                                            'Fill in all filter values to search'
                                         ) : (
                                             'Add filters to find companies'
                                         )}
@@ -708,6 +905,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                     </div>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }

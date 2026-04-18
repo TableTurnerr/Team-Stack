@@ -20,12 +20,14 @@ import {
   Zap,
   UserCog,
   ChevronDown,
+  ChevronUp,
+  Undo2,
   type LucideIcon,
 } from 'lucide-react';
 import Image from 'next/image';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type FollowUp, type User as UserType } from '@/lib/types';
-import { cn, formatPhoneNumber } from '@/lib/utils';
+import { cn, formatPhoneNumber, formatCompanyName } from '@/lib/utils';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
@@ -49,6 +51,33 @@ const STATUS_TABS: { id: StatusFilter; label: string; icon: LucideIcon }[] = [
   { id: 'completed', label: 'Completed', icon: CheckCheck },
   { id: 'dismissed', label: 'Dismissed', icon: Ban },
 ];
+
+type SortField = 'company' | 'scheduled_time' | 'assigned_to' | 'phone' | 'notes';
+type SortDir = 'asc' | 'desc';
+
+function SortableLabel({
+  label,
+  field,
+  currentSort,
+  onSort,
+}: {
+  label: string;
+  field: SortField;
+  currentSort: { field: SortField; dir: SortDir };
+  onSort: (field: SortField) => void;
+}) {
+  const isActive = currentSort.field === field;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(field)}
+      className="inline-flex items-center gap-1 cursor-pointer hover:text-[var(--foreground)] transition-colors"
+    >
+      {label}
+      {isActive && (currentSort.dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+    </button>
+  );
+}
 
 function statusBadge(status: string, isOverdue: boolean) {
   if (status === 'completed') {
@@ -80,7 +109,7 @@ function statusBadge(status: string, isOverdue: boolean) {
 }
 
 export default function FollowUpsPage() {
-  const { completeFollowUp, dismissFollowUp } = useFollowUps();
+  const { completeFollowUp, dismissFollowUp, undismissFollowUp } = useFollowUps();
   const [allFollowUps, setAllFollowUps] = useState<FollowUp[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -93,6 +122,17 @@ export default function FollowUpsPage() {
   const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const assigneeDropdownRef = useRef<HTMLDivElement>(null);
+  const [sort, setSort] = useState<{ field: SortField; dir: SortDir }>({
+    field: 'scheduled_time',
+    dir: 'asc',
+  });
+
+  const handleSort = (field: SortField) => {
+    setSort(prev => ({
+      field,
+      dir: prev.field === field && prev.dir === 'asc' ? 'desc' : 'asc',
+    }));
+  };
 
   const { getWidth, resize } = useResizableColumns('follow-ups', [
     { key: 'company', initialWidth: 200 },
@@ -174,6 +214,18 @@ export default function FollowUpsPage() {
     }
   };
 
+  const handleUndismiss = async (fu: FollowUp) => {
+    setActioningId(fu.id);
+    try {
+      await undismissFollowUp(fu.id);
+      setAllFollowUps(prev =>
+        prev.map(f => f.id === fu.id ? { ...f, status: 'pending' } : f)
+      );
+    } finally {
+      setActioningId(null);
+    }
+  };
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -196,13 +248,37 @@ export default function FollowUpsPage() {
   const baseList: Record<StatusFilter, FollowUp[]> = { overdue, upcoming, completed, dismissed };
 
   // Search filter
-  const filtered = baseList[activeTab].filter(fu => {
+  const searched = baseList[activeTab].filter(fu => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
-    const company = fu.expand?.company?.company_name?.toLowerCase() ?? '';
+    const company = formatCompanyName(fu.expand?.company?.company_name).toLowerCase();
     const notes   = fu.notes?.toLowerCase() ?? '';
     const assignee = (fu.expand?.assigned_to?.name ?? fu.expand?.assigned_to?.email ?? '').toLowerCase();
     return company.includes(q) || notes.includes(q) || assignee.includes(q);
+  });
+
+  // Sort
+  const sortValue = (fu: FollowUp): string | number => {
+    switch (sort.field) {
+      case 'company':
+        return formatCompanyName(fu.expand?.company?.company_name).toLowerCase();
+      case 'scheduled_time':
+        return new Date(fu.scheduled_time).getTime();
+      case 'assigned_to':
+        return (fu.expand?.assigned_to?.name ?? fu.expand?.assigned_to?.email ?? '').toLowerCase();
+      case 'phone':
+        return (fu.expand?.phone_number_record?.phone_number ?? '').toLowerCase();
+      case 'notes':
+        return (fu.notes ?? '').toLowerCase();
+    }
+  };
+
+  const filtered = [...searched].sort((a, b) => {
+    const av = sortValue(a);
+    const bv = sortValue(b);
+    if (av < bv) return sort.dir === 'asc' ? -1 : 1;
+    if (av > bv) return sort.dir === 'asc' ? 1 : -1;
+    return 0;
   });
 
   const allSelected = filtered.length > 0 && filtered.every(fu => selectedIds.has(fu.id));
@@ -223,7 +299,7 @@ export default function FollowUpsPage() {
 
     const categoryLabel = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
     const lines = targets.map((fu, i) => {
-      const companyName = fu.expand?.company?.company_name ?? 'Unknown Company';
+      const companyName = formatCompanyName(fu.expand?.company?.company_name) || 'Unknown Company';
       const phone = fu.expand?.phone_number_record?.phone_number ?? 'No phone';
       const notes = fu.notes?.trim() || 'No notes';
       return `${i + 1}. ${companyName}\n   Phone: ${phone}\n   Notes: ${notes}`;
@@ -485,13 +561,23 @@ export default function FollowUpsPage() {
             <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
               <tr>
                 <HeaderIndexCell allSelected={allSelected} someSelected={someSelected} onToggleAll={toggleSelectAll} />
-                <ResizableTh width={getWidth('company')} minWidth={120} onResize={(w) => resize('company', w)}>Company</ResizableTh>
-                <ResizableTh width={getWidth('scheduled')} minWidth={100} onResize={(w) => resize('scheduled', w)}>Scheduled</ResizableTh>
-                <ResizableTh width={getWidth('assigned_to')} minWidth={80} onResize={(w) => resize('assigned_to', w)} className="hidden md:table-cell">Assigned To</ResizableTh>
-                <ResizableTh width={getWidth('phone')} minWidth={90} onResize={(w) => resize('phone', w)} className="hidden lg:table-cell">Phone</ResizableTh>
-                <ResizableTh width={getWidth('notes')} minWidth={80} onResize={(w) => resize('notes', w)} className="hidden lg:table-cell">Notes</ResizableTh>
+                <ResizableTh width={getWidth('company')} minWidth={120} onResize={(w) => resize('company', w)}>
+                  <SortableLabel label="Company" field="company" currentSort={sort} onSort={handleSort} />
+                </ResizableTh>
+                <ResizableTh width={getWidth('scheduled')} minWidth={100} onResize={(w) => resize('scheduled', w)}>
+                  <SortableLabel label="Scheduled" field="scheduled_time" currentSort={sort} onSort={handleSort} />
+                </ResizableTh>
+                <ResizableTh width={getWidth('assigned_to')} minWidth={80} onResize={(w) => resize('assigned_to', w)} className="hidden md:table-cell">
+                  <SortableLabel label="Assigned To" field="assigned_to" currentSort={sort} onSort={handleSort} />
+                </ResizableTh>
+                <ResizableTh width={getWidth('phone')} minWidth={90} onResize={(w) => resize('phone', w)} className="hidden lg:table-cell">
+                  <SortableLabel label="Phone" field="phone" currentSort={sort} onSort={handleSort} />
+                </ResizableTh>
+                <ResizableTh width={getWidth('notes')} minWidth={80} onResize={(w) => resize('notes', w)} className="hidden lg:table-cell">
+                  <SortableLabel label="Notes" field="notes" currentSort={sort} onSort={handleSort} />
+                </ResizableTh>
                 <ResizableTh width={getWidth('status')} minWidth={80} onResize={(w) => resize('status', w)}>Status</ResizableTh>
-                {(activeTab === 'overdue' || activeTab === 'upcoming') && (
+                {(activeTab === 'overdue' || activeTab === 'upcoming' || activeTab === 'dismissed') && (
                   <ResizableTh width={getWidth('actions')} minWidth={80} onResize={(w) => resize('actions', w)} resizable={false} align="right">Actions</ResizableTh>
                 )}
               </tr>
@@ -534,7 +620,7 @@ export default function FollowUpsPage() {
                             </div>
                             <div className="min-w-0">
                               <p className="text-sm font-semibold group-hover:text-[var(--primary)] transition-colors truncate">
-                                {company.company_name}
+                                {formatCompanyName(company.company_name)}
                               </p>
                               {Array.isArray(company.status) && company.status.length > 0 && (
                                 <p className="text-[10px] text-[var(--muted)] truncate">{company.status.join(', ')}</p>
@@ -632,6 +718,21 @@ export default function FollowUpsPage() {
                             title="Dismiss"
                           >
                             <XCircle size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                    {activeTab === 'dismissed' && (
+                      <td className="px-4 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleUndismiss(fu)}
+                            disabled={isActioning}
+                            className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-[var(--card-hover)] text-[var(--muted)] hover:bg-blue-500/10 hover:text-blue-400 transition-all disabled:opacity-50 text-xs font-medium"
+                            title="Restore this follow-up to pending"
+                          >
+                            {isActioning ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />}
+                            Undismiss
                           </button>
                         </div>
                       </td>

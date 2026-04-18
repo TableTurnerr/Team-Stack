@@ -22,6 +22,7 @@ interface FollowUpContextType {
   createFollowUp: (data: CreateFollowUpData) => Promise<FollowUp>;
   completeFollowUp: (id: string) => Promise<void>;
   dismissFollowUp: (id: string) => Promise<void>;
+  undismissFollowUp: (id: string) => Promise<void>;
   refreshFollowUps: () => Promise<void>;
   isLoading: boolean;
 }
@@ -175,6 +176,24 @@ export function FollowUpProvider({ children }: { children: ReactNode }) {
     await fetchPendingFollowUps();
   }, [fetchPendingFollowUps]);
 
+  const undismissFollowUp = useCallback(async (id: string) => {
+    await pb.collection(COLLECTIONS.FOLLOW_UPS).update(id, {
+      status: 'pending',
+    });
+    // Re-schedule push (no-op if scheduled_time is past / qstash unconfigured).
+    void callFollowUpApi('/api/follow-ups/schedule-push', id);
+    // Re-surface related alerts.
+    try {
+      const alerts = await pb.collection(COLLECTIONS.ALERTS).getFullList({
+        filter: `entity_type = "follow_up" && entity_id = "${id}"`,
+      });
+      for (const alert of alerts) {
+        await pb.collection(COLLECTIONS.ALERTS).update(alert.id, { is_dismissed: false });
+      }
+    } catch { /* ignore */ }
+    await fetchPendingFollowUps();
+  }, [fetchPendingFollowUps]);
+
   return (
     <FollowUpContext.Provider
       value={{
@@ -184,6 +203,7 @@ export function FollowUpProvider({ children }: { children: ReactNode }) {
         createFollowUp,
         completeFollowUp,
         dismissFollowUp,
+        undismissFollowUp,
         refreshFollowUps,
         isLoading,
       }}

@@ -124,7 +124,7 @@ export function CashFlowChart({ transactions, primaryCurrency, psRewards, accoun
     const lines = activeAccounts.map((acc, idx) => ({
       id: acc.id,
       name: acc.name,
-      color: (acc.color && /^#[0-9a-f]{3,6}$/i.test(acc.color)) ? acc.color : PALETTE[idx % PALETTE.length],
+      color: PALETTE[idx % PALETTE.length],
     }));
     lines.push({ id: PS_KEY, name: 'PartnerStack', color: PALETTE[lines.length % PALETTE.length] });
 

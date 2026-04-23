@@ -8,6 +8,7 @@ import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { usePhone } from '@/contexts/phone-context';
+import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
 import { useSession } from '@/contexts/session-context';
 import { useAuth } from '@/contexts/auth-context';
 import { CurrentCallForm, type CallFormData } from '@/app/(dashboard)/session/current-call-form';
@@ -16,13 +17,20 @@ import { useToast } from '@/components/ui/toast';
 
 export function IncomingCallHandler() {
     const { callStatus, callDirection, incomingCallerNumber } = usePhone();
-    const { session, setSession, isStandaloneMode } = useSession();
+    const ownership = useCallOwnershipOptional();
+    const { session, setSession } = useSession();
     const { user } = useAuth();
     const { completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
 
-    // Only show incoming call notifications to the user who is in an active session (or standalone mode)
-    const isActiveForCalls = !!(session || isStandaloneMode);
+    // Every incoming call answered on THIS device is recorded, regardless
+    // of whether the user is in an active cold-calling session, in
+    // standalone recording mode, or just logged into the dashboard. The
+    // ownership gate is the only filter — it prevents teammates on the
+    // shared Zoom account from each seeing "incoming call" banners for
+    // each other's calls.
+    const isActiveForCalls =
+        ownership ? ownership.iOwnCurrentCall || ownership.iAmRinging : true;
 
     // ── UI state ──
     const [showRingingBanner, setShowRingingBanner] = useState(false);
@@ -221,7 +229,7 @@ export function IncomingCallHandler() {
             const hasCallbacks = (data.callbackEvents?.length ?? 0) > 0;
 
             // Create call log
-            await pb.collection(COLLECTIONS.CALL_LOGS).create<CallLog>({
+            const createdLog = await pb.collection(COLLECTIONS.CALL_LOGS).create<CallLog>({
                 company: data.companyId,
                 phone_number_record: phoneNumberRecordId || undefined,
                 caller: user.id,
@@ -240,7 +248,21 @@ export function IncomingCallHandler() {
                 callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                 is_callback: hasCallbacks ? true : undefined,
                 direction: 'inbound',
+                zoom_call_id: ownership?.zoomCallId ?? undefined,
             });
+
+            // Link this log to a call_claim so ownership is recorded for
+            // the shared-Zoom-account reporting layer. Best-effort.
+            try {
+                const { linkCallLogToClaim } = await import('@/lib/call-claim');
+                void linkCallLogToClaim(createdLog.id, {
+                    zoomCallId: ownership?.zoomCallId ?? null,
+                    phone: capturedCallerNumberRef.current || incomingCallerNumber,
+                    direction: 'inbound',
+                    userId: user.id,
+                    deviceId: ownership?.deviceId ?? null,
+                });
+            } catch (e) { console.warn('[IncomingCall] linkCallLogToClaim failed:', e); }
 
             // Update session performance metrics
             // Uses PocketBase atomic increment operators to prevent race conditions

@@ -2948,6 +2948,33 @@
                 "type": "bool"
             },
             {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_zoom_call_id",
+                "max": 128,
+                "min": 0,
+                "name": "zoom_call_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "pbc_call_claims",
+                "hidden": false,
+                "id": "relation_claim",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "claim",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
                 "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
@@ -2968,9 +2995,11 @@
                 "type": "autodate"
             }
         ],
-        "indexes": [],
+        "indexes": [
+            "CREATE INDEX `idx_call_logs_zoom_call_id` ON `call_logs` (`zoom_call_id`)"
+        ],
         "created": "2026-01-24 16:58:52.477Z",
-        "updated": "2026-03-17 10:23:44.822Z",
+        "updated": "2026-04-23 10:23:44.822Z",
         "system": false
     },
     {
@@ -3825,6 +3854,20 @@
                 "type": "bool"
             },
             {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_session_device_id",
+                "max": 64,
+                "min": 0,
+                "name": "device_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
                 "hidden": false,
                 "id": "autodate2990389176",
                 "name": "created",
@@ -3847,7 +3890,7 @@
         ],
         "indexes": [],
         "created": "2026-02-14 12:58:03.568Z",
-        "updated": "2026-03-17 10:23:44.843Z",
+        "updated": "2026-04-23 10:23:44.843Z",
         "system": false
     },
     {
@@ -6881,5 +6924,500 @@
         "system": false,
         "created": "2026-04-18 00:00:00.000Z",
         "updated": "2026-04-18 00:00:00.000Z"
+    },
+    {
+        "id": "pbc_call_claims",
+        "listRule": "@request.auth.id != ''",
+        "viewRule": "@request.auth.id != ''",
+        "createRule": "@request.auth.id != ''",
+        "updateRule": "@request.auth.id != ''",
+        "deleteRule": "@request.auth.role = 'admin'",
+        "name": "call_claims",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_claim_zoom_call_id",
+                "max": 128,
+                "min": 0,
+                "name": "zoom_call_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_claim_phone_e164",
+                "max": 32,
+                "min": 0,
+                "name": "phone_e164",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "select_claim_direction",
+                "maxSelect": 1,
+                "name": "direction",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "outbound",
+                    "inbound"
+                ]
+            },
+            {
+                "hidden": false,
+                "id": "select_claim_state",
+                "maxSelect": 1,
+                "name": "state",
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "pending",
+                    "active",
+                    "ended",
+                    "abandoned"
+                ]
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "_pb_users_auth_",
+                "hidden": false,
+                "id": "relation_claim_owner_user",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "owner_user",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_claim_owner_device_id",
+                "max": 64,
+                "min": 0,
+                "name": "owner_device_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "pbc_cc_sessions",
+                "hidden": false,
+                "id": "relation_claim_owner_session",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "owner_session",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "hidden": false,
+                "id": "date_claim_pending_since",
+                "max": "",
+                "min": "",
+                "name": "pending_since",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date_claim_claimed_at",
+                "max": "",
+                "min": "",
+                "name": "claimed_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date_claim_ended_at",
+                "max": "",
+                "min": "",
+                "name": "ended_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "pbc_2222222222",
+                "hidden": false,
+                "id": "relation_claim_call_log",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "call_log",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "hidden": false,
+                "id": "json_claim_ui_evidence",
+                "maxSize": 50000,
+                "name": "ui_evidence",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "json_claim_audio_evidence",
+                "maxSize": 20000,
+                "name": "audio_evidence",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_claim_intent_id",
+                "max": 64,
+                "min": 0,
+                "name": "intent_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE INDEX `idx_claims_zoom_call_id` ON `call_claims` (`zoom_call_id`)",
+            "CREATE INDEX `idx_claims_phone_state` ON `call_claims` (`phone_e164`, `state`)",
+            "CREATE INDEX `idx_claims_owner_user_state` ON `call_claims` (`owner_user`, `state`)"
+        ],
+        "created": "2026-04-23 00:00:00.000Z",
+        "updated": "2026-04-23 00:00:00.000Z",
+        "system": false
+    },
+    {
+        "id": "pbc_agent_devices",
+        "listRule": "@request.auth.id != ''",
+        "viewRule": "@request.auth.id != ''",
+        "createRule": "@request.auth.id != ''",
+        "updateRule": "@request.auth.id != ''",
+        "deleteRule": "@request.auth.role = 'admin'",
+        "name": "agent_devices",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_device_id",
+                "max": 64,
+                "min": 1,
+                "name": "device_id",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "_pb_users_auth_",
+                "hidden": false,
+                "id": "relation_device_user",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "user",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_device_hostname",
+                "max": 128,
+                "min": 0,
+                "name": "hostname",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_device_agent_version",
+                "max": 32,
+                "min": 0,
+                "name": "agent_version",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "date_device_last_seen",
+                "max": "",
+                "min": "",
+                "name": "last_seen",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE UNIQUE INDEX `idx_agent_devices_device_id` ON `agent_devices` (`device_id`)",
+            "CREATE INDEX `idx_agent_devices_user` ON `agent_devices` (`user`)"
+        ],
+        "created": "2026-04-23 00:00:00.000Z",
+        "updated": "2026-04-23 00:00:00.000Z",
+        "system": false
+    },
+    {
+        "id": "pbc_zoom_call_events",
+        "listRule": "@request.auth.id != ''",
+        "viewRule": "@request.auth.id != ''",
+        "createRule": "",
+        "updateRule": null,
+        "deleteRule": "@request.auth.role = 'admin'",
+        "name": "zoom_call_events",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_zcev_event",
+                "max": 128,
+                "min": 1,
+                "name": "event",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_zcev_zoom_call_id",
+                "max": 128,
+                "min": 0,
+                "name": "zoom_call_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_zcev_caller_number",
+                "max": 64,
+                "min": 0,
+                "name": "caller_number",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_zcev_callee_number",
+                "max": 64,
+                "min": 0,
+                "name": "callee_number",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "select_zcev_direction",
+                "maxSelect": 1,
+                "name": "direction",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "select",
+                "values": [
+                    "outbound",
+                    "inbound"
+                ]
+            },
+            {
+                "hidden": false,
+                "id": "json_zcev_payload",
+                "maxSize": 200000,
+                "name": "payload",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "json"
+            },
+            {
+                "hidden": false,
+                "id": "date_zcev_received_at",
+                "max": "",
+                "min": "",
+                "name": "received_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "autodate2990389176",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate3332085495",
+                "name": "updated",
+                "onCreate": true,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE INDEX `idx_zcev_zoom_call_id` ON `zoom_call_events` (`zoom_call_id`)",
+            "CREATE INDEX `idx_zcev_received_at` ON `zoom_call_events` (`received_at`)"
+        ],
+        "created": "2026-04-23 00:00:00.000Z",
+        "updated": "2026-04-23 00:00:00.000Z",
+        "system": false
     }
 ]

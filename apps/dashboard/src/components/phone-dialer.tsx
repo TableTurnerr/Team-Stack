@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Phone, PhoneCall, GripHorizontal, Minimize2, Maximize2, ChevronLeft, Power, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePhone } from '@/contexts/phone-context';
+import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
 import { useSession } from '@/contexts/session-context';
 
 const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
@@ -37,11 +38,20 @@ interface PhoneDialerProps {
     disabledReason?: string;
     /** If true, the dialer is hidden but stays mounted for persistence */
     hidden?: boolean;
+    /**
+     * In docked mode the dialer normally collapses to a thin header bar and
+     * expands on hover or during an active call. Set this to keep the dialer
+     * always expanded in docked mode — used on dedicated surfaces like the
+     * /session page where the custom dialer ↔ Zoom embed swap should be
+     * visible at all times, not hidden behind a hover.
+     */
+    alwaysExpanded?: boolean;
 }
 
-export function PhoneDialer({ docked = false, disabled = false, disabledReason, hidden = false }: PhoneDialerProps = {}) {
+export function PhoneDialer({ docked = false, disabled = false, disabledReason, hidden = false, alwaysExpanded = false }: PhoneDialerProps = {}) {
     const router = useRouter();
     const { callStatus, dialNumber, isDialing, customDialerNumber, activeCallNumber, agentRequired } = usePhone();
+    const ownership = useCallOwnershipOptional();
     const { session, setSession } = useSession();
     const { isConnected: agentConnected, callState: agentCallState, networkQuality, launchAgent } = useLocalAgent();
 
@@ -66,7 +76,13 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
     const resizeStartPosY = useRef<number>(0);
     const panelRef = useRef<HTMLDivElement>(null);
 
-    const isCallActive = callStatus === 'ringing' || callStatus === 'connected';
+    // Only treat the call as "active FOR THIS DASHBOARD" when this device
+    // actually owns it. On the shared Zoom account the iframe receives
+    // updates for every teammate's calls; without this gate we'd flash
+    // the Smart Embed UI on everyone's screen whenever any teammate dials.
+    const isCallActive =
+        (callStatus === 'ringing' || callStatus === 'connected') &&
+        (ownership ? ownership.iOwnCurrentCall || ownership.iAmRinging : true);
     const headerDialNumber = customDialerNumber.trim();
     const headerDialDigits = headerDialNumber.replace(/\D/g, '');
     const canHeaderDial = !disabled && !isCallActive && headerDialDigits.length >= 3 && agentConnected;
@@ -226,7 +242,11 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
     const hasSession = session && session.status === 'active';
     const hasUnsubmittedRecording = false;
     const unsubmittedDuration = 0;
-    const isCollapsed = disabled ? true : (docked ? (!isHovering && !isCallActive && !isInputFocused && !hasUnsubmittedRecording) : isMinimized);
+    const isCollapsed = disabled
+        ? true
+        : docked
+            ? (alwaysExpanded ? false : (!isHovering && !isCallActive && !isInputFocused && !hasUnsubmittedRecording))
+            : isMinimized;
     const currentHeight = docked
         ? (isCollapsed ? '52px' : '550px')
         : (isCollapsed ? '48px' : (showKeypad ? `${height}px` : (hasSession ? 'auto' : `${height}px`)));
@@ -542,13 +562,22 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
                                 agentConnected ? 'bg-green-500' : 'bg-red-500'
                             )} />
                             {agentConnected ? (
-                                <span className="text-[var(--muted)] font-medium">
+                                <span className="text-[var(--muted)] font-medium flex items-center gap-1.5 flex-wrap">
                                     Agent
                                     {agentCallState?.state === 'connected' && (
                                         <span className="text-green-500 ml-1">Call active</span>
                                     )}
                                     {networkQuality && !networkQuality.isStable && (
                                         <span className="text-yellow-500 ml-1">Network unstable</span>
+                                    )}
+                                    {ownership?.teammateBusy && (
+                                        <span
+                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 border border-amber-500/30"
+                                            title="Shared Zoom account presence reports 'On a call' but no call UI is visible on this machine — another teammate is on the shared line."
+                                        >
+                                            <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                                            Shared line busy — teammate on call
+                                        </span>
                                     )}
                                 </span>
                             ) : (

@@ -4,6 +4,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- UseWPF is required so the UIAutomation WPF client assemblies
+         (UIAutomationClient / UIAutomationTypes) resolve. The agent does
+         not use WPF itself; we only consume System.Windows.Automation. -->
+    <UseWPF>true</UseWPF>
     <RootNamespace>LocalCrmAgent</RootNamespace>
     <AssemblyName>LocalCrmAgent</AssemblyName>
     <Version>2.0.1</Version>
@@ -31,6 +35,26 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="NAudio.Lame" Version="2.1.0" />
     <PackageReference Include="Fleck" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- UIAutomation for Zoom Phone UI visibility (ZoomUiWatcher) -->
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- UseWPF=true changes the default implicit-usings set; re-add the
+         ones that pre-existing services rely on so we don't have to touch
+         every non-UIA file. -->
+    <Using Include="System.Net.Http" />
+    <Using Include="System.IO" />
+    <Using Include="System.Threading" />
+    <Using Include="System.Threading.Tasks" />
+    <Using Include="System.Collections.Generic" />
+    <Using Include="System.Linq" />
+    <Using Include="System" />
   </ItemGroup>
 
 </Project>

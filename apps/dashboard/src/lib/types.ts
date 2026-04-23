@@ -256,6 +256,12 @@ export interface ColdCallingSession extends RecordModel {
   manual_adjustments?: ManualAdjustment[] | null;
   /** Whether the session owner is currently on an active Zoom call */
   on_call?: boolean;
+  /**
+   * Stable per-machine id (from local agent's DeviceIdentity). Pins a
+   * session to a physical device so per-device session metrics can be
+   * joined against per-device call_claims on the shared Zoom account.
+   */
+  device_id?: string;
   expand?: {
     user?: User;
   };

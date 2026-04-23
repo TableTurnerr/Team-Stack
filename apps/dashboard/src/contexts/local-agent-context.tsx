@@ -11,6 +11,23 @@ export interface AgentCallState {
     direction: string | null;
     duration: number;
     confidence: 'low' | 'medium' | 'high';
+    // Ownership envelope — lets us distinguish "this teammate is on a call"
+    // from "some teammate on the shared account is on a call." When
+    // uiSeenHere OR audioActiveHere is true, THIS device is the one with
+    // the active call panel / ring toast.
+    deviceId: string | null;
+    intentId: string | null;
+    zoomCallId: string | null;
+    uiSeenHere: boolean;
+    audioActiveHere: boolean;
+    /**
+     * Negative-confirmation signal from the agent. When true, the shared
+     * Zoom account shows "On a call" presence but NO local active/ring UI
+     * is visible — i.e. another teammate on another device is on a call.
+     * Use to (a) reinforce that this device does NOT own the call, and
+     * (b) indicate that the shared line is currently busy with a teammate.
+     */
+    teammateOnCall: boolean;
 }
 
 export interface AgentNetworkQuality {
@@ -144,6 +161,12 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     direction: msg.direction ?? null,
                                     duration: msg.duration ?? 0,
                                     confidence: msg.confidence ?? 'low',
+                                    deviceId: msg.deviceId ?? null,
+                                    intentId: msg.intentId ?? null,
+                                    zoomCallId: msg.zoomCallId ?? null,
+                                    uiSeenHere: Boolean(msg.uiSeenHere),
+                                    audioActiveHere: Boolean(msg.audioActiveHere),
+                                    teammateOnCall: Boolean(msg.teammateOnCall),
                                 });
                                 break;
                             case 'networkQuality':

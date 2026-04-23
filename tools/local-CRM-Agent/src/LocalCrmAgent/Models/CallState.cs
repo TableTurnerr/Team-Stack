@@ -25,4 +25,20 @@ public class CallStateInfo
     public DateTime? ConnectTime { get; set; }
     public DateTime? EndTime { get; set; }
     public int DurationSeconds { get; set; }
+
+    // Ownership envelope — added so the dashboard can tell whether the call
+    // state it's receiving belongs to THIS teammate's device or not.
+    public string? DeviceId { get; set; }
+    public string? IntentId { get; set; }     // dashboard dial-click correlator
+    public string? ZoomCallId { get; set; }   // from webhook once correlated
+    public bool UiSeenHere { get; set; }      // true when ZoomUiWatcher saw active/ring on this box
+    public bool AudioActiveHere { get; set; } // true when WASAPI reports a live Zoom audio session
+
+    // Negative-confirmation signal: the shared Zoom account shows "On a call"
+    // presence but THIS device has no local active/ring UI. That can only
+    // mean another teammate on another device is the one actually on the
+    // call. Useful for:
+    //   (a) reinforcing "I do not own this call" on the dashboard,
+    //   (b) showing a "line busy (teammate)" hint so we can act as fallback.
+    public bool TeammateOnCall { get; set; }
 }

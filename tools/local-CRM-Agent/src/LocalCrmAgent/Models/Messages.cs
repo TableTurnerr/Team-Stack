@@ -29,6 +29,27 @@ public class CallStateMessage : AgentMessage
     [JsonPropertyName("confidence")]
     public string Confidence { get; set; } = "low";
 
+    // Ownership envelope — lets the dashboard decide whether THIS teammate
+    // owns the call or whether it's happening on another teammate's machine
+    // on the shared Zoom account.
+    [JsonPropertyName("deviceId")]
+    public string? DeviceId { get; set; }
+
+    [JsonPropertyName("intentId")]
+    public string? IntentId { get; set; }
+
+    [JsonPropertyName("zoomCallId")]
+    public string? ZoomCallId { get; set; }
+
+    [JsonPropertyName("uiSeenHere")]
+    public bool UiSeenHere { get; set; }
+
+    [JsonPropertyName("audioActiveHere")]
+    public bool AudioActiveHere { get; set; }
+
+    [JsonPropertyName("teammateOnCall")]
+    public bool TeammateOnCall { get; set; }
+
     public CallStateMessage() => Type = "callState";
 
     public static CallStateMessage From(CallStateInfo info) => new()
@@ -38,6 +59,12 @@ public class CallStateMessage : AgentMessage
         Direction = info.Direction,
         Duration = info.DurationSeconds,
         Confidence = info.Confidence.ToString().ToLowerInvariant(),
+        DeviceId = info.DeviceId,
+        IntentId = info.IntentId,
+        ZoomCallId = info.ZoomCallId,
+        UiSeenHere = info.UiSeenHere,
+        AudioActiveHere = info.AudioActiveHere,
+        TeammateOnCall = info.TeammateOnCall,
     };
 }
 

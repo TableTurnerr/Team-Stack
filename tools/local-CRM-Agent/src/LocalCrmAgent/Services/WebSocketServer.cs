@@ -21,6 +21,7 @@ public class AgentWebSocketServer : IDisposable
     private ZoomWindowSuppressor? _zoomSuppressor;
     private ZoomCallController? _callController;
     private ZoomPhoneApiService? _zoomApi;
+    private DialIntentTracker? _intentTracker;
     private WebSocketServer? _server;
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
@@ -79,6 +80,15 @@ public class AgentWebSocketServer : IDisposable
     public void SetZoomApi(ZoomPhoneApiService api)
     {
         _zoomApi = api;
+    }
+
+    /// <summary>
+    /// Wire the dial-intent tracker so dashboard-issued intents can be
+    /// correlated to the Zoom UI active-call appearance during fusion.
+    /// </summary>
+    public void SetDialIntentTracker(DialIntentTracker tracker)
+    {
+        _intentTracker = tracker;
     }
 
     /// <summary>
@@ -212,6 +222,12 @@ public class AgentWebSocketServer : IDisposable
                     break;
                 case "dial":
                     await HandleDial(doc.RootElement, client);
+                    break;
+                case "dialIntent":
+                    HandleDialIntent(doc.RootElement);
+                    break;
+                case "getDeviceId":
+                    HandleGetDeviceId(client);
                     break;
                 case "endCall":
                     await HandleEndCall(client);
@@ -610,6 +626,34 @@ public class AgentWebSocketServer : IDisposable
         var zoomUserId = root.TryGetProperty("zoomUserId", out var u) ? u.GetString() : null;
         if (accountId != null && clientId != null && clientSecret != null && zoomUserId != null)
             _zoomApi.SetCredentials(accountId, clientId, clientSecret, zoomUserId);
+    }
+
+    // Dashboard records a dial "intent" the instant the user clicks Call.
+    // The agent keeps it briefly so that when the Zoom UI active-call panel
+    // lights up with the same phone number, the fusion can mark this
+    // device/user as the unambiguous outbound owner — even if other
+    // teammates on the shared account see the iframe update.
+    private void HandleDialIntent(JsonElement root)
+    {
+        if (_intentTracker == null) return;
+        var intentId = root.TryGetProperty("intentId", out var i) ? i.GetString() : null;
+        var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() : null;
+        var userId = root.TryGetProperty("userId", out var u) ? u.GetString() : null;
+        var sessionId = root.TryGetProperty("sessionId", out var s) ? s.GetString() : null;
+        if (string.IsNullOrWhiteSpace(intentId) || string.IsNullOrWhiteSpace(phone)) return;
+        _intentTracker.Add(intentId!, phone!, userId ?? "", sessionId);
+    }
+
+    private void HandleGetDeviceId(IWebSocketConnection client)
+    {
+        var payload = new
+        {
+            type = "deviceId",
+            deviceId = DeviceIdentity.DeviceId,
+            hostname = DeviceIdentity.Hostname,
+        };
+        var json = JsonSerializer.Serialize(payload, _jsonOptions);
+        try { client.Send(json); } catch { }
     }
 
 

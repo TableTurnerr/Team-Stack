@@ -7,6 +7,8 @@ import { COLLECTIONS, type CallLog, type PhoneNumber } from '@/lib/types';
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { usePhone } from '@/contexts/phone-context';
+import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
+import { linkCallLogToClaim } from '@/lib/call-claim';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { PhoneDialer } from '@/components/phone-dialer';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
@@ -50,7 +52,8 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps) {
     const { user } = useAuth();
-    const { callStatus, endCall, activeCallNumber, dialNumber, setAutoHangup } = usePhone();
+    const { callStatus, endCall, activeCallNumber, callDirection, dialNumber, setAutoHangup } = usePhone();
+    const ownership = useCallOwnershipOptional();
     const {
         isSessionActive,
         status: recorderStatus,
@@ -314,8 +317,20 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 pitch_completed: data.pitchCompleted,
                 appointment_set: data.appointmentSet,
                 callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
+                zoom_call_id: ownership?.zoomCallId ?? undefined,
                 // session field is omitted (will be null) - this marks it as a standalone call
             }, { expand: 'company,phone_number_record' });
+
+            // Link log → claim so standalone calls are attributed correctly
+            // on the shared Zoom account.
+            void linkCallLogToClaim(callLog.id, {
+                zoomCallId: ownership?.zoomCallId ?? null,
+                phone: activeCallNumber,
+                direction: callDirection === 'inbound' ? 'inbound' : 'outbound',
+                userId: user.id,
+                deviceId: ownership?.deviceId ?? null,
+                intentId: ownership?.intentId ?? null,
+            });
 
             // Update company metadata + compute status from call logs
             try {
@@ -507,7 +522,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                     <div className="space-y-8">
                         <div>
                             <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wider mb-4">Dialer</h3>
-                            <PhoneDialer docked disabled={hasUnsavedCall} />
+                            <PhoneDialer docked alwaysExpanded disabled={hasUnsavedCall} />
                         </div>
 
                         <SessionFollowUps

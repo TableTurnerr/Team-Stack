@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { useAuth } from './auth-context';
@@ -14,16 +14,20 @@ interface SessionContextType {
     refreshSession: () => Promise<void>;
     isStandaloneMode: boolean;
     setStandaloneMode: (enabled: boolean) => void;
-    /** True when another user (not the current user) has an active session */
-    isBlockedByOtherSession: boolean;
-    /** Name of the user who owns the currently active session (if blocked) */
-    activeSessionUserName: string | null;
-    /** The other user's active session object (for displaying elapsed time etc.) */
-    otherActiveSession: ColdCallingSession | null;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
+/**
+ * Session ownership model.
+ *
+ * Each teammate runs their own session on their own device. On the shared
+ * Zoom account, cross-device call attribution is handled by the local
+ * agent's per-device UI/audio signals (see call-ownership-context), not by
+ * a global lock on cold_calling_sessions. This context therefore tracks
+ * ONLY the current user's session; concurrent teammate sessions are
+ * surfaced via TeamPresenceContext for display, never as a blocker.
+ */
 export function SessionProvider({ children }: { children: React.ReactNode }) {
     const { user, isAuthenticated } = useAuth();
     const { callStatus } = usePhone();
@@ -31,12 +35,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
     const [isStandaloneMode, setStandaloneMode] = useState(false);
 
-    // ── Global session lock state ──
-    const [otherActiveSession, setOtherActiveSession] = useState<ColdCallingSession | null>(null);
-    const [activeSessionUserName, setActiveSessionUserName] = useState<string | null>(null);
     const unsubscribeRef = useRef<(() => void) | null>(null);
-
-    const isBlockedByOtherSession = !!(otherActiveSession && user && otherActiveSession.user !== user.id);
 
     // ── Fetch the current user's session ──
     const fetchSession = useCallback(async () => {
@@ -65,42 +64,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
     }, [user, isAuthenticated]);
 
-    // ── Fetch ANY active session (global lock check) ──
-    const fetchGlobalActiveSession = useCallback(async () => {
-        if (!isAuthenticated || !user) {
-            setOtherActiveSession(null);
-            setActiveSessionUserName(null);
-            return;
-        }
-
-        try {
-            const result = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getList<ColdCallingSession>(1, 1, {
-                filter: `user != "${user.id}" && status = "active"`,
-                sort: '-created',
-                expand: 'user',
-            });
-            if (result.items.length > 0) {
-                const otherSession = result.items[0];
-                setOtherActiveSession(otherSession);
-                // Extract the name from expanded user relation
-                const expandedUser = otherSession.expand?.user;
-                setActiveSessionUserName(expandedUser?.name || 'Another user');
-            } else {
-                setOtherActiveSession(null);
-                setActiveSessionUserName(null);
-            }
-        } catch (err: any) {
-            if (err?.status !== 404) {
-                console.error('Failed to fetch global active session:', err);
-            }
-        }
-    }, [user, isAuthenticated]);
-
     // ── Initial fetch ──
     useEffect(() => {
         fetchSession();
-        fetchGlobalActiveSession();
-    }, [fetchSession, fetchGlobalActiveSession]);
+    }, [fetchSession]);
 
     // ── Debounced refresh to avoid 429s from rapid real-time events ──
     const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,9 +75,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = setTimeout(() => {
             fetchSession();
-            fetchGlobalActiveSession();
         }, 500);
-    }, [fetchSession, fetchGlobalActiveSession]);
+    }, [fetchSession]);
 
     // Clean up debounce timer
     useEffect(() => {
@@ -142,9 +108,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             }
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isAuthenticated, user, fetchSession, fetchGlobalActiveSession]);
+    }, [isAuthenticated, user, fetchSession]);
 
     // ── Sync on_call flag to PocketBase when Zoom call status changes ──
+    // callStatus comes from the local agent's per-device fusion state, so
+    // this flag flips ONLY when THIS teammate is the one on the call —
+    // teammate-busy signals from the shared account don't set on_call.
     const prevOnCallRef = useRef<boolean>(false);
     useEffect(() => {
         if (!session || session.status !== 'active') return;
@@ -161,7 +130,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             session, setSession, isLoading,
             refreshSession: fetchSession,
             isStandaloneMode, setStandaloneMode,
-            isBlockedByOtherSession, activeSessionUserName, otherActiveSession,
         }}>
             {children}
         </SessionContext.Provider>

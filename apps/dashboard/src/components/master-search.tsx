@@ -17,42 +17,47 @@ import {
   ArrowRight,
   Headphones,
 } from 'lucide-react';
-import { cn, buildPhoneSearchFilter, stripPhoneFormatting, formatPhoneNumber } from '@/lib/utils';
-import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS } from '@/lib/types';
-import { extractPlainText } from '@/components/block-editor/helpers';
-
-interface SearchResult {
-  id: string;
-  type: 'company' | 'note' | 'recording' | 'team' | 'follow-up' | 'cold-call' | 'page';
-  title: string;
-  subtitle?: string;
-  href: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-}
+import { cn } from '@/lib/utils';
+import { runGlobalSearch, flattenResults, type SearchResult } from '@/lib/global-search';
 
 // Static pages for feature/page search
 const PAGES: SearchResult[] = [
-  { id: 'p-cold-calls', type: 'page', title: 'Cold Calls', subtitle: 'Calling', href: '/cold-calls', icon: Phone },
-  { id: 'p-session', type: 'page', title: 'Call Session', subtitle: 'Active calling', href: '/session', icon: Headphones },
-  { id: 'p-recordings', type: 'page', title: 'Recordings', subtitle: 'Call recordings', href: '/recordings', icon: Mic },
-  { id: 'p-notes', type: 'page', title: 'Notes', subtitle: 'All notes', href: '/notes', icon: StickyNote },
-  { id: 'p-financial', type: 'page', title: 'Financial Overview', subtitle: 'Dashboard', href: '/financial', icon: TrendingUp },
-  { id: 'p-team', type: 'page', title: 'Team Overview', subtitle: 'Dashboard', href: '/team', icon: Users },
-  { id: 'p-follow-ups', type: 'page', title: 'Follow-Ups', subtitle: 'Task management', href: '/follow-ups', icon: CalendarClock },
-  { id: 'p-companies', type: 'page', title: 'Companies', subtitle: 'CRM', href: '/companies', icon: Building2 },
-  { id: 'p-email', type: 'page', title: 'Email Marketing', subtitle: 'Campaigns & templates', href: '/email', icon: Mail },
+  { id: 'p-cold-calls', type: 'page', title: 'Cold Calls', subtitle: 'Calling', href: '/cold-calls' },
+  { id: 'p-session', type: 'page', title: 'Call Session', subtitle: 'Active calling', href: '/session' },
+  { id: 'p-recordings', type: 'page', title: 'Recordings', subtitle: 'Call recordings', href: '/recordings' },
+  { id: 'p-notes', type: 'page', title: 'Notes', subtitle: 'All notes', href: '/notes' },
+  { id: 'p-financial', type: 'page', title: 'Financial Overview', subtitle: 'Dashboard', href: '/financial' },
+  { id: 'p-team', type: 'page', title: 'Team Overview', subtitle: 'Dashboard', href: '/team' },
+  { id: 'p-follow-ups', type: 'page', title: 'Follow-Ups', subtitle: 'Task management', href: '/follow-ups' },
+  { id: 'p-companies', type: 'page', title: 'Companies', subtitle: 'CRM', href: '/companies' },
+  { id: 'p-email', type: 'page', title: 'Email Marketing', subtitle: 'Campaigns & templates', href: '/email' },
 ];
 
-const TYPE_ICONS: Record<SearchResult['type'], React.ComponentType<{ size?: number; className?: string }>> = {
-  company: Building2,
-  note: StickyNote,
-  recording: Mic,
-  team: Users,
-  'follow-up': CalendarClock,
-  'cold-call': Phone,
-  page: ArrowRight,
+const PAGE_ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  'p-cold-calls': Phone,
+  'p-session': Headphones,
+  'p-recordings': Mic,
+  'p-notes': StickyNote,
+  'p-financial': TrendingUp,
+  'p-team': Users,
+  'p-follow-ups': CalendarClock,
+  'p-companies': Building2,
+  'p-email': Mail,
 };
+
+const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  Building2,
+  StickyNote,
+  Mic,
+  Users,
+  CalendarClock,
+  Phone,
+};
+
+function getIcon(result: SearchResult): React.ComponentType<{ size?: number; className?: string }> {
+  if (result.type === 'page') return PAGE_ICONS[result.id] || ArrowRight;
+  return (result.iconName && ICON_MAP[result.iconName]) || ArrowRight;
+}
 
 const TYPE_LABELS: Record<SearchResult['type'], string> = {
   company: 'Company',
@@ -63,6 +68,13 @@ const TYPE_LABELS: Record<SearchResult['type'], string> = {
   'cold-call': 'Cold Call',
   page: 'Page',
 };
+
+// How many results to show per type in the dropdown. Remaining results are
+// reachable via the "View all" button.
+const DROPDOWN_PER_TYPE_LIMIT = 3;
+// Per-type fetch size — needs to be larger than the display limit so we can
+// tell whether the "View all" affordance is needed.
+const DROPDOWN_FETCH_LIMIT = 8;
 
 interface MasterSearchProps {
   open: boolean;
@@ -119,119 +131,9 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
     );
     searchResults.push(...matchingPages);
 
-    // Search PocketBase collections in parallel
     try {
-      const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const filter = `company_name ~ "${escaped}"`;
-      const phoneFilter = buildPhoneSearchFilter('number', q);
-
-      // If the query has digits, also search companies by phone number
-      const digits = stripPhoneFormatting(q);
-      const companyPhoneFilter = digits.length >= 3
-        ? `${filter} || ${buildPhoneSearchFilter('phone_number', q)}`
-        : filter;
-
-      // Build call log filter: search by phone number (via relation), company name, or owner name
-      const callLogPhoneFilter = digits.length >= 3
-        ? buildPhoneSearchFilter('phone_number_record.phone_number', q)
-        : `phone_number_record.phone_number ~ "${escaped}"`;
-      const callLogFilter = `company.company_name ~ "${escaped}" || owner_name_found ~ "${escaped}" || ${callLogPhoneFilter}`;
-
-      const [companies, notes, recordings, users, followUps, callLogs] = await Promise.all([
-        pb.collection(COLLECTIONS.COMPANIES).getList(1, 5, { filter: companyPhoneFilter, fields: 'id,company_name,owner_name', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.NOTES).getList(1, 5, { filter: `note_text ~ "${escaped}"`, fields: 'id,note_text,company', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.RECORDINGS).getList(1, 5, { filter: `filename ~ "${escaped}"`, fields: 'id,filename,company', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.USERS).getList(1, 5, { filter: `name ~ "${escaped}" || email ~ "${escaped}"`, fields: 'id,name,email', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.FOLLOW_UPS).getList(1, 5, { filter: `title ~ "${escaped}" || description ~ "${escaped}"`, fields: 'id,title,due_date', requestKey: null }).catch(() => ({ items: [] })),
-        pb.collection(COLLECTIONS.CALL_LOGS).getList(1, 5, { filter: callLogFilter, expand: 'company,phone_number_record,cold_call', sort: '-call_time', requestKey: null }).catch(() => ({ items: [] })),
-      ]);
-
-      // Also search phone numbers
-      const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList(1, 5, { filter: phoneFilter, fields: 'id,number,company,label', expand: 'company', requestKey: null }).catch(() => ({ items: [] }));
-
-      for (const c of companies.items) {
-        searchResults.push({
-          id: c.id,
-          type: 'company',
-          title: (c as any).company_name,
-          subtitle: (c as any).owner_name || undefined,
-          href: `/companies/${c.id}`,
-          icon: Building2,
-        });
-      }
-
-      for (const p of phones.items) {
-        const companyName = (p as any).expand?.company?.company_name;
-        searchResults.push({
-          id: p.id,
-          type: 'company',
-          title: (p as any).number,
-          subtitle: companyName || (p as any).label || 'Phone number',
-          href: (p as any).company ? `/companies/${(p as any).company}` : '/companies',
-          icon: Phone,
-        });
-      }
-
-      for (const n of notes.items) {
-        const text = extractPlainText((n as any).note_text || '');
-        const preview = text.length > 80 ? text.slice(0, 80) + '...' : text;
-        searchResults.push({
-          id: n.id,
-          type: 'note',
-          title: preview || 'Untitled Note',
-          href: '/notes',
-          icon: StickyNote,
-        });
-      }
-
-      for (const r of recordings.items) {
-        searchResults.push({
-          id: r.id,
-          type: 'recording',
-          title: (r as any).filename || 'Recording',
-          href: '/recordings',
-          icon: Mic,
-        });
-      }
-
-      for (const u of users.items) {
-        searchResults.push({
-          id: u.id,
-          type: 'team',
-          title: (u as any).name || (u as any).email,
-          subtitle: (u as any).email,
-          href: '/team',
-          icon: Users,
-        });
-      }
-
-      for (const f of followUps.items) {
-        searchResults.push({
-          id: f.id,
-          type: 'follow-up',
-          title: (f as any).title || 'Follow-up',
-          subtitle: (f as any).due_date ? `Due: ${new Date((f as any).due_date).toLocaleDateString()}` : undefined,
-          href: '/follow-ups',
-          icon: CalendarClock,
-        });
-      }
-
-      for (const cl of callLogs.items) {
-        const phone = (cl as any).expand?.phone_number_record?.phone_number || '';
-        const companyName = (cl as any).expand?.company?.company_name || '';
-        const owner = (cl as any).owner_name_found || '';
-        const outcome = Array.isArray((cl as any).call_outcome) ? (cl as any).call_outcome.join(', ') : ((cl as any).call_outcome || '');
-        const coldCall = (cl as any).expand?.cold_call;
-        const detailHref = coldCall ? `/cold-calls/${coldCall.id}` : `/cold-calls/${cl.id}?type=log`;
-        searchResults.push({
-          id: cl.id,
-          type: 'cold-call',
-          title: companyName ? `${companyName} — ${formatPhoneNumber(phone)}` : formatPhoneNumber(phone) || 'Call Log',
-          subtitle: [owner, outcome].filter(Boolean).join(' · ') || undefined,
-          href: detailHref,
-          icon: Phone,
-        });
-      }
+      const grouped = await runGlobalSearch(q, DROPDOWN_FETCH_LIMIT);
+      searchResults.push(...flattenResults(grouped));
     } catch (err) {
       console.error('[MasterSearch] search error:', err);
     }
@@ -252,27 +154,52 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
     onClose();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    const items = query ? results : PAGES;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIndex((prev) => Math.min(prev + 1, items.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && items[selectedIndex]) {
-      handleSelect(items[selectedIndex]);
-    }
-  };
+  const viewAll = useCallback(() => {
+    router.push(`/search?q=${encodeURIComponent(query)}`);
+    onClose();
+  }, [query, router, onClose]);
 
-  if (!open) return null;
-
-  // Group results by type
+  // Group, then truncate each group to the display limit. We keep a
+  // parallel count of how many were hidden so we can decide whether to
+  // render the "View all" affordance.
   const grouped = results.reduce<Record<string, SearchResult[]>>((acc, r) => {
     if (!acc[r.type]) acc[r.type] = [];
     acc[r.type].push(r);
     return acc;
   }, {});
+  const truncated: Record<string, SearchResult[]> = {};
+  let hiddenCount = 0;
+  for (const [type, items] of Object.entries(grouped)) {
+    const limit = type === 'page' ? items.length : DROPDOWN_PER_TYPE_LIMIT;
+    truncated[type] = items.slice(0, limit);
+    if (items.length > limit) hiddenCount += items.length - limit;
+  }
+  const visibleResults = Object.values(truncated).flat();
+  // "View all" is a selectable row appended after results.
+  const hasViewAll = query.trim().length > 0 && (hiddenCount > 0 || visibleResults.length >= DROPDOWN_PER_TYPE_LIMIT);
+  const selectableCount = query ? visibleResults.length + (hasViewAll ? 1 : 0) : PAGES.length;
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex((prev) => Math.min(prev + 1, selectableCount - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === 'Enter') {
+      if (query) {
+        if (hasViewAll && selectedIndex === visibleResults.length) {
+          viewAll();
+        } else if (visibleResults[selectedIndex]) {
+          handleSelect(visibleResults[selectedIndex]);
+        }
+      } else if (PAGES[selectedIndex]) {
+        handleSelect(PAGES[selectedIndex]);
+      }
+    }
+  };
+
+  if (!open) return null;
 
   let flatIndex = 0;
 
@@ -306,7 +233,7 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
 
         {/* Results */}
         <div className="max-h-[50vh] overflow-y-auto">
-          {query && !loading && results.length === 0 && (
+          {query && !loading && visibleResults.length === 0 && (
             <div className="px-5 py-8 text-center text-sm text-[var(--muted)]">
               No results found for &ldquo;{query}&rdquo;
             </div>
@@ -316,7 +243,7 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
             <div className="px-5 py-4">
               <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider mb-2">Quick Navigation</p>
               {PAGES.map((page, i) => {
-                const Icon = page.icon;
+                const Icon = getIcon(page);
                 return (
                   <button
                     key={page.id}
@@ -341,14 +268,14 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
             </div>
           )}
 
-          {Object.entries(grouped).map(([type, items]) => (
+          {Object.entries(truncated).map(([type, items]) => (
             <div key={type} className="px-5 py-2">
               <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider mb-1 px-3">
                 {TYPE_LABELS[type as SearchResult['type']] || type}
               </p>
               {items.map((result) => {
                 const currentIndex = flatIndex++;
-                const Icon = result.icon;
+                const Icon = getIcon(result);
                 const isSelected = currentIndex === selectedIndex;
                 return (
                   <button
@@ -373,6 +300,26 @@ export function MasterSearch({ open, onClose }: MasterSearchProps) {
               })}
             </div>
           ))}
+
+          {hasViewAll && (() => {
+            const isSelected = selectedIndex === visibleResults.length;
+            return (
+              <div className="px-5 py-2 border-t border-[var(--card-border)]">
+                <button
+                  onClick={viewAll}
+                  className={cn(
+                    'flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-left transition-colors',
+                    isSelected
+                      ? 'bg-[var(--foreground)] text-[var(--background)]'
+                      : 'text-[var(--foreground)] hover:bg-[var(--sidebar-hover)]',
+                  )}
+                >
+                  <span className="text-sm font-medium">View all results</span>
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Footer hint */}

@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Phone, PhoneCall, GripHorizontal, Minimize2, Maximize2, ChevronLeft, Power, Loader2 } from 'lucide-react';
+import { Phone, PhoneCall, GripHorizontal, Minimize2, Maximize2, ChevronLeft, Power, Loader2, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePhone } from '@/contexts/phone-context';
 import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
 import { useSession } from '@/contexts/session-context';
 
-const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home';
+// const ZOOM_EMBED_URL = 'https://applications.zoom.us/integration/phone/embeddablephone/home'; // Zoom Smart Embed disabled
 import { CallRecorderControls } from '@/components/call-recorder-controls';
 import { CustomDialerOverlay } from '@/components/custom-dialer-overlay';
 import { pb } from '@/lib/pocketbase';
@@ -53,7 +53,7 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
     const { callStatus, dialNumber, isDialing, customDialerNumber, activeCallNumber, agentRequired } = usePhone();
     const ownership = useCallOwnershipOptional();
     const { session, setSession } = useSession();
-    const { isConnected: agentConnected, callState: agentCallState, networkQuality, launchAgent } = useLocalAgent();
+    const { isConnected: agentConnected, callState: agentCallState, networkQuality, launchAgent, launchZoom, zoomLaunching } = useLocalAgent();
 
     const [yPosition, setYPosition] = useState(DEFAULT_Y);
     const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -245,7 +245,7 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
     const isCollapsed = disabled
         ? true
         : docked
-            ? (alwaysExpanded ? false : (!isHovering && !isCallActive && !isInputFocused && !hasUnsubmittedRecording))
+            ? (alwaysExpanded ? false : (!isHovering && !isInputFocused))
             : isMinimized;
     const currentHeight = docked
         ? (isCollapsed ? '52px' : '550px')
@@ -319,7 +319,12 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
                     setIsHovering(true);
                 } : undefined}
                 onMouseLeave={docked ? () => {
-                    hoverTimeoutRef.current = setTimeout(() => setIsHovering(false), 300);
+                    if (hoverTimeoutRef.current) { clearTimeout(hoverTimeoutRef.current); hoverTimeoutRef.current = null; }
+                    setIsHovering(false);
+                    setIsInputFocused(false);
+                    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement && panelRef.current?.contains(document.activeElement)) {
+                        document.activeElement.blur();
+                    }
                 } : undefined}
                 className={cn(
                     "flex flex-col overflow-hidden",
@@ -591,7 +596,7 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
                             )}
                         </div>
 
-                        {/* Dialer area: custom dialer when idle, Zoom embed during call */}
+                        {/* Dialer area: custom dialer always shown; Zoom app handles active calls */}
                         <div className="flex-1 relative">
                             {!agentConnected ? (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--card-bg)] p-6">
@@ -609,25 +614,43 @@ export function PhoneDialer({ docked = false, disabled = false, disabledReason, 
                                         Launch Agent
                                     </button>
                                 </div>
-                            ) : isCallActive ? (
-                                /* During a call: show Zoom Smart Embed so user can
-                                   end the call and press DTMF digits directly.
-                                   Call STATE detection still comes from WASAPI (agent),
-                                   not from this iframe — so shared-account calls
-                                   on other machines are invisible. */
-                                <div className="absolute inset-0 flex flex-col">
-                                    <iframe
-                                        id="zoom-embed-control"
-                                        src={ZOOM_EMBED_URL}
-                                        allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
-                                        title="Zoom Phone"
-                                        className="w-full flex-1 border-0"
-                                        style={{ minHeight: 380 }}
-                                    />
-                                </div>
                             ) : (
-                                /* Idle: show our custom number dialer */
-                                <CustomDialerOverlay onDial={handleCustomDial} onFocusChange={setIsInputFocused} visible={!isCollapsed} />
+                                <>
+                                    {/* Zoom Smart Embed disabled — use Zoom app directly for call control */}
+                                    {/* isCallActive ? (
+                                        <div className="absolute inset-0 flex flex-col">
+                                            <iframe
+                                                id="zoom-embed-control"
+                                                src={ZOOM_EMBED_URL}
+                                                allow="microphone; camera; autoplay; clipboard-read; clipboard-write"
+                                                title="Zoom Phone"
+                                                className="w-full flex-1 border-0"
+                                                style={{ minHeight: 380 }}
+                                            />
+                                        </div>
+                                    ) : null */}
+
+                                    {isCallActive ? (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[var(--card-bg)] p-6">
+                                            <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center">
+                                                <PhoneCall size={20} className="text-green-500" />
+                                            </div>
+                                            <p className="text-sm font-semibold text-[var(--foreground)] text-center">
+                                                Open Zoom App For Call controls
+                                            </p>
+                                            <button
+                                                onClick={launchZoom}
+                                                disabled={zoomLaunching}
+                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 text-white text-xs font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50"
+                                            >
+                                                {zoomLaunching ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+                                                Open Zoom App
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <CustomDialerOverlay onDial={handleCustomDial} onFocusChange={setIsInputFocused} visible={!isCollapsed} />
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>

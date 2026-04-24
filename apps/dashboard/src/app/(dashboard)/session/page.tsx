@@ -2620,7 +2620,6 @@ export default function SessionPage() {
                 <div className="relative">
                     <PhoneDialer
                         docked
-                        alwaysExpanded
                         disabled={(hasUnsavedCall && callStatus !== 'ringing' && callStatus !== 'connected') || !!session.paused_at || zoomLostDuringSession || agentLostDuringSession}
                         disabledReason={
                             agentLostDuringSession ? 'Run CRM Agent first' :

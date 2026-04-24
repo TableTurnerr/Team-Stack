@@ -15,6 +15,9 @@ public class TrayIconManager : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     private readonly NotifyIcon _notifyIcon;
     private readonly AgentService _agent;
     private readonly CallStateFusion _fusion;
@@ -108,6 +111,26 @@ public class TrayIconManager : IDisposable
             Text = "CRM Agent — Idle",
             ContextMenuStrip = contextMenu,
             Visible = true,
+        };
+
+        // NotifyIcon's default right-click handler calls ShowContextMenu,
+        // but if the owning hidden window isn't the foreground window
+        // Windows silently skips painting the menu. Forcing foreground on
+        // MouseDown (before .NET's internal handler runs on MouseUp) makes
+        // the menu show reliably while still letting ContextMenuStrip manage
+        // its own mouse capture — so click-outside properly dismisses it.
+        _notifyIcon.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Right) return;
+            try
+            {
+                var windowField = typeof(NotifyIcon).GetField("window", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (windowField?.GetValue(_notifyIcon) is NativeWindow nw && nw.Handle != IntPtr.Zero)
+                {
+                    SetForegroundWindow(nw.Handle);
+                }
+            }
+            catch { }
         };
 
         _notifyIcon.DoubleClick += (_, _) =>

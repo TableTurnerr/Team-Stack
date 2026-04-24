@@ -18,9 +18,12 @@ import {
   Zap,
   Hash,
   PhoneForwarded,
+  Headphones,
+  Loader2,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type CallLog, type User } from '@/lib/types';
+import { COLLECTIONS, type CallLog, type Recording, type User } from '@/lib/types';
+import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
 import { formatDate, formatPhoneNumber, cn, buildPhoneSearchFilter, sanitizeFilterValue, stripPhoneFormatting, formatCompanyName } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
@@ -135,6 +138,37 @@ export default function ColdCallsPage() {
 
   // Selection
   const selection = useTableSelection(callLogs);
+
+  // Recording player
+  const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
+  const [playerLoading, setPlayerLoading] = useState<string | null>(null);
+
+  const handlePlayRecording = async (log: CallLog) => {
+    if (playerLoading === log.id) return;
+    setPlayerLoading(log.id);
+    try {
+      const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+        `call_log = "${log.id}"`
+      );
+      setPlayerRecording(recording);
+    } catch {
+      try {
+        const phoneNumber = log.expand?.phone_number_record?.phone_number;
+        if (phoneNumber) {
+          const last10 = phoneNumber.replace(/\D/g, '').slice(-10);
+          const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+            `phone_number ~ "${last10}"`,
+            { sort: '-recording_date' }
+          );
+          setPlayerRecording(recording);
+        }
+      } catch {
+        // No recording found
+      }
+    } finally {
+      setPlayerLoading(null);
+    }
+  };
 
   const pageOffset = (callLogsPage - 1) * perPage;
 
@@ -409,11 +443,18 @@ export default function ColdCallsPage() {
             selection={selection}
             pageOffset={pageOffset}
             timezones={preferences?.timezones}
+            onPlayRecording={handlePlayRecording}
+            playerLoading={playerLoading}
           />
         )
       ) : (
         <PhoneNumbersTab searchTerm={searchTerm} />
       )}
+
+      <RecordingPlayerOverlay
+        recording={playerRecording}
+        onClose={() => setPlayerRecording(null)}
+      />
     </div>
     </PageGuard>
   );
@@ -508,6 +549,8 @@ function CallLogsTable({
   selection,
   pageOffset,
   timezones,
+  onPlayRecording,
+  playerLoading,
 }: {
   logs: CallLog[];
   sort: { field: string; dir: 'asc' | 'desc' };
@@ -520,6 +563,8 @@ function CallLogsTable({
   selection: ReturnType<typeof useTableSelection<CallLog>>;
   pageOffset: number;
   timezones?: { timezone: string; label: string }[];
+  onPlayRecording: (log: CallLog) => void;
+  playerLoading: string | null;
 }) {
   return (
     <TableContainer>
@@ -775,6 +820,20 @@ function CallLogsTable({
                       )}
                       <td className="py-3.5 px-4 overflow-hidden">
                         <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                          {log.has_recording && (
+                            <Tooltip content="Play Recording">
+                              <button
+                                onClick={() => onPlayRecording(log)}
+                                disabled={playerLoading === log.id}
+                                className="p-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--primary)] transition-colors inline-flex items-center justify-center disabled:opacity-60"
+                              >
+                                {playerLoading === log.id
+                                  ? <Loader2 size={14} className="animate-spin" />
+                                  : <Headphones size={14} />
+                                }
+                              </button>
+                            </Tooltip>
+                          )}
                           {log.owner_reached && (
                             <Tooltip content="Owner Reached">
                               <span className="p-1 rounded bg-[var(--success-subtle)] inline-flex items-center justify-center">

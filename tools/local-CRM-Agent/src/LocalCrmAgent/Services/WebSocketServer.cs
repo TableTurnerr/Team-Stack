@@ -235,6 +235,12 @@ public class AgentWebSocketServer : IDisposable
                 case "setZoomApiConfig":
                     HandleSetZoomApiConfig(doc.RootElement);
                     break;
+                case "getLocalRecording":
+                    HandleGetLocalRecording(doc.RootElement, client);
+                    break;
+                case "getUnlinkedRecordings":
+                    HandleGetUnlinkedRecordings(client);
+                    break;
                 default:
                     Debug.WriteLine($"[WS] Unknown command type: {type}");
                     break;
@@ -615,6 +621,96 @@ public class AgentWebSocketServer : IDisposable
         var currentPhone = _fusion.CurrentState.PhoneNumber;
         var (success, error) = await _callController.EndCallAsync(currentPhone);
         SendTo(client, new EndCallResultMessage { Success = success, Error = error });
+    }
+
+    // Stream a local recording file back to the requesting client as base64.
+    // Used for previewing recordings that haven't been uploaded to PocketBase
+    // yet (e.g. before the call has been saved, so there's no call_log to link).
+    // Path-traversal is blocked by restricting to a plain file name and
+    // resolving against the recordings directory only.
+    private void HandleGetLocalRecording(JsonElement root, IWebSocketConnection client)
+    {
+        var fileName = root.TryGetProperty("fileName", out var f) ? f.GetString() : null;
+        var msg = new LocalRecordingMessage { FileName = fileName ?? "" };
+
+        if (_storage == null || string.IsNullOrWhiteSpace(fileName))
+        {
+            msg.Error = "No file name";
+            SendTo(client, msg);
+            return;
+        }
+
+        // Reject anything that isn't a bare file name — no separators, no "..".
+        var bare = Path.GetFileName(fileName);
+        if (bare != fileName || fileName.Contains("..", StringComparison.Ordinal))
+        {
+            msg.Error = "Invalid file name";
+            SendTo(client, msg);
+            return;
+        }
+
+        // Accept either the base name the dashboard remembers (pre-link) or the
+        // renamed `..._cl-{id}.mp3` form (post-link). If the exact name is
+        // missing, look up the manifest by prefix.
+        var recordingsDir = _storage.RecordingsDirectory;
+        var directPath = Path.Combine(recordingsDir, fileName);
+        string? resolvedPath = File.Exists(directPath) ? directPath : null;
+
+        if (resolvedPath == null)
+        {
+            var baseName = Path.GetFileNameWithoutExtension(fileName);
+            try
+            {
+                var match = Directory.EnumerateFiles(recordingsDir, $"{baseName}*.mp3")
+                    .FirstOrDefault();
+                if (match != null) resolvedPath = match;
+            }
+            catch { /* ignore — fall through to not-found */ }
+        }
+
+        if (resolvedPath == null)
+        {
+            msg.Error = "Recording file not found on disk";
+            SendTo(client, msg);
+            return;
+        }
+
+        try
+        {
+            var bytes = File.ReadAllBytes(resolvedPath);
+            msg.Data = Convert.ToBase64String(bytes);
+            msg.FileName = Path.GetFileName(resolvedPath);
+            msg.Success = true;
+        }
+        catch (Exception ex)
+        {
+            msg.Error = ex.Message;
+        }
+        SendTo(client, msg);
+    }
+
+    // Snapshot of on-disk recordings that haven't been linked to a CRM call log.
+    // Lets the dashboard repopulate the "Recorded but unsubmitted" state after
+    // a page refresh — the live recordingCompleted event only fires once per
+    // recording, so without this the UI forgets the recording on reload.
+    private void HandleGetUnlinkedRecordings(IWebSocketConnection client)
+    {
+        var msg = new UnlinkedRecordingsMessage();
+        if (_storage == null) { SendTo(client, msg); return; }
+
+        foreach (var e in _storage.GetUnlinkedRecordings())
+        {
+            msg.Recordings.Add(new UnlinkedRecordingDto
+            {
+                RecordingId = e.RecordingId ?? "",
+                FileName = e.FileName,
+                PhoneNumber = e.PhoneNumber,
+                Duration = e.DurationSeconds,
+                FileSizeBytes = e.FileSizeBytes,
+                StartTime = e.StartTime.ToString("o"),
+            });
+        }
+        SendTo(client, msg);
     }
 
     private void HandleSetZoomApiConfig(JsonElement root)

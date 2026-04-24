@@ -203,6 +203,65 @@ public class RecordingUploadedMessage : AgentMessage
     public RecordingUploadedMessage() => Type = "recordingUploaded";
 }
 
+/// <summary>
+/// Response to a getLocalRecording request — sends the MP3 bytes as base64
+/// so the dashboard can preview unsubmitted recordings directly from disk.
+/// </summary>
+public class LocalRecordingMessage : AgentMessage
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("mimeType")]
+    public string MimeType { get; set; } = "audio/mpeg";
+
+    /// <summary>Base64-encoded file bytes, or empty if not found.</summary>
+    [JsonPropertyName("data")]
+    public string Data { get; set; } = "";
+
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    public LocalRecordingMessage() => Type = "localRecording";
+}
+
+/// <summary>
+/// Snapshot of recordings that are on disk but not yet linked to a CRM call log.
+/// Sent in response to `getUnlinkedRecordings` so the dashboard can repopulate
+/// its "Recorded but unsubmitted" pill after a page refresh or reconnect.
+/// </summary>
+public class UnlinkedRecordingDto
+{
+    [JsonPropertyName("recordingId")]
+    public string RecordingId { get; set; } = "";
+
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("phoneNumber")]
+    public string PhoneNumber { get; set; } = "";
+
+    [JsonPropertyName("duration")]
+    public int Duration { get; set; }
+
+    [JsonPropertyName("fileSizeBytes")]
+    public long FileSizeBytes { get; set; }
+
+    [JsonPropertyName("startTime")]
+    public string StartTime { get; set; } = "";
+}
+
+public class UnlinkedRecordingsMessage : AgentMessage
+{
+    [JsonPropertyName("recordings")]
+    public List<UnlinkedRecordingDto> Recordings { get; set; } = [];
+
+    public UnlinkedRecordingsMessage() => Type = "unlinkedRecordings";
+}
+
 public class UploadQueueStatusMessage : AgentMessage
 {
     [JsonPropertyName("pendingCount")]

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Download, Loader2, CheckCircle2, Pencil } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
+import { useLocalAgent } from '@/contexts/local-agent-context';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp, type CompanyNote } from '@/lib/types';
 import { cn, timeAgo, formatDateTime, formatPhoneNumber, extractWebsiteFromName } from '@/lib/utils';
@@ -12,6 +13,7 @@ import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
 import { Tooltip } from '@/components/ui/tooltip';
+import { useToast } from '@/components/ui/toast';
 import {
     FORM_OUTCOMES,
     HUNG_UP_PRIMARY,
@@ -108,6 +110,7 @@ const EMPTY_CALLBACK_EVENTS: Array<{ reason: string; timestamp: string }> = [];
 
 export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS, suggestedCompanyName }: CurrentCallFormProps) {
     const { user } = useAuth();
+    const { addToast } = useToast();
     const [companySearch, setCompanySearch] = useState('');
     const [companyResults, setCompanyResults] = useState<Company[]>([]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -162,6 +165,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const hungUpDropdownRef = useRef<HTMLDivElement>(null);
 
     const { deferredSegments, latestRecording, uploadQueueStatus } = useCallRecording();
+    // Direct agent context for live recording + current-upload state. The
+    // call-recording-context flattens these, but currentUpload isn't plumbed
+    // through there yet, and we want per-state labels in the UI.
+    const { recordingState: agentRecordingLiveState, uploadQueueStatus: agentUploadQueue, fetchLocalRecording, isConnected: agentConnected, unlinkedRecordings } = useLocalAgent();
 
     // Recording playback
     const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
@@ -182,16 +189,22 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             // Try by call_log first
             let recording: Recording | null = null;
             try {
-                recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(`call_log = "${call.id}"`);
+                recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+                    pb.filter('call_log = {:callLog}', { callLog: call.id }),
+                );
             } catch {
                 // Fallback: agent mode may upload before linking, so call_log isn't set on PB record.
-                // Try matching by phone number.
+                // Match by phone number AND the user who made the call — without the uploader scope
+                // the most recent recording for that number could belong to a different user.
                 const phone = call.expand?.phone_number_record?.phone_number;
-                if (phone) {
+                if (phone && call.caller) {
                     const digits = phone.replace(/\D/g, '').slice(-10);
                     try {
                         recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
-                            `phone_number ~ "${digits}"`,
+                            pb.filter('phone_number ~ {:digits} && uploader = {:uploader}', {
+                                digits,
+                                uploader: call.caller,
+                            }),
                             { sort: '-created' },
                         );
                     } catch {
@@ -218,11 +231,17 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         ? deferredSegments.find(s => normalizePhone(s.phone) === formDigits)
         : null;
 
-    // Agent mode: check if the latest agent recording matches this form's phone number.
-    const agentRecordingMatch = !matchingSegment
-        && !!latestRecording
-        && !!formDigits
-        && normalizePhone(latestRecording.phoneNumber) === formDigits;
+    // Agent mode: resolve the recording that belongs to this form's phone number.
+    // We check the live `latestRecording` first (populated during the active call)
+    // and fall back to the persisted unlinked-recordings list (so the pill
+    // survives page refreshes and agent reconnects). The unlinked list is
+    // already sorted newest-first by the agent, so `find` picks the most recent.
+    const resolvedAgentRecording = !matchingSegment && formDigits
+        ? (latestRecording && normalizePhone(latestRecording.phoneNumber) === formDigits
+            ? latestRecording
+            : unlinkedRecordings.find(r => normalizePhone(r.phoneNumber) === formDigits) ?? null)
+        : null;
+    const agentRecordingMatch = !!resolvedAgentRecording;
 
     // Whether the agent is still uploading/processing the recording
     const agentRecordingUploading = agentRecordingMatch
@@ -231,8 +250,36 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     // Whether the agent recording is fully uploaded and ready to play
     const agentRecordingReady = agentRecordingMatch && !agentRecordingUploading;
 
-    // Whether we have any recording available for playback (browser or agent)
-    const hasRecordingForPlayback = !!(matchingSegment || agentRecordingReady);
+    // Inline recording-pipeline status for the "Recorded but unsubmitted" pill.
+    // Order of precedence mirrors the agent's state machine:
+    //   recording → stopping (converting) → pending upload → uploading → failed → uploaded
+    const pendingCount = uploadQueueStatus?.pendingCount ?? 0;
+    const failedCount = uploadQueueStatus?.failedCount ?? 0;
+    const currentUpload = agentUploadQueue?.currentUpload ?? uploadQueueStatus?.currentUpload ?? null;
+    const liveState = agentRecordingLiveState?.state ?? 'idle';
+    const isRecordingNow = liveState === 'recording'
+        && !!formDigits
+        && normalizePhone(agentRecordingLiveState?.phoneNumber ?? '') === formDigits;
+    const isConvertingNow = liveState === 'stopping'
+        && !!formDigits
+        && normalizePhone(agentRecordingLiveState?.phoneNumber ?? '') === formDigits;
+
+    const recordingStatus: { label: string; tone: 'recording' | 'processing' | 'uploading' | 'pending' | 'failed' | 'uploaded' } | null =
+        isRecordingNow ? { label: 'Recording…', tone: 'recording' }
+        : isConvertingNow ? { label: 'Processing audio…', tone: 'processing' }
+        : agentRecordingMatch && currentUpload ? { label: 'Uploading to CRM…', tone: 'uploading' }
+        : agentRecordingMatch && pendingCount > 0 ? { label: `Queued (${pendingCount} pending)`, tone: 'pending' }
+        : agentRecordingMatch && failedCount > 0 ? { label: 'Upload failed — will retry', tone: 'failed' }
+        : agentRecordingMatch ? { label: 'Uploaded', tone: 'uploaded' }
+        : null;
+
+    // Whether we have any recording available for playback (browser or agent).
+    // We surface the button whenever an agent match exists — even while uploading —
+    // because the upload-queue counters can race (pendingCount transiently 0 during
+    // the gap between conversion-complete and the upload loop's poll). Hiding the
+    // button in that window made clicks silently impossible; the click handler now
+    // gives toast feedback if the record isn't in PB yet.
+    const hasRecordingForPlayback = !!(matchingSegment || agentRecordingMatch);
 
     const handlePlayUnsubmitted = async () => {
         // Browser mode: play from in-memory blob
@@ -243,25 +290,64 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             return;
         }
 
-        // Agent mode: fetch the recording from PocketBase by phone number
-        if (agentRecordingReady && latestRecording) {
-            setPlayerLoading('unsubmitted');
-            try {
-                // Query by phone number (most reliable — always set by agent on upload)
-                const digits = latestRecording.phoneNumber.replace(/\D/g, '').slice(-10);
-                const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
-                    `phone_number ~ "${digits}"`,
-                    { sort: '-created' }
-                );
-                if (recording && recording.file) {
-                    setPlayerBlob(null);
-                    setPlayerRecording(recording);
+        // Agent mode: match by filename PREFIX + uploader. We can't do an exact match
+        // because the agent renames the file on disk when it gets linked to a call log:
+        //   `{timestamp}_{phone}.mp3` → `{timestamp}_{phone}_cl-{callLogId}.mp3`
+        // The recordingCompleted WebSocket message fires pre-rename, so `recordingToPlay.fileName`
+        // is the base; PocketBase's `original_filename` is the post-rename form. Prefix-match
+        // on the base (without the `.mp3` extension) handles both states. The timestamp
+        // is millisecond-precise, so collisions across users/recordings are effectively zero —
+        // the uploader scope makes it airtight.
+        const recordingToPlay = resolvedAgentRecording ?? latestRecording;
+        if (!recordingToPlay || !user) {
+            addToast('warning', 'No recording available yet for this call.');
+            return;
+        }
+
+        setPlayerLoading('unsubmitted');
+        try {
+            // Agent mode preview: before the call is submitted there's no call_log
+            // to link, so the recording hasn't been uploaded. Fetch the file from
+            // the agent's local disk and play it as an in-memory Blob. This is the
+            // fast path and always works while the agent is running.
+            if (agentConnected) {
+                try {
+                    const blob = await fetchLocalRecording(recordingToPlay.fileName);
+                    const url = URL.createObjectURL(blob);
+                    setPlayerRecording(null);
+                    setPlayerBlob(url);
+                    return;
+                } catch (localErr) {
+                    console.warn('[Unsubmitted] Local file fetch failed, falling back to PB:', localErr);
                 }
-            } catch (err) {
-                console.error('Failed to fetch agent recording:', err);
-            } finally {
-                setPlayerLoading(null);
             }
+
+            // Fallback: the agent is offline OR the local file is gone (e.g. user
+            // deleted it) — query PocketBase by original_filename prefix + uploader.
+            const baseName = recordingToPlay.fileName.replace(/\.mp3$/i, '');
+            const byFilename = await pb.collection(COLLECTIONS.RECORDINGS).getList<Recording>(1, 1, {
+                filter: pb.filter('original_filename ~ {:base} && uploader = {:uploader}', {
+                    base: baseName,
+                    uploader: user.id,
+                }),
+                sort: '-created',
+            });
+            const recording = byFilename.items[0] ?? null;
+
+            if (recording && recording.file) {
+                setPlayerBlob(null);
+                setPlayerRecording(recording);
+            } else {
+                addToast('warning',
+                    agentConnected
+                        ? 'The local recording file is missing and it hasn\'t been uploaded yet.'
+                        : 'Local agent is offline and this recording isn\'t in the CRM yet.');
+            }
+        } catch (err) {
+            console.error('Failed to fetch agent recording:', err);
+            addToast('error', `Failed to load recording: ${err instanceof Error ? err.message : 'unknown error'}`);
+        } finally {
+            setPlayerLoading(null);
         }
     };
 
@@ -894,12 +980,36 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             <span className="text-[10px] font-semibold text-[var(--warning)] uppercase tracking-wider">
                                 Recorded but unsubmitted
                             </span>
-                            {agentRecordingUploading && (
+                            {recordingStatus && (
                                 <span
-                                    className="flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warning)]/60 text-white ml-1"
-                                    title="Recording uploading…"
+                                    className={cn(
+                                        "flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ml-1 border",
+                                        recordingStatus.tone === 'recording' && "bg-[var(--error-subtle)] text-[var(--error)] border-[var(--error)]/30",
+                                        recordingStatus.tone === 'processing' && "bg-[var(--info-subtle)] text-[var(--info)] border-[var(--info)]/30",
+                                        recordingStatus.tone === 'uploading' && "bg-[var(--info-subtle)] text-[var(--info)] border-[var(--info)]/30",
+                                        recordingStatus.tone === 'pending' && "bg-[var(--warning-subtle)] text-[var(--warning)] border-[var(--warning)]/30",
+                                        recordingStatus.tone === 'failed' && "bg-[var(--error-subtle)] text-[var(--error)] border-[var(--error)]/30",
+                                        recordingStatus.tone === 'uploaded' && "bg-[var(--success-subtle)] text-[var(--success)] border-[var(--success)]/30",
+                                    )}
+                                    title={
+                                        recordingStatus.tone === 'uploaded'
+                                            ? 'Saved to CRM — click the mic to listen'
+                                            : recordingStatus.label
+                                    }
                                 >
-                                    <Loader2 size={12} className="animate-spin" />
+                                    {(recordingStatus.tone === 'processing' || recordingStatus.tone === 'uploading' || recordingStatus.tone === 'pending') && (
+                                        <Loader2 size={10} className="animate-spin" />
+                                    )}
+                                    {recordingStatus.tone === 'recording' && (
+                                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--error)] animate-pulse" />
+                                    )}
+                                    {recordingStatus.tone === 'uploaded' && (
+                                        <CheckCircle2 size={10} />
+                                    )}
+                                    {recordingStatus.tone === 'failed' && (
+                                        <AlertTriangle size={10} />
+                                    )}
+                                    <span>{recordingStatus.label}</span>
                                 </span>
                             )}
                             {hasRecordingForPlayback && (
@@ -1086,25 +1196,6 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                 <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-[var(--card-hover)] text-[var(--muted)] font-semibold whitespace-nowrap">
                                                     {calls.length} call{calls.length !== 1 ? 's' : ''}
                                                 </span>
-                                                {/* Group-level summary tags (most recent call) */}
-                                                <div className="flex gap-1 flex-wrap overflow-hidden max-w-[150px]">
-                                                    {(Array.isArray(calls[0]?.call_outcome) ? calls[0].call_outcome : calls[0]?.call_outcome ? [calls[0].call_outcome] : []).map(outcome => {
-                                                        const colors = getOutcomeColors(outcome);
-                                                        return (
-                                                            <span
-                                                                key={outcome}
-                                                                className={cn(
-                                                                    "px-1 py-0.5 rounded text-[9px] font-semibold border leading-none whitespace-nowrap",
-                                                                    colors.bg,
-                                                                    colors.text,
-                                                                    colors.border
-                                                                )}
-                                                            >
-                                                                {outcome}
-                                                            </span>
-                                                        );
-                                                    })}
-                                                </div>
                                             </div>
                                             <div className="space-y-1 ml-1.5 border-l border-[var(--card-border)] pl-2">
                                                 {calls.slice(0, 3).map((call, idx) => (

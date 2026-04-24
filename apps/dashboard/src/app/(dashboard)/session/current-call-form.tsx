@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Mic, Download, Loader2, CheckCircle2, Pencil } from 'lucide-react';
+import { Save, Building2, User, Phone as PhoneIcon, StickyNote, AlertCircle, CalendarClock, X, AlertTriangle, ChevronDown, Plus, Crown, Mail, Headphones, Download, Loader2, CheckCircle2, Pencil } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { useLocalAgent } from '@/contexts/local-agent-context';
@@ -1020,7 +1020,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                     className="flex items-center justify-center w-5 h-5 rounded-full bg-[var(--warning)] text-white hover:scale-110 active:scale-95 transition-all ml-1 shadow-sm animate-pulse disabled:opacity-50 disabled:animate-none"
                                     title="Listen to unsubmitted recording"
                                 >
-                                    {playerLoading === 'unsubmitted' ? <Loader2 size={12} className="animate-spin" /> : <Mic size={12} />}
+                                    {playerLoading === 'unsubmitted' ? <Loader2 size={12} className="animate-spin" /> : <Headphones size={12} />}
                                 </button>
                             )}
                         </div>
@@ -1219,7 +1219,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                                             )}
                                                                             title="Play recording"
                                                                         >
-                                                                            {playerLoading === call.id ? <Loader2 size={10} className="animate-spin" /> : <Mic size={10} />}
+                                                                            {playerLoading === call.id ? <Loader2 size={10} className="animate-spin" /> : <Headphones size={10} />}
                                                                         </button>
                                                                     )}
                                                                     {call.receptionist_name && (

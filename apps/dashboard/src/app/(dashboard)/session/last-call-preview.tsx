@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, ArrowLeft, Check, User, Crown, Mic, X, Loader2, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, ArrowLeft, Check, User, Crown, Headphones, X, Loader2, Pencil } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type Company, type Recording, type CompanyNote } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -397,7 +397,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                             className="p-1.5 rounded-lg text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors disabled:opacity-60"
                             title="Play recording"
                         >
-                            {playerLoading ? <Loader2 size={14} className="animate-spin" /> : <Mic size={14} />}
+                            {playerLoading ? <Loader2 size={14} className="animate-spin" /> : <Headphones size={14} />}
                         </button>
                     )}
                     {sessionId && !isViewingOlderCall && (

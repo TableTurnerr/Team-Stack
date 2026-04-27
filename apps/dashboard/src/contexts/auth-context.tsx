@@ -215,11 +215,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 last_activity: new Date().toISOString()
             };
 
-            if (!model.role) {
+            const isNewUser = !model.role;
+            if (isNewUser) {
                 updates.role = 'member';
             }
 
             await pb.collection('users').update(model.id, updates);
+
+            if (isNewUser) {
+                try {
+                    const defaultRoles = await pb.collection('roles').getFullList<{ id: string; members?: string[] }>({
+                        filter: 'is_default = true',
+                    });
+                    await Promise.all(
+                        defaultRoles.map(r =>
+                            pb.collection('roles').update(r.id, {
+                                members: Array.from(new Set([...(r.members || []), model.id])),
+                            })
+                        )
+                    );
+                } catch (e) {
+                    console.warn('Failed to auto-assign default role(s):', e);
+                }
+            }
 
             const updatedRecord = await pb.collection('users').getOne(model.id);
             const mapped = mapUser(updatedRecord);
@@ -233,7 +251,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const register = async (name: string, email: string, password: string, passwordConfirm: string) => {
         try {
-            await pb.collection('users').create({
+            const created = await pb.collection('users').create<{ id: string }>({
                 name,
                 email,
                 password,
@@ -241,6 +259,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 role: 'member',
                 status: 'offline',
             });
+
+            // Auto-add the new user to every role flagged is_default.
+            try {
+                const defaultRoles = await pb.collection('roles').getFullList<{ id: string; members?: string[] }>({
+                    filter: 'is_default = true',
+                });
+                await Promise.all(
+                    defaultRoles.map(r =>
+                        pb.collection('roles').update(r.id, {
+                            members: Array.from(new Set([...(r.members || []), created.id])),
+                        })
+                    )
+                );
+            } catch (e) {
+                console.warn('Failed to auto-assign default role(s):', e);
+            }
+
             await login(email, password);
         } catch (error) {
             console.error('Registration failed:', error);
@@ -263,11 +298,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 last_activity: new Date().toISOString()
             };
 
-            if (!model.role) {
+            const isNewUser = !model.role;
+            if (isNewUser) {
                 updates.role = 'member';
             }
 
             await pb.collection('users').update(model.id, updates);
+
+            if (isNewUser) {
+                try {
+                    const defaultRoles = await pb.collection('roles').getFullList<{ id: string; members?: string[] }>({
+                        filter: 'is_default = true',
+                    });
+                    await Promise.all(
+                        defaultRoles.map(r =>
+                            pb.collection('roles').update(r.id, {
+                                members: Array.from(new Set([...(r.members || []), model.id])),
+                            })
+                        )
+                    );
+                } catch (e) {
+                    console.warn('Failed to auto-assign default role(s):', e);
+                }
+            }
 
             const updatedRecord = await pb.collection('users').getOne(model.id);
             const mapped = mapUser(updatedRecord);
@@ -281,14 +334,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const logout = async () => {
         stopHeartbeat();
-        if (user?.id) {
+        if (user?.id && pb.authStore.isValid) {
             try {
                 await pb.collection('users').update(user.id, {
                     status: 'offline',
                     last_activity: new Date().toISOString()
                 });
             } catch (error) {
-                console.error('Failed to update logout status:', error);
+                console.warn('Failed to update logout status (continuing anyway):', error);
             }
         }
 

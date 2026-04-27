@@ -4,6 +4,8 @@ import {
   type Company,
   type PhoneNumber,
   type CallLog,
+  type LeadCategory,
+  type User,
 } from '@/lib/types';
 
 // ============================================================================
@@ -37,6 +39,17 @@ export interface CsvCompanyRow {
   last_contacted: string;
   notes: string;
   contact_source: string;
+
+  // New fields
+  website: string;
+  industry: string;
+  price_range: string;
+  google_rating: string;
+  google_reviews_count: string;
+  do_not_contact: string; // 'true'/'false'/'' on the CSV
+  lead_category: string;  // category NAME (resolved to id at apply-time)
+  assigned_to: string;    // user email (resolved to id at apply-time)
+
   phone_numbers_json: CsvPhoneEntry[];
   // Reference-only (never applied on import)
   total_calls: number;
@@ -47,6 +60,15 @@ export interface CsvCompanyRow {
   session_ids: string[];
   recording_ids: string[];
   follow_up_ids: string[];
+}
+
+/** Lookup maps used during apply to resolve relation names → IDs. */
+export interface RelationMaps {
+  leadCategoryByName: Map<string, string>; // lowercased name → id
+  userByEmail: Map<string, string>;        // lowercased email → id
+  userByName: Map<string, string>;         // lowercased name → id
+  leadCategoryNameById: Map<string, string>;
+  userLabelById: Map<string, string>;      // id → "email"
 }
 
 export interface ExportOptions {
@@ -130,6 +152,39 @@ export const FIELD_LABELS: Record<string, string> = {
   last_contacted: 'Last Contacted',
   notes: 'Notes',
   contact_source: 'Contact Source',
+
+  website: 'Website',
+  industry: 'Industry',
+  price_range: 'Price Range',
+  google_rating: 'Google Rating',
+  google_reviews_count: 'Google Reviews #',
+  do_not_contact: 'Do Not Contact',
+  lead_category: 'Lead Category',
+  assigned_to: 'Assigned To',
+};
+
+/** Short helper text shown under field name in templates / hints. */
+export const FIELD_HINTS: Record<string, string> = {
+  company_name: 'Required. The company display name.',
+  owner_name: 'Optional. Decision maker / contact person.',
+  company_location: 'City, region, or full address.',
+  google_maps_link: 'Full Google Maps URL.',
+  source: 'Where this lead came from (e.g. Yelp, Manual).',
+  instagram_handle: 'IG handle without @.',
+  email: 'Primary contact email.',
+  status: 'Comma-separated status tags (e.g. "Contacted, Hot").',
+  first_contacted: 'YYYY-MM-DD',
+  last_contacted: 'YYYY-MM-DD',
+  notes: 'Free-form notes.',
+  contact_source: 'Channel of last contact.',
+  website: 'Full URL incl. https://',
+  industry: 'Business category (e.g. Restaurant).',
+  price_range: 'e.g. "$", "$$", "$$$".',
+  google_rating: 'Numeric rating, e.g. "4.6".',
+  google_reviews_count: 'Integer, e.g. "1240".',
+  do_not_contact: '"true" or "false".',
+  lead_category: 'Category NAME — must match an existing category, or it is auto-created.',
+  assigned_to: 'User EMAIL — must match an existing user, or row is left unassigned.',
 };
 
 // Fields that can be edited on import (excludes id and reference-only columns)
@@ -146,13 +201,34 @@ export const IMPORTABLE_FIELDS: string[] = [
   'last_contacted',
   'notes',
   'contact_source',
+  'website',
+  'industry',
+  'price_range',
+  'google_rating',
+  'google_reviews_count',
+  'do_not_contact',
+  'lead_category',
+  'assigned_to',
 ];
 
 // Select-type fields — normalize to lowercase for comparison
-const SELECT_FIELDS = new Set(['status', 'source', 'contact_source']);
+const SELECT_FIELDS = new Set(['status', 'source', 'contact_source', 'industry']);
 
 // Date fields — compare only YYYY-MM-DD portion
 const DATE_FIELDS = new Set(['first_contacted', 'last_contacted']);
+
+// Boolean-typed fields — normalize "true"/"false"/""/"1"/"0"
+const BOOL_FIELDS = new Set(['do_not_contact']);
+
+// Fields whose CSV value is a name/email but DB value is an id (resolved via RelationMaps).
+const RELATION_FIELDS = new Set(['lead_category', 'assigned_to']);
+
+function normalizeBool(v: string): string {
+  const s = v.trim().toLowerCase();
+  if (s === '1' || s === 'true' || s === 'yes' || s === 'y') return 'true';
+  if (s === '0' || s === 'false' || s === 'no' || s === 'n' || s === '') return 'false';
+  return s;
+}
 
 // ============================================================================
 // CSV Encoding / Decoding
@@ -248,6 +324,14 @@ const CSV_HEADERS = [
   'last_contacted',
   'notes',
   'contact_source',
+  'website',
+  'industry',
+  'price_range',
+  'google_rating',
+  'google_reviews_count',
+  'do_not_contact',
+  'lead_category',
+  'assigned_to',
   'phone_numbers_json',
   'total_calls',
   'total_pickups',
@@ -258,6 +342,36 @@ const CSV_HEADERS = [
   'recording_ids',
   'follow_up_ids',
 ];
+
+/** Headers used by the downloadable blank template — only importable cols. */
+export const CSV_TEMPLATE_HEADERS = [
+  'id',
+  ...IMPORTABLE_FIELDS,
+  'phone_numbers_json',
+];
+
+/** Returns a UTF-8 blank CSV (with BOM and example placeholder row) usable as an import template. */
+export function generateBlankImportTemplate(): string {
+  const header = CSV_TEMPLATE_HEADERS.map(escapeCsvCell).join(',');
+  const example = CSV_TEMPLATE_HEADERS.map(h => {
+    if (h === 'id') return '';
+    if (h === 'company_name') return 'Acme Pizza';
+    if (h === 'owner_name') return 'Jane Doe';
+    if (h === 'company_location') return 'Brooklyn, NY';
+    if (h === 'website') return 'https://acmepizza.com';
+    if (h === 'industry') return 'Restaurant';
+    if (h === 'price_range') return '$$';
+    if (h === 'google_rating') return '4.6';
+    if (h === 'google_reviews_count') return '1240';
+    if (h === 'do_not_contact') return 'false';
+    if (h === 'lead_category') return 'High Value';
+    if (h === 'assigned_to') return 'sales@example.com';
+    if (h === 'status') return 'New';
+    if (h === 'phone_numbers_json') return '[{"phone_number":"+1 718-555-0100","label":"Main"}]';
+    return '';
+  }).map(escapeCsvCell).join(',');
+  return '\uFEFF' + header + '\n' + example + '\n';
+}
 
 /**
  * Builds the full CSV string for export.
@@ -302,6 +416,13 @@ export function generateLeadsCSV(
     const recordingIds = (options.includeReferenceIds && stats) ? stats.recording_ids.join(';') : '';
     const followUpIds = (options.includeReferenceIds && stats) ? stats.follow_up_ids.join(';') : '';
 
+    // Relation-as-name export (so CSV is human-editable in spreadsheets)
+    const leadCategoryName = company.expand?.lead_category?.name ?? '';
+    const assignedToLabel =
+      company.expand?.assigned_to?.email ??
+      company.expand?.assigned_to?.name ??
+      '';
+
     const cells = [
       escapeCsvCell(company.id),
       escapeCsvCell(company.company_name),
@@ -316,6 +437,14 @@ export function generateLeadsCSV(
       escapeCsvCell(company.last_contacted ?? ''),
       escapeCsvCell(company.notes ?? ''),
       escapeCsvCell(company.contact_source ?? ''),
+      escapeCsvCell(company.website ?? ''),
+      escapeCsvCell(company.industry ?? ''),
+      escapeCsvCell(company.price_range ?? ''),
+      escapeCsvCell(company.google_rating ?? ''),
+      escapeCsvCell(company.google_reviews_count ?? ''),
+      escapeCsvCell(company.do_not_contact ? 'true' : 'false'),
+      escapeCsvCell(leadCategoryName),
+      escapeCsvCell(assignedToLabel),
       phoneJsonCell,
       escapeCsvCell(String(totalCalls)),
       escapeCsvCell(String(totalPickups)),
@@ -438,6 +567,14 @@ export function parseLeadsCSV(csvText: string): ParseResult {
       last_contacted: get('last_contacted'),
       notes: get('notes'),
       contact_source: get('contact_source'),
+      website: get('website'),
+      industry: get('industry'),
+      price_range: get('price_range'),
+      google_rating: get('google_rating'),
+      google_reviews_count: get('google_reviews_count'),
+      do_not_contact: get('do_not_contact'),
+      lead_category: get('lead_category'),
+      assigned_to: get('assigned_to'),
       phone_numbers_json: phoneNumbersJson,
       total_calls: totalCalls,
       total_pickups: totalPickups,
@@ -491,7 +628,9 @@ function splitCsvIntoLines(text: string): string[] {
  */
 export function normalizeFieldValue(field: string, value: string | undefined): string {
   const v = (value ?? '').trim();
+  if (BOOL_FIELDS.has(field)) return normalizeBool(v);
   if (SELECT_FIELDS.has(field)) return v.toLowerCase();
+  if (RELATION_FIELDS.has(field)) return v.toLowerCase();
   if (DATE_FIELDS.has(field)) {
     // Compare only the date portion (YYYY-MM-DD), ignore time component
     if (!v) return '';
@@ -499,6 +638,64 @@ export function normalizeFieldValue(field: string, value: string | undefined): s
     return v.slice(0, 10);
   }
   return v;
+}
+
+/** Builds RelationMaps from the lead_categories + users collections. */
+export function buildRelationMaps(categories: LeadCategory[], users: User[]): RelationMaps {
+  const leadCategoryByName = new Map<string, string>();
+  const leadCategoryNameById = new Map<string, string>();
+  for (const c of categories) {
+    leadCategoryByName.set(c.name.trim().toLowerCase(), c.id);
+    leadCategoryNameById.set(c.id, c.name);
+  }
+  const userByEmail = new Map<string, string>();
+  const userByName = new Map<string, string>();
+  const userLabelById = new Map<string, string>();
+  for (const u of users) {
+    if (u.email) userByEmail.set(u.email.trim().toLowerCase(), u.id);
+    if (u.name) userByName.set(u.name.trim().toLowerCase(), u.id);
+    userLabelById.set(u.id, u.email || u.name || u.id);
+  }
+  return { leadCategoryByName, userByEmail, userByName, leadCategoryNameById, userLabelById };
+}
+
+/**
+ * Resolves a relation field's CSV value (a name/email) to its corresponding DB id.
+ * Returns `{ id, unresolved }` — `unresolved` is true when the value is non-empty
+ * but no match was found.
+ */
+export function resolveRelationValue(
+  field: string,
+  csvValue: string,
+  maps: RelationMaps,
+): { id: string; unresolved: boolean } {
+  const v = csvValue.trim();
+  if (!v) return { id: '', unresolved: false };
+  const key = v.toLowerCase();
+  if (field === 'lead_category') {
+    const id = maps.leadCategoryByName.get(key);
+    return id ? { id, unresolved: false } : { id: '', unresolved: true };
+  }
+  if (field === 'assigned_to') {
+    const id = maps.userByEmail.get(key) ?? maps.userByName.get(key);
+    return id ? { id, unresolved: false } : { id: '', unresolved: true };
+  }
+  return { id: v, unresolved: false };
+}
+
+/**
+ * Returns the DB-side display value for a relation field (for diff display).
+ * For lead_category we want the category name; for assigned_to we want the user's email.
+ */
+export function relationDisplayValue(
+  field: string,
+  dbValue: string,
+  maps: RelationMaps,
+): string {
+  if (!dbValue) return '';
+  if (field === 'lead_category') return maps.leadCategoryNameById.get(dbValue) ?? dbValue;
+  if (field === 'assigned_to') return maps.userLabelById.get(dbValue) ?? dbValue;
+  return dbValue;
 }
 
 let _diffCounter = 0;
@@ -510,18 +707,34 @@ function uniqueId(prefix = 'diff'): string {
  * Builds per-field diffs between a CSV row and a DB record.
  * Only includes fields that changed.
  */
-export function buildFieldDiffs(csvRow: CsvCompanyRow, dbRecord: Company): FieldDiff[] {
+export function buildFieldDiffs(
+  csvRow: CsvCompanyRow,
+  dbRecord: Company,
+  maps?: RelationMaps,
+): FieldDiff[] {
   return IMPORTABLE_FIELDS.map(field => {
     const csvVal = (csvRow as unknown as Record<string, string>)[field] ?? '';
-    const dbVal = (dbRecord as Record<string, unknown>)[field] as string | undefined ?? '';
+    const rawDbVal = (dbRecord as Record<string, unknown>)[field];
+    const dbValStr =
+      field === 'do_not_contact'
+        ? (rawDbVal ? 'true' : 'false')
+        : Array.isArray(rawDbVal)
+          ? rawDbVal.join(', ')
+          : String(rawDbVal ?? '');
+
+    // For relation fields, compare CSV name vs. DB display name.
+    const dbDisplay =
+      maps && RELATION_FIELDS.has(field)
+        ? relationDisplayValue(field, dbValStr, maps)
+        : dbValStr;
 
     const csvNorm = normalizeFieldValue(field, csvVal);
-    const dbNorm = normalizeFieldValue(field, String(dbVal));
+    const dbNorm = normalizeFieldValue(field, dbDisplay);
 
     return {
       field,
       label: FIELD_LABELS[field] ?? field,
-      oldValue: String(dbVal),
+      oldValue: dbDisplay,
       newValue: csvVal,
       hasChanged: csvNorm !== dbNorm,
       resolution: 'use_new' as FieldResolution,
@@ -625,7 +838,8 @@ export function buildPhoneNumberDiffs(
 export function buildDiff(
   csvRows: CsvCompanyRow[],
   dbCompanies: Company[],
-  dbPhoneMap: Map<string, PhoneNumber[]>
+  dbPhoneMap: Map<string, PhoneNumber[]>,
+  maps?: RelationMaps,
 ): CompanyDiff[] {
   const dbById = new Map(dbCompanies.map(c => [c.id, c]));
   const dbByName = new Map(dbCompanies.map(c => [c.company_name.trim().toLowerCase(), c]));
@@ -661,7 +875,7 @@ export function buildDiff(
 
     if (dbRecord) {
       matchedDbIds.add(dbRecord.id);
-      const fieldDiffs = buildFieldDiffs(csvRow, dbRecord);
+      const fieldDiffs = buildFieldDiffs(csvRow, dbRecord, maps);
       const phoneNumberDiffs = buildPhoneNumberDiffs(
         csvRow.phone_numbers_json,
         dbPhoneMap.get(dbRecord.id) ?? []

@@ -53,6 +53,7 @@ export function ExportLeadsModal({ isOpen, onClose, companiesCount, searchFilter
       const safeSearch = sanitizeFilterValue(searchFilter);
       const companies = await pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
         sort: '-created',
+        expand: 'lead_category,assigned_to',
         ...(scope === 'filtered' && safeSearch
           ? { filter: `company_name ~ "${safeSearch}" || owner_name ~ "${safeSearch}"` }
           : {}),

@@ -990,9 +990,16 @@ export default function CompaniesPage() {
           </button>
 
           <button
-            onClick={() => setShowImportModal(true)}
+            onClick={() => {
+              // Auto-download the import template so the user immediately gets a
+              // structured starter CSV (header row must not be edited).
+              import('@/lib/csv-utils').then(m => {
+                m.downloadCSV(m.generateBlankImportTemplate(), 'companies-import-template.csv');
+              });
+              setShowImportModal(true);
+            }}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)] transition-colors text-sm"
-            title="Import from CSV"
+            title="Import from CSV — downloads a template you can fill in"
           >
             <Upload size={15} />
             Import

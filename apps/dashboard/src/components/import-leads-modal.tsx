@@ -9,16 +9,18 @@ import {
   CheckCircle,
   Loader2,
   ChevronDown,
-  ChevronUp,
   ChevronRight,
   Plus,
   Minus,
   RefreshCw,
   Maximize2,
   Minimize2,
+  Download,
+  Search,
+  Info,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company } from '@/lib/types';
+import { COLLECTIONS, type Company, type LeadCategory, type User } from '@/lib/types';
 import { cn, extractWebsiteFromName } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -26,8 +28,14 @@ import {
   buildDiff,
   applyBulkResolution,
   fetchPhoneNumbersForCompanies,
-  countAppliedDiffsByAction,
+  buildRelationMaps,
+  resolveRelationValue,
+  generateBlankImportTemplate,
+  downloadCSV,
   FIELD_LABELS,
+  FIELD_HINTS,
+  IMPORTABLE_FIELDS,
+  CSV_TEMPLATE_HEADERS,
   type CsvCompanyRow,
   type CompanyDiff,
   type FieldDiff,
@@ -36,8 +44,8 @@ import {
   type CompanyResolution,
   type FieldResolution,
   type PhoneResolution,
+  type RelationMaps,
 } from '@/lib/csv-utils';
-import type { PhoneNumber } from '@/lib/types';
 
 // ============================================================================
 // Types
@@ -45,6 +53,8 @@ import type { PhoneNumber } from '@/lib/types';
 
 type ImportStage = 'drop' | 'parsing' | 'parse_error' | 'matching' | 'review' | 'applying' | 'done';
 type FilterTab = 'all' | 'update' | 'create' | 'delete' | 'unchanged';
+
+type RelationWarning = { rowId: string; companyName: string; field: string; value: string };
 
 interface ApplyLog {
   type: 'info' | 'success' | 'error';
@@ -528,7 +538,7 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
   const [stage, setStage] = useState<ImportStage>('drop');
   const [parseError, setParseError] = useState('');
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
-  const [parsedRows, setParsedRows] = useState<CsvCompanyRow[]>([]);
+  const [, setParsedRows] = useState<CsvCompanyRow[]>([]);
   const [diffs, setDiffs] = useState<CompanyDiff[]>([]);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showDeletedInDiff, setShowDeletedInDiff] = useState(false);
@@ -538,6 +548,11 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
   const [isMinimized, setIsMinimized] = useState(false);
   const [matchingProgress, setMatchingProgress] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFieldRef, setShowFieldRef] = useState(false);
+  const [relationMaps, setRelationMaps] = useState<RelationMaps | null>(null);
+  const [relationWarnings, setRelationWarnings] = useState<RelationWarning[]>([]);
+  const [fileName, setFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -553,7 +568,16 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
     setApplyLogs([]);
     setSummary(null);
     setIsMinimized(false);
+    setSearchQuery('');
+    setShowFieldRef(false);
+    setRelationMaps(null);
+    setRelationWarnings([]);
+    setFileName('');
     onClose();
+  };
+
+  const handleDownloadTemplate = () => {
+    downloadCSV(generateBlankImportTemplate(), 'companies-import-template.csv');
   };
 
   const addLog = (log: ApplyLog) => {
@@ -563,6 +587,7 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
   // ── File handling ──────────────────────────────────────────────────────────
 
   const handleFileSelect = (file: File) => {
+    setFileName(file.name);
     setStage('parsing');
     const reader = new FileReader();
     reader.onload = e => {
@@ -588,10 +613,20 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
 
   const runMatchingPhase = async (rows: CsvCompanyRow[]) => {
     setStage('matching');
-    setMatchingProgress('Fetching companies from database...');
+    setMatchingProgress('Loading lookup tables (categories, users)...');
     try {
+      const [categories, users] = await Promise.all([
+        pb.collection(COLLECTIONS.LEAD_CATEGORIES).getFullList<LeadCategory>({ sort: 'name' }),
+        pb.collection(COLLECTIONS.USERS).getFullList<User>({ fields: 'id,name,email', sort: 'name' }),
+      ]);
+      const maps = buildRelationMaps(categories, users);
+      setRelationMaps(maps);
+
+      setMatchingProgress('Fetching companies from database...');
       const dbCompanies = await pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
-        fields: 'id,company_name,owner_name,company_location,google_maps_link,phone_numbers,source,instagram_handle,email,status,first_contacted,last_contacted,notes,contact_source',
+        fields:
+          'id,company_name,owner_name,company_location,google_maps_link,source,instagram_handle,email,status,first_contacted,last_contacted,notes,contact_source,website,industry,price_range,google_rating,google_reviews_count,do_not_contact,lead_category,assigned_to,expand.lead_category.name,expand.assigned_to.email,expand.assigned_to.name',
+        expand: 'lead_category,assigned_to',
         sort: 'company_name',
       });
 
@@ -599,8 +634,25 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
       const dbPhoneMap = await fetchPhoneNumbersForCompanies(dbCompanies.map(c => c.id));
 
       setMatchingProgress('Computing diff...');
-      const computed = buildDiff(rows, dbCompanies, dbPhoneMap);
+      const computed = buildDiff(rows, dbCompanies, dbPhoneMap, maps);
       setDiffs(computed);
+
+      // Pre-flight: detect unresolved relation values so the user knows up-front.
+      const warnings: RelationWarning[] = [];
+      for (const d of computed) {
+        if (!d.csvRow) continue;
+        for (const f of ['lead_category', 'assigned_to'] as const) {
+          const v = (d.csvRow as unknown as Record<string, string>)[f];
+          if (!v) continue;
+          const resolved = resolveRelationValue(f, v, maps);
+          // Only warn for assigned_to (we auto-create lead categories on apply)
+          if (resolved.unresolved && f === 'assigned_to') {
+            warnings.push({ rowId: d.rowId, companyName: d.csvRow.company_name, field: f, value: v });
+          }
+        }
+      }
+      setRelationWarnings(warnings);
+
       setStage('review');
     } catch (err: unknown) {
       setParseError(err instanceof Error ? err.message : 'Failed to fetch database records.');
@@ -715,7 +767,7 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
       try {
         if (diff.action === 'create' && diff.csvRow) {
           addLog({ type: 'info', message: `Creating: ${diff.csvRow.company_name}` });
-          const payload: Partial<Company> = buildCompanyPayloadFromCsv(diff.csvRow);
+          const payload: Partial<Company> = await buildCompanyPayloadFromCsv(diff.csvRow);
           if (!payload.assigned_to && user?.id) payload.assigned_to = user.id;
           const created = await pb.collection(COLLECTIONS.COMPANIES).create<Company>(payload);
 
@@ -741,10 +793,10 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
           addLog({ type: 'info', message: `Updating: ${diff.dbRecord.company_name}` });
 
           // Build payload from field diffs where resolution = use_new
-          const payload: Partial<Company> = {};
+          const payload: Record<string, unknown> = {};
           for (const fd of diff.fieldDiffs) {
             if (fd.hasChanged && fd.resolution === 'use_new') {
-              (payload as Record<string, unknown>)[fd.field] = fd.newValue;
+              payload[fd.field] = await coerceFieldForPayload(fd.field, fd.newValue);
             }
           }
           if (Object.keys(payload).length > 0) {
@@ -825,30 +877,83 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  function buildCompanyPayloadFromCsv(row: CsvCompanyRow): Partial<Company> {
-    return {
-      company_name: row.company_name,
-      owner_name: row.owner_name || undefined,
-      company_location: row.company_location || undefined,
-      google_maps_link: row.google_maps_link || undefined,
-      website: extractWebsiteFromName(row.company_name),
-      source: row.source || undefined,
-      instagram_handle: row.instagram_handle || undefined,
-      email: row.email || undefined,
-      status: row.status ? (Array.isArray(row.status) ? row.status : [row.status]) as string[] : undefined,
-      first_contacted: row.first_contacted || undefined,
-      last_contacted: row.last_contacted || undefined,
-      notes: row.notes || undefined,
-      contact_source: row.contact_source || undefined,
-    };
+  async function ensureLeadCategoryId(name: string): Promise<string> {
+    const trimmed = name.trim();
+    if (!trimmed) return '';
+    if (relationMaps?.leadCategoryByName.has(trimmed.toLowerCase())) {
+      return relationMaps.leadCategoryByName.get(trimmed.toLowerCase()) ?? '';
+    }
+    // Auto-create
+    addLog({ type: 'info', message: `  + Creating lead category "${trimmed}"` });
+    const created = await pb
+      .collection(COLLECTIONS.LEAD_CATEGORIES)
+      .create<LeadCategory>({ name: trimmed });
+    if (relationMaps) {
+      relationMaps.leadCategoryByName.set(trimmed.toLowerCase(), created.id);
+      relationMaps.leadCategoryNameById.set(created.id, created.name);
+    }
+    return created.id;
+  }
+
+  function resolveAssignedTo(value: string): string | null {
+    const v = value.trim();
+    if (!v) return '';
+    const key = v.toLowerCase();
+    return (
+      relationMaps?.userByEmail.get(key) ??
+      relationMaps?.userByName.get(key) ??
+      null
+    );
+  }
+
+  /** Converts a CSV string value into the shape PocketBase expects for that column. */
+  async function coerceFieldForPayload(field: string, value: string): Promise<unknown> {
+    const v = (value ?? '').trim();
+    if (field === 'do_not_contact') {
+      const s = v.toLowerCase();
+      return s === 'true' || s === '1' || s === 'yes' || s === 'y';
+    }
+    if (field === 'status') {
+      if (!v) return [];
+      return v.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (field === 'lead_category') {
+      return v ? await ensureLeadCategoryId(v) : '';
+    }
+    if (field === 'assigned_to') {
+      const id = resolveAssignedTo(v);
+      // null = unresolved (skip silently); '' = explicit clear
+      return id === null ? undefined : id;
+    }
+    return v || undefined;
+  }
+
+  async function buildCompanyPayloadFromCsv(row: CsvCompanyRow): Promise<Partial<Company>> {
+    const payload: Record<string, unknown> = {};
+    for (const f of IMPORTABLE_FIELDS) {
+      const raw = (row as unknown as Record<string, string>)[f] ?? '';
+      const coerced = await coerceFieldForPayload(f, raw);
+      if (coerced !== undefined) payload[f] = coerced;
+    }
+    // Fallback: derive website from company name if URL-like and not provided
+    if (!payload.website) {
+      const derived = extractWebsiteFromName(row.company_name);
+      if (derived) payload.website = derived;
+    }
+    return payload as Partial<Company>;
   }
 
   // ── Filtered diffs for display ─────────────────────────────────────────────
 
   const visibleDiffs = diffs.filter(d => {
     if (!showDeletedInDiff && d.action === 'delete') return false;
-    if (filterTab === 'all') return true;
-    return d.action === filterTab;
+    if (filterTab !== 'all' && d.action !== filterTab) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const name = (d.csvRow?.company_name ?? d.dbRecord?.company_name ?? '').toLowerCase();
+      if (!name.includes(q)) return false;
+    }
+    return true;
   });
 
   const totalToApply = diffs.filter(d => d.companyResolution === 'apply' && d.action !== 'unchanged').length;
@@ -925,40 +1030,122 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 min-h-0">
 
-          {/* Drop zone */}
+          {/* Drop zone + onboarding */}
           {stage === 'drop' && (
-            <div
-              onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
-              onDragLeave={() => setIsDragOver(false)}
-              onDrop={handleDrop}
-              className={cn(
-                'border-2 border-dashed rounded-xl p-12 text-center transition-colors',
-                isDragOver
-                  ? 'border-[var(--primary)] bg-[var(--primary-subtle)]'
-                  : 'border-[var(--card-border)] hover:border-[var(--primary)] hover:bg-[var(--card-hover)]'
-              )}
-            >
-              <FileText size={40} className="mx-auto text-[var(--muted)] mb-4" />
-              <p className="text-sm font-medium mb-1">Drag & drop your leads CSV here</p>
-              <p className="text-xs text-[var(--muted)] mb-4">
-                CSV must be exported from this app (must have <code className="font-mono">id</code> and <code className="font-mono">company_name</code> columns)
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFileSelect(file);
-                }}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2 text-sm rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors"
+            <div className="space-y-5">
+              {/* Step 1: Download template */}
+              <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-4 flex items-start gap-3">
+                <div className="shrink-0 w-7 h-7 rounded-full bg-[var(--primary-subtle)] text-[var(--primary)] flex items-center justify-center text-xs font-bold">
+                  1
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold">Download the template</p>
+                  <p className="text-xs text-[var(--muted)] mt-0.5">
+                    Open the file in Excel / Sheets, fill rows under the headers, and save as CSV.
+                    <span className="font-medium text-[var(--foreground)]"> Do not rename or remove the header row.</span>
+                  </p>
+                </div>
+                <button
+                  onClick={handleDownloadTemplate}
+                  className="shrink-0 px-3 py-1.5 text-xs rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors flex items-center gap-1.5"
+                >
+                  <Download size={12} />
+                  Template
+                </button>
+              </div>
+
+              {/* Step 2: Field reference (collapsible) */}
+              <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)]">
+                <button
+                  onClick={() => setShowFieldRef(s => !s)}
+                  className="w-full flex items-center gap-3 p-4 text-left hover:bg-[var(--card-hover)] transition-colors rounded-xl"
+                >
+                  <div className="shrink-0 w-7 h-7 rounded-full bg-[var(--primary-subtle)] text-[var(--primary)] flex items-center justify-center text-xs font-bold">
+                    2
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold">Fill in your data</p>
+                    <p className="text-xs text-[var(--muted)] mt-0.5">
+                      {CSV_TEMPLATE_HEADERS.length} columns —{' '}
+                      <span className="font-medium text-[var(--foreground)]">company_name</span>{' '}
+                      is required, all others are optional. Tap to view field reference.
+                    </p>
+                  </div>
+                  {showFieldRef ? <ChevronDown size={14} className="text-[var(--muted)]" /> : <ChevronRight size={14} className="text-[var(--muted)]" />}
+                </button>
+                {showFieldRef && (
+                  <div className="border-t border-[var(--card-border)] divide-y divide-[var(--card-border)]">
+                    {CSV_TEMPLATE_HEADERS.map(field => {
+                      const isReq = field === 'company_name';
+                      return (
+                        <div key={field} className="flex items-start gap-3 px-4 py-2.5 text-xs">
+                          <code className="font-mono shrink-0 w-44 text-[var(--primary)]">{field}</code>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[var(--foreground)]">
+                              {FIELD_LABELS[field] ?? field}
+                              {isReq && <span className="ml-2 text-[var(--error)] font-semibold">required</span>}
+                            </p>
+                            <p className="text-[var(--muted)]">
+                              {FIELD_HINTS[field] ?? (field === 'phone_numbers_json' ? 'JSON array of phone records.' : '')}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 3: Drop / browse */}
+              <div
+                onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={handleDrop}
+                className={cn(
+                  'border-2 border-dashed rounded-xl p-8 text-center transition-colors',
+                  isDragOver
+                    ? 'border-[var(--primary)] bg-[var(--primary-subtle)]'
+                    : 'border-[var(--card-border)] hover:border-[var(--primary)] hover:bg-[var(--card-hover)]'
+                )}
               >
-                Browse Files
-              </button>
+                <div className="flex items-center justify-center gap-3 mb-3">
+                  <div className="shrink-0 w-7 h-7 rounded-full bg-[var(--primary-subtle)] text-[var(--primary)] flex items-center justify-center text-xs font-bold">
+                    3
+                  </div>
+                  <p className="text-sm font-semibold">Upload your filled CSV</p>
+                </div>
+                <FileText size={32} className="mx-auto text-[var(--muted)] mb-3" />
+                <p className="text-xs text-[var(--muted)] mb-4">
+                  Drag & drop here, or browse below. Existing companies will be matched by{' '}
+                  <code className="font-mono">id</code> first, then by <code className="font-mono">company_name</code>.
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileSelect(file);
+                  }}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 text-sm rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors"
+                >
+                  Browse Files
+                </button>
+              </div>
+
+              {/* Tip */}
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-[var(--primary-subtle)] text-xs text-[var(--primary)]">
+                <Info size={14} className="shrink-0 mt-0.5" />
+                <p>
+                  Leave the <code className="font-mono">id</code> column blank for new companies — fill it only when updating
+                  rows you previously exported. <code className="font-mono">lead_category</code> is matched by name (and auto-created
+                  if it doesn&rsquo;t exist); <code className="font-mono">assigned_to</code> must match a user&rsquo;s email.
+                </p>
+              </div>
             </div>
           )}
 
@@ -1003,7 +1190,17 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
           {/* Review stage */}
           {stage === 'review' && (
             <div className="space-y-4">
-              {/* Warnings */}
+              {/* File summary */}
+              {fileName && (
+                <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                  <FileText size={12} />
+                  <span className="font-mono truncate">{fileName}</span>
+                  <span>·</span>
+                  <span>{diffs.length} row{diffs.length !== 1 ? 's' : ''}</span>
+                </div>
+              )}
+
+              {/* Parsing warnings */}
               {parseWarnings.length > 0 && (
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-[var(--warning-subtle)] text-[var(--warning)] text-xs">
                   <AlertCircle size={14} className="mt-0.5 shrink-0" />
@@ -1012,6 +1209,29 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
                     <ul className="mt-1 space-y-0.5 text-[var(--muted)]">
                       {parseWarnings.slice(0, 3).map((w, i) => <li key={i}>{w}</li>)}
                       {parseWarnings.length > 3 && <li>...and {parseWarnings.length - 3} more</li>}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* Relation warnings (unresolved assigned_to) */}
+              {relationWarnings.length > 0 && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-[var(--warning-subtle)] text-[var(--warning)] text-xs">
+                  <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      {relationWarnings.length} row{relationWarnings.length !== 1 ? 's' : ''} reference an unknown user
+                    </p>
+                    <p className="text-[var(--muted)] mt-0.5">
+                      These will be left unassigned. Use a registered user&rsquo;s email under <code className="font-mono">assigned_to</code>.
+                    </p>
+                    <ul className="mt-1.5 space-y-0.5 text-[var(--muted)] max-h-20 overflow-y-auto">
+                      {relationWarnings.slice(0, 5).map((w, i) => (
+                        <li key={i} className="truncate">
+                          <span className="font-medium text-[var(--foreground)]">{w.companyName}</span> → &ldquo;{w.value}&rdquo;
+                        </li>
+                      ))}
+                      {relationWarnings.length > 5 && <li>...and {relationWarnings.length - 5} more</li>}
                     </ul>
                   </div>
                 </div>
@@ -1054,6 +1274,18 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
                   <option value="use_new_all">Use new values for all fields</option>
                   <option value="use_old_all">Keep old values for all fields</option>
                 </select>
+
+                {/* Search box */}
+                <div className="relative flex-1 min-w-[180px] max-w-xs">
+                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search company..."
+                    className="w-full pl-7 pr-2 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:border-[var(--primary)] focus:outline-none transition-colors"
+                  />
+                </div>
 
                 {/* Show deleted toggle */}
                 {hasDeletes && (

@@ -5,11 +5,15 @@ import { createPortal } from 'react-dom';
 import { X, Search, Filter, Building2, Phone, Check, ChevronDown, ChevronUp, Plus, Trash2, MapPin, User, Loader2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS } from '@/lib/types';
-import type { Company, PhoneNumber } from '@/lib/types';
+import type { Company, PhoneNumber, User as UserType, LeadCategory } from '@/lib/types';
 import { sanitizeFilterValue } from '@/lib/utils';
 import { getOutcomeColors, DEFAULT_OUTCOMES } from '@/lib/call-outcomes';
 
 const COMPANY_STATUSES = ['Cold No Reply', 'Replied', 'Warm', 'Booked', 'Paid', 'Client', 'Excluded'] as const;
+const CALL_DIRECTIONS = ['outbound', 'inbound'] as const;
+const SOURCES = ['Cold Call', 'Google Maps', 'Manual', 'Instagram'] as const;
+
+type FilterLogic = 'AND' | 'OR';
 
 export interface CRMImportEntry {
     number: string;
@@ -33,8 +37,9 @@ interface FilterRule {
 type FilterField = {
     key: string;
     label: string;
-    type: 'text' | 'boolean' | 'date' | 'select' | 'json_array' | 'rel_select' | 'rel_text' | 'rel_boolean';
+    type: 'text' | 'boolean' | 'date' | 'select' | 'json_array' | 'number' | 'rel_id' | 'rel_select' | 'rel_text' | 'rel_boolean' | 'rel_number' | 'rel_date';
     options?: readonly string[];
+    relCollection?: 'users' | 'lead_categories';
     group?: string;
 };
 
@@ -43,25 +48,41 @@ const FILTER_FIELDS: readonly FilterField[] = [
     { key: 'company_name', label: 'Company Name', type: 'text', group: 'Company' },
     { key: 'owner_name', label: 'Owner Name', type: 'text', group: 'Company' },
     { key: 'status', label: 'Status', type: 'json_array', options: COMPANY_STATUSES, group: 'Company' },
-    { key: 'source', label: 'Source', type: 'text', group: 'Company' },
+    { key: 'source', label: 'Source', type: 'select', options: SOURCES, group: 'Company' },
     { key: 'company_location', label: 'Location', type: 'text', group: 'Company' },
     { key: 'industry', label: 'Industry', type: 'text', group: 'Company' },
     { key: 'price_range', label: 'Price Range', type: 'text', group: 'Company' },
     { key: 'google_rating', label: 'Google Rating', type: 'text', group: 'Company' },
+    { key: 'google_reviews_count', label: 'Google Reviews Count', type: 'text', group: 'Company' },
     { key: 'notes', label: 'Notes Include', type: 'text', group: 'Company' },
+    { key: 'instagram_handle', label: 'Instagram Handle', type: 'text', group: 'Company' },
+    { key: 'contact_source', label: 'Contact Source', type: 'text', group: 'Company' },
     { key: 'first_contacted', label: 'First Contacted', type: 'date', group: 'Company' },
     { key: 'last_contacted', label: 'Last Contacted', type: 'date', group: 'Company' },
     { key: 'email', label: 'Has Email', type: 'boolean', group: 'Company' },
     { key: 'website', label: 'Has Website', type: 'boolean', group: 'Company' },
+    { key: 'instagram_handle_present', label: 'Has Instagram', type: 'boolean', group: 'Company' },
     { key: 'do_not_contact', label: 'Do Not Contact', type: 'boolean', group: 'Company' },
+
+    // ── Assignment / categorization ──
+    { key: 'assigned_to', label: 'Assignee', type: 'rel_id', relCollection: 'users', group: 'Assignment' },
+    { key: 'assigned_to_present', label: 'Has Assignee', type: 'boolean', group: 'Assignment' },
+    { key: 'lead_category', label: 'Lead Category', type: 'rel_id', relCollection: 'lead_categories', group: 'Assignment' },
+    { key: 'lead_category_present', label: 'Has Lead Category', type: 'boolean', group: 'Assignment' },
 
     // ── Call history (any call) ──
     { key: 'call_logs_via_company.call_outcome', label: 'Call Outcome Includes', type: 'rel_select', options: [...DEFAULT_OUTCOMES, 'Other'], group: 'Calls' },
-    { key: 'call_logs_via_company.post_call_notes', label: 'Post-Call Notes Include', type: 'rel_text', group: 'Calls' },
+    { key: 'call_logs_via_company.direction', label: 'Call Direction', type: 'rel_select', options: CALL_DIRECTIONS, group: 'Calls' },
     { key: 'call_logs_via_company.status_changed_to', label: 'Call Status Changed To', type: 'rel_select', options: COMPANY_STATUSES, group: 'Calls' },
+    { key: 'call_logs_via_company.caller', label: 'Called By', type: 'rel_id', relCollection: 'users', group: 'Calls' },
+    { key: 'call_logs_via_company.post_call_notes', label: 'Post-Call Notes Include', type: 'rel_text', group: 'Calls' },
     { key: 'call_logs_via_company.owner_reached', label: 'Owner Reached On Call', type: 'rel_boolean', group: 'Calls' },
     { key: 'call_logs_via_company.appointment_set', label: 'Appointment Set', type: 'rel_boolean', group: 'Calls' },
-    { key: 'call_logs_via_company.call_time', label: 'Last Call Date', type: 'date', group: 'Calls' },
+    { key: 'call_logs_via_company.pitch_completed', label: 'Pitch Completed', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.has_recording', label: 'Has Recording', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.duration', label: 'Total Call Duration (s)', type: 'rel_number', group: 'Calls' },
+    { key: 'call_logs_via_company.call_duration', label: 'Talk Duration (s)', type: 'rel_number', group: 'Calls' },
+    { key: 'call_logs_via_company.call_time', label: 'Call Date', type: 'rel_date', group: 'Calls' },
 
     // ── Company notes (pre-call / research) ──
     { key: 'company_notes_via_company.content', label: 'Pre-Call Note Includes', type: 'rel_text', group: 'Notes' },
@@ -87,9 +108,18 @@ const OPERATORS: Record<string, { key: string; label: string }[]> = {
         { key: '>', label: 'after' },
         { key: '<', label: 'before' },
     ],
+    number: [
+        { key: '>=', label: 'at least' },
+        { key: '<=', label: 'at most' },
+        { key: '=', label: 'equals' },
+    ],
     json_array: [
         { key: '?=', label: 'includes' },
         { key: '?!=', label: 'excludes' },
+    ],
+    rel_id: [
+        { key: '=', label: 'is' },
+        { key: '!=', label: 'is not' },
     ],
     rel_select: [
         { key: '?=', label: 'includes' },
@@ -103,6 +133,17 @@ const OPERATORS: Record<string, { key: string; label: string }[]> = {
         { key: '?=', label: 'is true' },
         { key: '?!=', label: 'is false or missing' },
     ],
+    rel_number: [
+        { key: '?>=', label: 'at least' },
+        { key: '?<=', label: 'at most' },
+        { key: '?=', label: 'equals' },
+    ],
+    rel_date: [
+        { key: '?>=', label: 'on or after' },
+        { key: '?<=', label: 'on or before' },
+        { key: '?>', label: 'after' },
+        { key: '?<', label: 'before' },
+    ],
 };
 
 function getFieldType(fieldKey: string): FilterField['type'] {
@@ -115,9 +156,20 @@ function getFieldOptions(fieldKey: string): string[] | undefined {
     return field?.options ? [...field.options] : undefined;
 }
 
+function getFieldDef(fieldKey: string): FilterField | undefined {
+    return FILTER_FIELDS.find(f => f.key === fieldKey);
+}
+
 function isRelFilter(f: FilterRule): boolean {
     return f.field.includes('_via_');
 }
+
+// Map "virtual" presence-style fields back to their underlying column.
+const PRESENCE_FIELD_MAP: Record<string, string> = {
+    instagram_handle_present: 'instagram_handle',
+    assigned_to_present: 'assigned_to',
+    lead_category_present: 'lead_category',
+};
 
 // Build a "quoted JSON token" filter clause for a field stored as a JSON array.
 // PB's `?=` isn't supported on this server, so we fall back to substring-matching
@@ -129,23 +181,38 @@ function buildJsonArrayClause(field: string, op: string, value: string): string 
     return `${field} ${likeOp} "${safeValue}"`;
 }
 
-function buildDirectFilter(filters: FilterRule[]): string {
-    return filters
+function buildDirectClause(f: FilterRule): string {
+    const type = getFieldType(f.field);
+    const realField = PRESENCE_FIELD_MAP[f.field] ?? f.field;
+    if (type === 'boolean') {
+        return f.operator === '!=' ? `${realField} != ""` : `${realField} = ""`;
+    }
+    if (type === 'json_array') {
+        if (!f.value) return '';
+        return buildJsonArrayClause(realField, f.operator, f.value);
+    }
+    if (type === 'rel_id') {
+        if (!f.value) return '';
+        const safeValue = sanitizeFilterValue(f.value);
+        return `${realField} ${f.operator} "${safeValue}"`;
+    }
+    if (type === 'number') {
+        if (f.value === '' || isNaN(Number(f.value))) return '';
+        return `${realField} ${f.operator} ${Number(f.value)}`;
+    }
+    if (!f.value) return '';
+    const safeValue = sanitizeFilterValue(f.value);
+    return `${realField} ${f.operator} "${safeValue}"`;
+}
+
+function buildDirectFilter(filters: FilterRule[], logic: FilterLogic): string {
+    const parts = filters
         .filter(f => f.field && f.operator && !isRelFilter(f))
-        .map(f => {
-            const type = getFieldType(f.field);
-            if (type === 'boolean') {
-                return f.operator === '!=' ? `${f.field} != ""` : `${f.field} = ""`;
-            }
-            if (type === 'json_array') {
-                if (!f.value) return '';
-                return buildJsonArrayClause(f.field, f.operator, f.value);
-            }
-            const safeValue = sanitizeFilterValue(f.value);
-            return `${f.field} ${f.operator} "${safeValue}"`;
-        })
-        .filter(Boolean)
-        .join(' && ');
+        .map(buildDirectClause)
+        .filter(Boolean);
+    if (parts.length === 0) return '';
+    const joiner = logic === 'OR' ? ' || ' : ' && ';
+    return parts.map(p => `(${p})`).join(joiner);
 }
 
 // Fields on related collections stored as JSON arrays (multi-select).
@@ -164,6 +231,12 @@ async function fetchCompanyIdsForRelFilter(f: FilterRule): Promise<Set<string>> 
     let filterStr: string;
     if (type === 'rel_boolean') {
         filterStr = directOp === '=' ? `${relField} = true` : `${relField} != true`;
+    } else if (type === 'rel_number') {
+        if (f.value === '' || isNaN(Number(f.value))) return new Set();
+        filterStr = `${relField} ${directOp} ${Number(f.value)}`;
+    } else if (type === 'rel_date') {
+        if (!f.value) return new Set();
+        filterStr = `${relField} ${directOp} "${sanitizeFilterValue(f.value)}"`;
     } else {
         if (!f.value) return new Set();
         if (type === 'rel_select' && ARRAY_REL_FIELDS.has(relField)) {
@@ -213,17 +286,42 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
 
     // Filter state
     const [filters, setFilters] = useState<FilterRule[]>([]);
+    const [filterLogic, setFilterLogic] = useState<FilterLogic>('AND');
     const [filterResults, setFilterResults] = useState<CompanyWithPhones[]>([]);
     const [filterLoading, setFilterLoading] = useState(false);
     const [filterMatchCount, setFilterMatchCount] = useState<number | null>(null);
     const [filterPage, setFilterPage] = useState(1);
     const [filterTotalPages, setFilterTotalPages] = useState(1);
 
+    // Lookup data for relation-based filters
+    const [users, setUsers] = useState<UserType[]>([]);
+    const [leadCategories, setLeadCategories] = useState<LeadCategory[]>([]);
+
     // Selection state — map of phoneNumber.id → { number, companyName }
     const [selected, setSelected] = useState<Map<string, { number: string; company: string }>>(new Map());
 
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const searchSeqRef = useRef(0);
+    const filterSeqRef = useRef(0);
     const PER_PAGE = 25;
+
+    // Load lookup data once when the modal first opens
+    useEffect(() => {
+        if (!open) return;
+        if (users.length > 0 && leadCategories.length > 0) return;
+        (async () => {
+            try {
+                const [u, c] = await Promise.all([
+                    pb.collection(COLLECTIONS.USERS).getFullList<UserType>({ fields: 'id,name,email', sort: 'name' }),
+                    pb.collection(COLLECTIONS.LEAD_CATEGORIES).getFullList<LeadCategory>({ sort: 'name' }),
+                ]);
+                setUsers(u);
+                setLeadCategories(c);
+            } catch (err) {
+                console.error('[CRM import] failed to load lookups', err);
+            }
+        })();
+    }, [open, users.length, leadCategories.length]);
 
     // Focus search input on open
     useEffect(() => {
@@ -239,6 +337,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
             setSearchResults([]);
             setFilterResults([]);
             setFilters([]);
+            setFilterLogic('AND');
             setSelected(new Map());
             setFilterMatchCount(null);
             setFilterPage(1);
@@ -248,44 +347,77 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
     // ── Search logic ──
 
     const doSearch = useCallback(async (query: string) => {
-        if (!query.trim()) {
+        const trimmed = query.trim();
+        if (!trimmed) {
             setSearchResults([]);
+            setSearchLoading(false);
             return;
         }
+        const seq = ++searchSeqRef.current;
         setSearchLoading(true);
         try {
-            const safeQ = sanitizeFilterValue(query.trim());
-            const filter = `(company_name ~ "${safeQ}" || owner_name ~ "${safeQ}") && do_not_contact != true`;
-            const companies = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(1, 30, {
-                filter,
-                sort: '-updated',
-            });
-            // Fetch phone numbers for matching companies
-            if (companies.items.length > 0) {
-                const companyIds = companies.items.map(c => c.id);
-                const phoneFilter = companyIds.map(id => `company = "${id}"`).join(' || ');
-                const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
-                    filter: phoneFilter,
+            const safeQ = sanitizeFilterValue(trimmed);
+            const companyFilter = `(company_name ~ "${safeQ}" || owner_name ~ "${safeQ}" || email ~ "${safeQ}" || instagram_handle ~ "${safeQ}" || website ~ "${safeQ}") && do_not_contact != true`;
+
+            // Look up companies matching by their own fields, plus companies whose phone numbers match
+            const [byCompany, byPhone] = await Promise.all([
+                pb.collection(COLLECTIONS.COMPANIES).getList<Company>(1, 30, {
+                    filter: companyFilter,
+                    sort: '-updated',
+                }),
+                pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
+                    filter: `phone_number ~ "${safeQ}" && disassociated != true`,
+                    batch: 100,
+                    fields: 'id,company,phone_number,label,location_name,disassociated',
+                }).catch(() => [] as PhoneNumber[]),
+            ]);
+
+            if (seq !== searchSeqRef.current) return; // a newer search has superseded this one
+
+            const companyMap = new Map<string, Company>();
+            byCompany.items.forEach(c => companyMap.set(c.id, c));
+
+            // Fetch the additional companies referenced by matching phone numbers
+            const extraIds = Array.from(new Set(byPhone.map(p => p.company).filter(id => id && !companyMap.has(id))));
+            if (extraIds.length > 0) {
+                const idClause = extraIds.map(id => `id = "${id}"`).join(' || ');
+                const extra = await pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
+                    filter: `(${idClause}) && do_not_contact != true`,
                 });
-                const phoneMap = new Map<string, PhoneNumber[]>();
-                for (const p of phones) {
-                    if (p.disassociated) continue;
-                    const arr = phoneMap.get(p.company) ?? [];
-                    arr.push(p);
-                    phoneMap.set(p.company, arr);
-                }
-                setSearchResults(companies.items.map(c => ({
-                    company: c,
-                    phones: phoneMap.get(c.id) ?? [],
-                    expanded: false,
-                })));
-            } else {
+                if (seq !== searchSeqRef.current) return;
+                extra.forEach(c => companyMap.set(c.id, c));
+            }
+
+            const companies = Array.from(companyMap.values()).sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
+            if (companies.length === 0) {
+                setSearchResults([]);
+                return;
+            }
+
+            const companyIds = companies.map(c => c.id);
+            const phoneFilter = companyIds.map(id => `company = "${id}"`).join(' || ');
+            const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({ filter: phoneFilter });
+            if (seq !== searchSeqRef.current) return;
+
+            const phoneMap = new Map<string, PhoneNumber[]>();
+            for (const p of phones) {
+                if (p.disassociated) continue;
+                const arr = phoneMap.get(p.company) ?? [];
+                arr.push(p);
+                phoneMap.set(p.company, arr);
+            }
+            setSearchResults(companies.map(c => ({
+                company: c,
+                phones: phoneMap.get(c.id) ?? [],
+                expanded: false,
+            })));
+        } catch (err) {
+            if (seq === searchSeqRef.current) {
+                console.error('[CRM search] failed', err);
                 setSearchResults([]);
             }
-        } catch {
-            setSearchResults([]);
         } finally {
-            setSearchLoading(false);
+            if (seq === searchSeqRef.current) setSearchLoading(false);
         }
     }, []);
 
@@ -298,118 +430,172 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
 
     // ── Filter logic ──
 
+    const attachPhones = useCallback(async (companies: Company[]): Promise<CompanyWithPhones[]> => {
+        if (companies.length === 0) return [];
+        const phoneFilter = companies.map(c => `company = "${c.id}"`).join(' || ');
+        const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({ filter: phoneFilter });
+        const phoneMap = new Map<string, PhoneNumber[]>();
+        for (const p of phones) {
+            if (p.disassociated) continue;
+            const arr = phoneMap.get(p.company) ?? [];
+            arr.push(p);
+            phoneMap.set(p.company, arr);
+        }
+        return companies.map(c => ({ company: c, phones: phoneMap.get(c.id) ?? [], expanded: false }));
+    }, []);
+
     const doFilterSearch = useCallback(async (page: number) => {
+        const seq = ++filterSeqRef.current;
         setFilterLoading(true);
         try {
-            // 1. Resolve any cross-table filters to company IDs
             const relFilters = filters.filter(isRelFilter);
-            let allowedIds: Set<string> | null = null;
-            for (const rf of relFilters) {
+            const directFilters = filters.filter(f => f.field && f.operator && !isRelFilter(f));
+
+            // Resolve every cross-table rule independently to its set of company IDs
+            const relIdSets = await Promise.all(relFilters.map(async rf => {
                 const type = getFieldType(rf.field);
-                if (type !== 'rel_boolean' && !rf.value) continue; // skip empty rules
-                const ids = await fetchCompanyIdsForRelFilter(rf);
-                if (allowedIds === null) {
-                    allowedIds = ids;
+                if (type !== 'rel_boolean' && !rf.value) return null;
+                return await fetchCompanyIdsForRelFilter(rf);
+            }));
+            if (seq !== filterSeqRef.current) return;
+
+            const validRelIdSets = relIdSets.filter((s): s is Set<string> => s !== null);
+
+            const directFilterStr = buildDirectFilter(directFilters, filterLogic);
+            const hasDoNotContactFilter = filters.some(f => f.field === 'do_not_contact');
+            const dncClause = hasDoNotContactFilter ? '' : 'do_not_contact != true';
+
+            // ── Combine the rel-filter ID sets with the direct PB filter according to logic ──
+            // AND mode → intersect all rel ID sets; query is (direct) && id IN intersection
+            // OR mode  → union all rel ID sets; query is (direct) || id IN union
+            let allowedIds: Set<string> | null = null;
+            if (validRelIdSets.length > 0) {
+                if (filterLogic === 'AND') {
+                    allowedIds = validRelIdSets.reduce<Set<string> | null>((acc, s) => {
+                        if (acc === null) return new Set(s);
+                        const next = new Set<string>();
+                        for (const id of acc) if (s.has(id)) next.add(id);
+                        return next;
+                    }, null);
                 } else {
-                    const prev: Set<string> = allowedIds;
-                    allowedIds = new Set(Array.from(prev).filter(id => ids.has(id)));
+                    allowedIds = new Set<string>();
+                    for (const s of validRelIdSets) for (const id of s) allowedIds.add(id);
                 }
-                if (allowedIds.size === 0) break; // short-circuit
             }
 
-            // 2. Build direct filter
-            const filterStr = buildDirectFilter(filters);
-            const hasDoNotContactFilter = filters.some(f => f.field === 'do_not_contact');
-            const baseParts = [filterStr];
-            if (!hasDoNotContactFilter) baseParts.push('do_not_contact != true');
-            const baseFilter = baseParts.filter(Boolean).join(' && ');
+            // In AND mode an empty intersection means zero results, regardless of direct filters.
+            if (filterLogic === 'AND' && allowedIds !== null && allowedIds.size === 0) {
+                setFilterMatchCount(0);
+                setFilterTotalPages(1);
+                setFilterResults([]);
+                return;
+            }
 
-            // 3. When cross-table filters resolved to a finite set of IDs, fetch
-            //    companies in chunks to avoid URL-length limits with large id lists.
-            if (allowedIds !== null) {
-                if (allowedIds.size === 0) {
+            // ── Fast path: no rel filters → single paginated PB query ──
+            if (validRelIdSets.length === 0) {
+                const baseFilter = [directFilterStr, dncClause].filter(Boolean).join(' && ');
+                const companies = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, PER_PAGE, {
+                    filter: baseFilter || undefined,
+                    sort: '-updated',
+                });
+                if (seq !== filterSeqRef.current) return;
+                setFilterMatchCount(companies.totalItems);
+                setFilterTotalPages(companies.totalPages);
+                const withPhones = await attachPhones(companies.items);
+                if (seq !== filterSeqRef.current) return;
+                setFilterResults(withPhones);
+                return;
+            }
+
+            // ── Slow path: rel filters present → fetch matching companies in chunks ──
+            const idList = allowedIds ? [...allowedIds] : [];
+            const CHUNK = 50;
+            const chunks: string[][] = [];
+            for (let i = 0; i < idList.length; i += CHUNK) chunks.push(idList.slice(i, i + CHUNK));
+
+            // Build a closure that combines the direct filter with an id clause for a chunk.
+            const buildChunkFilter = (idClause: string) => {
+                let combined: string;
+                if (filterLogic === 'AND') {
+                    combined = [directFilterStr, idClause ? `(${idClause})` : ''].filter(Boolean).join(' && ');
+                } else {
+                    // OR: direct OR id
+                    const parts = [directFilterStr, idClause].filter(Boolean);
+                    combined = parts.length === 0 ? '' : parts.length === 1 ? parts[0] : `(${parts.join(') || (')})`;
+                }
+                return [combined, dncClause].filter(Boolean).join(' && ');
+            };
+
+            const queries: Promise<Company[]>[] = [];
+
+            if (filterLogic === 'AND') {
+                // We must restrict to the intersection of IDs.
+                if (chunks.length === 0) {
                     setFilterMatchCount(0);
                     setFilterTotalPages(1);
                     setFilterResults([]);
                     return;
                 }
-                const idList = [...allowedIds];
-                const CHUNK = 50;
-                const chunks: string[][] = [];
-                for (let i = 0; i < idList.length; i += CHUNK) chunks.push(idList.slice(i, i + CHUNK));
-
-                const chunkResults = await Promise.all(chunks.map(chunk => {
+                for (const chunk of chunks) {
                     const idClause = chunk.map(id => `id = "${id}"`).join(' || ');
-                    const chunkFilter = [baseFilter, `(${idClause})`].filter(Boolean).join(' && ');
-                    return pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
-                        filter: chunkFilter,
+                    queries.push(pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
+                        filter: buildChunkFilter(idClause),
                         sort: '-updated',
-                    });
-                }));
-                const allCompanies = chunkResults.flat();
-                // De-dupe + sort (already sorted within chunks, merge-sort by updated desc)
-                const seen = new Set<string>();
-                const unique = allCompanies.filter(c => (seen.has(c.id) ? false : (seen.add(c.id), true)));
-                unique.sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
-                const total = unique.length;
-                const pageItems = unique.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-                setFilterMatchCount(total);
-                setFilterTotalPages(Math.max(1, Math.ceil(total / PER_PAGE)));
-
-                if (pageItems.length === 0) {
+                    }));
+                }
+            } else {
+                // OR mode: a company matches if it's in the rel-id union OR satisfies the direct filter.
+                // Run direct filter as one query, plus chunked id queries; then union results.
+                if (directFilterStr) {
+                    queries.push(pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
+                        filter: [directFilterStr, dncClause].filter(Boolean).join(' && '),
+                        sort: '-updated',
+                    }));
+                }
+                if (chunks.length === 0 && !directFilterStr) {
+                    setFilterMatchCount(0);
+                    setFilterTotalPages(1);
                     setFilterResults([]);
                     return;
                 }
-                const companyIds = pageItems.map(c => c.id);
-                const phoneFilter = companyIds.map(id => `company = "${id}"`).join(' || ');
-                const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({ filter: phoneFilter });
-                const phoneMap = new Map<string, PhoneNumber[]>();
-                for (const p of phones) {
-                    if (p.disassociated) continue;
-                    const arr = phoneMap.get(p.company) ?? [];
-                    arr.push(p);
-                    phoneMap.set(p.company, arr);
+                for (const chunk of chunks) {
+                    const idClause = chunk.map(id => `id = "${id}"`).join(' || ');
+                    queries.push(pb.collection(COLLECTIONS.COMPANIES).getFullList<Company>({
+                        filter: [`(${idClause})`, dncClause].filter(Boolean).join(' && '),
+                        sort: '-updated',
+                    }));
                 }
-                setFilterResults(pageItems.map(c => ({ company: c, phones: phoneMap.get(c.id) ?? [], expanded: false })));
-                return;
             }
 
-            // 4. No cross-table filters — standard paginated query
-            const companies = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, PER_PAGE, {
-                filter: baseFilter || undefined,
-                sort: '-updated',
-            });
-            setFilterMatchCount(companies.totalItems);
-            setFilterTotalPages(companies.totalPages);
-
-            if (companies.items.length > 0) {
-                const companyIds = companies.items.map(c => c.id);
-                const phoneFilter = companyIds.map(id => `company = "${id}"`).join(' || ');
-                const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
-                    filter: phoneFilter,
-                });
-                const phoneMap = new Map<string, PhoneNumber[]>();
-                for (const p of phones) {
-                    if (p.disassociated) continue;
-                    const arr = phoneMap.get(p.company) ?? [];
-                    arr.push(p);
-                    phoneMap.set(p.company, arr);
+            const chunkResults = await Promise.all(queries);
+            if (seq !== filterSeqRef.current) return;
+            const seen = new Set<string>();
+            const unique: Company[] = [];
+            for (const list of chunkResults) {
+                for (const c of list) {
+                    if (seen.has(c.id)) continue;
+                    seen.add(c.id);
+                    unique.push(c);
                 }
-                setFilterResults(companies.items.map(c => ({
-                    company: c,
-                    phones: phoneMap.get(c.id) ?? [],
-                    expanded: false,
-                })));
-            } else {
+            }
+            unique.sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
+            const total = unique.length;
+            const pageItems = unique.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+            setFilterMatchCount(total);
+            setFilterTotalPages(Math.max(1, Math.ceil(total / PER_PAGE)));
+            const withPhones = await attachPhones(pageItems);
+            if (seq !== filterSeqRef.current) return;
+            setFilterResults(withPhones);
+        } catch (err) {
+            if (seq === filterSeqRef.current) {
+                console.error('[CRM filter] search failed', err);
                 setFilterResults([]);
+                setFilterMatchCount(null);
             }
-        } catch {
-            setFilterResults([]);
-            setFilterMatchCount(null);
         } finally {
-            setFilterLoading(false);
+            if (seq === filterSeqRef.current) setFilterLoading(false);
         }
-    }, [filters]);
+    }, [filters, filterLogic, attachPhones]);
 
     // A filter rule is "ready" if it has a value — or is a value-less boolean type
     const filterIsReady = (f: FilterRule) => {
@@ -427,7 +613,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
         }
         const timeout = setTimeout(() => doFilterSearch(1), 500);
         return () => clearTimeout(timeout);
-    }, [filters, tab, doFilterSearch, allFiltersReady]);
+    }, [filters, filterLogic, tab, doFilterSearch, allFiltersReady]);
 
     // ── Selection helpers ──
 
@@ -505,7 +691,14 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                 const newType = getFieldType(updates.field);
                 const ops = OPERATORS[newType];
                 newFilter.operator = ops?.[0]?.key ?? '=';
-                newFilter.value = '';
+                const def = getFieldDef(updates.field);
+                if (newType === 'rel_id' && def?.relCollection === 'users') {
+                    newFilter.value = users[0]?.id ?? '';
+                } else if (newType === 'rel_id' && def?.relCollection === 'lead_categories') {
+                    newFilter.value = leadCategories[0]?.id ?? '';
+                } else {
+                    newFilter.value = '';
+                }
             }
             return newFilter;
         }));
@@ -595,6 +788,31 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                     {/* ── Filters Tab ── */}
                     {tab === 'filters' && (
                         <>
+                            {/* AND / OR mode toggle */}
+                            <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-[var(--sidebar-bg)] border border-[var(--card-border)]">
+                                <div className="text-xs text-[var(--muted)]">
+                                    Match {filterLogic === 'AND' ? (
+                                        <span className="font-semibold text-[var(--foreground)]">all conditions</span>
+                                    ) : (
+                                        <span className="font-semibold text-[var(--foreground)]">any condition</span>
+                                    )}
+                                </div>
+                                <div className="inline-flex rounded-lg border border-[var(--card-border)] overflow-hidden text-xs">
+                                    <button
+                                        onClick={() => setFilterLogic('AND')}
+                                        className={`px-3 py-1 font-semibold transition-colors ${filterLogic === 'AND' ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]'}`}
+                                    >
+                                        AND
+                                    </button>
+                                    <button
+                                        onClick={() => setFilterLogic('OR')}
+                                        className={`px-3 py-1 font-semibold transition-colors border-l border-[var(--card-border)] ${filterLogic === 'OR' ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]'}`}
+                                    >
+                                        OR
+                                    </button>
+                                </div>
+                            </div>
+
                             <div className="space-y-2">
                                 {filters.length === 0 && (
                                     <p className="text-sm text-[var(--muted)] py-3 text-center border border-dashed border-[var(--card-border)] rounded-lg">
@@ -605,17 +823,29 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                                     const fieldType = getFieldType(filter.field);
                                     const operators = OPERATORS[fieldType] ?? OPERATORS.text;
                                     const options = getFieldOptions(filter.field);
+                                    const def = getFieldDef(filter.field);
+                                    const isRelId = fieldType === 'rel_id';
+                                    const isDateLike = fieldType === 'date' || fieldType === 'rel_date';
+                                    const isNumberLike = fieldType === 'number' || fieldType === 'rel_number';
+                                    const valuelessTypes = fieldType === 'boolean' || fieldType === 'rel_boolean';
+                                    const relOptions: { value: string; label: string }[] = isRelId
+                                        ? def?.relCollection === 'users'
+                                            ? users.map(u => ({ value: u.id, label: u.name || u.email || u.id }))
+                                            : def?.relCollection === 'lead_categories'
+                                                ? leadCategories.map(c => ({ value: c.id, label: c.name }))
+                                                : []
+                                        : [];
                                     return (
                                         <div key={index} className="flex items-center gap-2 flex-wrap">
                                             {index > 0 && (
-                                                <span className="text-[10px] font-medium text-[var(--muted)] uppercase w-8">AND</span>
+                                                <span className="text-[10px] font-semibold text-[var(--muted)] uppercase w-8">{filterLogic}</span>
                                             )}
                                             <select
                                                 value={filter.field}
                                                 onChange={e => updateFilter(index, { field: e.target.value })}
                                                 className="px-2.5 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] max-w-[180px]"
                                             >
-                                                {['Company', 'Calls', 'Notes'].map(group => {
+                                                {['Company', 'Assignment', 'Calls', 'Notes'].map(group => {
                                                     const items = FILTER_FIELDS.filter(f => (f.group ?? 'Other') === group);
                                                     if (items.length === 0) return null;
                                                     return (
@@ -636,9 +866,20 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                                                     <option key={op.key} value={op.key}>{op.label}</option>
                                                 ))}
                                             </select>
-                                            {fieldType !== 'boolean' && fieldType !== 'rel_boolean' && (
+                                            {!valuelessTypes && (
                                                 <>
-                                                    {options ? (
+                                                    {isRelId ? (
+                                                        <select
+                                                            value={filter.value}
+                                                            onChange={e => updateFilter(index, { value: e.target.value })}
+                                                            className="px-2.5 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] min-w-[140px]"
+                                                        >
+                                                            <option value="">Select...</option>
+                                                            {relOptions.map(opt => (
+                                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                            ))}
+                                                        </select>
+                                                    ) : options ? (
                                                         <select
                                                             value={filter.value}
                                                             onChange={e => updateFilter(index, { value: e.target.value })}
@@ -649,12 +890,21 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                                                                 <option key={opt} value={opt}>{opt}</option>
                                                             ))}
                                                         </select>
-                                                    ) : fieldType === 'date' ? (
+                                                    ) : isDateLike ? (
                                                         <input
                                                             type="date"
                                                             value={filter.value}
                                                             onChange={e => updateFilter(index, { value: e.target.value })}
                                                             className="px-2.5 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                                                        />
+                                                    ) : isNumberLike ? (
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            value={filter.value}
+                                                            onChange={e => updateFilter(index, { value: e.target.value })}
+                                                            placeholder="0"
+                                                            className="px-2.5 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] text-xs focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-24"
                                                         />
                                                     ) : (
                                                         <input

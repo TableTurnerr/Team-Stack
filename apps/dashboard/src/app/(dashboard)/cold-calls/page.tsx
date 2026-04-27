@@ -5,7 +5,6 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   Phone,
-  Filter,
   Download,
   ChevronDown,
   ChevronUp,
@@ -39,6 +38,7 @@ import { CallButton } from '@/components/call-button';
 import { PageGuard } from '@/components/page-guard';
 import { PhoneNumbersTab } from '@/components/phone-numbers-tab';
 import { RelativeTime } from '@/components/relative-time';
+import { ColdCallsFilterBuilder, buildColdCallsFilter, type ColdCallFilterCondition, type ColdCallFilterLogic } from '@/components/cold-calls-filter-builder';
 import {
   TableContainer,
   IndexCell,
@@ -65,12 +65,6 @@ const CALL_LOG_COLUMNS: ColumnDefinition[] = [
 ];
 
 // ─── Shared Components ───────────────────────────────────────────────────────
-
-// Outcome filter options (built-in outcomes for the filter UI)
-const OUTCOME_FILTER_OPTIONS = [
-  'Interested', 'Not Interested', 'Callback', 'No Answer', 'Fumbled',
-  'Bad Lead', 'Send Email', 'Hung Up (Rude Recep)', 'Hung Up (Other)', 'Missed Call',
-];
 
 function SortLabel({
   label,
@@ -125,8 +119,10 @@ export default function ColdCallsPage() {
 
   // Shared filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [outcomeFilter, setOutcomeFilter] = useState<string[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
+  const [filterConditions, setFilterConditions] = useState<ColdCallFilterCondition[]>([]);
+  const [filterLogic, setFilterLogic] = useState<ColdCallFilterLogic>('AND');
+  const [appliedConditions, setAppliedConditions] = useState<ColdCallFilterCondition[]>([]);
+  const [appliedLogic, setAppliedLogic] = useState<ColdCallFilterLogic>('AND');
   const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({
     field: 'call_time',
     dir: 'desc'
@@ -190,10 +186,9 @@ export default function ColdCallsPage() {
           : `phone_number_record.phone_number ~ "${safe}"`;
         filters.push(`(company.company_name ~ "${safe}" || ${phoneCondition} || owner_name_found ~ "${safe}" || post_call_notes ~ "${safe}")`);
       }
-      if (outcomeFilter.length > 0) {
-        const outcomeConditions = outcomeFilter.map(o => `call_outcome = "${o}"`).join(' || ');
-        filters.push(`(${outcomeConditions})`);
-      }
+      const conditionsFilter = buildColdCallsFilter(appliedConditions, appliedLogic);
+      if (conditionsFilter) filters.push(conditionsFilter);
+
       const sortField = sort.field;
       const result = await pb.collection(COLLECTIONS.CALL_LOGS).getList<CallLog>(callLogsPage, perPage, {
         sort: `${sort.dir === 'desc' ? '-' : ''}${sortField}`,
@@ -211,7 +206,7 @@ export default function ColdCallsPage() {
     } finally {
       setCallLogsLoading(false);
     }
-  }, [callLogsPage, sort, searchTerm, outcomeFilter, isAuthenticated]);
+  }, [callLogsPage, sort, searchTerm, appliedConditions, appliedLogic, isAuthenticated]);
 
   // Fetch on mount and when deps change
   useEffect(() => {
@@ -233,19 +228,6 @@ export default function ColdCallsPage() {
       field,
       dir: prev.field === field && prev.dir === 'desc' ? 'asc' : 'desc'
     }));
-  };
-
-  const toggleOutcomeFilter = (outcome: string) => {
-    setOutcomeFilter(prev =>
-      prev.includes(outcome)
-        ? prev.filter(o => o !== outcome)
-        : [...prev, outcome]
-    );
-  };
-
-  const clearFilters = () => {
-    setSearchTerm('');
-    setOutcomeFilter([]);
   };
 
   // ─── CSV Export ──────────────────────────────────────────────────────────
@@ -277,7 +259,7 @@ export default function ColdCallsPage() {
     URL.revokeObjectURL(url);
   };
 
-  const hasActiveFilters = !!searchTerm || outcomeFilter.length > 0;
+  const hasActiveFilters = !!searchTerm || appliedConditions.length > 0;
   const loading = activeTab === 'call_logs' ? callLogsLoading : false;
 
   if (authLoading) {
@@ -305,23 +287,12 @@ export default function ColdCallsPage() {
 
           {activeTab === 'call_logs' && (
             <>
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
-                  showFilters || outcomeFilter.length > 0
-                    ? "bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]"
-                    : "border-[var(--card-border)] hover:bg-[var(--card-bg)]"
-                )}
-              >
-                <Filter size={16} />
-                Filters
-                {outcomeFilter.length > 0 && (
-                  <span className="ml-1 w-5 h-5 rounded-full bg-[var(--background)]/20 text-xs flex items-center justify-center">
-                    {outcomeFilter.length}
-                  </span>
-                )}
-              </button>
+              <ColdCallsFilterBuilder
+                conditions={filterConditions}
+                logic={filterLogic}
+                onChange={(c, l) => { setFilterConditions(c); setFilterLogic(l); }}
+                onApply={() => { setAppliedConditions(filterConditions); setAppliedLogic(filterLogic); setCallLogsPage(1); }}
+              />
 
               <button
                 onClick={exportToCSV}
@@ -382,42 +353,6 @@ export default function ColdCallsPage() {
           </div>
         </button>
       </div>
-
-      {/* Filters Panel (call logs only) */}
-      {activeTab === 'call_logs' && showFilters && (
-        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-medium">Filters</h3>
-            {outcomeFilter.length > 0 && (
-              <button onClick={clearFilters} className="text-sm text-[var(--primary)] hover:underline">
-                Clear all
-              </button>
-            )}
-          </div>
-          <div>
-            <label className="text-sm text-[var(--muted)] block mb-1">Outcome</label>
-            <div className="flex flex-wrap gap-1">
-              {OUTCOME_FILTER_OPTIONS.map(outcome => {
-                const colors = getOutcomeColors(outcome);
-                return (
-                  <button
-                    key={outcome}
-                    onClick={() => toggleOutcomeFilter(outcome)}
-                    className={cn(
-                      "px-2 py-1 rounded-md text-xs transition-all",
-                      outcomeFilter.includes(outcome)
-                        ? `${colors.bg} ${colors.text}`
-                        : "bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-border)]"
-                    )}
-                  >
-                    {outcome}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Error */}
       {activeTab === 'call_logs' && callLogsError && (

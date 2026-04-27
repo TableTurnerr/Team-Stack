@@ -57,6 +57,7 @@ export const PERMISSION_LABELS: Record<keyof RolePermissions, string> = {
   can_view_recordings: 'View Call Recordings',
   can_delete_recordings: 'Delete Recordings',
   can_manage_sessions: 'Manage Call Sessions',
+  can_access_extension_leads_directly: 'Access Extension Leads Directly (auto-claim on call)',
 };
 
 interface RolePermissionContextType {
@@ -118,6 +119,7 @@ export function RolePermissionProvider({ children }: { children: ReactNode }) {
       can_manage_team: false, can_manage_roles: false, can_view_financial: false,
       can_export_data: false, can_bulk_actions: false, can_manage_email_campaigns: false,
       can_view_recordings: true, can_delete_recordings: false, can_manage_sessions: true,
+      can_access_extension_leads_directly: false,
     };
 
     const managerPageAccess: Record<string, boolean> = {
@@ -126,25 +128,26 @@ export function RolePermissionProvider({ children }: { children: ReactNode }) {
     const managerPerms: Record<string, boolean> = {
       ...memberPerms, can_export_data: true, can_bulk_actions: true,
       can_manage_email_campaigns: true, can_view_financial: true, can_delete_recordings: true,
+      can_access_extension_leads_directly: true,
     };
 
     const defaults = [
       {
         name: 'Admin', color: '#ED4245', position: 0, is_default: false,
         members: adminIds, page_access: allPageAccess, permissions: allPerms,
-        data_access: { companies: { mode: 'all' }, leads: { mode: 'all' } },
+        data_access: { mode: 'all' },
         created_by: adminUserId,
       },
       {
         name: 'Manager', color: '#FEE75C', position: 1, is_default: false,
         members: [] as string[], page_access: managerPageAccess, permissions: managerPerms,
-        data_access: { companies: { mode: 'all' }, leads: { mode: 'all' } },
+        data_access: { mode: 'all' },
         created_by: adminUserId,
       },
       {
         name: 'Member', color: '#57F287', position: 2, is_default: true,
         members: memberIds, page_access: memberPageAccess, permissions: memberPerms,
-        data_access: { companies: { mode: 'all' }, leads: { mode: 'all' } },
+        data_access: { mode: 'assigned' },
         created_by: adminUserId,
       },
     ];
@@ -292,50 +295,36 @@ export function RolePermissionProvider({ children }: { children: ReactNode }) {
 
   const getDataAccess = useCallback((): RoleDataAccess => {
     if (isPreviewMode && previewRole) {
-      return previewRole.data_access || {};
+      return previewRole.data_access || { mode: 'none' };
     }
 
     if (isAdmin) {
-      return {
-        companies: { mode: 'all' },
-        leads: { mode: 'all' },
-      };
+      return { mode: 'all' };
     }
 
-    // Merge data access — if any role grants 'all', use 'all'; otherwise union specific IDs
-    const result: RoleDataAccess = {
-      companies: { mode: 'none', company_ids: [] },
-      leads: { mode: 'none', lead_ids: [] },
-    };
+    // Merge across roles: 'all' wins, then 'specific' (union of IDs), then 'assigned', then 'none'
+    let bestMode: 'specific' | 'assigned' | 'none' = 'none';
+    const ids = new Set<string>();
 
     for (const role of userRoles) {
       const da = role.data_access;
-      if (!da) continue;
+      if (!da?.mode) continue;
 
-      // Companies
-      if (da.companies) {
-        if (da.companies.mode === 'all') {
-          result.companies = { mode: 'all' };
-        } else if (da.companies.mode === 'assigned' && result.companies?.mode !== 'all') {
-          result.companies!.mode = 'assigned';
-          const ids = da.companies.company_ids || [];
-          result.companies!.company_ids = [...new Set([...(result.companies!.company_ids || []), ...ids])];
-        }
+      if (da.mode === 'all') {
+        return { mode: 'all' };
       }
-
-      // Leads
-      if (da.leads) {
-        if (da.leads.mode === 'all') {
-          result.leads = { mode: 'all' };
-        } else if (da.leads.mode === 'assigned' && result.leads?.mode !== 'all') {
-          result.leads!.mode = 'assigned';
-          const ids = da.leads.lead_ids || [];
-          result.leads!.lead_ids = [...new Set([...(result.leads!.lead_ids || []), ...ids])];
-        }
+      if (da.mode === 'specific') {
+        bestMode = 'specific';
+        (da.company_ids || []).forEach(id => ids.add(id));
+      } else if (da.mode === 'assigned' && bestMode !== 'specific') {
+        bestMode = 'assigned';
       }
     }
 
-    return result;
+    if (bestMode === 'specific') {
+      return { mode: 'specific', company_ids: [...ids] };
+    }
+    return { mode: bestMode };
   }, [isAdmin, userRoles, isPreviewMode, previewRole]);
 
   const startPreview = useCallback((role: Role) => {

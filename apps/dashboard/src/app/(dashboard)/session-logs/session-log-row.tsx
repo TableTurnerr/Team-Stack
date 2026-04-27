@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { ChevronDown, ChevronRight, Clock, User, Trash2, Loader2, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, User, Trash2, Loader2, SlidersHorizontal, Copy, Check } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type Recording, type FollowUp } from '@/lib/types';
 import { ManualAdjustmentModal } from '@/app/(dashboard)/session/manual-adjustment-modal';
 import { PerformanceCounterInline } from '@/components/performance-counter-inline';
 import { CallLogsNestedTable } from './call-logs-nested-table';
 import { InlineEditField } from '@/components/inline-edit-field';
+import { getCategoryColors } from '@/components/lead-category-select';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,8 @@ interface SessionLogRowProps {
     onUpdate: (session: ColdCallingSession) => void;
     onDelete?: (id: string) => void;
     timezones?: { timezone: string; label: string }[];
+    isColumnVisible: (key: string) => boolean;
+    categoryBreakdown?: Record<string, number>;
 }
 
 function formatDuration(seconds: number): string {
@@ -48,12 +51,13 @@ function formatDateTime(dateString: string): string {
     });
 }
 
-export function SessionLogRow({ session, index, selected, onSelect, hasSelection, onUpdate, onDelete, timezones }: SessionLogRowProps) {
+export function SessionLogRow({ session, index, selected, onSelect, hasSelection, onUpdate, onDelete, timezones, isColumnVisible, categoryBreakdown }: SessionLogRowProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [actualCallCount, setActualCallCount] = useState<number | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
     const [showManualAdjustment, setShowManualAdjustment] = useState(false);
+    const [idCopied, setIdCopied] = useState(false);
 
     // Test session deletion state
     const [confirmTestDelete, setConfirmTestDelete] = useState(false);
@@ -174,10 +178,32 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
 
     const sessionLabel = formatDateTime(session.started_at);
 
+    const toggleableKeys = ['started','duration','dials','pickups','pickup_pct','owner','pitch','appt','lead_category','user','status'];
+
+    const sortedCategories = categoryBreakdown
+        ? Object.entries(categoryBreakdown).sort((a, b) => b[1] - a[1])
+        : [];
+    const totalCategoryCalls = sortedCategories.reduce((sum, [, count]) => sum + count, 0);
+    const topCategory = sortedCategories[0];
+    const topPct = topCategory && totalCategoryCalls > 0
+        ? Math.round((topCategory[1] / totalCategoryCalls) * 100)
+        : 0;
+    const visibleColumnCount = 3 + toggleableKeys.filter(isColumnVisible).length; // expand + select + actions + visible
+
+    const handleCopyId = async () => {
+        try {
+            await navigator.clipboard.writeText(session.id);
+            setIdCopied(true);
+            setTimeout(() => setIdCopied(false), 1500);
+        } catch (err) {
+            console.error('Failed to copy session ID:', err);
+        }
+    };
+
     return (
         <>
             <tr className="border-b border-[var(--card-border)] hover:bg-[var(--sidebar-bg)] transition-colors">
-                <td className="px-4 py-3">
+                <td className="px-2 py-3">
                     <button
                         onClick={() => setIsExpanded(!isExpanded)}
                         className="p-1 hover:bg-[var(--card-bg)] rounded transition-colors"
@@ -191,6 +217,7 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                     </button>
                 </td>
                 <IndexCell index={index} selected={selected} onSelect={onSelect} forceCheckbox={hasSelection} />
+                {isColumnVisible('started') && (
                 <td className="px-4 py-3">
                     <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-2">
@@ -209,18 +236,26 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                         )}
                     </div>
                 </td>
+                )}
+                {isColumnVisible('duration') && (
                 <td className="px-4 py-3">
                     <div className="flex items-center gap-1 text-sm">
                         <Clock size={14} className="text-[var(--muted)]" />
                         <span>{formatDuration(session.total_duration_sec || 0)}</span>
                     </div>
                 </td>
-                <td className="px-4 py-3 text-center">
+                )}
+                {isColumnVisible('dials') && (
+                <td className="px-3 py-3 text-center">
                     <span className="font-medium tabular-nums">{session.total_dials || 0}</span>
                 </td>
-                <td className="px-4 py-3 text-center">
+                )}
+                {isColumnVisible('pickups') && (
+                <td className="px-3 py-3 text-center">
                     <span className="font-medium tabular-nums">{session.total_pickups || 0}</span>
                 </td>
+                )}
+                {isColumnVisible('pickup_pct') && (
                 <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                         <div className="flex-1 h-2 bg-[var(--muted)]/10 rounded-full overflow-hidden">
@@ -234,27 +269,70 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                         </span>
                     </div>
                 </td>
-                <td className="px-4 py-3 text-center">
+                )}
+                {isColumnVisible('owner') && (
+                <td className="px-3 py-3 text-center">
                     <PerformanceCounterInline
                         value={session.owner_reached || 0}
                         onSave={(value) => handleUpdateCounter('owner_reached', value)}
                         label="Owner Reached"
                     />
                 </td>
-                <td className="px-4 py-3 text-center">
+                )}
+                {isColumnVisible('pitch') && (
+                <td className="px-3 py-3 text-center">
                     <PerformanceCounterInline
                         value={session.pitch_completed || 0}
                         onSave={(value) => handleUpdateCounter('pitch_completed', value)}
                         label="Pitch Completed"
                     />
                 </td>
-                <td className="px-4 py-3 text-center">
+                )}
+                {isColumnVisible('appt') && (
+                <td className="px-3 py-3 text-center">
                     <PerformanceCounterInline
                         value={session.appointment_set || 0}
                         onSave={(value) => handleUpdateCounter('appointment_set', value)}
                         label="Appointment Set"
                     />
                 </td>
+                )}
+                {isColumnVisible('lead_category') && (
+                <td className="px-4 py-3">
+                    {topCategory ? (
+                        <Tooltip
+                            content={
+                                <div className="flex flex-col gap-0.5 py-0.5">
+                                    {sortedCategories.map(([name, count]) => {
+                                        const pct = Math.round((count / totalCategoryCalls) * 100);
+                                        return (
+                                            <div key={name} className="flex items-center justify-between gap-3">
+                                                <span>{name}</span>
+                                                <span className="text-[var(--muted)] tabular-nums">{pct}% ({count})</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            }
+                        >
+                            <div className="cursor-help">
+                                <span
+                                    className={cn(
+                                        'inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full whitespace-nowrap',
+                                        getCategoryColors(topCategory[0]).bg,
+                                        getCategoryColors(topCategory[0]).text,
+                                    )}
+                                >
+                                    {topPct}% {topCategory[0]}
+                                </span>
+                            </div>
+                        </Tooltip>
+                    ) : (
+                        <span className="text-[var(--muted)] text-sm">-</span>
+                    )}
+                </td>
+                )}
+                {isColumnVisible('user') && (
                 <td className="px-4 py-3">
                     {session.expand?.user ? (
                         <Tooltip content={session.expand.user.name}>
@@ -279,6 +357,8 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                         <span className="text-[var(--muted)] text-sm">-</span>
                     )}
                 </td>
+                )}
+                {isColumnVisible('status') && (
                 <td className="px-4 py-3">
                     <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${
                         session.status === 'active'
@@ -288,7 +368,16 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                         {session.status === 'active' ? 'Active' : 'Completed'}
                     </span>
                 </td>
+                )}
                 <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                    <button
+                        onClick={handleCopyId}
+                        className="p-1.5 rounded-lg text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--foreground)] transition-all duration-150"
+                        title={idCopied ? 'Copied!' : 'Copy session ID'}
+                    >
+                        {idCopied ? <Check size={15} className="text-[var(--success)]" /> : <Copy size={15} />}
+                    </button>
                     {session.is_test ? (
                         /* Test session delete button — available to all users */
                         confirmTestDelete ? (
@@ -334,13 +423,14 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                             }
                         </button>
                     ) : null}
+                    </div>
                 </td>
             </tr>
 
             {/* Expanded row showing call logs and notes */}
             {isExpanded && (
                 <tr>
-                    <td colSpan={13} className="p-0">
+                    <td colSpan={visibleColumnCount} className="p-0">
                         <div className="bg-[var(--card-bg)] border-t border-b border-[var(--card-border)]">
                             {/* Session Notes + Manual Adjustment */}
                             <div className="px-6 py-4 border-b border-[var(--card-border)]">

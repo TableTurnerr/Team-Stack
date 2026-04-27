@@ -16,6 +16,7 @@ import { CurrentCallForm, type CallFormData } from '@/app/(dashboard)/session/cu
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useToast } from '@/components/ui/toast';
 import { linkCallLogToClaim } from '@/lib/call-claim';
+import { autoClaimCompany } from '@/lib/auto-claim';
 
 /**
  * Logs outbound calls made OUTSIDE the /session page.
@@ -236,6 +237,9 @@ export function OutOfSessionOutboundHandler() {
                 direction: 'outbound',
                 zoom_call_id: ownership?.zoomCallId ?? undefined,
             });
+
+            // Auto-claim the company if it was unassigned.
+            void autoClaimCompany(data.companyId, user.id);
 
             // Link to call_claim for shared-Zoom-account ownership ledger
             try {

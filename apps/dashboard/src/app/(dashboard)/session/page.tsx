@@ -23,6 +23,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { usePhone } from '@/contexts/phone-context';
 import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
 import { linkCallLogToClaim } from '@/lib/call-claim';
+import { autoClaimCompany } from '@/lib/auto-claim';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
@@ -1612,6 +1613,9 @@ export default function SessionPage() {
                     is_callback: hasCallbacks ? true : undefined,
                     zoom_call_id: ownership?.zoomCallId ?? undefined,
                 }, { expand: 'company,phone_number_record' });
+
+                // Auto-claim the company if it was unassigned.
+                void autoClaimCompany(data.companyId, user.id);
 
                 // Link log → claim (shared-Zoom-account ownership ledger).
                 void linkCallLogToClaim(callLog.id, {

@@ -5,6 +5,7 @@ import { PhoneIncoming, PhoneMissed, X, Building2 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type ColdCallingSession, type CallLog } from '@/lib/types';
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
+import { autoClaimCompany } from '@/lib/auto-claim';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { usePhone } from '@/contexts/phone-context';
@@ -250,6 +251,9 @@ export function IncomingCallHandler() {
                 direction: 'inbound',
                 zoom_call_id: ownership?.zoomCallId ?? undefined,
             });
+
+            // Auto-claim the company if it was unassigned.
+            void autoClaimCompany(data.companyId, user.id);
 
             // Link this log to a call_claim so ownership is recorded for
             // the shared-Zoom-account reporting layer. Best-effort.

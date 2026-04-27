@@ -22,10 +22,12 @@ import {
   Globe
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type ColdCall, type EventLog, type LeadCategory } from '@/lib/types';
+import { COLLECTIONS, type Company, type ColdCall, type EventLog, type LeadCategory, type User as UserType } from '@/lib/types';
 import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting, formatCompanyName, extractWebsiteFromName } from '@/lib/utils';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
+import { AssigneePicker, AssigneeAvatar, useTeamMembers } from '@/components/assignee-picker';
+import { usePermissions } from '@/contexts/role-permission-context';
 import { CompaniesTableSkeleton } from '@/components/dashboard-skeletons';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { SearchInput } from '@/components/search-input';
@@ -56,6 +58,7 @@ const COMPANY_COLUMNS: ColumnDefinition[] = [
   { key: 'owner_name', label: 'Owner', defaultVisible: true },
   { key: 'instagram_handle', label: 'Instagram', defaultVisible: false },
   { key: 'lead_category', label: 'Lead Category', defaultVisible: true },
+  { key: 'assigned_to', label: 'Assigned To', defaultVisible: true },
   { key: 'status', label: 'Status', defaultVisible: true },
   { key: 'email', label: 'Email', defaultVisible: true },
   { key: 'company_location', label: 'Location', defaultVisible: false },
@@ -87,6 +90,8 @@ function CompanyRow({
   timezones,
   categories,
   onAddCategory,
+  isAdmin,
+  teamMembers,
 }: {
   company: Company;
   onEdit: (id: string, data: Partial<Company>) => void;
@@ -98,6 +103,8 @@ function CompanyRow({
   timezones?: { timezone: string; label: string }[];
   categories: LeadCategory[];
   onAddCategory: (name: string) => Promise<LeadCategory | null>;
+  isAdmin: boolean;
+  teamMembers: UserType[];
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
@@ -171,6 +178,17 @@ function CompanyRow({
               categories={categories}
               onChange={(id) => onEdit(company.id, { lead_category: id })}
               onAddCategory={onAddCategory}
+            />
+          </td>
+        )}
+        {isColumnVisible('assigned_to') && (
+          <td className="py-3 px-4">
+            <AssigneePicker
+              value={company.assigned_to}
+              expandedUser={company.expand?.assigned_to}
+              members={teamMembers}
+              onChange={(uid) => onEdit(company.id, { assigned_to: uid ?? '' })}
+              disabled={!isAdmin}
             />
           </td>
         )}
@@ -308,6 +326,23 @@ function CompanyRow({
             onChange={(id) => onEdit(company.id, { lead_category: id })}
             onAddCategory={onAddCategory}
           />
+        </td>
+      )}
+      {isColumnVisible('assigned_to') && (
+        <td className="py-3 px-4 overflow-hidden">
+          {!company.assigned_to && company.contact_source?.startsWith('Extension') ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+              NEW
+            </span>
+          ) : (
+            <AssigneePicker
+              value={company.assigned_to}
+              expandedUser={company.expand?.assigned_to}
+              members={teamMembers}
+              onChange={(uid) => onEdit(company.id, { assigned_to: uid ?? '' })}
+              disabled={!isAdmin}
+            />
+          )}
         </td>
       )}
       {isColumnVisible('status') && (
@@ -673,7 +708,11 @@ function AddCompanyModal({
 }
 
 export default function CompaniesPage() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const { hasPermission } = usePermissions();
+  const canAccessExtensionLeads = isAdmin || hasPermission('can_access_extension_leads_directly');
+  const teamMembers = useTeamMembers();
   const { preferences } = useUserPreferences();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [categories, setCategories] = useState<LeadCategory[]>([]);
@@ -684,6 +723,7 @@ export default function CompaniesPage() {
   const [filterLogic, setFilterLogic] = useState<FilterLogic>('AND');
   const [appliedConditions, setAppliedConditions] = useState<FilterCondition[]>([]);
   const [appliedLogic, setAppliedLogic] = useState<FilterLogic>('AND');
+  const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'mine' | 'unassigned' | 'new' | string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -706,6 +746,7 @@ export default function CompaniesPage() {
     { key: 'owner_name', initialWidth: 150, minWidth: 80 },
     { key: 'instagram_handle', initialWidth: 150, minWidth: 80 },
     { key: 'lead_category', initialWidth: 130, minWidth: 80 },
+    { key: 'assigned_to', initialWidth: 160, minWidth: 120 },
     { key: 'status', initialWidth: 150, minWidth: 80 },
     { key: 'email', initialWidth: 180, minWidth: 100 },
     { key: 'company_location', initialWidth: 150, minWidth: 80 },
@@ -732,11 +773,26 @@ export default function CompaniesPage() {
         }
       }
       const conditionsFilter = buildCompaniesFilter(appliedConditions, appliedLogic);
-      const filterParts = [searchFilter && `(${searchFilter})`, conditionsFilter].filter(Boolean);
+      let assigneeFilterStr = '';
+      if (assigneeFilter === 'mine' && user?.id) {
+        assigneeFilterStr = `assigned_to = "${user.id}"`;
+      } else if (assigneeFilter === 'unassigned') {
+        assigneeFilterStr = `assigned_to = ""`;
+      } else if (assigneeFilter === 'new') {
+        assigneeFilterStr = `assigned_to = "" && contact_source ~ "Extension"`;
+      } else if (assigneeFilter !== 'all' && assigneeFilter) {
+        assigneeFilterStr = `assigned_to = "${assigneeFilter}"`;
+      }
+      // Members without extension-leads permission cannot see unassigned leads by default
+      const hideUnassigned = !canAccessExtensionLeads && assigneeFilter === 'all'
+        ? `assigned_to != ""`
+        : '';
+      const filterParts = [searchFilter && `(${searchFilter})`, conditionsFilter, assigneeFilterStr, hideUnassigned].filter(Boolean);
       const filter = filterParts.join(' && ');
 
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
         sort: '-created',
+        expand: 'lead_category,assigned_to',
         ...(filter && { filter }),
       });
 
@@ -751,7 +807,7 @@ export default function CompaniesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchTerm, appliedConditions, appliedLogic, isAuthenticated]);
+  }, [page, searchTerm, appliedConditions, appliedLogic, isAuthenticated, assigneeFilter, user?.id, canAccessExtensionLeads]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -787,7 +843,9 @@ export default function CompaniesPage() {
 
   const handleAdd = async (data: Partial<Company>, phoneEntries: { phone: string; location: string }[] = []) => {
     try {
-      const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>(data);
+      const payload: Partial<Company> = { ...data };
+      if (!payload.assigned_to && user?.id) payload.assigned_to = user.id;
+      const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>(payload);
       setCompanies(prev => [newCompany, ...prev]);
       // Create phone_numbers collection records for each entry
       await Promise.all(
@@ -844,6 +902,23 @@ export default function CompaniesPage() {
             onChange={(c, l) => { setFilterConditions(c); setFilterLogic(l); }}
             onApply={() => { setAppliedConditions(filterConditions); setAppliedLogic(filterLogic); setPage(1); }}
           />
+
+          {(isAdmin || canAccessExtensionLeads) && (
+            <select
+              value={assigneeFilter}
+              onChange={(e) => { setAssigneeFilter(e.target.value); setPage(1); }}
+              className="px-3 py-2 rounded-lg border border-[var(--card-border)] bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+              title="Filter by assignee"
+            >
+              <option value="all">All assignees</option>
+              <option value="mine">Assigned to me</option>
+              <option value="new">New (extension)</option>
+              {isAdmin && <option value="unassigned">Unassigned</option>}
+              {isAdmin && teamMembers.filter(m => m.id !== user?.id).map(m => (
+                <option key={m.id} value={m.id}>{m.name || m.email}</option>
+              ))}
+            </select>
+          )}
 
           <ColumnSelector
             columns={columns}
@@ -921,6 +996,9 @@ export default function CompaniesPage() {
                     {isColumnVisible('lead_category') && (
                       <ResizableTh width={getWidth('lead_category')} minWidth={80} onResize={(w) => resize('lead_category', w)}>Lead Category</ResizableTh>
                     )}
+                    {isColumnVisible('assigned_to') && (
+                      <ResizableTh width={getWidth('assigned_to')} minWidth={120} onResize={(w) => resize('assigned_to', w)}>Assigned To</ResizableTh>
+                    )}
                     {isColumnVisible('status') && (
                       <ResizableTh width={getWidth('status')} minWidth={80} onResize={(w) => resize('status', w)}>Status</ResizableTh>
                     )}
@@ -956,6 +1034,8 @@ export default function CompaniesPage() {
                       timezones={preferences?.timezones}
                       categories={categories}
                       onAddCategory={handleAddCategory}
+                      isAdmin={isAdmin}
+                      teamMembers={teamMembers}
                     />
                   ))}
                 </tbody>

@@ -40,6 +40,8 @@ import {
   type LeadCategory,
 } from '@/lib/types';
 import { LeadCategorySelect } from '@/components/lead-category-select';
+import { AssigneePicker } from '@/components/assignee-picker';
+import { autoClaimCompany } from '@/lib/auto-claim';
 import { cn, formatPhoneNumber, formatCompanyName } from '@/lib/utils';
 import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
@@ -112,7 +114,7 @@ export default function CompanyDetailPage() {
           pendingFollowUpsData,
           allFollowUpsData
         ] = await Promise.all([
-          pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(id),
+          pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(id, { expand: 'lead_category,assigned_to' }),
           pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
             filter: `company = "${id}"`,
             sort: 'created'
@@ -231,6 +233,7 @@ export default function CompanyDetailPage() {
       });
 
       setCallLogs(prev => [newCall, ...prev]);
+      await autoClaimCompany(company.id, user?.id);
 
       await pb.collection(COLLECTIONS.PHONE_NUMBERS).update(selectedPhoneId, {
         last_called: newCall.call_time,
@@ -623,6 +626,18 @@ export default function CompanyDetailPage() {
                       onChange={(catId) => handleUpdateCompany('lead_category', catId)}
                       onAddCategory={handleAddCategory}
                     />
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-2 block">Assigned To</label>
+                    <AssigneePicker
+                      value={company.assigned_to}
+                      expandedUser={company.expand?.assigned_to}
+                      onChange={(uid) => handleUpdateCompany('assigned_to', uid ?? '')}
+                      disabled={!isAdmin}
+                    />
+                    {!isAdmin && (
+                      <p className="text-[10px] text-[var(--muted)] mt-1">Only admins can change assignments.</p>
+                    )}
                   </div>
                   <InlineEditField
                     id={`company_${id}_website`}

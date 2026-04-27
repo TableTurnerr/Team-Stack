@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { usePhone } from '@/contexts/phone-context';
 import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
 import { linkCallLogToClaim } from '@/lib/call-claim';
+import { autoClaimCompany } from '@/lib/auto-claim';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { PhoneDialer } from '@/components/phone-dialer';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
@@ -320,6 +321,9 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 zoom_call_id: ownership?.zoomCallId ?? undefined,
                 // session field is omitted (will be null) - this marks it as a standalone call
             }, { expand: 'company,phone_number_record' });
+
+            // Auto-claim the company if it was unassigned.
+            void autoClaimCompany(data.companyId, user.id);
 
             // Link log → claim so standalone calls are attributed correctly
             // on the shared Zoom account.

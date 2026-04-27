@@ -20,6 +20,7 @@ import {
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company } from '@/lib/types';
 import { cn, extractWebsiteFromName } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
 import {
   parseLeadsCSV,
   buildDiff,
@@ -523,6 +524,7 @@ function ApplyLogView({ logs }: { logs: ApplyLog[] }) {
 // ============================================================================
 
 export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLeadsModalProps) {
+  const { user } = useAuth();
   const [stage, setStage] = useState<ImportStage>('drop');
   const [parseError, setParseError] = useState('');
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
@@ -714,6 +716,7 @@ export function ImportLeadsModal({ isOpen, onClose, onImportComplete }: ImportLe
         if (diff.action === 'create' && diff.csvRow) {
           addLog({ type: 'info', message: `Creating: ${diff.csvRow.company_name}` });
           const payload: Partial<Company> = buildCompanyPayloadFromCsv(diff.csvRow);
+          if (!payload.assigned_to && user?.id) payload.assigned_to = user.id;
           const created = await pb.collection(COLLECTIONS.COMPANIES).create<Company>(payload);
 
           // Create phone numbers

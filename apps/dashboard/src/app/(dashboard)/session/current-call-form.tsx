@@ -812,6 +812,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     first_contacted: new Date().toISOString(),
                     last_contacted: new Date().toISOString(),
                     website: extractWebsiteFromName(trimmedName),
+                    assigned_to: user?.id,
                 });
                 companyId = newCompany.id;
                 companyName = newCompany.company_name;

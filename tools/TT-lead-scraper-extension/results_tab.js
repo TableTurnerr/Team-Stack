@@ -19,6 +19,51 @@ function pbGetUserIdFromToken(token) {
     } catch (e) { return null; }
 }
 
+// Lead categories cache helper. Reads cached list (refreshed by popup.js) and
+// optionally fetches in the background if cache is stale or empty.
+var LEAD_CATEGORY_TTL_MS = 5 * 60 * 1000;
+function pbFetchLeadCategories(forceRefresh, cb) {
+    chrome.storage.local.get(['gmes_lead_categories_cache', 'gmes_lead_categories_ts'], function (data) {
+        var cached = Array.isArray(data.gmes_lead_categories_cache) ? data.gmes_lead_categories_cache : [];
+        var fresh = data.gmes_lead_categories_ts && (Date.now() - data.gmes_lead_categories_ts < LEAD_CATEGORY_TTL_MS);
+        if (cached.length && !forceRefresh && fresh) { cb(cached); return; }
+        pbGetSettings(function (pbUrl, pbToken) {
+            if (!pbUrl || !pbToken) { cb(cached); return; }
+            var headers = { 'Authorization': 'Bearer ' + pbToken };
+            fetch(pbUrl + '/api/collections/lead_categories/records?perPage=200&sort=name', { headers: headers })
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('http ' + r.status)); })
+                .then(function (d) {
+                    var items = Array.isArray(d.items) ? d.items.map(function (i) { return { id: i.id, name: i.name }; }) : cached;
+                    chrome.storage.local.set({ gmes_lead_categories_cache: items, gmes_lead_categories_ts: Date.now() });
+                    cb(items);
+                })
+                .catch(function () { cb(cached); });
+        });
+    });
+}
+
+// Teammates cache helper.
+var TEAMMATES_TTL_MS = 5 * 60 * 1000;
+function pbFetchTeammates(forceRefresh, cb) {
+    chrome.storage.local.get(['gmes_teammates_cache', 'gmes_teammates_ts'], function (data) {
+        var cached = Array.isArray(data.gmes_teammates_cache) ? data.gmes_teammates_cache : [];
+        var fresh = data.gmes_teammates_ts && (Date.now() - data.gmes_teammates_ts < TEAMMATES_TTL_MS);
+        if (cached.length && !forceRefresh && fresh) { cb(cached); return; }
+        pbGetSettings(function (pbUrl, pbToken) {
+            if (!pbUrl || !pbToken) { cb(cached); return; }
+            var headers = { 'Authorization': 'Bearer ' + pbToken };
+            fetch(pbUrl + '/api/collections/users/records?perPage=200&sort=name&fields=id,name,email', { headers: headers })
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('http ' + r.status)); })
+                .then(function (d) {
+                    var items = Array.isArray(d.items) ? d.items.map(function (i) { return { id: i.id, name: i.name || i.email || i.id, email: i.email || '' }; }) : cached;
+                    chrome.storage.local.set({ gmes_teammates_cache: items, gmes_teammates_ts: Date.now() });
+                    cb(items);
+                })
+                .catch(function () { cb(cached); });
+        });
+    });
+}
+
 function pbCheckCompanyStatus(name, phones, cb) {
     pbGetSettings(function (pbUrl, pbToken) {
         if (!pbUrl) { cb({ status: 'new' }); return; }
@@ -83,7 +128,7 @@ function pbSendToCrm(item, cb) {
         var phones = Array.isArray(item.phones) && item.phones.length ? item.phones : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
         var websiteUrl = item.companyUrl || '';
         if (websiteUrl && websiteUrl.indexOf('https://www.google.com/maps') === 0) websiteUrl = '';
-        var companyBody = JSON.stringify({
+        var companyPayload = {
             company_name: item.title || '',
             company_location: (item.address || '') + (item.city ? ', ' + item.city : ''),
             google_maps_link: item.href || '',
@@ -97,7 +142,10 @@ function pbSendToCrm(item, cb) {
             contact_source: 'Extension - Scraper',
             notes: item.note || '',
             status: ['Untouched']
-        });
+        };
+        if (item.lead_category) companyPayload.lead_category = item.lead_category;
+        if (item.assigned_to) companyPayload.assigned_to = item.assigned_to;
+        var companyBody = JSON.stringify(companyPayload);
         fetch(pbUrl + '/api/collections/companies/records', { method: 'POST', headers: headers, body: companyBody })
             .then(function (r) {
                 if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
@@ -221,6 +269,13 @@ function showCrmConfirmation(item, onConfirm) {
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Rating</td><td style="padding:6px 0;color:#202124;">' + escapeHtmlModal(item.rating || '0') + ' \u2605 ' + escapeHtmlModal((item.reviewCount || '').replace(/[()]/g, '')) + ' reviews</td></tr>' +
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Website</td><td style="padding:6px 0;color:#202124;word-break:break-all;">' + escapeHtmlModal(item.companyUrl || 'N/A') + '</td></tr>' +
         '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Note</td><td style="padding:6px 0;color:#202124;white-space:pre-wrap;">' + escapeHtmlModal(item.note || 'None') + '</td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Lead Category</td><td style="padding:6px 0;color:#202124;">' +
+        '<select id="gmes-confirm-category" style="width:100%;padding:6px 10px;border:1.5px solid #e2e5eb;border-radius:7px;font-family:inherit;font-size:12.5px;background:#fff;color:#202124;">' +
+        '<option value="">\u2014 None \u2014</option></select></td></tr>' +
+        '<tr><td style="padding:6px 10px 6px 0;font-weight:700;color:#5f6368;white-space:nowrap;vertical-align:top;">Assign To</td><td style="padding:6px 0;color:#202124;">' +
+        '<select id="gmes-confirm-assignee" style="width:100%;padding:6px 10px;border:1.5px solid #e2e5eb;border-radius:7px;font-family:inherit;font-size:12.5px;background:#fff;color:#202124;">' +
+        '<option value="">\u2014 Unassigned (new-lead pool) \u2014</option></select>' +
+        '<div style="font-size:11px;color:#5f6368;margin-top:4px;">Picking a teammate routes the lead straight to them.</div></td></tr>' +
         '</table></div>' +
         '<div style="padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #e2e5eb;">' +
         '<button id="gmes-confirm-cancel" style="padding:8px 18px;border:1.5px solid #e2e5eb;border-radius:8px;background:#fff;color:#3c4043;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button>' +
@@ -228,9 +283,40 @@ function showCrmConfirmation(item, onConfirm) {
         '</div></div>';
 
     document.body.appendChild(modal);
+
+    var categorySelect = document.getElementById('gmes-confirm-category');
+    pbFetchLeadCategories(false, function (cats) {
+        chrome.storage.local.get(['gmes_default_lead_category'], function (data) {
+            var preselect = item.lead_category || data.gmes_default_lead_category || '';
+            (cats || []).forEach(function (c) {
+                var opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+                if (c.id === preselect) opt.selected = true;
+                categorySelect.appendChild(opt);
+            });
+        });
+    });
+
+    var assigneeSelect = document.getElementById('gmes-confirm-assignee');
+    pbFetchTeammates(false, function (mates) {
+        chrome.storage.local.get(['gmes_default_assigned_to'], function (data) {
+            var preselect = item.assigned_to || data.gmes_default_assigned_to || '';
+            (mates || []).forEach(function (m) {
+                var opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = m.name + (m.email ? ' (' + m.email + ')' : '');
+                if (m.id === preselect) opt.selected = true;
+                assigneeSelect.appendChild(opt);
+            });
+        });
+    });
+
     document.getElementById('gmes-confirm-cancel').addEventListener('click', function () { modal.remove(); });
     modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
     document.getElementById('gmes-confirm-send').addEventListener('click', function () {
+        item.lead_category = categorySelect.value || '';
+        item.assigned_to = assigneeSelect.value || '';
         modal.remove();
         onConfirm();
     });

@@ -12,6 +12,8 @@ A Chrome extension for scraping Google Maps leads and syncing them directly to t
   - **Google Maps Overlay**: When viewing a specific place on Maps, a "Quick Add" overlay appears. Supports auto-popup toggle.
   - **Website Scanner**: Visit any business website and the extension scans for contact info (phones with labels, emails, addresses).
 - **CRM Integration**: Send leads directly to PocketBase — creates `companies` and `phone_numbers` records. Checks for duplicates before adding.
+- **Lead Category Selection**: Pick a `lead_category` (Owner.com, ChowNow, etc.) every time you send a lead to the CRM. Set a default in CRM Settings; override per-lead in the confirm dialog. Categories are fetched live from PocketBase and cached.
+- **Direct Assignment**: Pick a teammate to assign each lead to right from the confirm dialog (`assigned_to`). Assigned leads skip the new-lead pool and go straight to the chosen user. Set a default assignee in CRM Settings or leave blank to send to the unassigned/new-lead pool.
 - **Multiple Phone Numbers**: Extracts and stores multiple phone numbers per business, each with a label and location name. All numbers normalized to US format (`1XXXXXXXXXX`).
 - **Deduplication**: Prevents duplicate entries by Maps URL (fallback: Title + Address).
 - **Persistence**: Results saved across sessions via `chrome.storage.local`.
@@ -50,9 +52,11 @@ A Chrome extension for scraping Google Maps leads and syncing them directly to t
 5. Use `Ctrl+Shift+M` to show/hide the overlay at any time.
 
 ### CRM Sync
-1. Open **CRM Settings** in the popup and enter your PocketBase URL and Auth Token.
-2. On any overlay or in the results table, click **"Send to CRM"** to create the company and phone number records.
-3. The overlay will show an **"Already in CRM"** badge if a matching company or phone number already exists in your database.
+1. Click **"Connect to TableTurnerr CRM"** in the popup (or use **Advanced** to enter a PocketBase URL + token manually).
+2. Once connected, optionally pick a **Default Lead Category** (Owner.com, ChowNow, etc.) and a **Default Assignee**. Both pre-fill every confirm dialog.
+3. On any overlay or in the results table, click **"Send to CRM"**, review the lead in the confirm dialog, optionally change the **Lead Category** and **Assign To** teammate, and click **Confirm & Send**.
+4. Choosing a teammate in **Assign To** skips the new-lead pool and writes `assigned_to` directly. Leaving it blank sends the lead unassigned.
+5. The overlay will show an **"Already in CRM"** badge if a matching company or phone number already exists in your database.
 
 ### Exporting
 - Click **"Download as CSV"** to export your list as an `.xls` file.
@@ -99,11 +103,16 @@ All phone numbers are stored as 11-digit US format: `1XXXXXXXXXX` (e.g., `121255
 
 ## CRM Integration Details
 
-Connects to your PocketBase instance:
-- **companies** collection: creates record with `source: 'cold_call'`, `status: 'Cold No Reply'`
-- **phone_numbers** collection: creates one record per extracted phone, with `label` and `location_name` fields populated from website scan context
+Connects to your PocketBase instance and writes to several collections in one send:
 
-Configure via the **CRM Settings** panel in the popup.
+- **companies** — `company_name`, `company_location`, `google_maps_link`, `google_rating`, `google_reviews_count`, `website`, `industry`, `price_range`, `email`, `source: 'Google Maps'` (or `'Website'`), `contact_source: 'Extension - …'`, `notes`, `status: ['Untouched']`, and (when selected) `lead_category` (relation to `lead_categories`) and `assigned_to` (relation to `users`).
+- **phone_numbers** — one record per extracted phone, with `label`, `location_name`, and `location_address`.
+- **company_notes** — a `pre_call` note record with the user-entered note (deduped by content).
+- **interactions** — an outbound `phone` interaction stamped with the current user, so the lead shows up on the activity timeline.
+
+Lead categories are loaded from `lead_categories` and cached for 5 minutes. Teammates are loaded from `users` and cached the same way. Use the **refresh** button next to either dropdown if the list has changed.
+
+Configure via the **TableTurnerr CRM** panel in the popup.
 
 ---
 
@@ -119,9 +128,9 @@ Filters scraped results to include only restaurants and food-related businesses,
 2. Update `releaseNotes` in `version.json`.
 3. Create distribution zip:
    ```bash
-   zip -r TT-lead-scraper-v2.3.zip . -x "*.git*"
+   zip -r TT-lead-scraper-v3.0.zip . -x "*.git*"
    ```
-4. Create a GitHub release with tag `v2.3` and upload the zip.
+4. Create a GitHub release with tag `v3.0` and upload the zip.
 
 ---
 

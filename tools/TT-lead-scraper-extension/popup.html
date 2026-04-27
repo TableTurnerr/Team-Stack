@@ -702,6 +702,42 @@
             Disconnect
           </button>
         </div>
+
+        <!-- Default Lead Category -->
+        <div style="margin-top:12px; padding-top:11px; border-top:1px dashed var(--border);">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            Default Lead Category
+          </label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="defaultLeadCategorySelect" class="crm-input" style="flex:1; margin-bottom:0; padding:8px 10px; font-size:12.5px;">
+              <option value="">— None —</option>
+            </select>
+            <button id="refreshLeadCategoriesBtn" class="icon-btn" title="Refresh categories" style="width:32px; height:32px; background:var(--surface-2); border:1.5px solid var(--border); color:var(--text-muted);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:5px; line-height:1.4;">Pre-selected when sending leads to CRM. Editable per-lead in the confirm dialog.</div>
+          <div id="defaultLeadCategoryStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+        </div>
+
+        <!-- Default Assignee -->
+        <div style="margin-top:12px; padding-top:11px; border-top:1px dashed var(--border);">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6M19 8v6"/></svg>
+            Default Assignee
+          </label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="defaultAssigneeSelect" class="crm-input" style="flex:1; margin-bottom:0; padding:8px 10px; font-size:12.5px;">
+              <option value="">— Unassigned (new-lead pool) —</option>
+            </select>
+            <button id="refreshAssigneesBtn" class="icon-btn" title="Refresh teammates" style="width:32px; height:32px; background:var(--surface-2); border:1.5px solid var(--border); color:var(--text-muted);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:5px; line-height:1.4;">Picking a teammate skips the new-lead pool and routes the lead straight to them.</div>
+          <div id="defaultAssigneeStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+        </div>
       </div>
 
       <!-- Advanced fallback -->

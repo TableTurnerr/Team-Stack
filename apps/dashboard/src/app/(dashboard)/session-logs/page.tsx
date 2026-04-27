@@ -18,6 +18,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { PageGuard } from '@/components/page-guard';
 import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import { useTeamMembers } from '@/components/assignee-picker';
 
 const SESSION_LOG_COLUMNS: ColumnDefinition[] = [
     { key: 'started', label: 'Started', defaultVisible: true },
@@ -49,7 +50,9 @@ export default function SessionLogsPage() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
+    const [userFilter, setUserFilter] = useState<'all' | 'mine' | string>('all');
     const [showFilters, setShowFilters] = useState(false);
+    const teamMembers = useTeamMembers();
     const [bulkDeleting, setBulkDeleting] = useState(false);
     const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
     const [bulkIdsCopied, setBulkIdsCopied] = useState(false);
@@ -65,10 +68,14 @@ export default function SessionLogsPage() {
             setLoading(true);
 
             // Build filter
-            let filter = '';
-            if (statusFilter !== 'all') {
-                filter = `status = "${statusFilter}"`;
+            const parts: string[] = [];
+            if (statusFilter !== 'all') parts.push(`status = "${statusFilter}"`);
+            if (userFilter === 'mine' && user?.id) {
+                parts.push(`user = "${user.id}"`);
+            } else if (userFilter !== 'all' && userFilter) {
+                parts.push(`user = "${userFilter}"`);
             }
+            const filter = parts.join(' && ');
 
             const result = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getFullList<ColdCallingSession>({
                 filter,
@@ -111,7 +118,7 @@ export default function SessionLogsPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [statusFilter]);
+    }, [statusFilter, userFilter, user?.id]);
 
     useEffect(() => {
         fetchSessions();
@@ -296,7 +303,7 @@ export default function SessionLogsPage() {
 
             {/* Filters */}
             {showFilters && (
-                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
+                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-3">
                     <div className="flex items-center gap-4">
                         <span className="text-sm font-medium">Status:</span>
                         <div className="flex gap-2">
@@ -315,6 +322,22 @@ export default function SessionLogsPage() {
                             ))}
                         </div>
                     </div>
+                    {isAdmin && (
+                        <div className="flex items-center gap-4">
+                            <span className="text-sm font-medium">User:</span>
+                            <select
+                                value={userFilter}
+                                onChange={(e) => setUserFilter(e.target.value)}
+                                className="px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                            >
+                                <option value="all">All users</option>
+                                <option value="mine">Just me</option>
+                                {teamMembers.filter(m => m.id !== user?.id).map(m => (
+                                    <option key={m.id} value={m.id}>{m.name || m.email}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                 </div>
             )}
 

@@ -37,7 +37,9 @@ import {
   type FollowUp,
   type ColdCall,
   type Recording,
+  type LeadCategory,
 } from '@/lib/types';
+import { LeadCategorySelect } from '@/components/lead-category-select';
 import { cn, formatPhoneNumber, formatCompanyName } from '@/lib/utils';
 import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
@@ -75,6 +77,7 @@ export default function CompanyDetailPage() {
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
+  const [categories, setCategories] = useState<LeadCategory[]>([]);
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumber[]>([]);
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [notes, setNotes] = useState<CompanyNote[]>([]);
@@ -157,6 +160,22 @@ export default function CompanyDetailPage() {
 
     fetchData();
   }, [id]);
+
+  useEffect(() => {
+    pb.collection(COLLECTIONS.LEAD_CATEGORIES).getFullList<LeadCategory>({ sort: 'name' })
+      .then(setCategories)
+      .catch(() => {});
+  }, []);
+
+  const handleAddCategory = async (name: string): Promise<LeadCategory | null> => {
+    try {
+      const created = await pb.collection(COLLECTIONS.LEAD_CATEGORIES).create<LeadCategory>({ name });
+      setCategories(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      return created;
+    } catch {
+      return null;
+    }
+  };
 
   const handleUpdateCompany = async (field: keyof Company, value: string) => {
     if (!company) return;
@@ -412,6 +431,14 @@ export default function CompanyDetailPage() {
                   })}
                 </span>
               )}
+              {company.lead_category && (() => {
+                const cat = categories.find(c => c.id === company.lead_category);
+                return cat ? (
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full border border-orange-500/40 bg-orange-500/10 text-orange-400">
+                    {cat.name}
+                  </span>
+                ) : null;
+              })()}
             </h1>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[var(--muted)] font-medium">
               {company.instagram_handle && (
@@ -587,6 +614,15 @@ export default function CompanyDetailPage() {
                       )}
                     </div>
                     <p className="text-[10px] text-[var(--muted)] mt-1">Auto-computed from last call per phone number</p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-2 block">Lead Category</label>
+                    <LeadCategorySelect
+                      value={company.lead_category || ''}
+                      categories={categories}
+                      onChange={(catId) => handleUpdateCompany('lead_category', catId)}
+                      onAddCategory={handleAddCategory}
+                    />
                   </div>
                   <InlineEditField
                     id={`company_${id}_website`}

@@ -22,7 +22,7 @@ import {
   Globe
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type ColdCall, type EventLog } from '@/lib/types';
+import { COLLECTIONS, type Company, type ColdCall, type EventLog, type LeadCategory } from '@/lib/types';
 import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting, formatCompanyName, extractWebsiteFromName } from '@/lib/utils';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
@@ -33,6 +33,8 @@ import { ColumnSelector } from '@/components/column-selector';
 import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
 import { ExportLeadsModal } from '@/components/export-leads-modal';
 import { ImportLeadsModal } from '@/components/import-leads-modal';
+import { LeadCategorySelect } from '@/components/lead-category-select';
+import { CompaniesFilterBuilder, buildCompaniesFilter, type FilterCondition, type FilterLogic } from '@/components/companies-filter-builder';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { PageGuard } from '@/components/page-guard';
@@ -53,6 +55,7 @@ const COMPANY_COLUMNS: ColumnDefinition[] = [
   { key: 'company_name', label: 'Company Name', defaultVisible: true },
   { key: 'owner_name', label: 'Owner', defaultVisible: true },
   { key: 'instagram_handle', label: 'Instagram', defaultVisible: false },
+  { key: 'lead_category', label: 'Lead Category', defaultVisible: true },
   { key: 'status', label: 'Status', defaultVisible: true },
   { key: 'email', label: 'Email', defaultVisible: true },
   { key: 'company_location', label: 'Location', defaultVisible: false },
@@ -82,6 +85,8 @@ function CompanyRow({
   onSelect,
   hasSelection,
   timezones,
+  categories,
+  onAddCategory,
 }: {
   company: Company;
   onEdit: (id: string, data: Partial<Company>) => void;
@@ -91,6 +96,8 @@ function CompanyRow({
   onSelect: () => void;
   hasSelection: boolean;
   timezones?: { timezone: string; label: string }[];
+  categories: LeadCategory[];
+  onAddCategory: (name: string) => Promise<LeadCategory | null>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
@@ -154,6 +161,16 @@ function CompanyRow({
               onChange={(e) => setEditData(p => ({ ...p, instagram_handle: e.target.value }))}
               className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               placeholder="@username"
+            />
+          </td>
+        )}
+        {isColumnVisible('lead_category') && (
+          <td className="py-3 px-4">
+            <LeadCategorySelect
+              value={company.lead_category || ''}
+              categories={categories}
+              onChange={(id) => onEdit(company.id, { lead_category: id })}
+              onAddCategory={onAddCategory}
             />
           </td>
         )}
@@ -281,6 +298,16 @@ function CompanyRow({
               </a>
             ) : <span className="text-[var(--muted)]">-</span>}
           </span>
+        </td>
+      )}
+      {isColumnVisible('lead_category') && (
+        <td className="py-3 px-4 overflow-hidden">
+          <LeadCategorySelect
+            value={company.lead_category || ''}
+            categories={categories}
+            onChange={(id) => onEdit(company.id, { lead_category: id })}
+            onAddCategory={onAddCategory}
+          />
         </td>
       )}
       {isColumnVisible('status') && (
@@ -649,9 +676,14 @@ export default function CompaniesPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { preferences } = useUserPreferences();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [categories, setCategories] = useState<LeadCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([]);
+  const [filterLogic, setFilterLogic] = useState<FilterLogic>('AND');
+  const [appliedConditions, setAppliedConditions] = useState<FilterCondition[]>([]);
+  const [appliedLogic, setAppliedLogic] = useState<FilterLogic>('AND');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -673,6 +705,7 @@ export default function CompaniesPage() {
     { key: 'company_name', initialWidth: 200, minWidth: 100 },
     { key: 'owner_name', initialWidth: 150, minWidth: 80 },
     { key: 'instagram_handle', initialWidth: 150, minWidth: 80 },
+    { key: 'lead_category', initialWidth: 130, minWidth: 80 },
     { key: 'status', initialWidth: 150, minWidth: 80 },
     { key: 'email', initialWidth: 180, minWidth: 100 },
     { key: 'company_location', initialWidth: 150, minWidth: 80 },
@@ -691,13 +724,17 @@ export default function CompaniesPage() {
 
       const safeSearch = sanitizeFilterValue(searchTerm);
       const digits = stripPhoneFormatting(searchTerm);
-      let filter = '';
+      let searchFilter = '';
       if (safeSearch) {
-        filter = `company_name ~ "${safeSearch}" || owner_name ~ "${safeSearch}"`;
+        searchFilter = `company_name ~ "${safeSearch}" || owner_name ~ "${safeSearch}"`;
         if (digits.length >= 3) {
-          filter += ` || ${buildPhoneSearchFilter('phone_number', searchTerm)}`;
+          searchFilter += ` || ${buildPhoneSearchFilter('phone_number', searchTerm)}`;
         }
       }
+      const conditionsFilter = buildCompaniesFilter(appliedConditions, appliedLogic);
+      const filterParts = [searchFilter && `(${searchFilter})`, conditionsFilter].filter(Boolean);
+      const filter = filterParts.join(' && ');
+
       const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
         sort: '-created',
         ...(filter && { filter }),
@@ -714,13 +751,30 @@ export default function CompaniesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchTerm, isAuthenticated]);
+  }, [page, searchTerm, appliedConditions, appliedLogic, isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchCompanies();
     }
   }, [isAuthenticated, fetchCompanies]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    pb.collection(COLLECTIONS.LEAD_CATEGORIES).getFullList<LeadCategory>({ sort: 'name' })
+      .then(setCategories)
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  const handleAddCategory = async (name: string): Promise<LeadCategory | null> => {
+    try {
+      const created = await pb.collection(COLLECTIONS.LEAD_CATEGORIES).create<LeadCategory>({ name });
+      setCategories(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      return created;
+    } catch {
+      return null;
+    }
+  };
 
   const handleEdit = async (id: string, data: Partial<Company>) => {
     try {
@@ -782,6 +836,14 @@ export default function CompaniesPage() {
             <Plus size={16} />
             Add Company
           </button>
+
+          <CompaniesFilterBuilder
+            conditions={filterConditions}
+            logic={filterLogic}
+            categories={categories}
+            onChange={(c, l) => { setFilterConditions(c); setFilterLogic(l); }}
+            onApply={() => { setAppliedConditions(filterConditions); setAppliedLogic(filterLogic); setPage(1); }}
+          />
 
           <ColumnSelector
             columns={columns}
@@ -856,6 +918,9 @@ export default function CompaniesPage() {
                     {isColumnVisible('instagram_handle') && (
                       <ResizableTh width={getWidth('instagram_handle')} minWidth={80} onResize={(w) => resize('instagram_handle', w)}>Instagram</ResizableTh>
                     )}
+                    {isColumnVisible('lead_category') && (
+                      <ResizableTh width={getWidth('lead_category')} minWidth={80} onResize={(w) => resize('lead_category', w)}>Lead Category</ResizableTh>
+                    )}
                     {isColumnVisible('status') && (
                       <ResizableTh width={getWidth('status')} minWidth={80} onResize={(w) => resize('status', w)}>Status</ResizableTh>
                     )}
@@ -889,6 +954,8 @@ export default function CompaniesPage() {
                       onSelect={() => selection.toggle(company.id)}
                       hasSelection={selection.hasSelection}
                       timezones={preferences?.timezones}
+                      categories={categories}
+                      onAddCategory={handleAddCategory}
                     />
                   ))}
                 </tbody>

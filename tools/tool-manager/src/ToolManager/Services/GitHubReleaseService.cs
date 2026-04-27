@@ -477,7 +477,8 @@ public partial class GitHubReleaseService
                     if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                     {
                         var url = asset.GetProperty("browser_download_url").GetString();
-                        _cachedSelfUpdate = (version, url!);
+                        if (url == null) continue;
+                        _cachedSelfUpdate = (version, url);
                         return (version, url);
                     }
                 }

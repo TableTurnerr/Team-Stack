@@ -72,14 +72,13 @@ public class InstallService
                     if (p.total is > 0)
                     {
                         var pct = (int)(p.downloaded * 100 / p.total.Value);
-                        var mb = p.downloaded / (1024.0 * 1024.0);
-                        var totalMb = p.total.Value / (1024.0 * 1024.0);
-                        status?.Report(new InstallProgress($"Downloading... {mb:F1} / {totalMb:F1} MB", pct));
+                        status?.Report(new InstallProgress(
+                            "Downloading", pct, p.downloaded, p.total));
                     }
                     else
                     {
-                        var mb = p.downloaded / (1024.0 * 1024.0);
-                        status?.Report(new InstallProgress($"Downloading... {mb:F1} MB", -1));
+                        status?.Report(new InstallProgress(
+                            "Downloading", -1, p.downloaded, null));
                     }
                 });
 

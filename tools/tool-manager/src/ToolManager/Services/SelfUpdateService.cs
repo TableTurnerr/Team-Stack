@@ -125,21 +125,37 @@ public class SelfUpdateService : IDisposable
             var installDir = Path.GetDirectoryName(Environment.ProcessPath)!;
             var targetExe = Path.Combine(installDir, "ToolManager.exe");
 
+            // Escape special characters for cmd.exe inside double-quoted strings.
+            // %, &, ^, <, >, | all need protection to survive batch interpretation.
+            string CmdEscape(string path) => path
+                .Replace("%", "%%")
+                .Replace("^", "^^")
+                .Replace("&", "^&")
+                .Replace("<", "^<")
+                .Replace(">", "^>")
+                .Replace("|", "^|");
+
+            var qNewExe = CmdEscape(newExe);
+            var qTargetExe = CmdEscape(targetExe);
+            var qInstallDir = CmdEscape(installDir);
+            var qTempDir = CmdEscape(tempDir);
+            var qZipPath = CmdEscape(zipPath);
+
             script = Path.Combine(Path.GetTempPath(), "ToolManager_Updater.bat");
             File.WriteAllText(script, $"""
                 @echo off
                 timeout /t 2 /nobreak >nul
                 taskkill /IM ToolManager.exe /F >nul 2>&1
                 timeout /t 2 /nobreak >nul
-                copy /Y "{newExe}" "{targetExe}" >nul
+                copy /Y "{qNewExe}" "{qTargetExe}" >nul
                 if %ERRORLEVEL% neq 0 (
                     timeout /t 3 /nobreak >nul
-                    copy /Y "{newExe}" "{targetExe}" >nul
+                    copy /Y "{qNewExe}" "{qTargetExe}" >nul
                 )
-                start /D "{installDir}" "" "{targetExe}"
+                start /D "{qInstallDir}" "" "{qTargetExe}"
                 timeout /t 5 /nobreak >nul
-                rmdir /s /q "{tempDir}" >nul 2>&1
-                del "{zipPath}" >nul 2>&1
+                rmdir /s /q "{qTempDir}" >nul 2>&1
+                del "{qZipPath}" >nul 2>&1
                 del "%~f0" >nul 2>&1
                 """);
 

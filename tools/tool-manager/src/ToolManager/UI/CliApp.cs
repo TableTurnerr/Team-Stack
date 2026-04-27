@@ -117,22 +117,30 @@ public class CliApp
     {
         var version = _selfUpdater.CurrentVersionDisplay;
         var authTag = _github.IsAuthenticated
-            ? "[green]Authenticated[/] (5,000 req/hr)"
-            : "[yellow]Unauthenticated[/] (60 req/hr)";
+            ? $"[green]\u25cf Authenticated[/] [grey50]({_github.RateLimitRemaining} requests left)[/]"
+            : "[yellow]\u25cb Unauthenticated[/] [grey50](60 req/hr)[/]";
 
         var lastCheck = _lastFetchTime == default
-            ? "never"
-            : FormatElapsed(DateTime.UtcNow - _lastFetchTime);
+            ? "[grey50]never[/]"
+            : $"[grey70]{FormatElapsed(DateTime.UtcNow - _lastFetchTime)}[/]";
 
-        var content = new Markup(
-            $"  API: {authTag}\n" +
-            $"  Last checked: [dim]{lastCheck}[/]");
+        var buildTag = _selfUpdater.IsDevBuild
+            ? "  [cyan](dev build)[/]"
+            : "";
 
-        var panel = new Panel(content)
-            .Header($"[bold dodgerblue1] TableTurnerr Tool Manager [/][dim]v{version}[/]")
+        var grid = new Grid()
+            .AddColumn(new GridColumn().NoWrap())
+            .AddColumn(new GridColumn().NoWrap().RightAligned())
+            .AddRow(
+                $"  [bold]API[/]    {authTag}",
+                $"[grey50]Last check[/]  {lastCheck}  ");
+
+        var panel = new Panel(grid)
+            .Header($"  [bold dodgerblue1] TableTurnerr Tool Manager [/][grey50]v{Markup.Escape(version)}[/]{buildTag}  ")
             .Border(BoxBorder.Rounded)
             .BorderColor(Color.DodgerBlue1)
-            .Padding(0, 0, 1, 0);
+            .Padding(0, 0, 0, 0)
+            .Expand();
 
         AnsiConsole.Write(panel);
         AnsiConsole.WriteLine();
@@ -144,58 +152,57 @@ public class CliApp
     {
         var table = new Table()
             .Border(TableBorder.Rounded)
-            .BorderColor(Color.Grey)
+            .BorderColor(Color.Grey30)
+            .AddColumn(new TableColumn("[bold] [/]").NoWrap())
             .AddColumn(new TableColumn("[bold]Tool[/]").NoWrap())
             .AddColumn(new TableColumn("[bold]Latest[/]").Centered())
             .AddColumn(new TableColumn("[bold]Installed[/]").Centered())
             .AddColumn(new TableColumn("[bold]Status[/]"))
             .AddColumn(new TableColumn("[bold]Type[/]"));
 
-        // Manager self-entry
+        // Manager self-entry — always at the top with a visually distinct icon
         var selfLatest = _selfUpdater.UpdateAvailable
-            ? $"v{_selfUpdater.LatestVersion!.ToString(3)}"
+            ? $"[yellow]v{_selfUpdater.LatestVersion!.ToString(3)}[/]"
             : $"v{Markup.Escape(_selfUpdater.CurrentVersionDisplay)}";
         var selfInstalled = _selfUpdater.IsDevBuild
             ? $"[cyan]v{Markup.Escape(_selfUpdater.CurrentVersionDisplay)}[/]"
             : $"v{Markup.Escape(_selfUpdater.CurrentVersionDisplay)}";
-        var selfStatus = _selfUpdater.IsDevBuild
-            ? "[cyan]Dev build[/]"
-            : _selfUpdater.UpdateAvailable
-                ? "[yellow]Update available[/]"
-                : "[green]Up to date[/]";
+        var (selfIcon, selfStatus) = StatusFor(
+            isInstalled: true,
+            isDev: _selfUpdater.IsDevBuild,
+            updateAvailable: _selfUpdater.UpdateAvailable);
         table.AddRow(
-            "[dodgerblue1]Tool Manager[/]",
+            selfIcon,
+            "[dodgerblue1 bold]Tool Manager[/]",
             selfLatest,
             selfInstalled,
             selfStatus,
-            "[dim]this app[/]");
+            "[grey50]this app[/]");
 
-        foreach (var tool in tools)
+        // Sort: updates available first, then installed up-to-date, then not installed.
+        // Within each group, sort by display name.
+        var sorted = tools
+            .OrderBy(t => t.UpdateAvailable ? 0 : t.IsInstalled ? 1 : 2)
+            .ThenBy(t => t.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var tool in sorted)
         {
-            var latest = FormatVersion(tool.LatestVersion);
+            var latest = tool.UpdateAvailable
+                ? $"[yellow]{FormatVersion(tool.LatestVersion)}[/]"
+                : FormatVersion(tool.LatestVersion);
             var installed = tool.IsInstalled
-                ? (tool.IsDevBuild ? $"[cyan]v{Markup.Escape(tool.InstalledVersionRaw ?? "")}[/]" : FormatVersion(tool.InstalledVersion))
-                : "[dim]—[/]";
+                ? (tool.IsDevBuild
+                    ? $"[cyan]v{Markup.Escape(tool.InstalledVersionRaw ?? "")}[/]"
+                    : FormatVersion(tool.InstalledVersion))
+                : "[grey50]\u2014[/]";
 
-            string status;
-            if (tool.IsDevBuild)
-                status = "[cyan]Dev build[/]";
-            else if (tool.UpdateAvailable)
-                status = "[yellow]Update available[/]";
-            else if (tool.IsInstalled)
-                status = "[green]Up to date[/]";
-            else
-                status = "[dim]Not installed[/]";
+            var (icon, status) = StatusFor(tool.IsInstalled, tool.IsDevBuild, tool.UpdateAvailable);
 
-            var type = tool.ToolType switch
-            {
-                "windows-app" => "Windows App",
-                "chrome-extension" => "Chrome Ext",
-                "unknown" => "[dim]—[/]",
-                _ => tool.ToolType,
-            };
+            var type = FormatToolType(tool.ToolType);
 
             table.AddRow(
+                icon,
                 $"[bold]{Markup.Escape(tool.DisplayName)}[/]",
                 latest,
                 installed,
@@ -205,6 +212,26 @@ public class CliApp
 
         AnsiConsole.Write(table);
     }
+
+    /// <summary>
+    /// Returns the leading status glyph + the status cell text.
+    /// Glyphs are filled (\u25cf) for installed, half (\u25d0) for update-available, hollow (\u25cb) for not installed.
+    /// </summary>
+    private static (string icon, string status) StatusFor(bool isInstalled, bool isDev, bool updateAvailable)
+    {
+        if (isDev) return ("[cyan]\u25c6[/]", "[cyan]Dev build[/]");
+        if (updateAvailable) return ("[yellow]\u25d0[/]", "[yellow]Update available[/]");
+        if (isInstalled) return ("[green]\u25cf[/]", "[green]Up to date[/]");
+        return ("[grey42]\u25cb[/]", "[grey50]Not installed[/]");
+    }
+
+    private static string FormatToolType(string type) => type switch
+    {
+        "windows-app" => "[plum2]Windows App[/]",
+        "chrome-extension" => "[lightseagreen]Chrome Ext[/]",
+        "unknown" => "[grey50]\u2014[/]",
+        _ => Markup.Escape(type),
+    };
 
     // ── Action menu ─────────────────────────────────────────
 
@@ -326,20 +353,21 @@ public class CliApp
         var installable = tools.Where(t => !t.IsInstalled).ToList();
         if (installable.Count == 0)
         {
-            AnsiConsole.MarkupLine("[dim]No tools available to install.[/]");
+            AnsiConsole.MarkupLine("[grey50]No tools available to install.[/]");
             return;
         }
 
         var installChoices = installable
-            .Select(t => $"{t.DisplayName} (v{FormatVersionRaw(t.LatestVersion)})")
-            .Append("Cancel")
+            .Select(t => $"[bold]{Markup.Escape(t.DisplayName)}[/] [grey50]v{FormatVersionRaw(t.LatestVersion)}[/]")
             .ToList();
+        installChoices.Add("Cancel");
         var choice = NumberedMenu.Show("[bold]Select a tool to install:[/]", installChoices, Color.Green);
 
         if (choice == "Cancel") return;
 
-        var tool = installable.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
-        if (tool == null) return;
+        var idx = installChoices.IndexOf(choice);
+        if (idx < 0 || idx >= installable.Count) return;
+        var tool = installable[idx];
 
         // Version picker if multiple versions available
         var (selectedVersion, selectedUrl) = PickVersion(tool);
@@ -361,17 +389,18 @@ public class CliApp
 
         if (tools.Count == 0 && !hasSelfUpdate)
         {
-            AnsiConsole.MarkupLine("[dim]All tools are up to date.[/]");
+            AnsiConsole.MarkupLine("[grey50]All tools are up to date.[/]");
             return;
         }
 
         var choices = new List<string>();
 
         if (hasSelfUpdate)
-            choices.Add($"Tool Manager (v{_selfUpdater.CurrentVersion.ToString(3)} → v{_selfUpdater.LatestVersion!.ToString(3)})");
+            choices.Add(
+                $"[dodgerblue1 bold]Tool Manager[/] [grey50]v{_selfUpdater.CurrentVersion.ToString(3)}[/] [grey42]\u2192[/] [yellow]v{_selfUpdater.LatestVersion!.ToString(3)}[/]");
 
         choices.AddRange(tools.Select(t =>
-            $"{t.DisplayName} ({FormatVersionRaw(t.InstalledVersion)} → v{FormatVersionRaw(t.LatestVersion)})"));
+            $"[bold]{Markup.Escape(t.DisplayName)}[/] [grey50]v{FormatVersionRaw(t.InstalledVersion)}[/] [grey42]\u2192[/] [yellow]v{FormatVersionRaw(t.LatestVersion)}[/]"));
 
         choices.Add("Cancel");
 
@@ -379,16 +408,19 @@ public class CliApp
 
         if (choice == "Cancel") return;
 
-        if (choice.StartsWith("Tool Manager"))
+        var idx = choices.IndexOf(choice);
+        if (idx < 0) return;
+
+        if (hasSelfUpdate && idx == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]Applying Tool Manager update — the app will restart...[/]");
+            AnsiConsole.MarkupLine("[yellow]Applying Tool Manager update \u2014 the app will restart...[/]");
             await _selfUpdater.ApplyUpdate();
             return;
         }
 
-        var tool = tools.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
-        if (tool == null) return;
-        await RunInstallWithProgress(tool, "Updating");
+        var toolIdx = hasSelfUpdate ? idx - 1 : idx;
+        if (toolIdx < 0 || toolIdx >= tools.Count) return;
+        await RunInstallWithProgress(tools[toolIdx], "Updating");
     }
 
     private async Task UpdateAll(List<ToolInfo> tools)
@@ -425,22 +457,23 @@ public class CliApp
     {
         if (tools.Count == 0)
         {
-            AnsiConsole.MarkupLine("[dim]No tools installed to uninstall.[/]");
+            AnsiConsole.MarkupLine("[grey50]No tools installed to uninstall.[/]");
             return;
         }
 
         var uninstallChoices = tools
-            .Select(t => $"{t.DisplayName} (v{t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion)})")
-            .Append("Cancel")
+            .Select(t => $"[bold]{Markup.Escape(t.DisplayName)}[/] [grey50]v{Markup.Escape(t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion))}[/]")
             .ToList();
+        uninstallChoices.Add("Cancel");
         var choice = NumberedMenu.Show("[bold]Select a tool to uninstall:[/]", uninstallChoices, Color.Red);
 
         if (choice == "Cancel") return;
 
-        var tool = tools.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
-        if (tool == null) return;
+        var idx = uninstallChoices.IndexOf(choice);
+        if (idx < 0 || idx >= tools.Count) return;
+        var tool = tools[idx];
 
-        if (!AnsiConsole.Confirm($"Uninstall [bold]{Markup.Escape(tool.DisplayName)}[/]?", defaultValue: false))
+        if (!AnsiConsole.Confirm($"Uninstall [bold red]{Markup.Escape(tool.DisplayName)}[/]?", defaultValue: false))
             return;
 
         await AnsiConsole.Status()
@@ -452,7 +485,7 @@ public class CliApp
             });
 
         _github.RefreshInstalledStatus();
-        AnsiConsole.MarkupLine($"[green]{Markup.Escape(tool.DisplayName)} uninstalled.[/]");
+        AnsiConsole.MarkupLine($"[green]\u2713 {Markup.Escape(tool.DisplayName)} uninstalled.[/]");
     }
 
     // ── Switch to Release ───────────────────────────────────
@@ -463,7 +496,7 @@ public class CliApp
 
         if (devTools.Count == 0 && !selfIsDev)
         {
-            AnsiConsole.MarkupLine("[dim]No dev builds found.[/]");
+            AnsiConsole.MarkupLine("[grey50]No dev builds found.[/]");
             return;
         }
 
@@ -471,16 +504,16 @@ public class CliApp
 
         if (selfIsDev)
         {
-            // Need to fetch the latest release version for Tool Manager
             var (latestSelfVer, _) = _github.GetCachedSelfUpdate();
             var latestLabel = latestSelfVer != null
                 ? $"v{latestSelfVer.ToString(3)}"
                 : "latest release";
-            choices.Add($"Tool Manager ({_selfUpdater.CurrentVersionDisplay} → {latestLabel})");
+            choices.Add(
+                $"[dodgerblue1 bold]Tool Manager[/] [cyan]{Markup.Escape(_selfUpdater.CurrentVersionDisplay)}[/] [grey42]\u2192[/] [green]{latestLabel}[/]");
         }
 
         choices.AddRange(devTools.Select(t =>
-            $"{t.DisplayName} ({t.InstalledVersionRaw} → v{FormatVersionRaw(t.LatestVersion)})"));
+            $"[bold]{Markup.Escape(t.DisplayName)}[/] [cyan]{Markup.Escape(t.InstalledVersionRaw ?? "")}[/] [grey42]\u2192[/] [green]v{FormatVersionRaw(t.LatestVersion)}[/]"));
 
         choices.Add("Cancel");
 
@@ -488,7 +521,10 @@ public class CliApp
 
         if (choice == "Cancel") return;
 
-        if (choice.StartsWith("Tool Manager"))
+        var idx = choices.IndexOf(choice);
+        if (idx < 0) return;
+
+        if (selfIsDev && idx == 0)
         {
             AnsiConsole.MarkupLine("[yellow]Fetching latest release...[/]");
             var (ver, url) = await _github.GetLatestSelfRelease();
@@ -504,13 +540,14 @@ public class CliApp
                     defaultValue: true))
                 return;
 
-            AnsiConsole.MarkupLine("[yellow]Switching to release — the app will restart...[/]");
+            AnsiConsole.MarkupLine("[yellow]Switching to release \u2014 the app will restart...[/]");
             await _selfUpdater.ApplySpecificVersion(ver, url);
             return;
         }
 
-        var tool = devTools.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
-        if (tool == null) return;
+        var toolIdx = selfIsDev ? idx - 1 : idx;
+        if (toolIdx < 0 || toolIdx >= devTools.Count) return;
+        var tool = devTools[toolIdx];
 
         if (!AnsiConsole.Confirm(
                 $"Replace dev build [cyan]{Markup.Escape(tool.InstalledVersionRaw ?? "")}[/] with release [green]v{FormatVersionRaw(tool.LatestVersion)}[/]?",
@@ -1086,36 +1123,78 @@ public class CliApp
                 new ProgressBarColumn()
                 {
                     CompletedStyle = new Style(Color.DodgerBlue1),
-                    RemainingStyle = new Style(Color.Grey),
+                    RemainingStyle = new Style(Color.Grey30),
+                    FinishedStyle = new Style(Color.Green),
                 },
                 new PercentageColumn(),
+                new DownloadedColumn(),
+                new TransferSpeedColumn(),
+                new RemainingTimeColumn(),
                 new SpinnerColumn(Spinner.Known.Dots))
             .StartAsync(async ctx =>
             {
-                var displayVer = overrideVersion != null ? $" v{FormatVersionRaw(overrideVersion)}" : "";
-                var task = ctx.AddTask($"{verb} [bold]{Markup.Escape(tool.DisplayName)}{displayVer}[/]", maxValue: 100);
+                var displayVer = overrideVersion != null
+                    ? $" [grey50]v{FormatVersionRaw(overrideVersion)}[/]"
+                    : "";
+                var task = ctx.AddTask(
+                    $"{verb} [bold]{Markup.Escape(tool.DisplayName)}[/]{displayVer}",
+                    maxValue: 100);
+
+                bool inDownload = false;
+                long lastBytes = 0;
 
                 var progress = new Progress<InstallProgress>(p =>
                 {
-                    task.Description = Markup.Escape(p.Status);
-                    if (p.Percent >= 0)
+                    if (p.BytesDownloaded.HasValue && p.TotalBytes is > 0)
                     {
+                        // Switch to byte-mode the first time we see a known total — this lets
+                        // the speed/ETA columns compute meaningful values from increments.
+                        if (!inDownload)
+                        {
+                            task.MaxValue = p.TotalBytes.Value;
+                            task.Value = 0;
+                            inDownload = true;
+                            lastBytes = 0;
+                        }
+                        var delta = p.BytesDownloaded.Value - lastBytes;
+                        if (delta > 0) task.Increment(delta);
+                        lastBytes = p.BytesDownloaded.Value;
+                        task.Description =
+                            $"[dodgerblue1]\u2193[/] Downloading [bold]{Markup.Escape(tool.DisplayName)}[/]{displayVer}";
                         task.IsIndeterminate = false;
-                        task.Value = p.Percent;
                     }
                     else
                     {
-                        task.IsIndeterminate = true;
+                        // Non-download phase: switch back to percent-based progress.
+                        if (inDownload)
+                        {
+                            task.MaxValue = 100;
+                            task.Value = 0;
+                            inDownload = false;
+                            lastBytes = 0;
+                        }
+                        task.Description =
+                            $"[dodgerblue1]\u25b8[/] {Markup.Escape(p.Status)} [bold]{Markup.Escape(tool.DisplayName)}[/]{displayVer}";
+                        if (p.Percent >= 0)
+                        {
+                            task.IsIndeterminate = false;
+                            task.Value = p.Percent;
+                        }
+                        else
+                        {
+                            task.IsIndeterminate = true;
+                        }
                     }
                 });
 
                 var success = await _installer.InstallOrUpdate(tool, progress, overrideUrl, overrideVersion);
 
                 task.IsIndeterminate = false;
+                task.MaxValue = 100;
                 task.Value = 100;
                 task.Description = success
-                    ? $"[green]{Markup.Escape(tool.DisplayName)} installed successfully[/]"
-                    : $"[red]Failed to install {Markup.Escape(tool.DisplayName)}[/]";
+                    ? $"[green]\u2713 {Markup.Escape(tool.DisplayName)}{(overrideVersion != null ? $" v{FormatVersionRaw(overrideVersion)}" : "")} ready[/]"
+                    : $"[red]\u2717 Failed to install {Markup.Escape(tool.DisplayName)}[/]";
             });
 
         _github.RefreshInstalledStatus();
@@ -1132,7 +1211,7 @@ public class CliApp
             {
                 var label = $"v{FormatVersionRaw(v.Version)}";
                 if (v.Version == tool.LatestVersion) label += " (latest)";
-                if (v.PublishedAt.HasValue) label += $"  [{v.PublishedAt.Value.ToLocalTime():yyyy-MM-dd}]";
+                if (v.PublishedAt.HasValue) label += $"  [grey50]({v.PublishedAt.Value.ToLocalTime():yyyy-MM-dd})[/]";
                 return label;
             })
             .ToList();

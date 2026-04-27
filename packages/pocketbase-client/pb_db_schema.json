@@ -2493,6 +2493,70 @@
         "system": false
     },
     {
+        "id": "pbc_lead_categories",
+        "listRule": "@request.auth.id != ''",
+        "viewRule": "@request.auth.id != ''",
+        "createRule": "@request.auth.id != ''",
+        "updateRule": "@request.auth.id != ''",
+        "deleteRule": "@request.auth.role = 'admin'",
+        "name": "lead_categories",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210257",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_lc_name",
+                "max": 100,
+                "min": 1,
+                "name": "name",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "autodate_lc_created",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            },
+            {
+                "hidden": false,
+                "id": "autodate_lc_updated",
+                "name": "updated",
+                "onCreate": false,
+                "onUpdate": true,
+                "presentable": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE UNIQUE INDEX idx_lead_categories_name ON lead_categories (name)"
+        ],
+        "system": false
+    },
+    {
         "id": "pbc_6239365334",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
@@ -2715,6 +2779,19 @@
                 "required": false,
                 "system": false,
                 "type": "text"
+            },
+            {
+                "cascadeDelete": false,
+                "collectionId": "pbc_lead_categories",
+                "hidden": false,
+                "id": "relation_lead_category",
+                "maxSelect": 1,
+                "minSelect": 0,
+                "name": "lead_category",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "relation"
             },
             {
                 "autogeneratePattern": "",

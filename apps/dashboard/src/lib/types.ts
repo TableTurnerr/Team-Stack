@@ -14,6 +14,10 @@ export interface User extends RecordModel {
   discord_user_id?: string;
 }
 
+export interface LeadCategory extends RecordModel {
+  name: string;
+}
+
 export interface Company extends RecordModel {
   company_name: string;
   owner_name?: string;
@@ -39,6 +43,12 @@ export interface Company extends RecordModel {
 
   // Email suppression
   do_not_contact?: boolean;
+
+  // Lead category (relation ID)
+  lead_category?: string;
+  expand?: {
+    lead_category?: LeadCategory;
+  };
 }
 
 
@@ -535,6 +545,7 @@ export const COLLECTIONS = {
   COLD_CALLING_SESSIONS: 'cold_calling_sessions',
 
   CUSTOM_CALL_OUTCOMES: 'custom_call_outcomes',
+  LEAD_CATEGORIES: 'lead_categories',
 
   // Financial collections
   BANK_ACCOUNTS: 'bank_accounts',

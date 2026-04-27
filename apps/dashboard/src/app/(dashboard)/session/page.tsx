@@ -21,6 +21,9 @@ import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, t
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { usePhone } from '@/contexts/phone-context';
+import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
+import { linkCallLogToClaim } from '@/lib/call-claim';
+import { autoClaimCompany } from '@/lib/auto-claim';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
@@ -83,7 +86,8 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
     const { dialNumber, callStatus, callDirection, isDialing, activeCallNumber, setAutoHangup, endCall, agentRequired } = usePhone();
-    const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode, isBlockedByOtherSession, activeSessionUserName, otherActiveSession } = useSession();
+    const ownership = useCallOwnershipOptional();
+    const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
     const { addToast } = useToast();
     const { isConnected: agentConnected, launchAgent, zoomDetected: agentZoomDetected, launchZoom, zoomLaunching, recordingState: agentRecordingState, uploadQueueStatus: agentUploadQueue, sendCommand: sendAgentCommand } = useLocalAgent();
@@ -1056,7 +1060,10 @@ export default function SessionPage() {
                 }
             }
 
-            // 2. Create the session in PocketBase only after screen share is secured
+            // 2. Create the session in PocketBase only after screen share is secured.
+            //    device_id pins this session to the teammate's physical machine so
+            //    per-device session metrics can be joined to per-device call_claims
+            //    on the shared Zoom account.
             const newSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).create<ColdCallingSession>({
                 user: user.id,
                 started_at: new Date().toISOString(),
@@ -1070,6 +1077,7 @@ export default function SessionPage() {
                 paused_at: null,
                 total_paused_sec: 0,
                 is_test: pendingTestSession,
+                device_id: ownership?.deviceId ?? undefined,
             });
             setPendingTestSession(false);
             setSession(newSession);
@@ -1083,7 +1091,7 @@ export default function SessionPage() {
         } finally {
             setStarting(false);
         }
-    }, [user, setSession, startAudioSession, pendingTestSession]);
+    }, [user, setSession, startAudioSession, pendingTestSession, ownership?.deviceId]);
 
     // ---------------------------------------------------------------------------
     // End session
@@ -1603,7 +1611,21 @@ export default function SessionPage() {
                     appointment_set: data.appointmentSet,
                     callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                     is_callback: hasCallbacks ? true : undefined,
+                    zoom_call_id: ownership?.zoomCallId ?? undefined,
                 }, { expand: 'company,phone_number_record' });
+
+                // Auto-claim the company if it was unassigned.
+                void autoClaimCompany(data.companyId, user.id);
+
+                // Link log → claim (shared-Zoom-account ownership ledger).
+                void linkCallLogToClaim(callLog.id, {
+                    zoomCallId: ownership?.zoomCallId ?? null,
+                    phone: activeCallNumber,
+                    direction: callDirection === 'inbound' ? 'inbound' : 'outbound',
+                    userId: user.id,
+                    deviceId: ownership?.deviceId ?? null,
+                    intentId: ownership?.intentId ?? null,
+                });
                 // Submit this call's recording.
                 // For calls with callback legs, merge ALL queued segments into one recording
                 // (each callback re-dial creates a separate segment). For normal calls,
@@ -2175,43 +2197,9 @@ export default function SessionPage() {
                 );
             }
 
-            // ── Blocked by another user's active session ──
-            if (isBlockedByOtherSession && otherActiveSession) {
-                const otherStart = new Date(otherActiveSession.started_at).getTime();
-                const otherPausedSec = otherActiveSession.total_paused_sec ?? 0;
-                const otherCurrentPauseSec = otherActiveSession.paused_at
-                    ? Math.floor((Date.now() - new Date(otherActiveSession.paused_at).getTime()) / 1000)
-                    : 0;
-                const otherElapsed = Math.max(0, Math.floor((Date.now() - otherStart) / 1000) - otherPausedSec - otherCurrentPauseSec);
-                const isPaused = !!otherActiveSession.paused_at;
-
-                return (
-                    <div className="flex items-center justify-center min-h-[60vh]">
-                        <div className="text-center space-y-5 max-w-md bg-[var(--card-bg)] p-8 rounded-2xl border border-[var(--warning)]/40 shadow-xl">
-                            <div className="w-16 h-16 rounded-2xl bg-[var(--warning-subtle)] flex items-center justify-center mx-auto">
-                                <Headphones size={28} className="text-[var(--warning)] animate-pulse" />
-                            </div>
-                            <div>
-                                <h1 className="text-xl font-bold mb-2">Session In Progress</h1>
-                                <p className="text-sm text-[var(--muted)] leading-relaxed">
-                                    <span className="font-semibold text-[var(--foreground)]">{activeSessionUserName}</span>{' '}
-                                    is currently in an active call session. Only one session can run at a time.
-                                </p>
-                            </div>
-                            <div className="flex items-center justify-center gap-3 bg-[var(--sidebar-bg)] p-3 rounded-xl border border-[var(--card-border)]">
-                                <span className={`w-2 h-2 rounded-full ${isPaused ? 'bg-[var(--warning)]' : 'bg-[var(--success)] animate-pulse'}`} />
-                                <span className="text-sm font-medium">{isPaused ? 'Paused' : 'Active'}</span>
-                                <span className="text-sm font-mono text-[var(--muted)]">{formatDuration(otherElapsed)}</span>
-                            </div>
-                            <p className="text-xs text-[var(--muted)]">
-                                You&apos;ll be able to start your session once {activeSessionUserName?.split(' ')[0] || 'they'} end{activeSessionUserName?.split(' ')[0] ? 's' : ''} theirs.
-                                This page will update automatically.
-                            </p>
-                        </div>
-                    </div>
-                );
-            }
-
+            // Concurrent teammate sessions are allowed — cross-device call
+            // attribution is handled by the local agent's per-device signals
+            // (see call-ownership-context). No global lock here.
             return (
                 <div className="space-y-4">
                     {/* Upload cooldown banner — shown after session ends while recordings are still uploading */}
@@ -2627,7 +2615,12 @@ export default function SessionPage() {
                     </div>
                 )}
 
-                {/* Docked Zoom Phone Dialer - Above Current Call section */}
+                {/* Docked Zoom Phone Dialer - Above Current Call section.
+                    alwaysExpanded keeps the dialer visible at rest so the
+                    custom dialer ↔ Zoom embed swap happens in place when
+                    THIS user starts a call. Teammate calls on the shared
+                    Zoom account don't trigger the swap because isCallActive
+                    in the dialer is gated on per-device ownership. */}
                 <div className="relative">
                     <PhoneDialer
                         docked

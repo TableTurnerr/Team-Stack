@@ -33,7 +33,9 @@ static class Program
         var audioMonitor = new ZoomAudioMonitor();
         var windowMonitor = new ZoomWindowMonitor();
         var networkMonitor = new NetworkMonitor();
-        var fusion = new CallStateFusion(audioMonitor, windowMonitor);
+        var uiWatcher = new ZoomUiWatcher();
+        var intentTracker = new DialIntentTracker();
+        var fusion = new CallStateFusion(audioMonitor, windowMonitor, uiWatcher, intentTracker);
         var micManager = new MicrophoneManager(fusion);
         var storageManager = new RecordingStorageManager();
         var recorder = new AudioRecorderService(storageManager, fusion, micManager);
@@ -43,6 +45,7 @@ static class Program
         var callController = new ZoomCallController(zoomSuppressor, windowMonitor);
         callController.SetApiService(zoomApi);
         var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
+        wsServer.SetDialIntentTracker(intentTracker);
         wsServer.SetRecordingServices(recorder, uploader, storageManager);
         wsServer.SetMicrophoneManager(micManager);
         wsServer.SetZoomSuppressor(zoomSuppressor);

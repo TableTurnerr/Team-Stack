@@ -166,7 +166,23 @@ public class RecordingStorageManager
         lock (_lock)
         {
             return _entries
-                .Where(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null)
+                .Where(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null && e.ConversionComplete)
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// Get recordings that have finished converting but haven't been linked to
+    /// a CRM call log yet. These are the ones the dashboard can preview
+    /// locally after a page refresh (before the call has been submitted).
+    /// </summary>
+    public List<RecordingEntry> GetUnlinkedRecordings()
+    {
+        lock (_lock)
+        {
+            return _entries
+                .Where(e => !e.Uploaded && e.CallLogId == null && e.Error == null && e.ConversionComplete)
+                .OrderByDescending(e => e.StartTime)
                 .ToList();
         }
     }
@@ -235,7 +251,7 @@ public class RecordingStorageManager
                 // Unlinked recordings (no CallLogId) are filtered out by
                 // GetPendingUploads and would never upload — counting them
                 // here would mislead users into thinking uploads are stuck.
-                return _entries.Count(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null);
+                return _entries.Count(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null && e.ConversionComplete);
             }
         }
     }
@@ -307,6 +323,16 @@ public class RecordingStorageManager
                 var json = File.ReadAllText(_manifestPath);
                 _entries = JsonSerializer.Deserialize<List<RecordingEntry>>(json, JsonOptions) ?? [];
                 Debug.WriteLine($"[Storage] Loaded manifest: {_entries.Count} entries");
+
+                // Backfill ConversionComplete for entries written by older agent
+                // builds that didn't track the flag. FileSizeBytes > 0 or already-
+                // uploaded both imply the MP3 was fully written at some point, so
+                // they're safe to mark complete.
+                foreach (var e in _entries)
+                {
+                    if (!e.ConversionComplete && (e.Uploaded || e.FileSizeBytes > 0))
+                        e.ConversionComplete = true;
+                }
             }
         }
         catch (Exception ex)
@@ -354,6 +380,15 @@ public class RecordingEntry
 
     [JsonPropertyName("fileSizeBytes")]
     public long FileSizeBytes { get; set; }
+
+    /// <summary>
+    /// Set to true once the WAV → MP3 conversion has fully written and closed
+    /// the MP3 file on disk. Uploads must wait on this: LameMP3FileWriter holds
+    /// the file open during conversion, and uploading the in-progress file
+    /// produces a truncated, corrupt MP3 on the server.
+    /// </summary>
+    [JsonPropertyName("conversionComplete")]
+    public bool ConversionComplete { get; set; }
 
     [JsonPropertyName("uploaded")]
     public bool Uploaded { get; set; }

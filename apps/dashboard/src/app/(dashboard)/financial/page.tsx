@@ -516,10 +516,10 @@ export default function FinancialPage() {
 
   const psKpis = useMemo(() => {
     const totalEarned = psRewards
-      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null)
+      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null && !r.withdrawn)
       .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
     const pending = psRewards
-      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null)
+      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null && !r.withdrawn)
       .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
     return { totalEarned, pending };
   }, [psRewards, convert, primaryCurrency]);
@@ -715,7 +715,7 @@ export default function FinancialPage() {
 
   const monthlyApprovedPS = useMemo(() =>
     psRewards
-      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null &&
+      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null && !r.withdrawn &&
         new Date(r.created_at).toISOString().split('T')[0] >= thisMonthStart)
       .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0),
     [psRewards, convert, primaryCurrency, thisMonthStart]
@@ -723,7 +723,7 @@ export default function FinancialPage() {
 
   const monthlyPendingPS = useMemo(() =>
     psRewards
-      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null &&
+      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null && !r.withdrawn &&
         new Date(r.created_at).toISOString().split('T')[0] >= thisMonthStart)
       .reduce((s, r) => s + convert((r.amount ?? 0) / 100, r.currency as SupportedCurrency, primaryCurrency), 0),
     [psRewards, convert, primaryCurrency, thisMonthStart]

@@ -22,13 +22,6 @@ public class AgentService : IDisposable
     private Task? _networkTask;
     private readonly DateTime _startTime = DateTime.UtcNow;
 
-    /// <summary>
-    /// Tracks whether we already attempted to auto-launch Zoom for the current
-    /// "zoom gone" cycle. Resets when Zoom is detected again so a subsequent
-    /// disappearance triggers a fresh launch attempt.
-    /// </summary>
-    private bool _zoomAutoLaunchAttempted;
-
     public event Action<int>? ConnectionCountChanged;
 
     public int ConnectionCount => _wsServer.ConnectionCount;
@@ -101,25 +94,6 @@ public class AgentService : IDisposable
                     var uptime = (int)(DateTime.UtcNow - _startTime).TotalSeconds;
                     var zoomDetected = _audioMonitor.IsZoomRunning();
                     _wsServer.BroadcastHeartbeat(uptime, zoomDetected);
-
-                    // Auto-launch Zoom when CRM clients are connected (session
-                    // likely active) but Zoom is not running. Only attempt once
-                    // per disappearance cycle to avoid spam-launching.
-                    if (!zoomDetected && _wsServer.ConnectionCount > 0 && !_zoomAutoLaunchAttempted)
-                    {
-                        _zoomAutoLaunchAttempted = true;
-                        Debug.WriteLine("[Agent] Zoom not detected with active clients — auto-launching");
-                        _ = Task.Run(async () =>
-                        {
-                            var (success, _, msg) = await _audioMonitor.LaunchZoom();
-                            Debug.WriteLine($"[Agent] Auto-launch result: {msg}");
-                        });
-                    }
-                    else if (zoomDetected && _zoomAutoLaunchAttempted)
-                    {
-                        // Zoom is back — reset so we can auto-launch again if it disappears
-                        _zoomAutoLaunchAttempted = false;
-                    }
                 }
 
                 // Every 10 seconds: upload queue status

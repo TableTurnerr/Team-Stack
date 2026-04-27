@@ -56,6 +56,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
     error,
 }) => {
     const [showPassword, setShowPassword] = useState(false);
+    const [showPasswordLogin, setShowPasswordLogin] = useState(false);
 
     return (
         <div className="min-h-[100dvh] flex flex-col lg:flex-row w-full overflow-hidden">
@@ -86,7 +87,50 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                         </div>
                     )}
 
-                    {/* Form */}
+                    {/* Google Button (primary) */}
+                    <button
+                        type="button"
+                        onClick={onGoogleSignIn}
+                        disabled={isLoading}
+                        className="animate-element animate-delay-300 w-full flex items-center justify-center gap-3 rounded-xl bg-[var(--foreground)] py-3.5 font-medium text-[var(--background)] hover:opacity-90 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] cursor-pointer"
+                    >
+                        <GoogleIcon />
+                        <span>Continue with Google</span>
+                    </button>
+
+                    {/* Sign up link */}
+                    <p className="animate-element animate-delay-400 text-center text-sm text-[var(--muted)] mt-6">
+                        Don&apos;t have an account?{' '}
+                        <button
+                            type="button"
+                            onClick={onCreateAccount}
+                            className="text-[var(--foreground)] hover:text-[var(--muted)] font-medium transition-colors underline underline-offset-2 cursor-pointer"
+                        >
+                            Create one
+                        </button>
+                    </p>
+
+                    {/* Toggle for email/password login */}
+                    {!showPasswordLogin && (
+                        <div className="animate-element animate-delay-500 mt-8 text-center">
+                            <button
+                                type="button"
+                                onClick={() => setShowPasswordLogin(true)}
+                                className="text-sm text-[var(--muted)] hover:text-[var(--foreground)] font-medium transition-colors underline underline-offset-2 cursor-pointer"
+                            >
+                                Use Login &amp; Password
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Email/Password Form (secondary) */}
+                    {showPasswordLogin && (
+                    <>
+                    <div className="animate-element relative flex items-center my-6">
+                        <span className="flex-1 border-t border-[var(--card-border)]"></span>
+                        <span className="px-4 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Or</span>
+                        <span className="flex-1 border-t border-[var(--card-border)]"></span>
+                    </div>
                     <form className="space-y-5" onSubmit={onSignIn}>
                         <div className="animate-element animate-delay-300">
                             <label htmlFor="email" className="block text-sm font-medium text-[var(--foreground)]">
@@ -169,36 +213,8 @@ export const SignInPage: React.FC<SignInPageProps> = ({
                             ) : 'Sign In'}
                         </button>
                     </form>
-
-                    {/* Divider */}
-                    <div className="animate-element animate-delay-700 relative flex items-center my-6">
-                        <span className="flex-1 border-t border-[var(--card-border)]"></span>
-                        <span className="px-4 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Or</span>
-                        <span className="flex-1 border-t border-[var(--card-border)]"></span>
-                    </div>
-
-                    {/* Google Button */}
-                    <button
-                        type="button"
-                        onClick={onGoogleSignIn}
-                        disabled={isLoading}
-                        className="animate-element animate-delay-800 w-full flex items-center justify-center gap-3 border border-[var(--card-border)] rounded-xl py-3.5 font-medium hover:bg-[var(--card-hover)] hover:border-[var(--muted)]/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] cursor-pointer"
-                    >
-                        <GoogleIcon />
-                        <span>Continue with Google</span>
-                    </button>
-
-                    {/* Sign up link */}
-                    <p className="animate-element animate-delay-900 text-center text-sm text-[var(--muted)] mt-8">
-                        Don&apos;t have an account?{' '}
-                        <button
-                            type="button"
-                            onClick={onCreateAccount}
-                            className="text-[var(--foreground)] hover:text-[var(--muted)] font-medium transition-colors underline underline-offset-2 cursor-pointer"
-                        >
-                            Create one
-                        </button>
-                    </p>
+                    </>
+                    )}
                 </div>
             </section>
 

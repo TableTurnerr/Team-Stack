@@ -56,11 +56,11 @@ export function CashFlowChart({ transactions, primaryCurrency, psRewards, accoun
     const expense = dayTxns.filter(t => t.type === 'expense').reduce((s, t) => s + convert(t.amount + (t.fee_amount ?? 0), t.currency, primaryCurrency), 0);
 
     const psApproved = (psRewards ?? [])
-      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null && format(new Date(r.created_at), 'yyyy-MM-dd') === dayStr)
+      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null && !r.withdrawn && format(new Date(r.created_at), 'yyyy-MM-dd') === dayStr)
       .reduce((s, r) => s + convert(r.amount / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
 
     const psPending = (psRewards ?? [])
-      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null && format(new Date(r.created_at), 'yyyy-MM-dd') === dayStr)
+      .filter(r => ['pending', 'hold'].includes(r.reward_status) && r.amount != null && !r.withdrawn && format(new Date(r.created_at), 'yyyy-MM-dd') === dayStr)
       .reduce((s, r) => s + convert(r.amount / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
 
     return {
@@ -92,7 +92,7 @@ export function CashFlowChart({ transactions, primaryCurrency, psRewards, accoun
     const psNets: number[] = days.map(day => {
       const dayStr = format(day, 'yyyy-MM-dd');
       return (psRewards ?? [])
-        .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null && format(new Date(r.created_at), 'yyyy-MM-dd') === dayStr)
+        .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null && !r.withdrawn && format(new Date(r.created_at), 'yyyy-MM-dd') === dayStr)
         .reduce((s, r) => s + convert(r.amount / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
     });
 
@@ -109,7 +109,7 @@ export function CashFlowChart({ transactions, primaryCurrency, psRewards, accoun
     }
 
     const psTotalNow = (psRewards ?? [])
-      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null)
+      .filter(r => ['approved', 'paid'].includes(r.reward_status) && r.amount != null && !r.withdrawn)
       .reduce((s, r) => s + convert(r.amount / 100, r.currency as SupportedCurrency, primaryCurrency), 0);
     accountBalances[PS_KEY] = walkBack(psTotalNow, psNets);
 
@@ -124,7 +124,7 @@ export function CashFlowChart({ transactions, primaryCurrency, psRewards, accoun
     const lines = activeAccounts.map((acc, idx) => ({
       id: acc.id,
       name: acc.name,
-      color: (acc.color && /^#[0-9a-f]{3,6}$/i.test(acc.color)) ? acc.color : PALETTE[idx % PALETTE.length],
+      color: PALETTE[idx % PALETTE.length],
     }));
     lines.push({ id: PS_KEY, name: 'PartnerStack', color: PALETTE[lines.length % PALETTE.length] });
 

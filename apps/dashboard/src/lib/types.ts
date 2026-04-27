@@ -14,6 +14,10 @@ export interface User extends RecordModel {
   discord_user_id?: string;
 }
 
+export interface LeadCategory extends RecordModel {
+  name: string;
+}
+
 export interface Company extends RecordModel {
   company_name: string;
   owner_name?: string;
@@ -39,6 +43,15 @@ export interface Company extends RecordModel {
 
   // Email suppression
   do_not_contact?: boolean;
+
+  // Lead category (relation ID)
+  lead_category?: string;
+  // RBAC owner (relation to users; admins can assign)
+  assigned_to?: string;
+  expand?: {
+    lead_category?: LeadCategory;
+    assigned_to?: User;
+  };
 }
 
 
@@ -256,6 +269,12 @@ export interface ColdCallingSession extends RecordModel {
   manual_adjustments?: ManualAdjustment[] | null;
   /** Whether the session owner is currently on an active Zoom call */
   on_call?: boolean;
+  /**
+   * Stable per-machine id (from local agent's DeviceIdentity). Pins a
+   * session to a physical device so per-device session metrics can be
+   * joined against per-device call_claims on the shared Zoom account.
+   */
+  device_id?: string;
   expand?: {
     user?: User;
   };
@@ -529,6 +548,7 @@ export const COLLECTIONS = {
   COLD_CALLING_SESSIONS: 'cold_calling_sessions',
 
   CUSTOM_CALL_OUTCOMES: 'custom_call_outcomes',
+  LEAD_CATEGORIES: 'lead_categories',
 
   // Financial collections
   BANK_ACCOUNTS: 'bank_accounts',
@@ -591,18 +611,13 @@ export interface RolePermissions {
   can_view_recordings?: boolean;
   can_delete_recordings?: boolean;
   can_manage_sessions?: boolean;
+  can_access_extension_leads_directly?: boolean;
 }
 
-/** Data-level access control */
+/** Data-level access control (applies uniformly to companies/leads — they're the same row) */
 export interface RoleDataAccess {
-  companies?: {
-    mode: 'all' | 'assigned' | 'none';
-    company_ids?: string[];
-  };
-  leads?: {
-    mode: 'all' | 'assigned' | 'none';
-    lead_ids?: string[];
-  };
+  mode?: 'all' | 'assigned' | 'specific' | 'none';
+  company_ids?: string[];
 }
 
 export interface Role extends RecordModel {

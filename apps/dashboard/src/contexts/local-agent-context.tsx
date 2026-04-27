@@ -11,6 +11,23 @@ export interface AgentCallState {
     direction: string | null;
     duration: number;
     confidence: 'low' | 'medium' | 'high';
+    // Ownership envelope — lets us distinguish "this teammate is on a call"
+    // from "some teammate on the shared account is on a call." When
+    // uiSeenHere OR audioActiveHere is true, THIS device is the one with
+    // the active call panel / ring toast.
+    deviceId: string | null;
+    intentId: string | null;
+    zoomCallId: string | null;
+    uiSeenHere: boolean;
+    audioActiveHere: boolean;
+    /**
+     * Negative-confirmation signal from the agent. When true, the shared
+     * Zoom account shows "On a call" presence but NO local active/ring UI
+     * is visible — i.e. another teammate on another device is on a call.
+     * Use to (a) reinforce that this device does NOT own the call, and
+     * (b) indicate that the shared line is currently busy with a teammate.
+     */
+    teammateOnCall: boolean;
 }
 
 export interface AgentNetworkQuality {
@@ -65,10 +82,24 @@ interface LocalAgentContextType {
     recordingState: AgentRecordingState | null;
     /** Latest completed recording metadata */
     latestRecording: AgentRecordingCompleted | null;
+    /**
+     * Recordings on disk that haven't been linked to a CRM call log yet.
+     * Refreshed on agent connect and whenever the agent reports a state
+     * change that could have added/removed an unlinked entry. Lets the UI
+     * recover the "Recorded but unsubmitted" pill after a page refresh.
+     */
+    unlinkedRecordings: AgentRecordingCompleted[];
     /** Upload queue status */
     uploadQueueStatus: AgentUploadQueueStatus | null;
     /** Send a command to the agent via WebSocket */
     sendCommand: (command: Record<string, unknown>) => void;
+    /**
+     * Fetch a local recording file from the agent as a browser Blob, for
+     * previewing recordings that haven't been uploaded to PocketBase yet.
+     * Rejects if the agent isn't connected, the file is missing, or the
+     * request times out.
+     */
+    fetchLocalRecording: (fileName: string) => Promise<Blob>;
 }
 
 // ── Context ─────────────────────────────────────────────────────────
@@ -87,7 +118,16 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
     const [zoomLaunching, setZoomLaunching] = useState(false);
     const [recordingState, setRecordingState] = useState<AgentRecordingState | null>(null);
     const [latestRecording, setLatestRecording] = useState<AgentRecordingCompleted | null>(null);
+    const [unlinkedRecordings, setUnlinkedRecordings] = useState<AgentRecordingCompleted[]>([]);
     const [uploadQueueStatus, setUploadQueueStatus] = useState<AgentUploadQueueStatus | null>(null);
+
+    // Pending local-recording fetch promises keyed by requested file name.
+    // Resolved when the matching `localRecording` WebSocket message arrives.
+    const pendingLocalFetchesRef = useRef<Map<string, {
+        resolve: (b: Blob) => void;
+        reject: (e: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+    }>>(new Map());
 
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -129,6 +169,10 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     try {
                         ws.send(JSON.stringify({ type: 'setAutoRecord', enabled: true, onRinging: false }));
                         ws.send(JSON.stringify({ type: 'getRecordingStatus' }));
+                        // Repopulate the list of on-disk unlinked recordings
+                        // so the "Recorded but unsubmitted" UI survives page
+                        // refreshes and agent reconnects.
+                        ws.send(JSON.stringify({ type: 'getUnlinkedRecordings' }));
                     } catch { /* ignore */ }
                 };
 
@@ -144,6 +188,12 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     direction: msg.direction ?? null,
                                     duration: msg.duration ?? 0,
                                     confidence: msg.confidence ?? 'low',
+                                    deviceId: msg.deviceId ?? null,
+                                    intentId: msg.intentId ?? null,
+                                    zoomCallId: msg.zoomCallId ?? null,
+                                    uiSeenHere: Boolean(msg.uiSeenHere),
+                                    audioActiveHere: Boolean(msg.audioActiveHere),
+                                    teammateOnCall: Boolean(msg.teammateOnCall),
                                 });
                                 break;
                             case 'networkQuality':
@@ -172,24 +222,87 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     error: msg.error ?? null,
                                 });
                                 break;
-                            case 'recordingCompleted':
-                                setLatestRecording({
+                            case 'recordingCompleted': {
+                                const completed: AgentRecordingCompleted = {
                                     recordingId: msg.recordingId ?? '',
                                     fileName: msg.fileName ?? '',
                                     phoneNumber: msg.phoneNumber ?? '',
                                     duration: msg.duration ?? 0,
                                     fileSizeBytes: msg.fileSizeBytes ?? 0,
                                     startTime: msg.startTime ?? '',
+                                };
+                                setLatestRecording(completed);
+                                // Keep the unlinked list in sync so the
+                                // recording is still visible after refresh.
+                                setUnlinkedRecordings(prev => {
+                                    const without = prev.filter(r => r.fileName !== completed.fileName);
+                                    return [completed, ...without];
                                 });
                                 setRecordingState({ state: 'idle', recordingId: null, fileName: null, phoneNumber: null, duration: 0, error: null });
                                 break;
-                            case 'recordingUploaded':
-                                // UI can react to this if needed
+                            }
+                            case 'recordingUploaded': {
+                                // Once uploaded (and linked), the recording
+                                // is no longer "unsubmitted" — drop it from
+                                // the local list.
+                                const fn: string = msg.fileName ?? '';
+                                if (fn) {
+                                    setUnlinkedRecordings(prev => prev.filter(r => r.fileName !== fn));
+                                }
                                 break;
+                            }
+                            case 'unlinkedRecordings': {
+                                const list: AgentRecordingCompleted[] = Array.isArray(msg.recordings)
+                                    ? msg.recordings.map((r: Record<string, unknown>) => ({
+                                        recordingId: (r.recordingId as string) ?? '',
+                                        fileName: (r.fileName as string) ?? '',
+                                        phoneNumber: (r.phoneNumber as string) ?? '',
+                                        duration: (r.duration as number) ?? 0,
+                                        fileSizeBytes: (r.fileSizeBytes as number) ?? 0,
+                                        startTime: (r.startTime as string) ?? '',
+                                    }))
+                                    : [];
+                                setUnlinkedRecordings(list);
+                                // Seed latestRecording from the most recent
+                                // unlinked entry if the live one is empty
+                                // (first load after a page refresh).
+                                setLatestRecording(prev => prev ?? list[0] ?? null);
+                                break;
+                            }
                             case 'endCallResult':
                             case 'dialResult':
                                 console.log('[LocalAgent] %s: %s', msg.type, msg.success ? 'OK' : `FAILED: ${msg.error}`);
                                 break;
+                            case 'localRecording': {
+                                // Resolve whichever pending fetch matches the base filename.
+                                // The agent may return the post-link renamed form (..._cl-<id>.mp3)
+                                // even though we asked for the base — match by prefix to stay robust.
+                                const rxName: string = msg.fileName ?? '';
+                                const base = rxName.replace(/_cl-[^.]+(?=\.)/, '').replace(/\.mp3$/i, '');
+                                const pending = pendingLocalFetchesRef.current;
+                                const keys = Array.from(pending.keys());
+                                const matchKey = keys.find(k => {
+                                    const kBase = k.replace(/_cl-[^.]+(?=\.)/, '').replace(/\.mp3$/i, '');
+                                    return kBase === base || k === rxName;
+                                });
+                                if (!matchKey) break;
+                                const entry = pending.get(matchKey)!;
+                                pending.delete(matchKey);
+                                clearTimeout(entry.timer);
+                                if (!msg.success || !msg.data) {
+                                    entry.reject(new Error(msg.error || 'Agent returned no data'));
+                                    break;
+                                }
+                                try {
+                                    const binary = atob(msg.data);
+                                    const bytes = new Uint8Array(binary.length);
+                                    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                                    entry.resolve(new Blob([bytes], { type: msg.mimeType || 'audio/mpeg' }));
+                                } catch (e) {
+                                    entry.reject(e instanceof Error ? e : new Error('Decode failed'));
+                                }
+                                break;
+                            }
                             case 'uploadQueueStatus':
                                 setUploadQueueStatus({
                                     pendingCount: msg.pendingCount ?? 0,
@@ -246,6 +359,37 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
         };
     }, []);
 
+    const fetchLocalRecording = useCallback((fileName: string): Promise<Blob> => {
+        return new Promise<Blob>((resolve, reject) => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                reject(new Error('Local agent is not connected'));
+                return;
+            }
+            // If we already have a pending request for this file, piggy-back on it.
+            const existing = pendingLocalFetchesRef.current.get(fileName);
+            if (existing) {
+                const prevResolve = existing.resolve;
+                const prevReject = existing.reject;
+                existing.resolve = (b) => { prevResolve(b); resolve(b); };
+                existing.reject = (e) => { prevReject(e); reject(e); };
+                return;
+            }
+            const timer = setTimeout(() => {
+                pendingLocalFetchesRef.current.delete(fileName);
+                reject(new Error('Timed out waiting for local recording'));
+            }, 15000);
+            pendingLocalFetchesRef.current.set(fileName, { resolve, reject, timer });
+            try {
+                ws.send(JSON.stringify({ type: 'getLocalRecording', fileName }));
+            } catch (err) {
+                pendingLocalFetchesRef.current.delete(fileName);
+                clearTimeout(timer);
+                reject(err instanceof Error ? err : new Error('Failed to send request'));
+            }
+        });
+    }, []);
+
     const sendCommand = useCallback((command: Record<string, unknown>) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -282,8 +426,8 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
             isConnected, callState, networkQuality,
             zoomDetected, agentUptime, launchAgent,
             launchZoom, zoomLaunching,
-            recordingState, latestRecording, uploadQueueStatus,
-            sendCommand,
+            recordingState, latestRecording, unlinkedRecordings, uploadQueueStatus,
+            sendCommand, fetchLocalRecording,
         }}>
             {children}
         </LocalAgentContext.Provider>
@@ -308,7 +452,9 @@ export function useLocalAgent(): LocalAgentContextType {
         zoomLaunching: false,
         recordingState: null,
         latestRecording: null,
+        unlinkedRecordings: [],
         uploadQueueStatus: null,
         sendCommand: () => {},
+        fetchLocalRecording: () => Promise.reject(new Error('Local agent is not connected')),
     };
 }

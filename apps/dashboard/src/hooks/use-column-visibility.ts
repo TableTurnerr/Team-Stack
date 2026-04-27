@@ -33,7 +33,14 @@ export function useColumnVisibility(
       if (stored) {
         try {
           const parsed = JSON.parse(stored) as string[];
-          return new Set(parsed);
+          const restored = new Set(parsed);
+          // Add any new defaultVisible columns not yet in stored prefs
+          for (const col of columnDefinitions) {
+            if (col.defaultVisible !== false && !parsed.includes(col.key)) {
+              restored.add(col.key);
+            }
+          }
+          return restored;
         } catch (e) {
           console.error('Failed to parse column visibility from localStorage:', e);
         }

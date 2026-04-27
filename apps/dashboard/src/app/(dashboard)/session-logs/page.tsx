@@ -1,15 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { History, Download, RefreshCw, Loader2, Filter, Trash2 } from 'lucide-react';
+import { History, Download, RefreshCw, Loader2, Filter, Trash2, Copy, Check } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type Recording, type FollowUp } from '@/lib/types';
 import { SessionLogRow } from './session-log-row';
 import {
     TableContainer,
     HeaderIndexCell,
-    ResizableTh,
-    useResizableColumns,
     useTableSelection,
     TableEmptyState,
     SelectionToolbar,
@@ -18,20 +16,23 @@ import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { useRecycleBinOptional } from '@/contexts/recycle-bin-context';
 import { useAuth } from '@/contexts/auth-context';
 import { PageGuard } from '@/components/page-guard';
+import { ColumnSelector } from '@/components/column-selector';
+import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-visibility';
+import { useTeamMembers } from '@/components/assignee-picker';
 
-const COLUMN_CONFIG = [
-    { key: 'expand' },
-    { key: 'started', initialWidth: 180, minWidth: 120 },
-    { key: 'duration', initialWidth: 100, minWidth: 80 },
-    { key: 'dials', initialWidth: 80, minWidth: 60 },
-    { key: 'pickups', initialWidth: 80, minWidth: 60 },
-    { key: 'pickup_pct', initialWidth: 120, minWidth: 90 },
-    { key: 'owner', initialWidth: 80, minWidth: 60 },
-    { key: 'pitch', initialWidth: 80, minWidth: 60 },
-    { key: 'appt', initialWidth: 80, minWidth: 60 },
-    { key: 'user', initialWidth: 80, minWidth: 60 },
-    { key: 'status', initialWidth: 100, minWidth: 80 },
-    { key: 'actions' },
+const SESSION_LOG_COLUMNS: ColumnDefinition[] = [
+    { key: 'started', label: 'Started', defaultVisible: true },
+    { key: 'duration', label: 'Duration', defaultVisible: true },
+    { key: 'dials', label: 'Dials', defaultVisible: true },
+    { key: 'pickups', label: 'Pickups', defaultVisible: true },
+    { key: 'pickup_pct', label: 'Pickup %', defaultVisible: true },
+    { key: 'owner', label: 'Owner', defaultVisible: true },
+    { key: 'pitch', label: 'Pitch', defaultVisible: true },
+    { key: 'appt', label: 'Appt', defaultVisible: true },
+    { key: 'lead_category', label: 'Lead Category', defaultVisible: true },
+    { key: 'user', label: 'User', defaultVisible: true },
+    { key: 'status', label: 'Status', defaultVisible: true },
+    { key: 'actions', label: 'Actions', alwaysVisible: true },
 ];
 
 function formatDateTime(dateString: string): string {
@@ -45,15 +46,19 @@ function formatDateTime(dateString: string): string {
 export default function SessionLogsPage() {
     const { preferences } = useUserPreferences();
     const [sessions, setSessions] = useState<ColdCallingSession[]>([]);
+    const [categoryBreakdowns, setCategoryBreakdowns] = useState<Map<string, Record<string, number>>>(new Map());
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
+    const [userFilter, setUserFilter] = useState<'all' | 'mine' | string>('all');
     const [showFilters, setShowFilters] = useState(false);
+    const teamMembers = useTeamMembers();
     const [bulkDeleting, setBulkDeleting] = useState(false);
     const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+    const [bulkIdsCopied, setBulkIdsCopied] = useState(false);
 
     const selection = useTableSelection(sessions);
-    const { resize, getWidth } = useResizableColumns('session-logs', COLUMN_CONFIG);
+    const columnVisibility = useColumnVisibility('session-logs', SESSION_LOG_COLUMNS);
     const recycleBin = useRecycleBinOptional();
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
@@ -63,10 +68,14 @@ export default function SessionLogsPage() {
             setLoading(true);
 
             // Build filter
-            let filter = '';
-            if (statusFilter !== 'all') {
-                filter = `status = "${statusFilter}"`;
+            const parts: string[] = [];
+            if (statusFilter !== 'all') parts.push(`status = "${statusFilter}"`);
+            if (userFilter === 'mine' && user?.id) {
+                parts.push(`user = "${user.id}"`);
+            } else if (userFilter !== 'all' && userFilter) {
+                parts.push(`user = "${userFilter}"`);
             }
+            const filter = parts.join(' && ');
 
             const result = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getFullList<ColdCallingSession>({
                 filter,
@@ -75,13 +84,41 @@ export default function SessionLogsPage() {
             });
 
             setSessions(result);
+
+            // Fetch call logs (with company.lead_category) for these sessions in chunks
+            // to compute the lead-category breakdown per session.
+            const sessionIds = result.map(s => s.id);
+            const breakdown = new Map<string, Record<string, number>>();
+            const CHUNK = 40;
+            for (let i = 0; i < sessionIds.length; i += CHUNK) {
+                const chunk = sessionIds.slice(i, i + CHUNK);
+                const filter = chunk.map(id => `session = "${id}"`).join(' || ');
+                if (!filter) continue;
+                try {
+                    const logs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
+                        filter,
+                        expand: 'company.lead_category',
+                        fields: 'id,session,expand.company.expand.lead_category.name',
+                    });
+                    for (const log of logs) {
+                        if (!log.session) continue;
+                        const name = log.expand?.company?.expand?.lead_category?.name || 'Uncategorized';
+                        const map = breakdown.get(log.session) || {};
+                        map[name] = (map[name] || 0) + 1;
+                        breakdown.set(log.session, map);
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch call log categories:', err);
+                }
+            }
+            setCategoryBreakdowns(breakdown);
         } catch (err) {
             console.error('Failed to fetch sessions:', err);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [statusFilter]);
+    }, [statusFilter, userFilter, user?.id]);
 
     useEffect(() => {
         fetchSessions();
@@ -157,6 +194,21 @@ export default function SessionLogsPage() {
         }
     };
 
+    const handleBulkCopyIds = async () => {
+        const ids = sessions
+            .filter(s => selection.selectedIds.has(s.id))
+            .map(s => s.id)
+            .join('\n');
+        if (!ids) return;
+        try {
+            await navigator.clipboard.writeText(ids);
+            setBulkIdsCopied(true);
+            setTimeout(() => setBulkIdsCopied(false), 1500);
+        } catch (err) {
+            console.error('Failed to copy session IDs:', err);
+        }
+    };
+
     const handleExportCSV = () => {
         // CSV export functionality
         const csvHeader = 'Date,Duration,Dials,Pickups,Pickup Rate,Owner Reached,Pitch Completed,Appointments,User,Status\n';
@@ -227,6 +279,17 @@ export default function SessionLogsPage() {
                     >
                         <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
                     </button>
+                    <ColumnSelector
+                        columns={columnVisibility.columns}
+                        visibleColumns={columnVisibility.visibleColumns}
+                        onToggle={columnVisibility.toggleColumn}
+                        onReset={() => {
+                            columnVisibility.resetToDefault();
+                            if (typeof window !== 'undefined') {
+                                localStorage.removeItem('col-widths-session-logs');
+                            }
+                        }}
+                    />
                     <button
                         onClick={handleExportCSV}
                         disabled={sessions.length === 0}
@@ -240,7 +303,7 @@ export default function SessionLogsPage() {
 
             {/* Filters */}
             {showFilters && (
-                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
+                <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 space-y-3">
                     <div className="flex items-center gap-4">
                         <span className="text-sm font-medium">Status:</span>
                         <div className="flex gap-2">
@@ -259,6 +322,22 @@ export default function SessionLogsPage() {
                             ))}
                         </div>
                     </div>
+                    {isAdmin && (
+                        <div className="flex items-center gap-4">
+                            <span className="text-sm font-medium">User:</span>
+                            <select
+                                value={userFilter}
+                                onChange={(e) => setUserFilter(e.target.value)}
+                                className="px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+                            >
+                                <option value="all">All users</option>
+                                <option value="mine">Just me</option>
+                                {teamMembers.filter(m => m.id !== user?.id).map(m => (
+                                    <option key={m.id} value={m.id}>{m.name || m.email}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -300,6 +379,13 @@ export default function SessionLogsPage() {
             {/* Bulk Action Toolbar */}
             {selection.hasSelection && (
                 <SelectionToolbar count={selection.count} totalCount={sessions.length}>
+                    <button
+                        onClick={handleBulkCopyIds}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-bg)] transition-colors"
+                    >
+                        {bulkIdsCopied ? <Check size={14} className="text-[var(--success)]" /> : <Copy size={14} />}
+                        {bulkIdsCopied ? 'Copied' : 'Copy IDs'}
+                    </button>
                     {confirmBulkDelete ? (
                         <div className="flex items-center gap-2">
                             <span className="text-sm text-[var(--error)]">Delete {selection.count} session{selection.count > 1 ? 's' : ''}?</span>
@@ -347,27 +433,50 @@ export default function SessionLogsPage() {
                 </TableContainer>
             ) : (
                 <TableContainer>
-                    <div className="overflow-x-auto">
-                        <table className="w-full" style={{ tableLayout: 'fixed' }}>
+                    <div className="overflow-x-hidden">
+                        <table className="w-full">
                             <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                                 <tr>
-                                    <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider w-10"></th>
+                                    <th className="px-2 py-3 w-8"></th>
                                     <HeaderIndexCell
                                         allSelected={selection.allSelected}
                                         someSelected={selection.someSelected}
                                         onToggleAll={selection.toggleAll}
                                     />
-                                    <ResizableTh width={getWidth('started')} onResize={(w) => resize('started', w)}>Started</ResizableTh>
-                                    <ResizableTh width={getWidth('duration')} onResize={(w) => resize('duration', w)}>Duration</ResizableTh>
-                                    <ResizableTh width={getWidth('dials')} onResize={(w) => resize('dials', w)} align="center">Dials</ResizableTh>
-                                    <ResizableTh width={getWidth('pickups')} onResize={(w) => resize('pickups', w)} align="center">Pickups</ResizableTh>
-                                    <ResizableTh width={getWidth('pickup_pct')} onResize={(w) => resize('pickup_pct', w)}>Pickup %</ResizableTh>
-                                    <ResizableTh width={getWidth('owner')} onResize={(w) => resize('owner', w)} align="center">Owner</ResizableTh>
-                                    <ResizableTh width={getWidth('pitch')} onResize={(w) => resize('pitch', w)} align="center">Pitch</ResizableTh>
-                                    <ResizableTh width={getWidth('appt')} onResize={(w) => resize('appt', w)} align="center">Appt</ResizableTh>
-                                    <ResizableTh width={getWidth('user')} onResize={(w) => resize('user', w)}>User</ResizableTh>
-                                    <ResizableTh width={getWidth('status')} onResize={(w) => resize('status', w)}>Status</ResizableTh>
-                                    <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider w-10"></th>
+                                    {columnVisibility.isColumnVisible('started') && (
+                                        <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left">Started</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('duration') && (
+                                        <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left whitespace-nowrap">Duration</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('dials') && (
+                                        <th className="px-3 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-center whitespace-nowrap">Dials</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('pickups') && (
+                                        <th className="px-3 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-center whitespace-nowrap">Pickups</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('pickup_pct') && (
+                                        <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left whitespace-nowrap w-[140px]">Pickup %</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('owner') && (
+                                        <th className="px-3 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-center whitespace-nowrap">Owner</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('pitch') && (
+                                        <th className="px-3 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-center whitespace-nowrap">Pitch</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('appt') && (
+                                        <th className="px-3 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-center whitespace-nowrap">Appt</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('lead_category') && (
+                                        <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left whitespace-nowrap">Lead Category</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('user') && (
+                                        <th className="px-3 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left whitespace-nowrap">User</th>
+                                    )}
+                                    {columnVisibility.isColumnVisible('status') && (
+                                        <th className="px-4 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider text-left whitespace-nowrap">Status</th>
+                                    )}
+                                    <th className="px-3 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider w-[90px]"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -382,6 +491,8 @@ export default function SessionLogsPage() {
                                         onUpdate={handleUpdateSession}
                                         onDelete={handleDeleteSession}
                                         timezones={preferences?.timezones}
+                                        isColumnVisible={columnVisibility.isColumnVisible}
+                                        categoryBreakdown={categoryBreakdowns.get(session.id)}
                                     />
                                 ))}
                             </tbody>

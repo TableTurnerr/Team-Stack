@@ -29,6 +29,27 @@ public class CallStateMessage : AgentMessage
     [JsonPropertyName("confidence")]
     public string Confidence { get; set; } = "low";
 
+    // Ownership envelope — lets the dashboard decide whether THIS teammate
+    // owns the call or whether it's happening on another teammate's machine
+    // on the shared Zoom account.
+    [JsonPropertyName("deviceId")]
+    public string? DeviceId { get; set; }
+
+    [JsonPropertyName("intentId")]
+    public string? IntentId { get; set; }
+
+    [JsonPropertyName("zoomCallId")]
+    public string? ZoomCallId { get; set; }
+
+    [JsonPropertyName("uiSeenHere")]
+    public bool UiSeenHere { get; set; }
+
+    [JsonPropertyName("audioActiveHere")]
+    public bool AudioActiveHere { get; set; }
+
+    [JsonPropertyName("teammateOnCall")]
+    public bool TeammateOnCall { get; set; }
+
     public CallStateMessage() => Type = "callState";
 
     public static CallStateMessage From(CallStateInfo info) => new()
@@ -38,6 +59,12 @@ public class CallStateMessage : AgentMessage
         Direction = info.Direction,
         Duration = info.DurationSeconds,
         Confidence = info.Confidence.ToString().ToLowerInvariant(),
+        DeviceId = info.DeviceId,
+        IntentId = info.IntentId,
+        ZoomCallId = info.ZoomCallId,
+        UiSeenHere = info.UiSeenHere,
+        AudioActiveHere = info.AudioActiveHere,
+        TeammateOnCall = info.TeammateOnCall,
     };
 }
 
@@ -174,6 +201,65 @@ public class RecordingUploadedMessage : AgentMessage
     public string? Error { get; set; }
 
     public RecordingUploadedMessage() => Type = "recordingUploaded";
+}
+
+/// <summary>
+/// Response to a getLocalRecording request — sends the MP3 bytes as base64
+/// so the dashboard can preview unsubmitted recordings directly from disk.
+/// </summary>
+public class LocalRecordingMessage : AgentMessage
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("mimeType")]
+    public string MimeType { get; set; } = "audio/mpeg";
+
+    /// <summary>Base64-encoded file bytes, or empty if not found.</summary>
+    [JsonPropertyName("data")]
+    public string Data { get; set; } = "";
+
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    public LocalRecordingMessage() => Type = "localRecording";
+}
+
+/// <summary>
+/// Snapshot of recordings that are on disk but not yet linked to a CRM call log.
+/// Sent in response to `getUnlinkedRecordings` so the dashboard can repopulate
+/// its "Recorded but unsubmitted" pill after a page refresh or reconnect.
+/// </summary>
+public class UnlinkedRecordingDto
+{
+    [JsonPropertyName("recordingId")]
+    public string RecordingId { get; set; } = "";
+
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("phoneNumber")]
+    public string PhoneNumber { get; set; } = "";
+
+    [JsonPropertyName("duration")]
+    public int Duration { get; set; }
+
+    [JsonPropertyName("fileSizeBytes")]
+    public long FileSizeBytes { get; set; }
+
+    [JsonPropertyName("startTime")]
+    public string StartTime { get; set; } = "";
+}
+
+public class UnlinkedRecordingsMessage : AgentMessage
+{
+    [JsonPropertyName("recordings")]
+    public List<UnlinkedRecordingDto> Recordings { get; set; } = [];
+
+    public UnlinkedRecordingsMessage() => Type = "unlinkedRecordings";
 }
 
 public class UploadQueueStatusMessage : AgentMessage

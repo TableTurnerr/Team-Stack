@@ -166,7 +166,7 @@ export default function TeamPage() {
     const name = prompt('Enter name:');
 
     try {
-      await pb.collection(COLLECTIONS.USERS).create({
+      const newUser = await pb.collection(COLLECTIONS.USERS).create<{ id: string }>({
         email,
         password,
         passwordConfirm: password,
@@ -174,6 +174,23 @@ export default function TeamPage() {
         role: 'member',
         status: 'offline',
       });
+
+      // Auto-add new user to every role flagged is_default (e.g. Member).
+      try {
+        const defaultRoles = await pb.collection(COLLECTIONS.ROLES).getFullList<{ id: string; members?: string[] }>({
+          filter: 'is_default = true',
+        });
+        await Promise.all(
+          defaultRoles.map(r =>
+            pb.collection(COLLECTIONS.ROLES).update(r.id, {
+              members: Array.from(new Set([...(r.members || []), newUser.id])),
+            })
+          )
+        );
+      } catch (e) {
+        console.warn('Failed to auto-assign default role(s):', e);
+      }
+
       alert('User created!');
       await refresh();
     } catch (e) {

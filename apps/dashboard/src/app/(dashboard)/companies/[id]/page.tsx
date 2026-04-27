@@ -24,6 +24,7 @@ import {
   Trash2,
   Send,
   Globe,
+  Headphones,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import {
@@ -35,7 +36,12 @@ import {
   type Interaction,
   type FollowUp,
   type ColdCall,
+  type Recording,
+  type LeadCategory,
 } from '@/lib/types';
+import { LeadCategorySelect } from '@/components/lead-category-select';
+import { AssigneePicker } from '@/components/assignee-picker';
+import { autoClaimCompany } from '@/lib/auto-claim';
 import { cn, formatPhoneNumber, formatCompanyName } from '@/lib/utils';
 import { getOutcomeColors, computeCompanyStatuses } from '@/lib/call-outcomes';
 import { InlineEditField } from '@/components/inline-edit-field';
@@ -55,6 +61,7 @@ import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { SoftDeleteConfirmModal } from '@/components/soft-delete-confirm-modal';
 import { EmailActivityFeed } from '@/components/email/email-activity-feed';
 import { CompanyTimeline } from '@/components/company-timeline';
+import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
 
 type TabType = 'overview' | 'phones' | 'calls' | 'follow_ups' | 'notes' | 'timeline' | 'email_activity';
 
@@ -72,6 +79,7 @@ export default function CompanyDetailPage() {
 
   // Data State
   const [company, setCompany] = useState<Company | null>(null);
+  const [categories, setCategories] = useState<LeadCategory[]>([]);
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumber[]>([]);
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [notes, setNotes] = useState<CompanyNote[]>([]);
@@ -106,7 +114,7 @@ export default function CompanyDetailPage() {
           pendingFollowUpsData,
           allFollowUpsData
         ] = await Promise.all([
-          pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(id),
+          pb.collection(COLLECTIONS.COMPANIES).getOne<Company>(id, { expand: 'lead_category,assigned_to' }),
           pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
             filter: `company = "${id}"`,
             sort: 'created'
@@ -154,6 +162,22 @@ export default function CompanyDetailPage() {
 
     fetchData();
   }, [id]);
+
+  useEffect(() => {
+    pb.collection(COLLECTIONS.LEAD_CATEGORIES).getFullList<LeadCategory>({ sort: 'name' })
+      .then(setCategories)
+      .catch(() => {});
+  }, []);
+
+  const handleAddCategory = async (name: string): Promise<LeadCategory | null> => {
+    try {
+      const created = await pb.collection(COLLECTIONS.LEAD_CATEGORIES).create<LeadCategory>({ name });
+      setCategories(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      return created;
+    } catch {
+      return null;
+    }
+  };
 
   const handleUpdateCompany = async (field: keyof Company, value: string) => {
     if (!company) return;
@@ -209,6 +233,7 @@ export default function CompanyDetailPage() {
       });
 
       setCallLogs(prev => [newCall, ...prev]);
+      await autoClaimCompany(company.id, user?.id);
 
       await pb.collection(COLLECTIONS.PHONE_NUMBERS).update(selectedPhoneId, {
         last_called: newCall.call_time,
@@ -260,6 +285,35 @@ export default function CompanyDetailPage() {
 
   const [isDeletingCallLog, setIsDeletingCallLog] = useState<string | null>(null);
   const [isDeletingCompany, setIsDeletingCompany] = useState(false);
+  const [playerRecording, setPlayerRecording] = useState<Recording | null>(null);
+  const [playerLoading, setPlayerLoading] = useState<string | null>(null);
+
+  const handlePlayRecording = async (log: CallLog) => {
+    if (playerLoading === log.id) return;
+    setPlayerLoading(log.id);
+    try {
+      const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+        `call_log = "${log.id}"`
+      );
+      setPlayerRecording(recording);
+    } catch {
+      try {
+        const phoneNumber = log.expand?.phone_number_record?.phone_number;
+        if (phoneNumber) {
+          const last10 = phoneNumber.replace(/\D/g, '').slice(-10);
+          const recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
+            `phone_number ~ "${last10}"`,
+            { sort: '-recording_date' }
+          );
+          setPlayerRecording(recording);
+        }
+      } catch {
+        // No recording found
+      }
+    } finally {
+      setPlayerLoading(null);
+    }
+  };
 
   const handleDeleteCallLog = async (log: CallLog) => {
     if (!recycleBin) return;
@@ -380,6 +434,14 @@ export default function CompanyDetailPage() {
                   })}
                 </span>
               )}
+              {company.lead_category && (() => {
+                const cat = categories.find(c => c.id === company.lead_category);
+                return cat ? (
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full border border-orange-500/40 bg-orange-500/10 text-orange-400">
+                    {cat.name}
+                  </span>
+                ) : null;
+              })()}
             </h1>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[var(--muted)] font-medium">
               {company.instagram_handle && (
@@ -555,6 +617,27 @@ export default function CompanyDetailPage() {
                       )}
                     </div>
                     <p className="text-[10px] text-[var(--muted)] mt-1">Auto-computed from last call per phone number</p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-2 block">Lead Category</label>
+                    <LeadCategorySelect
+                      value={company.lead_category || ''}
+                      categories={categories}
+                      onChange={(catId) => handleUpdateCompany('lead_category', catId)}
+                      onAddCategory={handleAddCategory}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--muted)] uppercase tracking-wider mb-2 block">Assigned To</label>
+                    <AssigneePicker
+                      value={company.assigned_to}
+                      expandedUser={company.expand?.assigned_to}
+                      onChange={(uid) => handleUpdateCompany('assigned_to', uid ?? '')}
+                      disabled={!isAdmin}
+                    />
+                    {!isAdmin && (
+                      <p className="text-[10px] text-[var(--muted)] mt-1">Only admins can change assignments.</p>
+                    )}
                   </div>
                   <InlineEditField
                     id={`company_${id}_website`}
@@ -797,6 +880,7 @@ export default function CompanyDetailPage() {
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Outcome</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">Summary</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest">AI</th>
+                    <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-center">Recording</th>
                     <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-right">Actions</th>
                     {isAdmin && (
                       <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-center">Del</th>
@@ -856,6 +940,23 @@ export default function CompanyDetailPage() {
                               <Zap size={10} />
                               AI
                             </Link>
+                          ) : (
+                            <span className="text-xs text-[var(--muted)]">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {call.has_recording ? (
+                            <button
+                              onClick={() => handlePlayRecording(call)}
+                              disabled={playerLoading === call.id}
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors disabled:opacity-60"
+                              title="Play recording"
+                            >
+                              {playerLoading === call.id
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <Headphones size={14} />
+                              }
+                            </button>
                           ) : (
                             <span className="text-xs text-[var(--muted)]">-</span>
                           )}
@@ -1215,6 +1316,11 @@ export default function CompanyDetailPage() {
           onDisassociated={handlePhoneDisassociated}
         />
       )}
+
+      <RecordingPlayerOverlay
+        recording={playerRecording}
+        onClose={() => setPlayerRecording(null)}
+      />
 
     </div>
     </PageGuard>

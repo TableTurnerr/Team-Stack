@@ -16,12 +16,13 @@ import { UnsavedChangesProvider } from '@/contexts/unsaved-changes-context';
 import { FollowUpProvider } from '@/contexts/follow-up-context';
 import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
-import { PhoneDialer } from '@/components/phone-dialer';
 import { RecycleBinProvider } from '@/contexts/recycle-bin-context';
 import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
 import { IncomingCallHandler } from '@/components/incoming-call-handler';
+import { OutOfSessionOutboundHandler } from '@/components/out-of-session-outbound-handler';
 import { LocalAgentProvider } from '@/contexts/local-agent-context';
+import { CallOwnershipProvider } from '@/contexts/call-ownership-context';
 import { RolePermissionProvider } from '@/contexts/role-permission-context';
 import { RolePreviewBanner } from '@/components/role-preview-banner';
 
@@ -57,7 +58,6 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isSessionPage = pathname === '/session';
 
   // Track page visits for quick access on overview
   useEffect(() => {
@@ -83,6 +83,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         <FloatingSaveBar />
         <ActiveSessionBanner />
         <IncomingCallHandler />
+        <OutOfSessionOutboundHandler />
         <UndoDeleteToast />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[var(--background)]">
           <div className="w-full px-4 py-8 lg:px-8">
@@ -90,8 +91,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
-      {/* Floating dialer — always mounted for persistence, hidden on session page */}
-      <PhoneDialer hidden={isSessionPage} />
     </div>
   );
 }
@@ -106,6 +105,7 @@ export default function DashboardLayout({
       <AuthGuard>
         <ToastProvider>
           <LocalAgentProvider>
+          <CallOwnershipProvider>
           <PhoneProvider>
             <SessionProvider>
               <TeamPresenceProvider>
@@ -123,6 +123,7 @@ export default function DashboardLayout({
               </TeamPresenceProvider>
             </SessionProvider>
           </PhoneProvider>
+          </CallOwnershipProvider>
           </LocalAgentProvider>
         </ToastProvider>
       </AuthGuard>

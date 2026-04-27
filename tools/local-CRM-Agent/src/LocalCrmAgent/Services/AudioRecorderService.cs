@@ -497,11 +497,16 @@ public class AudioRecorderService : IDisposable
                 var fileInfo = new FileInfo(targetMp3);
                 var duration = (int)(DateTime.UtcNow - startTime).TotalSeconds;
 
-                // Update manifest with final file info
+                // Update manifest with final file info. ConversionComplete must
+                // be set here (not before) — GetPendingUploads gates on it so
+                // the upload service can't grab the MP3 while LameMP3FileWriter
+                // still holds it open for write, which was producing truncated
+                // / glitching uploads on the server side.
                 _storage.UpdateEntry(fileName, e =>
                 {
                     e.DurationSeconds = duration;
                     e.FileSizeBytes = fileInfo.Length;
+                    e.ConversionComplete = true;
                 });
 
                 Debug.WriteLine($"[Recorder] Completed: {fileName} ({duration}s, {fileInfo.Length} bytes)");

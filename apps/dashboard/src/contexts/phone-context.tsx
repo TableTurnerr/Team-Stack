@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
 import { useLocalAgent } from './local-agent-context';
+import { useCallOwnershipOptional } from './call-ownership-context';
 
 // ── Call Status ────────────────────────────────────────────────────
 export type CallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
@@ -85,6 +86,7 @@ export function usePhoneOptional() {
  */
 export function PhoneProvider({ children }: { children: ReactNode }) {
     const { isConnected: agentConnected, callState: agentCallState, sendCommand } = useLocalAgent();
+    const ownership = useCallOwnershipOptional();
 
     // ── State ────────────────────────────────────────────────────────
     const [isDialerOpen, setIsDialerOpen] = useState(false);
@@ -280,6 +282,12 @@ export function PhoneProvider({ children }: { children: ReactNode }) {
 
         dialCallbackRef.current?.();
         outboundIntentRef.current = true;
+
+        // Emit a dial intent FIRST, so when the Zoom UI active-call panel
+        // lights up the agent can correlate the call to THIS user/device.
+        // Without this correlation, every teammate's dashboard would race
+        // to claim the call via the shared-account iframe update.
+        try { ownership?.emitDialIntent(cleaned); } catch { /* non-fatal */ }
 
         setIsDialerOpen(true);
         setLastDialedNumber(cleaned);

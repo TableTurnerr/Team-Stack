@@ -30,6 +30,7 @@ import { COLLECTIONS, type FollowUp, type User as UserType } from '@/lib/types';
 import { cn, formatPhoneNumber, formatCompanyName } from '@/lib/utils';
 import { CompanyHoverCard } from '@/components/company-hover-card';
 import { useFollowUps } from '@/contexts/follow-up-context';
+import { useAuth } from '@/contexts/auth-context';
 import { FollowUpTimeDisplay } from '@/components/follow-up-time-display';
 import { formatDateTimeInTimezone } from '@/lib/timezone-utils';
 import {
@@ -110,11 +111,14 @@ function statusBadge(status: string, isOverdue: boolean) {
 
 export default function FollowUpsPage() {
   const { completeFollowUp, dismissFollowUp, undismissFollowUp } = useFollowUps();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [allFollowUps, setAllFollowUps] = useState<FollowUp[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<StatusFilter>('overdue');
   const [search, setSearch] = useState('');
+  const [memberFilter, setMemberFilter] = useState<'all' | 'mine' | string>('all');
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
@@ -247,8 +251,17 @@ export default function FollowUpsPage() {
 
   const baseList: Record<StatusFilter, FollowUp[]> = { overdue, upcoming, completed, dismissed };
 
+  // Member filter (admin-only; members are already restricted via PB rules)
+  const memberFiltered = isAdmin && memberFilter !== 'all'
+    ? baseList[activeTab].filter(fu => {
+        const targetId = memberFilter === 'mine' ? user?.id : memberFilter;
+        if (!targetId) return true;
+        return fu.assigned_to === targetId || fu.created_by === targetId;
+      })
+    : baseList[activeTab];
+
   // Search filter
-  const searched = baseList[activeTab].filter(fu => {
+  const searched = memberFiltered.filter(fu => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     const company = formatCompanyName(fu.expand?.company?.company_name).toLowerCase();
@@ -459,6 +472,21 @@ export default function FollowUpsPage() {
             className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl focus:outline-none focus:border-[var(--primary)] transition-colors"
           />
         </div>
+
+        {isAdmin && (
+          <select
+            value={memberFilter}
+            onChange={(e) => setMemberFilter(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:border-[var(--primary)]"
+            title="Filter by member"
+          >
+            <option value="all">All members</option>
+            <option value="mine">Only mine</option>
+            {teamMembers.filter(m => m.id !== user?.id).map(m => (
+              <option key={m.id} value={m.id}>{m.name || m.email}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* ── Selection toolbar + PowerDialer ── */}

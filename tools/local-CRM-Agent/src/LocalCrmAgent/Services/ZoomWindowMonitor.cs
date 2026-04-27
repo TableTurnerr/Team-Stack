@@ -31,6 +31,16 @@ public partial class ZoomWindowMonitor
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    // Class of the separate top-level window Zoom shows while an inbound
+    // call is ringing. The window title format is:
+    //   "nooh@tableturnerr.com 8 0 2  is calling you…"
+    // i.e. "{CallerName} {CallerNumberSpaced} is calling you…". We can
+    // read it via Win32 GetWindowText without ever touching UIA.
+    private const string IncomingRingClassName = "SipCallNormalIncomingCallWindow";
+
     // ── Regex patterns ──────────────────────────────────────────────
 
     [GeneratedRegex(@"\b\+?1?\s*\(?(\d{3})\)?[\s\-\.]*(\d{3})[\s\-\.]*(\d{4})\b")]
@@ -66,6 +76,21 @@ public partial class ZoomWindowMonitor
         public bool IsTimerDetected { get; set; }
         public TimeSpan? DetectedTimer { get; set; }
         public string? DetectedPhoneNumber { get; set; }
+
+        /// <summary>
+        /// True when a visible SipCallNormalIncomingCallWindow was seen —
+        /// this is the deterministic "this device is ringing" signal.
+        /// </summary>
+        public bool IncomingRingWindowVisible { get; set; }
+
+        /// <summary>
+        /// Raw title of the incoming-ring window (if visible). Format:
+        /// "{callerName} {spaced-digits} is calling you…".
+        /// </summary>
+        public string? IncomingRingWindowTitle { get; set; }
+
+        /// <summary>Phone number parsed out of the incoming-ring window title.</summary>
+        public string? IncomingRingCallerNumber { get; set; }
     }
 
     /// <summary>
@@ -97,14 +122,30 @@ public partial class ZoomWindowMonitor
                     processName.Contains(z, StringComparison.OrdinalIgnoreCase)))
                     return true;
 
+                // Read window class so we can special-case the incoming-call
+                // ringing window. Win32 class names are cheap and don't
+                // involve UIA.
+                var clsBuf = new StringBuilder(128);
+                GetClassName(hWnd, clsBuf, clsBuf.Capacity);
+                string windowClass = clsBuf.ToString();
+
                 int len = GetWindowTextLength(hWnd);
-                if (len <= 0) return true;
+                string title = "";
+                if (len > 0)
+                {
+                    var sb = new StringBuilder(len + 1);
+                    GetWindowText(hWnd, sb, sb.Capacity);
+                    title = sb.ToString();
+                }
 
-                var sb = new StringBuilder(len + 1);
-                GetWindowText(hWnd, sb, sb.Capacity);
-                var title = sb.ToString();
-
-                if (!string.IsNullOrWhiteSpace(title))
+                if (string.Equals(windowClass, IncomingRingClassName, StringComparison.OrdinalIgnoreCase))
+                {
+                    result.IncomingRingWindowVisible = true;
+                    result.IncomingRingWindowTitle = title;
+                    result.IncomingRingCallerNumber = ExtractIncomingRingNumber(title);
+                    result.ZoomWindowFound = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(title))
                 {
                     zoomTitles.Add(title);
                     result.ZoomWindowFound = true;
@@ -116,6 +157,16 @@ public partial class ZoomWindowMonitor
         catch (Exception ex)
         {
             Debug.WriteLine($"[WindowMonitor] EnumWindows error: {ex.Message}");
+        }
+
+        // If we saw an incoming-ring window, lift its signals into the
+        // legacy flags so existing fusion logic picks them up.
+        if (result.IncomingRingWindowVisible)
+        {
+            result.IsIncomingDetected = true;
+            result.IsRingingDetected = true;
+            if (!string.IsNullOrEmpty(result.IncomingRingCallerNumber))
+                result.DetectedPhoneNumber = result.IncomingRingCallerNumber;
         }
 
         // Analyze collected titles
@@ -158,5 +209,48 @@ public partial class ZoomWindowMonitor
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Parse an incoming-ring window title like:
+    ///   "nooh@tableturnerr.com 8 0 2  is calling you…"
+    ///   "+1  (6 3 1 ) 7 9 1 -8 3 7 8  is calling you…"
+    /// Zoom inserts single spaces between digits in these titles, so the
+    /// generic US/international phone regexes don't match. We strip the
+    /// "is calling you" trailing phrase, then collect all digits + leading
+    /// "+" as the number. If we find ≥3 digits that's the caller number.
+    /// </summary>
+    internal static string? ExtractIncomingRingNumber(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return null;
+        // Everything before "is calling" is the caller identity line.
+        var idx = title.IndexOf(" is calling", StringComparison.OrdinalIgnoreCase);
+        var identity = idx >= 0 ? title[..idx] : title;
+
+        // An identity line can be:
+        //   "nooh@tableturnerr.com 8 0 2"  (name + extension digits)
+        //   "+1  (6 3 1 ) 7 9 1 -8 3 7 8"  (E.164-ish spaced digits)
+        //   "Jane Doe"                     (contact name, no number)
+        // We keep only digit characters and a single leading "+".
+        var sb = new StringBuilder();
+        bool seenPlus = false;
+        foreach (var c in identity)
+        {
+            if (c == '+' && sb.Length == 0 && !seenPlus)
+            {
+                sb.Append('+');
+                seenPlus = true;
+            }
+            else if (char.IsDigit(c))
+            {
+                sb.Append(c);
+            }
+            // Everything else (spaces, punctuation, letters) is dropped.
+        }
+        // Require at least 3 digits so we don't return noise from name-only identities.
+        int digitCount = 0;
+        for (int i = 0; i < sb.Length; i++) if (char.IsDigit(sb[i])) digitCount++;
+        if (digitCount < 3) return null;
+        return sb.ToString();
     }
 }

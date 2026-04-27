@@ -1,5 +1,5 @@
 {
-  "version": "2.8",
-  "releaseNotes": "Complete CRM field mapping: now sends website, industry, price_range, email, google_rating, google_reviews_count, and contact_source from all modes. Website scanner emails flow to CRM. Added website/industry/price_range fields to DB schema.",
+  "version": "3.0",
+  "releaseNotes": "Lead Category + Assign To: pick a lead_category and a specific teammate (assigned_to) when sending leads to CRM. Picking an assignee skips the new-lead pool and routes the lead straight to them. Set defaults in CRM settings; override per-lead in the confirm dialog. Both lists are fetched from PocketBase and cached.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

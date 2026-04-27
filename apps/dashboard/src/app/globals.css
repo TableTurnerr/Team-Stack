@@ -210,8 +210,7 @@ input[type="checkbox"]:focus-visible {
 }
 
 /* Dark mode - Sleek black */
-@media (prefers-color-scheme: dark) {
-  :root {
+.dark {
     /* Core palette - Dark mode */
     --background: #0a0a0a;
     --foreground: #fafafa;
@@ -254,7 +253,6 @@ input[type="checkbox"]:focus-visible {
     --error-subtle: rgba(239, 68, 68, 0.15);
     --info: #3b82f6;
     --info-subtle: rgba(59, 130, 246, 0.15);
-  }
 }
 
 * {
@@ -360,24 +358,22 @@ body {
 }
 
 /* Custom scrollbar for dark theme */
-@media (prefers-color-scheme: dark) {
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
 
-  ::-webkit-scrollbar-track {
-    background: var(--background);
-  }
+.dark ::-webkit-scrollbar-track {
+  background: var(--background);
+}
 
-  ::-webkit-scrollbar-thumb {
-    background: var(--sidebar-border);
-    border-radius: 4px;
-  }
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--sidebar-border);
+  border-radius: 4px;
+}
 
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--muted-foreground);
-  }
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
 }
 
 /* Focus styles - subtle and thin */

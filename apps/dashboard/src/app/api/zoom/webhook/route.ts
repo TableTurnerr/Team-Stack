@@ -18,6 +18,19 @@ import PocketBase from 'pocketbase';
  *   5. Call logs are always created by the authenticated CRM user, never by this webhook
  */
 
+/**
+ * Canonicalise a phone string by stripping non-digits and prefixing "+".
+ * Short strings (extensions) return digits-only without the "+".
+ * Kept in sync with the identical helper in the local agent.
+ */
+function toE164Loose(input: string | undefined | null): string | null {
+    if (!input) return null;
+    const digits = String(input).replace(/\D+/g, '');
+    if (!digits) return null;
+    if (digits.length < 7) return digits;
+    return `+${digits}`;
+}
+
 const ZOOM_WEBHOOK_SECRET = process.env.ZOOM_WEBHOOK_SECRET_TOKEN || '';
 const PB_URL = process.env.NEXT_PUBLIC_POCKETBASE_URL || '';
 const PB_ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || '';
@@ -108,38 +121,87 @@ export async function POST(request: Request) {
     const status = (callObj.status ?? event.split('.').pop() ?? '') as string;
     const duration = (callObj.duration ?? 0) as number;
 
-    // Store as a raw lookup record — agents query by phone number + timing
-    // to find call_id for API operations. No CRM user is attached here.
+    // Normalize direction: Zoom uses strings like "outbound"/"inbound"
+    // already, but fall back to inferring from the event name.
+    const normalizedDirection =
+        direction === 'outbound' || direction === 'inbound'
+            ? direction
+            : event.includes('callee_')     // "phone.callee_ringing" → received by us
+                ? 'inbound'
+                : event.includes('caller_') // "phone.caller_...">dialed by us
+                    ? 'outbound'
+                    : '';
+
+    // Canonicalise the external phone for the claim. The webhook reports
+    // the number that isn't us:
+    //   inbound  → caller_number is the external party
+    //   outbound → callee_number is the external party
+    const externalPhoneRaw =
+        normalizedDirection === 'inbound' ? callerNumber :
+        normalizedDirection === 'outbound' ? calleeNumber :
+        (calleeNumber || callerNumber);
+    const phoneE164 = toE164Loose(externalPhoneRaw);
+
+    // Store the raw event using the canonical schema field names.
     const pb = await getPbAdmin();
     if (pb) {
         try {
             await pb.collection('zoom_call_events').create({
-                event_type: event,
-                call_id: callId,
-                callee_number: calleeNumber,
+                event,
+                zoom_call_id: callId,
                 caller_number: callerNumber,
-                direction,
-                zoom_user_id: zoomUserId,
-                status,
-                duration,
-                raw_payload: JSON.stringify(eventPayload),
+                callee_number: calleeNumber,
+                direction: normalizedDirection || undefined,
+                payload: eventPayload,
+                received_at: new Date().toISOString(),
             });
-
-            // Clean up events older than 24 hours (they're just a cache)
-            try {
-                const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().replace('T', ' ');
-                const old = await pb.collection('zoom_call_events').getList(1, 50, {
-                    filter: `created < "${cutoff}"`,
-                    fields: 'id',
-                });
-                for (const record of old.items) {
-                    await pb.collection('zoom_call_events').delete(record.id);
-                }
-            } catch { /* cleanup is best-effort */ }
         } catch (err) {
-            // Collection might not exist yet — log but don't fail
             console.warn('[ZoomWebhook] Failed to store event:', err);
         }
+
+        // Inbound ringing: create an unassigned pending claim so every
+        // connected dashboard sees the ring via PocketBase realtime
+        // *before* any teammate's agent has detected it locally. The
+        // claim is owner-less until the teammate that answers links
+        // their UI-confirmed call to it.
+        if (
+            normalizedDirection === 'inbound' &&
+            /ring|ringing|callee_ringing/i.test(event) &&
+            callId
+        ) {
+            try {
+                const existing = await pb
+                    .collection('call_claims')
+                    .getFirstListItem(`zoom_call_id = "${callId}"`)
+                    .catch(() => null);
+
+                if (!existing) {
+                    await pb.collection('call_claims').create({
+                        zoom_call_id: callId,
+                        phone_e164: phoneE164 ?? externalPhoneRaw,
+                        direction: 'inbound',
+                        state: 'pending',
+                        pending_since: new Date().toISOString(),
+                        ui_evidence: { source: 'zoom_webhook', event },
+                    });
+                }
+            } catch (err) {
+                console.warn('[ZoomWebhook] Failed to create pending claim:', err);
+            }
+        }
+
+        // Best-effort cleanup: events older than 24h are just a cache.
+        try {
+            const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
+                .toISOString().replace('T', ' ');
+            const old = await pb.collection('zoom_call_events').getList(1, 50, {
+                filter: `created < "${cutoff}"`,
+                fields: 'id',
+            });
+            for (const record of old.items) {
+                await pb.collection('zoom_call_events').delete(record.id);
+            }
+        } catch { /* best-effort */ }
     }
 
     console.log(`[ZoomWebhook] Call ${callId}: ${event} | ${callerNumber} → ${calleeNumber} | ${status}`);

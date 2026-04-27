@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Mic, ExternalLink, Trash2, Loader2, PhoneIncoming, PhoneOutgoing, SlidersHorizontal } from 'lucide-react';
+import { Headphones, ExternalLink, Trash2, Loader2, PhoneIncoming, PhoneOutgoing, SlidersHorizontal } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type Recording, type ColdCallingSession, type ManualAdjustment } from '@/lib/types';
 import Link from 'next/link';
@@ -224,7 +224,7 @@ export function CallLogsNestedTable({ sessionId, onLogsLoaded }: CallLogsNestedT
                                         >
                                             {playerLoading === log.id
                                                 ? <Loader2 size={14} className="animate-spin" />
-                                                : <Mic size={14} />
+                                                : <Headphones size={14} />
                                             }
                                         </button>
                                     ) : (

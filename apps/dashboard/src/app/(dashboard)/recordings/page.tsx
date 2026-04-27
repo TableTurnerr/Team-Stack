@@ -714,42 +714,47 @@ export default function RecordingsPage() {
                       )}
                       {isColumnVisible('phone_number') && (
                         <td className="py-3 px-4 whitespace-nowrap text-sm font-mono">
-                          {recording.expand?.phone_number_record ? (
-                            <div className="flex items-center gap-1">
-                              <div className="flex flex-col">
-                                <PhoneHoverCard phoneRecord={recording.expand.phone_number_record} side="bottom">
-                                  <span className="font-bold text-[var(--foreground)] cursor-default">
-                                    {formatPhoneNumber(recording.expand.phone_number_record.phone_number)}
-                                  </span>
-                                </PhoneHoverCard>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  {recording.expand.phone_number_record.label && (
-                                    <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
-                                      {recording.expand.phone_number_record.label}
-                                    </span>
+                          {(() => {
+                            const phoneRecord = recording.expand?.phone_number_record;
+                            const company = recording.expand?.company;
+                            const displayPhone = phoneRecord?.phone_number || recording.phone_number;
+                            if (!phoneRecord && !company && !displayPhone) return null;
+                            return (
+                              <div className="flex items-center gap-1">
+                                <div className="flex flex-col">
+                                  {phoneRecord ? (
+                                    <PhoneHoverCard phoneRecord={phoneRecord} side="bottom">
+                                      <span className="font-bold text-[var(--foreground)] cursor-default">
+                                        {formatPhoneNumber(phoneRecord.phone_number)}
+                                      </span>
+                                    </PhoneHoverCard>
+                                  ) : (
+                                    <span className="text-[var(--muted)]">{formatPhoneNumber(displayPhone)}</span>
                                   )}
-                                  {recording.expand.company && (
-                                    <CompanyHoverCard company={recording.expand.company} side="bottom">
-                                      <Link
-                                        href={`/companies/${recording.company}`}
-                                        className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
-                                      >
-                                        {recording.expand.company.company_name}
-                                      </Link>
-                                    </CompanyHoverCard>
+                                  {(phoneRecord?.label || company) && (
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      {phoneRecord?.label && (
+                                        <span className="text-[10px] px-1 py-0 rounded bg-[var(--card-hover)] text-[var(--muted)] font-bold uppercase tracking-wider">
+                                          {phoneRecord.label}
+                                        </span>
+                                      )}
+                                      {company && (
+                                        <CompanyHoverCard company={company} side="bottom">
+                                          <Link
+                                            href={`/companies/${recording.company}`}
+                                            className="text-[10px] text-[var(--primary)] font-bold hover:underline truncate max-w-[100px]"
+                                          >
+                                            {company.company_name}
+                                          </Link>
+                                        </CompanyHoverCard>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
+                                {displayPhone && <CallButton phoneNumber={displayPhone} />}
                               </div>
-                              <CallButton phoneNumber={recording.expand.phone_number_record.phone_number} />
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <span className="text-[var(--muted)]">{formatPhoneNumber(recording.phone_number)}</span>
-                              {recording.phone_number && (
-                                <CallButton phoneNumber={recording.phone_number} />
-                              )}
-                            </div>
-                          )}
+                            );
+                          })()}
                         </td>
                       )}
                       {isColumnVisible('note') && (

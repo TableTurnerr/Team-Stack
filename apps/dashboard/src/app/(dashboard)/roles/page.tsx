@@ -77,6 +77,7 @@ const DEFAULT_PERMISSIONS: RolePermissions = {
   can_view_recordings: true,
   can_delete_recordings: false,
   can_manage_sessions: true,
+  can_access_extension_leads_directly: false,
 };
 
 function RolesContent() {
@@ -100,10 +101,7 @@ function RolesContent() {
   const [editPageAccess, setEditPageAccess] = useState<Record<PageKey, boolean>>(DEFAULT_PAGE_ACCESS);
   const [editPermissions, setEditPermissions] = useState<RolePermissions>(DEFAULT_PERMISSIONS);
   const [editMembers, setEditMembers] = useState<string[]>([]);
-  const [editDataAccess, setEditDataAccess] = useState<RoleDataAccess>({
-    companies: { mode: 'all' },
-    leads: { mode: 'all' },
-  });
+  const [editDataAccess, setEditDataAccess] = useState<RoleDataAccess>({ mode: 'all' });
 
   const selectedRole = roles.find(r => r.id === selectedRoleId) || null;
 
@@ -113,7 +111,7 @@ function RolesContent() {
     JSON.stringify(editPageAccess) !== JSON.stringify({ ...DEFAULT_PAGE_ACCESS, ...(selectedRole.page_access || {}) }) ||
     JSON.stringify(editPermissions) !== JSON.stringify({ ...DEFAULT_PERMISSIONS, ...(selectedRole.permissions || {}) }) ||
     JSON.stringify(editMembers) !== JSON.stringify(selectedRole.members || []) ||
-    JSON.stringify(editDataAccess) !== JSON.stringify(selectedRole.data_access || { companies: { mode: 'all' }, leads: { mode: 'all' } })
+    JSON.stringify(editDataAccess) !== JSON.stringify(selectedRole.data_access || { mode: 'all' })
   ) : false;
 
   // Fetch all users for member assignment
@@ -138,7 +136,7 @@ function RolesContent() {
       setEditPageAccess({ ...DEFAULT_PAGE_ACCESS, ...(selectedRole.page_access || {}) });
       setEditPermissions({ ...DEFAULT_PERMISSIONS, ...(selectedRole.permissions || {}) });
       setEditMembers(selectedRole.members || []);
-      setEditDataAccess(selectedRole.data_access || { companies: { mode: 'all' }, leads: { mode: 'all' } });
+      setEditDataAccess(selectedRole.data_access || { mode: 'all' });
     }
   }, [selectedRole]);
 
@@ -153,7 +151,7 @@ function RolesContent() {
         members: [],
         page_access: DEFAULT_PAGE_ACCESS,
         permissions: DEFAULT_PERMISSIONS,
-        data_access: { companies: { mode: 'all' }, leads: { mode: 'all' } },
+        data_access: { mode: 'all' },
         created_by: user?.id,
       });
       await refreshRoles();
@@ -262,12 +260,9 @@ function RolesContent() {
 
   const toggleCompanyAssignment = (companyId: string) => {
     setEditDataAccess(prev => {
-      const ids = prev.companies?.company_ids || [];
+      const ids = prev.company_ids || [];
       const newIds = ids.includes(companyId) ? ids.filter(id => id !== companyId) : [...ids, companyId];
-      return {
-        ...prev,
-        companies: { mode: 'assigned', company_ids: newIds },
-      };
+      return { mode: 'specific', company_ids: newIds };
     });
   };
 
@@ -490,7 +485,7 @@ function RolesContent() {
                       setEditPageAccess({ ...DEFAULT_PAGE_ACCESS, ...(selectedRole.page_access || {}) });
                       setEditPermissions({ ...DEFAULT_PERMISSIONS, ...(selectedRole.permissions || {}) });
                       setEditMembers(selectedRole.members || []);
-                      setEditDataAccess(selectedRole.data_access || { companies: { mode: 'all' }, leads: { mode: 'all' } });
+                      setEditDataAccess(selectedRole.data_access || { mode: 'all' });
                     }
                   }}
                   className="px-4 py-2 text-sm font-medium rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-bg)] transition-colors"
@@ -828,124 +823,106 @@ function DataAccessTab({
   onCompanySearchChange: (v: string) => void;
   onToggleCompany: (companyId: string) => void;
 }) {
-  const companyMode = dataAccess.companies?.mode || 'all';
-  const assignedCompanyIds = dataAccess.companies?.company_ids || [];
-  const leadMode = dataAccess.leads?.mode || 'all';
+  const mode = dataAccess.mode || 'all';
+  const assignedCompanyIds = dataAccess.company_ids || [];
+
+  const modeDescriptions: Record<typeof mode, string> = {
+    all: 'Members can see and interact with every company and lead in the CRM.',
+    assigned: 'Members will only see companies and leads where they are listed as the assignee.',
+    specific: 'Members can only see the hand-picked companies and leads listed below.',
+    none: 'Members have no access to companies or leads.',
+  };
 
   return (
-    <div className="space-y-8">
-      {/* Company Access */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold">Company Access</h3>
-          <p className="text-xs text-[var(--muted)]">Control which companies members of this role can see and interact with</p>
-        </div>
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold">Data Access</h3>
+        <p className="text-xs text-[var(--muted)]">
+          Control which companies and leads (same underlying records) members of this role can see
+        </p>
+      </div>
 
-        <div className="flex gap-2">
-          {(['all', 'assigned', 'none'] as const).map(mode => (
-            <button
-              key={mode}
-              onClick={() => onDataAccessChange({
-                ...dataAccess,
-                companies: { mode, company_ids: mode === 'assigned' ? assignedCompanyIds : [] },
-              })}
-              className={cn(
-                'px-4 py-2 text-sm font-medium rounded-lg border transition-colors capitalize',
-                companyMode === mode
-                  ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
-                  : 'border-[var(--card-border)] hover:bg-[var(--card-hover)]'
-              )}
-            >
-              {mode === 'all' ? 'All Companies' : mode === 'assigned' ? 'Specific Companies' : 'No Access'}
-            </button>
-          ))}
-        </div>
-
-        {/* Company picker for 'assigned' mode */}
-        {companyMode === 'assigned' && (
-          <div className="space-y-3">
-            <div className="relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-              <input
-                type="text"
-                value={companySearch}
-                onChange={e => onCompanySearchChange(e.target.value)}
-                placeholder="Search companies..."
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-              />
-            </div>
-
-            {assignedCompanyIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {assignedCompanyIds.map(id => {
-                  const c = companies.find(co => co.id === id);
-                  return (
-                    <span
-                      key={id}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--primary-subtle)] text-[var(--primary)]"
-                    >
-                      {c?.company_name || id}
-                      <button onClick={() => onToggleCompany(id)} className="hover:text-[var(--error)]">
-                        <X size={10} />
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
+      <div className="flex gap-2 flex-wrap">
+        {(['all', 'assigned', 'specific', 'none'] as const).map(m => (
+          <button
+            key={m}
+            onClick={() => onDataAccessChange(
+              m === 'specific'
+                ? { mode: 'specific', company_ids: assignedCompanyIds }
+                : { mode: m }
             )}
+            className={cn(
+              'px-4 py-2 text-sm font-medium rounded-lg border transition-colors capitalize',
+              mode === m
+                ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
+                : 'border-[var(--card-border)] hover:bg-[var(--card-hover)]'
+            )}
+          >
+            {m === 'all' ? 'All'
+              : m === 'assigned' ? 'Only Assigned to User'
+              : m === 'specific' ? 'Specific Companies'
+              : 'No Access'}
+          </button>
+        ))}
+      </div>
 
-            <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-lg border border-[var(--card-border)] p-1">
-              {companies.filter(c => !assignedCompanyIds.includes(c.id)).length === 0 ? (
-                <p className="text-sm text-[var(--muted)] py-3 text-center">
-                  {companySearch ? 'No matching companies' : 'All companies assigned'}
-                </p>
-              ) : (
-                companies
-                  .filter(c => !assignedCompanyIds.includes(c.id))
-                  .slice(0, 50)
-                  .map(c => (
-                    <button
-                      key={c.id}
-                      onClick={() => onToggleCompany(c.id)}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded hover:bg-[var(--card-hover)] transition-colors text-left"
-                    >
-                      <Plus size={12} className="text-[var(--muted)] shrink-0" />
-                      <span className="truncate">{c.company_name}</span>
-                    </button>
-                  ))
-              )}
-            </div>
+      <p className="text-xs text-[var(--muted)] italic">{modeDescriptions[mode]}</p>
+
+      {mode === 'specific' && (
+        <div className="space-y-3 pt-2">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+            <input
+              type="text"
+              value={companySearch}
+              onChange={e => onCompanySearchChange(e.target.value)}
+              placeholder="Search companies..."
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+            />
           </div>
-        )}
-      </div>
 
-      {/* Lead Access */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold">Lead Access</h3>
-          <p className="text-xs text-[var(--muted)]">Control which leads members of this role can see</p>
-        </div>
-
-        <div className="flex gap-2">
-          {(['all', 'none'] as const).map(mode => (
-            <button
-              key={mode}
-              onClick={() => onDataAccessChange({
-                ...dataAccess,
-                leads: { mode, lead_ids: [] },
+          {assignedCompanyIds.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {assignedCompanyIds.map(id => {
+                const c = companies.find(co => co.id === id);
+                return (
+                  <span
+                    key={id}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--primary-subtle)] text-[var(--primary)]"
+                  >
+                    {c?.company_name || id}
+                    <button onClick={() => onToggleCompany(id)} className="hover:text-[var(--error)]">
+                      <X size={10} />
+                    </button>
+                  </span>
+                );
               })}
-              className={cn(
-                'px-4 py-2 text-sm font-medium rounded-lg border transition-colors capitalize',
-                leadMode === mode
-                  ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
-                  : 'border-[var(--card-border)] hover:bg-[var(--card-hover)]'
-              )}
-            >
-              {mode === 'all' ? 'All Leads' : 'No Access'}
-            </button>
-          ))}
+            </div>
+          )}
+
+          <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-lg border border-[var(--card-border)] p-1">
+            {companies.filter(c => !assignedCompanyIds.includes(c.id)).length === 0 ? (
+              <p className="text-sm text-[var(--muted)] py-3 text-center">
+                {companySearch ? 'No matching companies' : 'All companies assigned'}
+              </p>
+            ) : (
+              companies
+                .filter(c => !assignedCompanyIds.includes(c.id))
+                .slice(0, 50)
+                .map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => onToggleCompany(c.id)}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm rounded hover:bg-[var(--card-hover)] transition-colors text-left"
+                  >
+                    <Plus size={12} className="text-[var(--muted)] shrink-0" />
+                    <span className="truncate">{c.company_name}</span>
+                  </button>
+                ))
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

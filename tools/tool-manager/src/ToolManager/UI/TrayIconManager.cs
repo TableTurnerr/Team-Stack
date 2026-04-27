@@ -17,12 +17,16 @@ public class TrayIconManager : IDisposable
     private readonly NotifyIcon _trayIcon;
     private readonly UpdateScheduler _scheduler;
     private readonly SelfUpdateService _selfUpdater;
+    private readonly SynchronizationContext? _uiContext;
     private DateTime _lastLaunch = DateTime.MinValue;
 
     public TrayIconManager(UpdateScheduler scheduler, SelfUpdateService selfUpdater)
     {
         _scheduler = scheduler;
         _selfUpdater = selfUpdater;
+        // Captured here so background-thread events can marshal NotifyIcon updates
+        // back to the UI thread that owns the tray icon's hidden window.
+        _uiContext = SynchronizationContext.Current;
 
         _trayIcon = new NotifyIcon
         {
@@ -118,14 +122,22 @@ public class TrayIconManager : IDisposable
 
     private void ShowBalloon(string title, string text, ToolTipIcon icon)
     {
-        try
+        void Show()
         {
-            _trayIcon.BalloonTipTitle = title;
-            _trayIcon.BalloonTipText = text;
-            _trayIcon.BalloonTipIcon = icon;
-            _trayIcon.ShowBalloonTip(5000);
+            try
+            {
+                _trayIcon.BalloonTipTitle = title;
+                _trayIcon.BalloonTipText = text;
+                _trayIcon.BalloonTipIcon = icon;
+                _trayIcon.ShowBalloonTip(5000);
+            }
+            catch { }
         }
-        catch { }
+
+        if (_uiContext != null)
+            _uiContext.Post(_ => Show(), null);
+        else
+            Show();
     }
 
     public void Dispose()

@@ -117,6 +117,11 @@ static class Program
         Application.EnableVisualStyles();
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
 
+        // Install the WinForms SynchronizationContext on the main thread so the
+        // tray manager can marshal background-thread events to the UI thread.
+        if (SynchronizationContext.Current is not WindowsFormsSynchronizationContext)
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+
         using var tray = new TrayIconManager(scheduler, selfUpdater);
         Application.Run();
 

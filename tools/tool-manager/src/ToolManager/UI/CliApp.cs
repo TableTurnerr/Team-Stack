@@ -44,6 +44,7 @@ public class CliApp
         RenderHeader();
         var tools = await FetchTools();
         await AutoUpdateInstalledTools(tools);
+        bool firstIteration = true;
 
         while (true)
         {
@@ -52,7 +53,9 @@ public class CliApp
                 AnsiConsole.Clear();
                 RenderHeader();
 
-                tools = await FetchTools();
+                if (!firstIteration)
+                    tools = await FetchTools();
+                firstIteration = false;
                 RenderToolTable(tools);
                 AnsiConsole.WriteLine();
 
@@ -569,17 +572,16 @@ public class CliApp
         }
 
         var manageChoices = installed
-            .Select(t => $"{t.DisplayName} (v{t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion)})")
-            .Append("Cancel")
+            .Select(t => $"[bold]{Markup.Escape(t.DisplayName)}[/] [grey50]v{Markup.Escape(t.InstalledVersionRaw ?? FormatVersionRaw(t.InstalledVersion))}[/]")
             .ToList();
+        manageChoices.Add("Cancel");
         var choice = NumberedMenu.Show("[bold]Select a tool to manage:[/]", manageChoices, Color.DodgerBlue1);
 
         if (choice == "Cancel") return;
 
-        var tool = installed.FirstOrDefault(t => choice.StartsWith(t.DisplayName));
-        if (tool == null) return;
-
-        await ManageToolSubmenu(tool);
+        var idx = manageChoices.IndexOf(choice);
+        if (idx < 0 || idx >= installed.Count) return;
+        await ManageToolSubmenu(installed[idx]);
     }
 
     private async Task ManageToolSubmenu(ToolInfo tool)

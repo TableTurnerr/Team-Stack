@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -13,13 +13,19 @@ import {
   Check,
   RefreshCw,
   ChevronRight,
+  ChevronDown,
   Instagram,
   Mail,
   MessageSquare,
   Calendar,
   Download,
   Upload,
-  Globe
+  Globe,
+  UserCog,
+  Tag,
+  Layers,
+  Loader2,
+  User as UserIcon,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type ColdCall, type EventLog, type LeadCategory, type User as UserType } from '@/lib/types';
@@ -329,7 +335,7 @@ function CompanyRow({
         </td>
       )}
       {isColumnVisible('assigned_to') && (
-        <td className="py-3 px-4 overflow-hidden">
+        <td className="py-3 px-4">
           {!company.assigned_to && company.contact_source?.startsWith('Extension') ? (
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
               NEW
@@ -740,6 +746,53 @@ export default function CompaniesPage() {
   // Table selection
   const selection = useTableSelection(companies);
 
+  // Bulk actions
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMenu, setBulkMenu] = useState<null | 'assignee' | 'category' | 'source'>(null);
+  const bulkMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!bulkMenu) return;
+    function onClick(e: MouseEvent) {
+      if (bulkMenuRef.current && !bulkMenuRef.current.contains(e.target as Node)) {
+        setBulkMenu(null);
+      }
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [bulkMenu]);
+
+  const handleBulkUpdate = async (patch: Partial<Company>) => {
+    if (selection.count === 0) return;
+    const ids = Array.from(selection.selectedIds);
+    setBulkBusy(true);
+    setBulkMenu(null);
+    try {
+      await Promise.all(
+        ids.map(id => pb.collection(COLLECTIONS.COMPANIES).update(id, patch))
+      );
+      setCompanies(prev =>
+        prev.map(c => {
+          if (!selection.isSelected(c.id)) return c;
+          const next: Company = { ...c, ...patch } as Company;
+          if ('assigned_to' in patch) {
+            const uid = patch.assigned_to as string;
+            next.expand = {
+              ...c.expand,
+              assigned_to: uid ? teamMembers.find(m => m.id === uid) : undefined,
+            };
+          }
+          return next;
+        })
+      );
+      selection.clear();
+    } catch (err) {
+      console.error('Bulk update failed:', err);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   // Resizable columns
   const { getWidth, resize } = useResizableColumns('companies', [
     { key: 'company_name', initialWidth: 200, minWidth: 100 },
@@ -963,7 +1016,119 @@ export default function CompaniesPage() {
       )}
 
       {/* Selection Toolbar */}
-      <SelectionToolbar count={selection.count} totalCount={companies.length} />
+      <SelectionToolbar count={selection.count} totalCount={companies.length}>
+        <div className="flex items-center gap-2" ref={bulkMenuRef}>
+          {/* Assignee */}
+          {isAdmin && (
+            <div className="relative">
+              <button
+                onClick={() => setBulkMenu(bulkMenu === 'assignee' ? null : 'assignee')}
+                disabled={bulkBusy}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] text-xs font-medium hover:bg-[var(--card-hover)] transition-all disabled:opacity-50"
+              >
+                {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <UserCog size={12} />}
+                Assignee
+                <ChevronDown size={10} />
+              </button>
+              {bulkMenu === 'assignee' && (
+                <div className="absolute top-full right-0 mt-1 w-52 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl z-50 py-1 max-h-64 overflow-y-auto">
+                  <button
+                    onClick={() => handleBulkUpdate({ assigned_to: '' })}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-left"
+                  >
+                    <UserIcon size={12} className="text-[var(--muted)]" />
+                    Unassigned
+                  </button>
+                  {teamMembers.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => handleBulkUpdate({ assigned_to: m.id })}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-left"
+                    >
+                      <AssigneeAvatar user={m} size={16} />
+                      <span className="truncate">{m.name || m.email}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Lead Category */}
+          <div className="relative">
+            <button
+              onClick={() => setBulkMenu(bulkMenu === 'category' ? null : 'category')}
+              disabled={bulkBusy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] text-xs font-medium hover:bg-[var(--card-hover)] transition-all disabled:opacity-50"
+            >
+              {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <Tag size={12} />}
+              Category
+              <ChevronDown size={10} />
+            </button>
+            {bulkMenu === 'category' && (
+              <div className="absolute top-full right-0 mt-1 w-52 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl z-50 py-1 max-h-64 overflow-y-auto">
+                <button
+                  onClick={() => handleBulkUpdate({ lead_category: '' })}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-left text-[var(--muted)]"
+                >
+                  <X size={12} />
+                  Clear category
+                </button>
+                {categories.map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => handleBulkUpdate({ lead_category: cat.id })}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-left"
+                  >
+                    <Tag size={12} className="text-[var(--muted)]" />
+                    <span className="truncate">{cat.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Source */}
+          <div className="relative">
+            <button
+              onClick={() => setBulkMenu(bulkMenu === 'source' ? null : 'source')}
+              disabled={bulkBusy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)] text-xs font-medium hover:bg-[var(--card-hover)] transition-all disabled:opacity-50"
+            >
+              {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <Layers size={12} />}
+              Source
+              <ChevronDown size={10} />
+            </button>
+            {bulkMenu === 'source' && (
+              <div className="absolute top-full right-0 mt-1 w-44 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl z-50 py-1">
+                {(['Manual', 'Cold Call', 'Google Maps', 'Instagram'] as const).map(src => (
+                  <button
+                    key={src}
+                    onClick={() => handleBulkUpdate({ source: src })}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--sidebar-bg)] transition-colors text-left"
+                  >
+                    <span className={cn(
+                      'px-2 py-0.5 rounded text-[10px]',
+                      SOURCE_COLORS[src]?.bg,
+                      SOURCE_COLORS[src]?.text
+                    )}>
+                      {src}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={selection.clear}
+            disabled={bulkBusy}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-hover)] transition-colors disabled:opacity-50"
+          >
+            Clear
+          </button>
+        </div>
+      </SelectionToolbar>
 
       {/* Table */}
       <TableContainer>

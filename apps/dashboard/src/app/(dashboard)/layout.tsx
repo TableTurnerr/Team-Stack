@@ -16,7 +16,6 @@ import { UnsavedChangesProvider } from '@/contexts/unsaved-changes-context';
 import { FollowUpProvider } from '@/contexts/follow-up-context';
 import { FloatingSaveBar } from '@/components/floating-save-bar';
 import { ActiveSessionBanner } from '@/components/active-session-banner';
-import { PhoneDialer } from '@/components/phone-dialer';
 import { RecycleBinProvider } from '@/contexts/recycle-bin-context';
 import { UndoDeleteToast } from '@/components/undo-delete-toast';
 import { TeamPresenceProvider } from '@/contexts/team-presence-context';
@@ -59,7 +58,6 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isSessionPage = pathname === '/session';
 
   // Track page visits for quick access on overview
   useEffect(() => {
@@ -93,8 +91,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
-      {/* Floating dialer — always mounted for persistence, hidden on session page */}
-      <PhoneDialer hidden={isSessionPage} />
     </div>
   );
 }

@@ -46,8 +46,11 @@ export interface Company extends RecordModel {
 
   // Lead category (relation ID)
   lead_category?: string;
+  // RBAC owner (relation to users; admins can assign)
+  assigned_to?: string;
   expand?: {
     lead_category?: LeadCategory;
+    assigned_to?: User;
   };
 }
 
@@ -608,18 +611,13 @@ export interface RolePermissions {
   can_view_recordings?: boolean;
   can_delete_recordings?: boolean;
   can_manage_sessions?: boolean;
+  can_access_extension_leads_directly?: boolean;
 }
 
-/** Data-level access control */
+/** Data-level access control (applies uniformly to companies/leads — they're the same row) */
 export interface RoleDataAccess {
-  companies?: {
-    mode: 'all' | 'assigned' | 'none';
-    company_ids?: string[];
-  };
-  leads?: {
-    mode: 'all' | 'assigned' | 'none';
-    lead_ids?: string[];
-  };
+  mode?: 'all' | 'assigned' | 'specific' | 'none';
+  company_ids?: string[];
 }
 
 export interface Role extends RecordModel {

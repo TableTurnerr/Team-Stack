@@ -38,7 +38,15 @@ import { CallButton } from '@/components/call-button';
 import { PageGuard } from '@/components/page-guard';
 import { PhoneNumbersTab } from '@/components/phone-numbers-tab';
 import { RelativeTime } from '@/components/relative-time';
-import { ColdCallsFilterBuilder, buildColdCallsFilter, type ColdCallFilterCondition, type ColdCallFilterLogic } from '@/components/cold-calls-filter-builder';
+import {
+  FilterBuilder,
+  FilterChips,
+  buildDirectFilter,
+  type FilterCondition,
+  type FilterFieldDef,
+  type FilterLogic,
+} from '@/components/filter-builder';
+import { DEFAULT_OUTCOMES } from '@/lib/call-outcomes';
 import {
   TableContainer,
   IndexCell,
@@ -103,6 +111,21 @@ function formatCallDuration(seconds?: number): string {
 
 type TabType = 'call_logs' | 'phone_numbers';
 
+// ─── Filter fields ───────────────────────────────────────────────────────────
+
+const COLD_CALL_OUTCOME_OPTIONS = [...DEFAULT_OUTCOMES, 'Other +'] as const;
+
+const COLD_CALLS_FILTER_FIELDS: readonly FilterFieldDef[] = [
+  { key: 'call_outcome', label: 'Outcome', type: 'json_array', options: COLD_CALL_OUTCOME_OPTIONS, group: 'Calls' },
+  { key: 'call_time', label: 'Date', type: 'date', group: 'Calls' },
+  { key: 'direction', label: 'Direction', type: 'enum', options: ['outbound', 'inbound'] as const, group: 'Calls' },
+  { key: 'owner_reached', label: 'Owner Reached', type: 'boolean', group: 'Calls' },
+  { key: 'pitch_completed', label: 'Pitch Completed', type: 'boolean', group: 'Calls' },
+  { key: 'appointment_set', label: 'Appointment Set', type: 'boolean', group: 'Calls' },
+  { key: 'has_recording', label: 'Has Recording', type: 'boolean', group: 'Calls' },
+  { key: 'post_call_notes', label: 'Notes', type: 'text', group: 'Notes' },
+];
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function ColdCallsPage() {
@@ -119,10 +142,10 @@ export default function ColdCallsPage() {
 
   // Shared filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterConditions, setFilterConditions] = useState<ColdCallFilterCondition[]>([]);
-  const [filterLogic, setFilterLogic] = useState<ColdCallFilterLogic>('AND');
-  const [appliedConditions, setAppliedConditions] = useState<ColdCallFilterCondition[]>([]);
-  const [appliedLogic, setAppliedLogic] = useState<ColdCallFilterLogic>('AND');
+  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([]);
+  const [filterLogic, setFilterLogic] = useState<FilterLogic>('AND');
+  const [appliedConditions, setAppliedConditions] = useState<FilterCondition[]>([]);
+  const [appliedLogic, setAppliedLogic] = useState<FilterLogic>('AND');
   const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({
     field: 'call_time',
     dir: 'desc'
@@ -186,7 +209,7 @@ export default function ColdCallsPage() {
           : `phone_number_record.phone_number ~ "${safe}"`;
         filters.push(`(company.company_name ~ "${safe}" || ${phoneCondition} || owner_name_found ~ "${safe}" || post_call_notes ~ "${safe}")`);
       }
-      const conditionsFilter = buildColdCallsFilter(appliedConditions, appliedLogic);
+      const conditionsFilter = buildDirectFilter(appliedConditions, appliedLogic, COLD_CALLS_FILTER_FIELDS);
       if (conditionsFilter) filters.push(conditionsFilter);
 
       const sortField = sort.field;
@@ -287,11 +310,18 @@ export default function ColdCallsPage() {
 
           {activeTab === 'call_logs' && (
             <>
-              <ColdCallsFilterBuilder
+              <FilterBuilder
+                fields={COLD_CALLS_FILTER_FIELDS}
                 conditions={filterConditions}
                 logic={filterLogic}
-                onChange={(c, l) => { setFilterConditions(c); setFilterLogic(l); }}
-                onApply={() => { setAppliedConditions(filterConditions); setAppliedLogic(filterLogic); setCallLogsPage(1); }}
+                onChange={(c, l) => {
+                  setFilterConditions(c);
+                  setFilterLogic(l);
+                  setAppliedConditions(c);
+                  setAppliedLogic(l);
+                  setCallLogsPage(1);
+                }}
+                title="Filter"
               />
 
               <button
@@ -353,6 +383,25 @@ export default function ColdCallsPage() {
           </div>
         </button>
       </div>
+
+      {/* Active filters strip */}
+      {activeTab === 'call_logs' && appliedConditions.length > 0 && (
+        <FilterChips
+          conditions={appliedConditions}
+          fields={COLD_CALLS_FILTER_FIELDS}
+          onRemove={(id) => {
+            const next = appliedConditions.filter(c => c.id !== id);
+            setFilterConditions(next);
+            setAppliedConditions(next);
+            setCallLogsPage(1);
+          }}
+          onClear={() => {
+            setFilterConditions([]);
+            setAppliedConditions([]);
+            setCallLogsPage(1);
+          }}
+        />
+      )}
 
       {/* Error */}
       {activeTab === 'call_logs' && callLogsError && (

@@ -7,7 +7,7 @@ import { useCallRecording } from '@/contexts/call-recording-context';
 import { useLocalAgent } from '@/contexts/local-agent-context';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp, type CompanyNote } from '@/lib/types';
-import { cn, timeAgo, formatDateTime, formatPhoneNumber, extractWebsiteFromName } from '@/lib/utils';
+import { cn, timeAgo, formatDateTime, formatPhoneNumber } from '@/lib/utils';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
@@ -30,6 +30,10 @@ export type { CallbackReason };
 export interface CallFormData {
     companyId: string;
     companyName: string;
+    /** When set, the page handler must create a Company with this name and use
+     *  its id as the call log's `company`. Lets the form return instantly
+     *  without awaiting a network round-trip during the click handler. */
+    newCompanyName?: string;
     phoneNumber: string;
     receptionistName: string;
     ownerName: string;
@@ -157,6 +161,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [showAdditionalPhone, setShowAdditionalPhone] = useState(false);
     const [email, setEmail] = useState('');
     const [showEmail, setShowEmail] = useState(false);
+    /** Inline validation banner shown above the Save button. Replaces the old
+     *  silent early-returns so users get visible feedback when the form is
+     *  missing required fields. */
+    const [formError, setFormError] = useState<string | null>(null);
     const [shouldPulseOwnerReached, setShouldPulseOwnerReached] = useState(false);
     const pulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -423,6 +431,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setShowAdditionalPhone(false);
         setEmail('');
         setShowEmail(false);
+        setFormError(null);
         lastLookedUpPhone.current = '';
         lastAppliedSuggestion.current = '';
     }, []);
@@ -479,6 +488,17 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             email,
         });
     }, [companySearch, selectedCompany, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, onDraftChange]);
+
+    // Clear the inline Save validation banner whenever the user fixes the
+    // relevant fields (company name or call outcome). Keeps the banner
+    // ephemeral instead of sticking around after the user has resolved the
+    // missing input.
+    useEffect(() => {
+        if (!formError) return;
+        if (companySearch.trim().length > 0 && callOutcome.length > 0) {
+            setFormError(null);
+        }
+    }, [formError, companySearch, callOutcome]);
 
     // Reset suggestion tracking when phone number changes so the same company name
     // can be re-applied to consecutive calls (e.g. two different numbers for the same company)
@@ -793,61 +813,102 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const isSavingRef = useRef(false);
 
     const handleSave = useCallback(async () => {
-        if (!selectedCompany && !isNewCompany) return;
-        if (!companySearch.trim()) return;
-        if (callOutcome.length === 0) return;
         if (isSavingRef.current) return;
+
+        // Inline validation banners replace the old silent early-returns so the
+        // user can see why the click did nothing. The Save button stays enabled
+        // (apart from in-flight saves) so clicks always hit this branch.
+        const trimmedSearch = companySearch.trim();
+        if (!trimmedSearch) {
+            setFormError('Pick a company name first');
+            return;
+        }
+        if (callOutcome.length === 0) {
+            setFormError('Pick a call outcome');
+            return;
+        }
+
         isSavingRef.current = true;
 
         try {
-            let companyId: string;
-            let companyName: string;
+            // Force-resolve the company on click. If the user typed a name but
+            // never picked an autocomplete entry, race a one-shot exact-match
+            // lookup against a 500 ms timeout. Whichever resolves first wins —
+            // we never block the click handler longer than that, even on a
+            // slow network. If the lookup is too slow, we fall through to the
+            // "new company" path and let the page handler create it.
+            let resolvedCompany: Company | null = selectedCompany;
 
-            if (isNewCompany) {
-                const trimmedName = companySearch.trim();
-                const newCompany = await pb.collection(COLLECTIONS.COMPANIES).create<Company>({
-                    company_name: trimmedName,
-                    owner_name: ownerName || undefined,
-                    source: 'Cold Call',
-                    first_contacted: new Date().toISOString(),
-                    last_contacted: new Date().toISOString(),
-                    website: extractWebsiteFromName(trimmedName),
-                    assigned_to: user?.id,
-                });
-                companyId = newCompany.id;
-                companyName = newCompany.company_name;
-            } else if (selectedCompany) {
-                companyId = selectedCompany.id;
-                companyName = selectedCompany.company_name;
-            } else {
-                return;
+            if (!resolvedCompany && !isNewCompany && trimmedSearch.length >= 2) {
+                const lookup = pb.collection(COLLECTIONS.COMPANIES).getList<Company>(1, 1, {
+                    filter: `company_name = "${trimmedSearch}"`,
+                }).then(result => result.items[0] ?? null).catch(() => null);
+                const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 500));
+                const winner = await Promise.race([lookup, timeout]);
+                if (winner) {
+                    resolvedCompany = winner;
+                    setSelectedCompany(winner);
+                } else {
+                    setIsNewCompany(true);
+                }
             }
 
-            onSave({
-                companyId,
-                companyName,
-                phoneNumber,
-                receptionistName,
-                ownerName,
-                callOutcome,
-                postCallNotes,
-                wasPickedUp: !callOutcome.includes('No Answer') && callOutcome.length > 0,
-                ownerReached,
-                pitchCompleted,
-                appointmentSet,
-                followUp: showFollowUp ? followUpData : null,
-                callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
-                additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
-                additionalPhoneNote: additionalPhoneNote.trim() || undefined,
-                email: email.trim() || undefined,
-                completeFollowUpIds: completeFollowUps && pendingFollowUps.length > 0
-                    ? pendingFollowUps.map(f => f.id)
-                    : undefined,
-            });
+            const wasPickedUp = !callOutcome.includes('No Answer') && callOutcome.length > 0;
 
-            resetForm();
-        } catch (err) {
-            console.error('Failed to save call:', err);
+            const payload: CallFormData = resolvedCompany
+                ? {
+                    companyId: resolvedCompany.id,
+                    companyName: resolvedCompany.company_name,
+                    newCompanyName: undefined,
+                    phoneNumber,
+                    receptionistName,
+                    ownerName,
+                    callOutcome,
+                    postCallNotes,
+                    wasPickedUp,
+                    ownerReached,
+                    pitchCompleted,
+                    appointmentSet,
+                    followUp: showFollowUp ? followUpData : null,
+                    callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
+                    additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
+                    additionalPhoneNote: additionalPhoneNote.trim() || undefined,
+                    email: email.trim() || undefined,
+                    completeFollowUpIds: completeFollowUps && pendingFollowUps.length > 0
+                        ? pendingFollowUps.map(f => f.id)
+                        : undefined,
+                }
+                : {
+                    // No selected company — page handler will create one from
+                    // newCompanyName. companyId stays empty until then.
+                    companyId: '',
+                    companyName: trimmedSearch,
+                    newCompanyName: trimmedSearch,
+                    phoneNumber,
+                    receptionistName,
+                    ownerName,
+                    callOutcome,
+                    postCallNotes,
+                    wasPickedUp,
+                    ownerReached,
+                    pitchCompleted,
+                    appointmentSet,
+                    followUp: showFollowUp ? followUpData : null,
+                    callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
+                    additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
+                    additionalPhoneNote: additionalPhoneNote.trim() || undefined,
+                    email: email.trim() || undefined,
+                    completeFollowUpIds: completeFollowUps && pendingFollowUps.length > 0
+                        ? pendingFollowUps.map(f => f.id)
+                        : undefined,
+                };
+
+            try {
+                onSave(payload);
+                resetForm();
+            } catch (err) {
+                console.error('Failed to save call:', err);
+            }
         } finally {
             isSavingRef.current = false;
         }
@@ -933,13 +994,16 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         }
     }, [selectedCompany, user, preCallNoteDraft, preCallNotes, mostRecentPreCallNote]);
 
-    const hasCompany = (selectedCompany || isNewCompany) && companySearch.trim().length >= 2;
     const hasPhoneNumber = !!phoneNumber;
-    const hasOutcome = callOutcome.length > 0;
     // Only allow save after a call has actually happened (hasUnsavedCall === true).
     // During a live call: allow only if there's a previous unsaved call (callback scenario).
     // Before any call is made: always disabled.
-    const canSave = hasCompany && hasPhoneNumber && hasOutcome && !saving && hasUnsavedCall;
+    //
+    // Note: company/outcome are NOT part of canSave anymore — the Save button
+    // stays enabled even when those fields are blank, and the click handler
+    // surfaces an inline `formError` banner instead. Keeps the button reachable
+    // so users get visible feedback rather than a silently-disabled control.
+    const canSave = hasPhoneNumber && !saving && hasUnsavedCall;
 
     const handleCallbackSelect = (reason: CallbackReason) => {
         setShowCallbackDropdown(false);
@@ -1865,6 +1929,19 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     </div>
                 )}
             </div>
+
+            {/* Inline validation banner — surfaces missing required fields
+                (company name / call outcome) instead of silently no-op-ing the
+                Save click. Cleared automatically once the user fills the fields. */}
+            {formError && (
+                <div
+                    role="alert"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--error)]/30 bg-[var(--error-subtle)] text-[var(--error)] text-xs font-medium"
+                >
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>{formError}</span>
+                </div>
+            )}
 
             {/* Action buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

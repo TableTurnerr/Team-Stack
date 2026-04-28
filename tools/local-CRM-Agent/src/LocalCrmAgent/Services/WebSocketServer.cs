@@ -61,6 +61,7 @@ public class AgentWebSocketServer : IDisposable
         _recorder.RecordingCompleted += OnRecordingCompleted;
         _recorder.RecordingConverted += OnRecordingConverted;
         _uploader.UploadCompleted += OnUploadCompleted;
+        _uploader.UploadProgress += OnUploadProgress;
     }
 
     /// <summary>
@@ -219,6 +220,12 @@ public class AgentWebSocketServer : IDisposable
                 case "cancelPendingUploads":
                     HandleCancelPendingUploads(doc.RootElement);
                     break;
+                case "retryAllUploads":
+                    HandleRetryAllUploads();
+                    break;
+                case "getFailedUploads":
+                    HandleGetFailedUploads(client);
+                    break;
                 case "setUploadConfig":
                     HandleSetUploadConfig(doc.RootElement);
                     break;
@@ -360,6 +367,33 @@ public class AgentWebSocketServer : IDisposable
         var fileName = root.TryGetProperty("fileName", out var f) ? f.GetString() : null;
         if (fileName != null)
             _uploader.EnqueueUpload(fileName);
+    }
+
+    private void HandleRetryAllUploads()
+    {
+        if (_uploader == null) return;
+        _uploader.RetryAll();
+        Debug.WriteLine("[WS] retryAllUploads: reset all failed entries");
+        BroadcastUploadQueueStatus();
+    }
+
+    private void HandleGetFailedUploads(IWebSocketConnection client)
+    {
+        var msg = new FailedUploadsMessage();
+        if (_uploader == null) { SendTo(client, msg); return; }
+
+        foreach (var e in _uploader.GetFailedUploads())
+        {
+            msg.Uploads.Add(new FailedUploadDto
+            {
+                FileName = e.FileName,
+                PhoneNumber = e.PhoneNumber,
+                Error = e.Error,
+                RetryCount = e.RetryCount,
+                CallLogId = e.CallLogId,
+            });
+        }
+        SendTo(client, msg);
     }
 
     private void HandleCancelPendingUploads(JsonElement root)
@@ -509,6 +543,38 @@ public class AgentWebSocketServer : IDisposable
             CallLogId = callLogId,
             Success = success,
             Error = error,
+        };
+        Broadcast(msg);
+    }
+
+    // Throttle progress broadcasts so we don't flood clients on small files —
+    // only emit when the file changes, every ~250ms, or on completion.
+    private readonly object _progressLock = new();
+    private string? _lastProgressFile;
+    private DateTime _lastProgressAt = DateTime.MinValue;
+
+    private void OnUploadProgress(string fileName, long bytesSent, long bytesTotal)
+    {
+        bool shouldEmit;
+        lock (_progressLock)
+        {
+            var now = DateTime.UtcNow;
+            shouldEmit = fileName != _lastProgressFile
+                || (bytesTotal > 0 && bytesSent >= bytesTotal)
+                || (now - _lastProgressAt).TotalMilliseconds >= 250;
+            if (shouldEmit)
+            {
+                _lastProgressFile = fileName;
+                _lastProgressAt = now;
+            }
+        }
+        if (!shouldEmit) return;
+
+        var msg = new UploadProgressMessage
+        {
+            FileName = fileName,
+            BytesSent = bytesSent,
+            BytesTotal = bytesTotal,
         };
         Broadcast(msg);
     }
@@ -810,6 +876,7 @@ public class AgentWebSocketServer : IDisposable
         if (_uploader != null)
         {
             _uploader.UploadCompleted -= OnUploadCompleted;
+            _uploader.UploadProgress -= OnUploadProgress;
         }
         _micManager = null;
 

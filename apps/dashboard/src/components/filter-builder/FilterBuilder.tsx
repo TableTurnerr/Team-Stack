@@ -299,8 +299,23 @@ export function FilterBuilder({
   title = 'Filter',
 }: FilterBuilderProps) {
   const [open, setOpen] = useState(false);
+  const [draftConditions, setDraftConditions] = useState<FilterCondition[]>(conditions);
+  const [draftLogic, setDraftLogic] = useState<FilterLogic>(logic);
   const ref = useRef<HTMLDivElement>(null);
   const activeCount = activeConditionCount(conditions, fields);
+  const draftActiveCount = activeConditionCount(draftConditions, fields);
+  const isDirty =
+    draftLogic !== logic ||
+    JSON.stringify(draftConditions) !== JSON.stringify(conditions);
+
+  // Fork applied → draft each time the dropdown opens.
+  useEffect(() => {
+    if (open) {
+      setDraftConditions(conditions);
+      setDraftLogic(logic);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -313,29 +328,39 @@ export function FilterBuilder({
 
   const addCondition = () => {
     const c = makeCondition(fields[0], relData);
-    onChange([...conditions, c], logic);
+    setDraftConditions(prev => [...prev, c]);
   };
   const updateCondition = (id: string, updated: FilterCondition) => {
-    onChange(conditions.map(c => (c.id === id ? updated : c)), logic);
+    setDraftConditions(prev => prev.map(c => (c.id === id ? updated : c)));
   };
   const removeCondition = (id: string) => {
-    onChange(conditions.filter(c => c.id !== id), logic);
+    setDraftConditions(prev => prev.filter(c => c.id !== id));
   };
-  const clearAll = () => onChange([], logic);
+  const clearAll = () => setDraftConditions([]);
+
+  const apply = () => {
+    onChange(draftConditions, draftLogic);
+    setOpen(false);
+  };
+  const cancel = () => {
+    setDraftConditions(conditions);
+    setDraftLogic(logic);
+    setOpen(false);
+  };
 
   return (
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(v => !v)}
         className={cn(
-          'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm transition-colors',
+          'flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors',
           activeCount > 0
             ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
             : 'border-[var(--card-border)] hover:bg-[var(--card-bg)] text-[var(--foreground)]',
         )}
         title={title}
       >
-        <Filter size={14} />
+        <Filter size={16} />
         {title}
         {activeCount > 0 && (
           <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[var(--primary)] text-[var(--background)]">
@@ -349,25 +374,25 @@ export function FilterBuilder({
           <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--card-border)] gap-3">
             <span className="text-sm font-semibold">{title}</span>
             <div className="flex items-center gap-2">
-              {conditions.length > 1 && (
+              {draftConditions.length > 1 && (
                 <div className="inline-flex rounded-lg border border-[var(--card-border)] overflow-hidden text-xs">
                   <button
-                    onClick={() => onChange(conditions, 'AND')}
-                    className={cn('px-2.5 py-0.5 font-semibold transition-colors', logic === 'AND' ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]')}
+                    onClick={() => setDraftLogic('AND')}
+                    className={cn('px-2.5 py-0.5 font-semibold transition-colors', draftLogic === 'AND' ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]')}
                     title="Match all conditions"
                   >
                     All
                   </button>
                   <button
-                    onClick={() => onChange(conditions, 'OR')}
-                    className={cn('px-2.5 py-0.5 font-semibold transition-colors border-l border-[var(--card-border)]', logic === 'OR' ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]')}
+                    onClick={() => setDraftLogic('OR')}
+                    className={cn('px-2.5 py-0.5 font-semibold transition-colors border-l border-[var(--card-border)]', draftLogic === 'OR' ? 'bg-[var(--foreground)] text-[var(--background)]' : 'text-[var(--muted)] hover:bg-[var(--card-hover)]')}
                     title="Match any condition"
                   >
                     Any
                   </button>
                 </div>
               )}
-              {activeCount > 0 && (
+              {draftActiveCount > 0 && (
                 <button
                   onClick={clearAll}
                   className="text-xs text-[var(--muted)] hover:text-[var(--error)] transition-colors"
@@ -379,12 +404,12 @@ export function FilterBuilder({
           </div>
 
           <div className="p-4 space-y-2.5 max-h-96 overflow-y-auto">
-            {conditions.length === 0 ? (
+            {draftConditions.length === 0 ? (
               <p className="text-xs text-[var(--muted)] text-center py-2">
                 No filters. Add a condition below to narrow down results.
               </p>
             ) : (
-              conditions.map(c => (
+              draftConditions.map(c => (
                 <ConditionRow
                   key={c.id}
                   condition={c}
@@ -405,12 +430,19 @@ export function FilterBuilder({
             </button>
           </div>
 
-          <div className="flex items-center justify-end px-4 py-3 border-t border-[var(--card-border)]">
+          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--card-border)]">
             <button
-              onClick={() => setOpen(false)}
-              className="px-3 py-1.5 text-xs rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors"
+              onClick={cancel}
+              className="px-3 py-1.5 text-xs rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors"
             >
-              Done
+              Cancel
+            </button>
+            <button
+              onClick={apply}
+              disabled={!isDirty}
+              className="px-3 py-1.5 text-xs rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Apply{isDirty ? ' changes' : ''}
             </button>
           </div>
         </div>

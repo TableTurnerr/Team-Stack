@@ -25,6 +25,7 @@ public class AudioRecorderService : IDisposable
     private readonly RecordingStorageManager _storage;
     private readonly CallStateFusion _fusion;
     private readonly MicrophoneManager? _micManager;
+    private readonly DialIntentTracker? _intentTracker;
     private readonly object _lock = new();
 
     private WasapiLoopbackCapture? _loopbackCapture;
@@ -49,6 +50,7 @@ public class AudioRecorderService : IDisposable
     private DateTime _recordingStartTime;
     private string? _currentPhoneNumber;
     private string? _currentRecordingId;
+    private string? _currentClientCallId;
     private RecordingState _state = RecordingState.Idle;
 
     // Safety: max recording duration (2 hours) — absolute ceiling.
@@ -104,22 +106,27 @@ public class AudioRecorderService : IDisposable
     public event Action<RecordingState, string?>? StateChanged;
     /// <summary>
     /// Fired immediately when capture stops, BEFORE MP3 conversion. Args:
-    /// recordingId, fileName, phoneNumber, duration, fileSize, startTime.
-    /// duration/fileSize are best-effort estimates at this point — final
-    /// values are reported via <see cref="RecordingConverted"/>.
+    /// recordingId, fileName, phoneNumber, duration, fileSize, startTime,
+    /// clientCallId. duration/fileSize are best-effort estimates at this
+    /// point — final values are reported via <see cref="RecordingConverted"/>.
     /// </summary>
-    public event Action<string, string, string, int, long, DateTime>? RecordingCompleted;
+    public event Action<string, string, string, int, long, DateTime, string?>? RecordingCompleted;
     /// <summary>
     /// Fired after WAV→MP3 conversion succeeds. Args: recordingId, fileName,
     /// final duration (seconds), final fileSize (bytes).
     /// </summary>
     public event Action<string, string, int, long>? RecordingConverted;
 
-    public AudioRecorderService(RecordingStorageManager storage, CallStateFusion fusion, MicrophoneManager? micManager = null)
+    public AudioRecorderService(
+        RecordingStorageManager storage,
+        CallStateFusion fusion,
+        MicrophoneManager? micManager = null,
+        DialIntentTracker? intentTracker = null)
     {
         _storage = storage;
         _fusion = fusion;
         _micManager = micManager;
+        _intentTracker = intentTracker;
         _fusion.StateChanged += OnCallStateChanged;
     }
 
@@ -167,6 +174,14 @@ public class AudioRecorderService : IDisposable
                 _currentPhoneNumber = phoneNumber;
                 _recordingStartTime = DateTime.UtcNow;
                 _currentRecordingId = Guid.NewGuid().ToString("N")[..12]; // short unique ID
+
+                // Pull the freshest dial intent's client call id so the
+                // resulting recording is unambiguously bound to the dashboard
+                // dial that started the call. The dashboard later links the
+                // recording to a call_log by this id, avoiding the stale
+                // "latestRecording" race when MP3 conversion lags.
+                var intent = _intentTracker?.MostRecent();
+                _currentClientCallId = intent?.ClientCallId;
 
                 // Generate file paths
                 _tempWavPath = _storage.GenerateTempWavPath(phoneNumber);
@@ -318,6 +333,7 @@ public class AudioRecorderService : IDisposable
             _targetMp3Path = null;
             _currentPhoneNumber = null;
             _currentRecordingId = null;
+            _currentClientCallId = null;
         }
 
         _isRecordingActive = false;
@@ -457,6 +473,7 @@ public class AudioRecorderService : IDisposable
         string? targetMp3;
         string? phoneNumber;
         string? recordingId;
+        string? clientCallId;
         DateTime startTime;
         lock (_lock)
         {
@@ -472,6 +489,7 @@ public class AudioRecorderService : IDisposable
             targetMp3 = _targetMp3Path;
             phoneNumber = _currentPhoneNumber;
             recordingId = _currentRecordingId;
+            clientCallId = _currentClientCallId;
             startTime = _recordingStartTime;
         }
 
@@ -491,6 +509,8 @@ public class AudioRecorderService : IDisposable
         // before the potentially slow WAV→MP3 conversion.
         var fileName = Path.GetFileName(targetMp3);
         _storage.AddEntry(fileName, phoneNumber ?? "", startTime, recordingId);
+        if (clientCallId != null)
+            _storage.UpdateEntry(fileName, entry => entry.ClientCallId = clientCallId);
 
         // Reset state + paths NOW so the next recording can start while
         // conversion runs in the background. The manifest entry is the
@@ -503,6 +523,7 @@ public class AudioRecorderService : IDisposable
             _targetMp3Path = null;
             _currentPhoneNumber = null;
             _currentRecordingId = null;
+            _currentClientCallId = null;
         }
 
         StateChanged?.Invoke(RecordingState.Idle, null);
@@ -511,7 +532,7 @@ public class AudioRecorderService : IDisposable
         // know the recording exists right now, not 5 seconds later when MP3
         // conversion finishes. Final duration/fileSize are reported via
         // RecordingConverted once the WAV→MP3 pass completes.
-        RecordingCompleted?.Invoke(recordingId ?? "", fileName, phoneNumber ?? "", preliminaryDuration, 0, startTime);
+        RecordingCompleted?.Invoke(recordingId ?? "", fileName, phoneNumber ?? "", preliminaryDuration, 0, startTime, clientCallId);
 
         // Convert WAV to MP3 on a background thread, with a 30s timeout so a
         // hung LAME encoder can never wedge the recorder permanently.

@@ -436,6 +436,23 @@ public class RecordingUploadService : IDisposable
     }
 
     /// <summary>
+    /// Link a recording to a call log by the dashboard-issued client call id.
+    /// Preferred over <see cref="LinkRecording"/> because it bypasses the
+    /// global-latest-recording race when MP3 conversion lag means the previous
+    /// call's file is still the freshest entry.
+    /// </summary>
+    public void LinkRecordingByClientCallId(string clientCallId, string callLogId)
+    {
+        var entry = _storage.GetByClientCallId(clientCallId);
+        if (entry == null)
+        {
+            Debug.WriteLine($"[Upload] LinkByClientCallId: no recording found for clientCallId={clientCallId}");
+            return;
+        }
+        LinkRecording(entry.FileName, callLogId, entry.RecordingId);
+    }
+
+    /// <summary>
     /// Link a recording to a call log. Triggers immediate upload.
     /// </summary>
     public void LinkRecording(string? fileName, string callLogId, string? recordingId = null)

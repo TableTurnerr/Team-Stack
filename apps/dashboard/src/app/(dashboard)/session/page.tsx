@@ -70,6 +70,7 @@ interface PendingCallSnapshot {
     connectTime: number | null;
     endTime: number;
     pickupIncremented: boolean;
+    clientCallId: string | null;
 }
 
 interface UnsavedCallStoragePayload {
@@ -178,6 +179,10 @@ export default function SessionPage() {
     // Holds up to MAX_PENDING_SNAPSHOTS in-flight entries; oldest is dropped on overflow.
     // handleSaveCall consumes the matching snapshot via the saved data.phoneNumber digits.
     const pendingCallSnapshotsRef = useRef<Map<string, PendingCallSnapshot>>(new Map());
+    // Stable per-call ids minted at dial time and threaded through the dial
+    // intent → recording manifest → broadcast. Keyed by last-10 phone digits
+    // so handleSaveCall can recover the id on form submission.
+    const clientCallIdsRef = useRef<Map<string, string>>(new Map());
     const prevCallStatusForResetRef = useRef(callStatus);
 
     // Track unsaved call state — true when call ended but form not yet submitted
@@ -795,6 +800,7 @@ export default function SessionPage() {
                             connectTime,
                             endTime,
                             pickupIncremented: pickupCountIncremented,
+                            clientCallId: clientCallIdsRef.current.get(phoneDigits) ?? null,
                         });
                         // Cap the map at MAX_PENDING_SNAPSHOTS — drop oldest on overflow.
                         while (map.size > MAX_PENDING_SNAPSHOTS) {
@@ -1470,6 +1476,25 @@ export default function SessionPage() {
         // Pass company suggestion from power dialer to the form
         setSuggestedCompanyName(companyName || '');
 
+        // Mint a stable per-call id and stash it keyed by last-10 phone digits
+        // so handleSaveCall can pair the resulting recording with the exact
+        // call_log we're about to create — no global "latest recording" race.
+        const clientCallId =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+                ? crypto.randomUUID()
+                : `cc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const dialDigits = phoneNumber.replace(/\D/g, '').slice(-10);
+        if (dialDigits) {
+            const map = clientCallIdsRef.current;
+            map.set(dialDigits, clientCallId);
+            // Cap the map so a long run of calls doesn't leak memory.
+            while (map.size > 8) {
+                const oldest = map.keys().next().value;
+                if (oldest === undefined) break;
+                map.delete(oldest);
+            }
+        }
+
         // Start recording immediately when dialing — captures ringing audio.
         // The ringing/connected effects also call startRecording(), but the
         // recorder guards against double-start (returns early if already recording).
@@ -1478,7 +1503,7 @@ export default function SessionPage() {
             startRecording();
         }
 
-        dialNumber(phoneNumber);
+        dialNumber(phoneNumber, clientCallId);
     }, [dialNumber, setContextPhoneNumber, isDialing, callStatus, session?.paused_at, effectiveAgentConnected, effectiveZoomDetected, addToast, isSessionActive, enterDeferredMode, startRecording]);
 
     // Ref so power dialer timers always call the latest handleDial (avoids stale closures)
@@ -1549,6 +1574,14 @@ export default function SessionPage() {
         const capturedConnectTime = snapshot?.connectTime ?? connectTime;
         const capturedEndTime = snapshot?.endTime ?? callEndTimeRef.current ?? Date.now();
         const capturedPickupIncremented = snapshot?.pickupIncremented ?? pickupCountIncremented;
+        const capturedClientCallId = snapshot?.clientCallId
+            ?? (savedPhoneDigits ? clientCallIdsRef.current.get(savedPhoneDigits) : undefined)
+            ?? null;
+        if (capturedClientCallId && savedPhoneDigits) {
+            // Once consumed, drop the id so a stale entry can't mis-link
+            // a later call with the same phone digits.
+            clientCallIdsRef.current.delete(savedPhoneDigits);
+        }
         if (snapshotKey) snapshotMap.delete(snapshotKey);
 
         // Determine if this call involved callbacks
@@ -1739,7 +1772,10 @@ export default function SessionPage() {
                     const submitFn = hasCallbacks
                         ? submitDeferredRecording    // merge all segments (callback legs)
                         : submitOldestDeferredRecording; // pop one segment (normal call)
-                    void submitFn(callLog.id);
+                    // Pass the captured clientCallId so the agent can link by
+                    // stable id (avoids the global-latest-recording race when
+                    // MP3 conversion lags behind form submission).
+                    void submitFn(callLog.id, capturedClientCallId);
                     // Optimistically mark the call log; the agent will perform the actual
                     // upload in the background. If the recording ends up empty/failed the
                     // flag is harmless — the recordings collection will just be empty.

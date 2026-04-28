@@ -38,6 +38,9 @@ public class CallStateMessage : AgentMessage
     [JsonPropertyName("intentId")]
     public string? IntentId { get; set; }
 
+    [JsonPropertyName("clientCallId")]
+    public string? ClientCallId { get; set; }
+
     [JsonPropertyName("zoomCallId")]
     public string? ZoomCallId { get; set; }
 
@@ -61,6 +64,7 @@ public class CallStateMessage : AgentMessage
         Confidence = info.Confidence.ToString().ToLowerInvariant(),
         DeviceId = info.DeviceId,
         IntentId = info.IntentId,
+        ClientCallId = info.ClientCallId,
         ZoomCallId = info.ZoomCallId,
         UiSeenHere = info.UiSeenHere,
         AudioActiveHere = info.AudioActiveHere,
@@ -180,6 +184,15 @@ public class RecordingCompletedMessage : AgentMessage
     [JsonPropertyName("startTime")]
     public string StartTime { get; set; } = "";
 
+    /// <summary>
+    /// Dashboard-issued stable per-call id, copied from the dial intent that
+    /// triggered this recording. Lets the dashboard correlate the broadcast
+    /// to the exact call_log it just created without relying on a global
+    /// "latest recording" pointer that MP3 conversion lag can stale-read.
+    /// </summary>
+    [JsonPropertyName("clientCallId")]
+    public string? ClientCallId { get; set; }
+
     public RecordingCompletedMessage() => Type = "recordingCompleted";
 }
 
@@ -274,6 +287,9 @@ public class UnlinkedRecordingDto
 
     [JsonPropertyName("startTime")]
     public string StartTime { get; set; } = "";
+
+    [JsonPropertyName("clientCallId")]
+    public string? ClientCallId { get; set; }
 }
 
 public class UnlinkedRecordingsMessage : AgentMessage

@@ -30,6 +30,7 @@ public class CallStateInfo
     // state it's receiving belongs to THIS teammate's device or not.
     public string? DeviceId { get; set; }
     public string? IntentId { get; set; }     // dashboard dial-click correlator
+    public string? ClientCallId { get; set; } // stable per-call id from the dashboard
     public string? ZoomCallId { get; set; }   // from webhook once correlated
     public bool UiSeenHere { get; set; }      // true when ZoomUiWatcher saw active/ring on this box
     public bool AudioActiveHere { get; set; } // true when WASAPI reports a live Zoom audio session

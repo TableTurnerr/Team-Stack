@@ -27,6 +27,7 @@ import { autoClaimCompany } from '@/lib/auto-claim';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
+import { PendingUploadsPanel } from './pending-uploads-panel';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { ManualAdjustmentModal } from './manual-adjustment-modal';
@@ -2717,6 +2718,7 @@ export default function SessionPage() {
                             companyName={lastCallCompanyName}
                             sessionId={session.id}
                         />
+                        <PendingUploadsPanel />
                     </div>
                 </div>
             </div>

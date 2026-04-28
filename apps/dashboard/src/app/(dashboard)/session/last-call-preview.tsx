@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, ArrowLeft, Check, User, Crown, Headphones, X, Loader2, Pencil } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { ChevronDown, ChevronUp, RotateCcw, Building2, StickyNote, History, ArrowLeft, Check, User, Crown, Headphones, X, Loader2, Pencil, CheckCircle2, AlertTriangle, Upload, Link as LinkIcon } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type CallLog, type Company, type Recording, type CompanyNote } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { useLocalAgent } from '@/contexts/local-agent-context';
 import { cn } from '@/lib/utils';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { RecordingPlayerOverlay } from '@/components/recording-player-overlay';
@@ -26,8 +27,38 @@ interface LastCallPreviewProps {
 
 const LAST_CALL_STORAGE_KEY = 'crm:session:last-call:v1';
 
+// Defensive shapes for upload-tracking state added by sibling units. Typed as
+// optional so this component compiles whether or not the upstream PRs are
+// merged. `uploadProgress` may carry either bytes or a precomputed percent.
+interface UploadProgressEntry {
+    callLogId?: string | null;
+    fileName?: string;
+    bytesSent?: number;
+    bytesTotal?: number;
+    percent?: number;
+}
+interface FailedUploadEntry {
+    callLogId?: string | null;
+    fileName?: string;
+}
+
 export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPreviewProps) {
     const { user } = useAuth();
+    const agent = useLocalAgent() as unknown as {
+        uploadProgress?: Map<string, UploadProgressEntry>;
+        failedUploads?: FailedUploadEntry[];
+        sendCommand: (command: Record<string, unknown>) => void;
+    };
+    const uploadProgress = agent.uploadProgress ?? null;
+    const failedUploads = useMemo(() => agent.failedUploads ?? [], [agent.failedUploads]);
+    const sendCommand = agent.sendCommand;
+    const [retryingFileName, setRetryingFileName] = useState<string | null>(null);
+    // FileNames whose upload has completed successfully during this mount
+    // (saw progress, then dropped from the map without entering failedUploads).
+    const [completedUploads, setCompletedUploads] = useState<Set<string>>(new Set());
+    // Tracks the file currently in progress for our display call so we can
+    // detect the transition out of uploadProgress.
+    const seenInProgressRef = useRef<Map<string, string>>(new Map()); // callLogId -> fileName
     const [isExpanded, setIsExpanded] = useState(true);
     const [localCallLog, setLocalCallLog] = useState<CallLog | null>(null);
     const [localCompanyName, setLocalCompanyName] = useState('');
@@ -327,6 +358,107 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
         }
     }, [displayCall, notes, ownerReached, pitchCompleted, appointmentSet, receptionistName, ownerName, isViewingOlderCall, handleBackToLastCall]);
 
+    // Recording status pill — find any in-flight or failed upload tied to the
+    // displayed call_log. Match by callLogId on the entry, with a fallback that
+    // scans the fileName for the agent's `_cl-{callLogId}` rename suffix.
+    // Computed unconditionally before the early return to keep hook order stable.
+    const callLogIdForStatus = displayCall?.id ?? null;
+    const matchesCallLog = (entryCallLogId: string | null | undefined, fileName: string | undefined) => {
+        if (!callLogIdForStatus) return false;
+        if (entryCallLogId && entryCallLogId === callLogIdForStatus) return true;
+        if (fileName && fileName.includes(`_cl-${callLogIdForStatus}`)) return true;
+        return false;
+    };
+    let activeUpload: UploadProgressEntry | null = null;
+    if (uploadProgress) {
+        for (const entry of uploadProgress.values()) {
+            if (matchesCallLog(entry?.callLogId, entry?.fileName)) {
+                activeUpload = entry;
+                break;
+            }
+        }
+    }
+    const failedForCall = failedUploads.find(f => matchesCallLog(f?.callLogId, f?.fileName)) ?? null;
+    const isRetrying = retryingFileName !== null
+        && (failedForCall?.fileName === retryingFileName || activeUpload?.fileName === retryingFileName);
+
+    // Detect upload completion: when a fileName we previously saw in
+    // uploadProgress for this call disappears AND is not in failedUploads,
+    // mark it complete. Persisted across the mount in `completedUploads`.
+    useEffect(() => {
+        if (!callLogIdForStatus) return;
+        const seenMap = seenInProgressRef.current;
+        if (activeUpload?.fileName) {
+            seenMap.set(callLogIdForStatus, activeUpload.fileName);
+            return;
+        }
+        const previouslySeen = seenMap.get(callLogIdForStatus);
+        if (!previouslySeen) return;
+        const stillFailed = failedUploads.some(f => f?.fileName === previouslySeen);
+        if (stillFailed) return;
+        seenMap.delete(callLogIdForStatus);
+        setCompletedUploads(prev => {
+            if (prev.has(previouslySeen)) return prev;
+            const next = new Set(prev);
+            next.add(previouslySeen);
+            return next;
+        });
+    }, [activeUpload, callLogIdForStatus, failedUploads]);
+
+    const fileNameForCall = activeUpload?.fileName
+        ?? failedForCall?.fileName
+        ?? seenInProgressRef.current.get(callLogIdForStatus ?? '')
+        ?? null;
+    const uploadCompleted = fileNameForCall !== null && completedUploads.has(fileNameForCall);
+
+    const recordingPill: { label: string; tone: 'linked' | 'uploading' | 'uploaded' | 'failed' } | null = (() => {
+        if (!callLogIdForStatus) return null;
+        if (failedForCall && !isRetrying) {
+            return { label: 'Failed', tone: 'failed' };
+        }
+        if (activeUpload) {
+            const pct = typeof activeUpload.percent === 'number'
+                ? activeUpload.percent
+                : (activeUpload.bytesTotal && activeUpload.bytesTotal > 0
+                    ? Math.min(100, (activeUpload.bytesSent ?? 0) / activeUpload.bytesTotal * 100)
+                    : null);
+            const rounded = pct !== null ? Math.round(pct) : null;
+            return {
+                label: rounded !== null ? `Uploading ${rounded}%` : 'Uploading…',
+                tone: 'uploading',
+            };
+        }
+        if (uploadCompleted) {
+            return { label: 'Uploaded', tone: 'uploaded' };
+        }
+        if (displayCall?.has_recording) {
+            return { label: 'Linked', tone: 'linked' };
+        }
+        return null;
+    })();
+
+    const handleRetryUpload = () => {
+        if (!failedForCall?.fileName) return;
+        // Optimistically clear the failed pill — the agent will re-broadcast
+        // uploadQueueStatus / uploadProgress shortly with the live state.
+        setRetryingFileName(failedForCall.fileName);
+        sendCommand({ type: 'uploadRecording', fileName: failedForCall.fileName });
+    };
+
+    // Drop the optimistic-retry hint once the matching failed entry clears
+    // OR a fresh failure for the same file lands (so the pill can re-appear).
+    const stillFailing = retryingFileName !== null
+        && failedUploads.some(f => f?.fileName === retryingFileName);
+    const stillUploading = retryingFileName !== null
+        && uploadProgress !== null
+        && Array.from(uploadProgress.values()).some(e => e?.fileName === retryingFileName);
+    useEffect(() => {
+        if (retryingFileName === null) return;
+        if (!stillFailing && !stillUploading) {
+            setRetryingFileName(null);
+        }
+    }, [retryingFileName, stillFailing, stillUploading]);
+
     if (!displayCall) {
         return (
             <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5">
@@ -387,6 +519,38 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                     )}
                 </div>
                 <div className="flex items-center gap-2">
+                    {recordingPill && (
+                        <span
+                            className={cn(
+                                'flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border',
+                                recordingPill.tone === 'linked' && 'bg-[var(--card-hover)] text-[var(--muted)] border-[var(--card-border)]',
+                                recordingPill.tone === 'uploading' && 'bg-[var(--info-subtle)] text-[var(--info)] border-[var(--info)]/30',
+                                recordingPill.tone === 'uploaded' && 'bg-[var(--success-subtle)] text-[var(--success)] border-[var(--success)]/30',
+                                recordingPill.tone === 'failed' && 'bg-[var(--error-subtle)] text-[var(--error)] border-[var(--error)]/30',
+                            )}
+                            title={recordingPill.label}
+                        >
+                            {recordingPill.tone === 'linked' && <LinkIcon size={10} />}
+                            {recordingPill.tone === 'uploading' && <Loader2 size={10} className="animate-spin" />}
+                            {recordingPill.tone === 'uploaded' && <CheckCircle2 size={10} />}
+                            {recordingPill.tone === 'failed' && <AlertTriangle size={10} />}
+                            <span>{recordingPill.label}</span>
+                        </span>
+                    )}
+                    {recordingPill?.tone === 'failed' && failedForCall?.fileName && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleRetryUpload();
+                            }}
+                            disabled={isRetrying}
+                            className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[var(--error-subtle)] text-[var(--error)] border border-[var(--error)]/30 hover:bg-[var(--error)]/15 transition-colors disabled:opacity-60"
+                            title="Retry upload"
+                        >
+                            <Upload size={10} />
+                            <span>Retry</span>
+                        </button>
+                    )}
                     {displayCall.has_recording && (
                         <button
                             onClick={(e) => {

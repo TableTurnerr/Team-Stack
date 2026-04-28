@@ -55,6 +55,18 @@ static class Program
         var autoUpdater = new AutoUpdateService();
         var startupWatchdog = new StartupWatchdog();
 
+        // ── Load persisted config and apply ────────────────────────
+        var config = AgentConfig.Load();
+        recorder.AutoRecordEnabled = config.AutoRecordEnabled;
+        recorder.RecordOnRinging = config.RecordOnRinging;
+
+        var savedToken = config.GetUnprotectedAuthToken();
+        if (!string.IsNullOrEmpty(config.LastPocketbaseUrl) && !string.IsNullOrEmpty(savedToken) && !string.IsNullOrEmpty(config.LastUploaderId))
+        {
+            uploader.SetAuth(config.LastPocketbaseUrl, savedToken, config.LastUploaderId);
+        }
+        wsServer.SetAgentConfig(config);
+
         // ── Start agent ────────────────────────────────────────────
         agent.Start();
         zoomSuppressor.Start();

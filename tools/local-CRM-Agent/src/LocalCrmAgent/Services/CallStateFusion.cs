@@ -40,6 +40,7 @@ public class CallStateFusion : IDisposable
     private string? _phoneNumber;
     private string? _direction;
     private string? _intentId;
+    private string? _clientCallId;
 
     private CancellationTokenSource? _cts;
     private Task? _pollingTask;
@@ -219,6 +220,7 @@ public class CallStateFusion : IDisposable
             {
                 _direction = "outbound";
                 _intentId = freshIntent.IntentId;
+                _clientCallId = freshIntent.ClientCallId;
                 if (string.IsNullOrWhiteSpace(_phoneNumber))
                     _phoneNumber = freshIntent.PhoneE164;
             }
@@ -311,6 +313,7 @@ public class CallStateFusion : IDisposable
                         _phoneNumber = null;
                         _direction = null;
                         _intentId = null;
+                        _clientCallId = null;
                         _connectedAt = null;
                         _ringingAt = null;
                         _endedAt = null;
@@ -350,6 +353,7 @@ public class CallStateFusion : IDisposable
             DurationSeconds = duration,
             DeviceId = DeviceIdentity.DeviceId,
             IntentId = _intentId,
+            ClientCallId = _clientCallId,
             UiSeenHere = uiActive || uiRinging,
             AudioActiveHere = audioActive,
             // Teammate-busy: account-wide presence shows "On a call" while

@@ -12,8 +12,13 @@ interface PhoneContextType {
     isDialerOpen: boolean;
     /** Toggle the dialer panel open/closed */
     toggleDialer: () => void;
-    /** Dial a phone number via the local agent */
-    dialNumber: (phoneNumber: string) => void;
+    /**
+     * Dial a phone number via the local agent. The optional clientCallId is
+     * passed through to the dial intent so the agent can stamp the resulting
+     * recording with it, allowing the dashboard to link the recording to
+     * the right call_log even with MP3 conversion lag.
+     */
+    dialNumber: (phoneNumber: string, clientCallId?: string | null) => void;
     /** The last phone number that was dialed via CRM buttons */
     lastDialedNumber: string | null;
     /** Current call status as reported by the local agent */
@@ -257,7 +262,7 @@ export function PhoneProvider({ children }: { children: ReactNode }) {
         };
     }, [callStatus]);
 
-    const dialNumber = useCallback((phoneNumber: string) => {
+    const dialNumber = useCallback((phoneNumber: string, clientCallId?: string | null) => {
         if (!agentConnected) return;
 
         const hasPlus = phoneNumber.startsWith('+');
@@ -287,7 +292,7 @@ export function PhoneProvider({ children }: { children: ReactNode }) {
         // lights up the agent can correlate the call to THIS user/device.
         // Without this correlation, every teammate's dashboard would race
         // to claim the call via the shared-account iframe update.
-        try { ownership?.emitDialIntent(cleaned); } catch { /* non-fatal */ }
+        try { ownership?.emitDialIntent(cleaned, null, clientCallId ?? null); } catch { /* non-fatal */ }
 
         setIsDialerOpen(true);
         setLastDialedNumber(cleaned);

@@ -18,9 +18,15 @@ interface CallRecordingContextType {
     setPhoneNumber: (phone: string) => void;
     discardRecording: () => void;
     enterDeferredMode: () => void;
-    submitOldestDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    /**
+     * Submit the oldest deferred recording. If clientCallId is given, the
+     * agent uses its stable per-call stamp to find the right recording —
+     * this avoids mis-attribution when MP3 conversion lag means the global
+     * "latest recording" still points at the previous call.
+     */
+    submitOldestDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     discardOldestDeferredRecording: () => void;
-    submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    submitDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     discardDeferredRecording: () => void;
     isDeferredMode: boolean;
     deferredSegments: any[];

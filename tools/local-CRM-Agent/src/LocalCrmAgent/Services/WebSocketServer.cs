@@ -214,6 +214,9 @@ public class AgentWebSocketServer : IDisposable
                 case "linkRecording":
                     HandleLinkRecording(doc.RootElement);
                     break;
+                case "linkRecordingByClientId":
+                    HandleLinkRecordingByClientId(doc.RootElement);
+                    break;
                 case "uploadRecording":
                     HandleUploadRecording(doc.RootElement);
                     break;
@@ -359,6 +362,19 @@ public class AgentWebSocketServer : IDisposable
         var recordingId = root.TryGetProperty("recordingId", out var r) ? r.GetString() : null;
         if (callLogId != null && (fileName != null || recordingId != null))
             _uploader.LinkRecording(fileName, callLogId, recordingId);
+    }
+
+    // Preferred linking path: dashboard sends the per-call clientCallId it
+    // generated at dial time, agent finds the matching recording (stamped
+    // with the same id) and links it. Eliminates the global-latest-recording
+    // race that mis-attributes recordings when MP3 conversion lags.
+    private void HandleLinkRecordingByClientId(JsonElement root)
+    {
+        if (_uploader == null) return;
+        var clientCallId = root.TryGetProperty("clientCallId", out var c) ? c.GetString() : null;
+        var callLogId = root.TryGetProperty("callLogId", out var l) ? l.GetString() : null;
+        if (!string.IsNullOrEmpty(clientCallId) && !string.IsNullOrEmpty(callLogId))
+            _uploader.LinkRecordingByClientCallId(clientCallId!, callLogId!);
     }
 
     private void HandleUploadRecording(JsonElement root)
@@ -508,7 +524,7 @@ public class AgentWebSocketServer : IDisposable
         Broadcast(msg);
     }
 
-    private void OnRecordingCompleted(string recordingId, string fileName, string phoneNumber, int duration, long fileSize, DateTime startTime)
+    private void OnRecordingCompleted(string recordingId, string fileName, string phoneNumber, int duration, long fileSize, DateTime startTime, string? clientCallId)
     {
         var msg = new RecordingCompletedMessage
         {
@@ -518,6 +534,7 @@ public class AgentWebSocketServer : IDisposable
             Duration = duration,
             FileSizeBytes = fileSize,
             StartTime = startTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            ClientCallId = clientCallId,
         };
         Broadcast(msg);
     }
@@ -819,6 +836,7 @@ public class AgentWebSocketServer : IDisposable
                 Duration = e.DurationSeconds,
                 FileSizeBytes = e.FileSizeBytes,
                 StartTime = e.StartTime.ToString("o"),
+                ClientCallId = e.ClientCallId,
             });
         }
         SendTo(client, msg);
@@ -847,8 +865,9 @@ public class AgentWebSocketServer : IDisposable
         var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() : null;
         var userId = root.TryGetProperty("userId", out var u) ? u.GetString() : null;
         var sessionId = root.TryGetProperty("sessionId", out var s) ? s.GetString() : null;
+        var clientCallId = root.TryGetProperty("clientCallId", out var c) ? c.GetString() : null;
         if (string.IsNullOrWhiteSpace(intentId) || string.IsNullOrWhiteSpace(phone)) return;
-        _intentTracker.Add(intentId!, phone!, userId ?? "", sessionId);
+        _intentTracker.Add(intentId!, phone!, userId ?? "", sessionId, clientCallId);
     }
 
     private void HandleGetDeviceId(IWebSocketConnection client)

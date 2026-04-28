@@ -47,8 +47,13 @@ interface CallOwnershipContextType {
     intentId: string | null;
     /** Latest Zoom call_id (once the webhook has correlated the call). */
     zoomCallId: string | null;
-    /** Generate a new intentId and push it to the agent for correlation. */
-    emitDialIntent: (phoneNumber: string, sessionId?: string | null) => string;
+    /**
+     * Generate a new intentId and push it to the agent for correlation.
+     * Optionally include a stable clientCallId so the agent can stamp the
+     * resulting recording with it — see local-agent-context for why this
+     * matters for recording → call_log linking.
+     */
+    emitDialIntent: (phoneNumber: string, sessionId?: string | null, clientCallId?: string | null) => string;
 }
 
 const CallOwnershipContext = createContext<CallOwnershipContextType | null>(null);
@@ -98,7 +103,7 @@ export function CallOwnershipProvider({ children }: { children: ReactNode }) {
         return Boolean(callState.teammateOnCall);
     }, [callState, iOwnCurrentCall, iAmRinging]);
 
-    const emitDialIntent = useCallback((phoneNumber: string, sessionId?: string | null) => {
+    const emitDialIntent = useCallback((phoneNumber: string, sessionId?: string | null, clientCallId?: string | null) => {
         const intentId =
             typeof crypto !== 'undefined' && 'randomUUID' in crypto
                 ? crypto.randomUUID()
@@ -110,6 +115,7 @@ export function CallOwnershipProvider({ children }: { children: ReactNode }) {
                 phoneNumber,
                 userId: user?.id ?? '',
                 sessionId: sessionId ?? undefined,
+                clientCallId: clientCallId ?? undefined,
             });
         } catch (e) {
             console.warn('[CallOwnership] dialIntent send failed:', e);

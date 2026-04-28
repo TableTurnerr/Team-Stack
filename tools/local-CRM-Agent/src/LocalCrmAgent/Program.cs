@@ -38,7 +38,7 @@ static class Program
         var fusion = new CallStateFusion(audioMonitor, windowMonitor, uiWatcher, intentTracker);
         var micManager = new MicrophoneManager(fusion);
         var storageManager = new RecordingStorageManager();
-        var recorder = new AudioRecorderService(storageManager, fusion, micManager);
+        var recorder = new AudioRecorderService(storageManager, fusion, micManager, intentTracker);
         var uploader = new RecordingUploadService(storageManager);
         var zoomSuppressor = new ZoomWindowSuppressor();
         var zoomApi = new ZoomPhoneApiService();

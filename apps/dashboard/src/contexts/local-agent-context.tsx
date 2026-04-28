@@ -17,6 +17,13 @@ export interface AgentCallState {
     // the active call panel / ring toast.
     deviceId: string | null;
     intentId: string | null;
+    /**
+     * Stable per-call id minted by the dashboard at dial time and threaded
+     * through the dial intent → recording manifest → broadcast. Lets the
+     * dashboard link a recording to the exact call_log it just created
+     * without relying on a global "latest recording" pointer.
+     */
+    clientCallId: string | null;
     zoomCallId: string | null;
     uiSeenHere: boolean;
     audioActiveHere: boolean;
@@ -53,6 +60,12 @@ export interface AgentRecordingCompleted {
     duration: number;
     fileSizeBytes: number;
     startTime: string;
+    /**
+     * Stable per-call id stamped on the recording at start time, copied
+     * from the dial intent. Lets callers link this recording to the exact
+     * call_log they just created without using the global latestRecording.
+     */
+    clientCallId: string | null;
 }
 
 export interface AgentUploadQueueStatus {
@@ -104,6 +117,13 @@ interface LocalAgentContextType {
      * request times out.
      */
     fetchLocalRecording: (fileName: string) => Promise<Blob>;
+    /**
+     * Link the recording stamped with this clientCallId to the given call_log.
+     * Preferred over the global "latestRecording" lookup because it stays
+     * correct even when MP3 conversion lag means latestRecording still
+     * points at the previous call when the user submits the new form.
+     */
+    linkRecordingByClientId: (clientCallId: string, callLogId: string) => void;
 }
 
 // ── Context ─────────────────────────────────────────────────────────
@@ -216,6 +236,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     confidence: msg.confidence ?? 'low',
                                     deviceId: msg.deviceId ?? null,
                                     intentId: msg.intentId ?? null,
+                                    clientCallId: msg.clientCallId ?? null,
                                     zoomCallId: msg.zoomCallId ?? null,
                                     uiSeenHere: Boolean(msg.uiSeenHere),
                                     audioActiveHere: Boolean(msg.audioActiveHere),
@@ -256,6 +277,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     duration: msg.duration ?? 0,
                                     fileSizeBytes: msg.fileSizeBytes ?? 0,
                                     startTime: msg.startTime ?? '',
+                                    clientCallId: msg.clientCallId ?? null,
                                 };
                                 setLatestRecording(completed);
                                 // Keep the unlinked list in sync so the
@@ -286,6 +308,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                         duration: (r.duration as number) ?? 0,
                                         fileSizeBytes: (r.fileSizeBytes as number) ?? 0,
                                         startTime: (r.startTime as string) ?? '',
+                                        clientCallId: (r.clientCallId as string | null | undefined) ?? null,
                                     }))
                                     : [];
                                 setUnlinkedRecordings(list);
@@ -472,6 +495,15 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore send errors */ }
     }, []);
 
+    const linkRecordingByClientId = useCallback((clientCallId: string, callLogId: string) => {
+        if (!clientCallId || !callLogId) return;
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        try {
+            ws.send(JSON.stringify({ type: 'linkRecordingByClientId', clientCallId, callLogId }));
+        } catch { /* ignore send errors */ }
+    }, []);
+
     const launchAgent = useCallback(() => {
         try {
             // Use an anchor element to trigger the protocol handler
@@ -502,7 +534,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
             launchZoom, zoomLaunching,
             recordingState, latestRecording, unlinkedRecordings, uploadQueueStatus,
             uploadProgress, failedUploads,
-            sendCommand, fetchLocalRecording,
+            sendCommand, fetchLocalRecording, linkRecordingByClientId,
         }}>
             {children}
         </LocalAgentContext.Provider>
@@ -533,5 +565,6 @@ export function useLocalAgent(): LocalAgentContextType {
         failedUploads: [],
         sendCommand: () => {},
         fetchLocalRecording: () => Promise.reject(new Error('Local agent is not connected')),
+        linkRecordingByClientId: () => {},
     };
 }

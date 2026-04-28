@@ -17,7 +17,7 @@ import {
     SlidersHorizontal,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences } from '@/lib/types';
+import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences, type Company } from '@/lib/types';
 import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { usePhone } from '@/contexts/phone-context';
@@ -1552,9 +1552,34 @@ export default function SessionPage() {
         // ── BACKGROUND SAVE ── fire-and-forget API work
         void (async () => {
             try {
+                // If the form passed a `newCompanyName` (free-text branch), create the
+                // company in parallel with the phone-number lookup. If newCompanyName is
+                // undefined, fall through to the pre-existing data.companyId path.
+                const newCompanyName = data.newCompanyName;
+                let resolvedCompanyId = data.companyId;
+                const companyCreatePromise: Promise<string | null> = (newCompanyName && !resolvedCompanyId)
+                    ? pb.collection(COLLECTIONS.COMPANIES).create<Company>({
+                        company_name: newCompanyName,
+                        owner_name: data.ownerName || undefined,
+                        source: 'Cold Call',
+                        first_contacted: new Date().toISOString(),
+                        last_contacted: new Date().toISOString(),
+                        assigned_to: user.id,
+                    }).then(c => {
+                        resolvedCompanyId = c.id;
+                        return c.id;
+                    }).catch(err => {
+                        console.error('Failed to create company:', err);
+                        return null;
+                    })
+                    : Promise.resolve(data.companyId || null);
+
                 // Find or create phone number record
                 let phoneNumberRecordId = '';
                 try {
+                    const companyId = data.companyId || (await companyCreatePromise);
+                    if (!companyId) throw new Error('No company id resolved');
+                    resolvedCompanyId = companyId;
                     const digits = data.phoneNumber.replace(/\D/g, '');
                     const last10 = digits.slice(-10);
                     const filterParts = [`phone_number = "${data.phoneNumber}"`];
@@ -1562,13 +1587,13 @@ export default function SessionPage() {
                     if (last10 !== digits && last10.length >= 7) filterParts.push(`phone_number ~ "${last10}"`);
 
                     const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                        filter: `company = "${data.companyId}" && (${filterParts.join(' || ')})`,
+                        filter: `company = "${companyId}" && (${filterParts.join(' || ')})`,
                     });
                     if (phoneRecords.items.length > 0) {
                         phoneNumberRecordId = phoneRecords.items[0].id;
                     } else {
                         const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
-                            company: data.companyId,
+                            company: companyId,
                             phone_number: data.phoneNumber,
                             receptionist_name: data.receptionistName || undefined,
                             last_called: new Date().toISOString(),
@@ -1576,6 +1601,13 @@ export default function SessionPage() {
                         phoneNumberRecordId = newPhone.id;
                     }
                 } catch { /* ignore — still log the call */ }
+
+                // If the company create promise failed earlier, bail before creating
+                // a call_log with an empty company id.
+                if (!resolvedCompanyId) {
+                    await companyCreatePromise; // ensure error surfaces in console
+                    if (!resolvedCompanyId) throw new Error('Company id unresolved — call_log not saved');
+                }
 
                 // Calculate call durations from captured values.
                 // capturedEndTime is set when callStatus became 'ended', so it reflects
@@ -1595,7 +1627,7 @@ export default function SessionPage() {
 
                 // Create call log
                 const callLog = await pb.collection(COLLECTIONS.CALL_LOGS).create<CallLog>({
-                    company: data.companyId,
+                    company: resolvedCompanyId,
                     phone_number_record: phoneNumberRecordId || undefined,
                     caller: user.id,
                     call_time: new Date().toISOString(),
@@ -1616,7 +1648,7 @@ export default function SessionPage() {
                 }, { expand: 'company,phone_number_record' });
 
                 // Auto-claim the company if it was unassigned.
-                void autoClaimCompany(data.companyId, user.id);
+                void autoClaimCompany(resolvedCompanyId, user.id);
 
                 // Link log → claim (shared-Zoom-account ownership ledger).
                 void linkCallLogToClaim(callLog.id, {
@@ -1655,7 +1687,7 @@ export default function SessionPage() {
                 // Save additional phone number found during call
                 if (data.additionalPhoneNumber) {
                     pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
-                        company: data.companyId,
+                        company: resolvedCompanyId,
                         phone_number: data.additionalPhoneNumber,
                         receptionist_name: data.additionalPhoneNote || undefined,
                         last_called: new Date().toISOString(),
@@ -1693,7 +1725,7 @@ export default function SessionPage() {
                     (async () => {
                         try {
                             const companyUpdates: Record<string, unknown> = { last_contacted: new Date().toISOString() };
-                            const existingCompany = await pb.collection(COLLECTIONS.COMPANIES).getOne(data.companyId);
+                            const existingCompany = await pb.collection(COLLECTIONS.COMPANIES).getOne(resolvedCompanyId);
                             if (!existingCompany.source) companyUpdates.source = 'Cold Call';
                             if (!existingCompany.first_contacted) companyUpdates.first_contacted = new Date().toISOString();
                             if (data.ownerReached && data.ownerName && !existingCompany.owner_name) {
@@ -1705,20 +1737,20 @@ export default function SessionPage() {
                             // Compute company status from last call per phone number
                             try {
                                 const allLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
-                                    filter: `company = "${data.companyId}"`,
+                                    filter: `company = "${resolvedCompanyId}"`,
                                     sort: '-call_time',
                                     fields: 'phone_number_record,call_time,call_outcome',
                                 });
                                 const statuses = computeCompanyStatuses(allLogs);
                                 companyUpdates.status = statuses;
                             } catch { /* non-critical */ }
-                            await pb.collection(COLLECTIONS.COMPANIES).update(data.companyId, companyUpdates);
+                            await pb.collection(COLLECTIONS.COMPANIES).update(resolvedCompanyId, companyUpdates);
                         } catch { /* non-critical */ }
                     })(),
                     data.followUp ? (async () => {
                         try {
                             await createFollowUp({
-                                company: data.companyId,
+                                company: resolvedCompanyId,
                                 phone_number_record: phoneNumberRecordId || undefined,
                                 call_log: callLog.id,
                                 scheduled_time: data.followUp!.scheduledTime,

@@ -58,6 +58,7 @@ public class AgentWebSocketServer : IDisposable
         // Subscribe to recording events for broadcasting
         _recorder.StateChanged += OnRecordingStateChanged;
         _recorder.RecordingCompleted += OnRecordingCompleted;
+        _recorder.RecordingConverted += OnRecordingConverted;
         _uploader.UploadCompleted += OnUploadCompleted;
     }
 
@@ -455,6 +456,18 @@ public class AgentWebSocketServer : IDisposable
         Broadcast(msg);
     }
 
+    private void OnRecordingConverted(string recordingId, string fileName, int duration, long fileSize)
+    {
+        var msg = new RecordingConvertedMessage
+        {
+            RecordingId = recordingId,
+            FileName = fileName,
+            Duration = duration,
+            FileSizeBytes = fileSize,
+        };
+        Broadcast(msg);
+    }
+
     private void OnUploadCompleted(string fileName, string? recordingId, string? callLogId, bool success, string? error)
     {
         var msg = new RecordingUploadedMessage
@@ -760,6 +773,7 @@ public class AgentWebSocketServer : IDisposable
         {
             _recorder.StateChanged -= OnRecordingStateChanged;
             _recorder.RecordingCompleted -= OnRecordingCompleted;
+            _recorder.RecordingConverted -= OnRecordingConverted;
         }
         if (_uploader != null)
         {

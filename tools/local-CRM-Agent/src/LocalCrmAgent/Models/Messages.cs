@@ -183,6 +183,28 @@ public class RecordingCompletedMessage : AgentMessage
     public RecordingCompletedMessage() => Type = "recordingCompleted";
 }
 
+/// <summary>
+/// Fired after WAV→MP3 conversion completes successfully — carries the
+/// final duration / file size that weren't yet known when
+/// <see cref="RecordingCompletedMessage"/> was broadcast.
+/// </summary>
+public class RecordingConvertedMessage : AgentMessage
+{
+    [JsonPropertyName("recordingId")]
+    public string RecordingId { get; set; } = "";
+
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("duration")]
+    public int Duration { get; set; }
+
+    [JsonPropertyName("fileSizeBytes")]
+    public long FileSizeBytes { get; set; }
+
+    public RecordingConvertedMessage() => Type = "recordingConverted";
+}
+
 public class RecordingUploadedMessage : AgentMessage
 {
     [JsonPropertyName("fileName")]

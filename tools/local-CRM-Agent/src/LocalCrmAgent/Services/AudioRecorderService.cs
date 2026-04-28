@@ -103,9 +103,17 @@ public class AudioRecorderService : IDisposable
 
     public event Action<RecordingState, string?>? StateChanged;
     /// <summary>
-    /// Fired when recording is completed. Args: recordingId, fileName, phoneNumber, duration, fileSize, startTime.
+    /// Fired immediately when capture stops, BEFORE MP3 conversion. Args:
+    /// recordingId, fileName, phoneNumber, duration, fileSize, startTime.
+    /// duration/fileSize are best-effort estimates at this point — final
+    /// values are reported via <see cref="RecordingConverted"/>.
     /// </summary>
     public event Action<string, string, string, int, long, DateTime>? RecordingCompleted;
+    /// <summary>
+    /// Fired after WAV→MP3 conversion succeeds. Args: recordingId, fileName,
+    /// final duration (seconds), final fileSize (bytes).
+    /// </summary>
+    public event Action<string, string, int, long>? RecordingConverted;
 
     public AudioRecorderService(RecordingStorageManager storage, CallStateFusion fusion, MicrophoneManager? micManager = null)
     {
@@ -484,14 +492,39 @@ public class AudioRecorderService : IDisposable
         var fileName = Path.GetFileName(targetMp3);
         _storage.AddEntry(fileName, phoneNumber ?? "", startTime, recordingId);
 
-        // Convert WAV to MP3 on a background thread
-        _ = Task.Run(() =>
+        // Reset state + paths NOW so the next recording can start while
+        // conversion runs in the background. The manifest entry is the
+        // single source of truth for the in-flight file from this point on.
+        var preliminaryDuration = (int)(DateTime.UtcNow - startTime).TotalSeconds;
+        lock (_lock)
+        {
+            _state = RecordingState.Idle;
+            _tempWavPath = null;
+            _targetMp3Path = null;
+            _currentPhoneNumber = null;
+            _currentRecordingId = null;
+        }
+
+        StateChanged?.Invoke(RecordingState.Idle, null);
+
+        // Broadcast RecordingCompleted IMMEDIATELY — the dashboard wants to
+        // know the recording exists right now, not 5 seconds later when MP3
+        // conversion finishes. Final duration/fileSize are reported via
+        // RecordingConverted once the WAV→MP3 pass completes.
+        RecordingCompleted?.Invoke(recordingId ?? "", fileName, phoneNumber ?? "", preliminaryDuration, 0, startTime);
+
+        // Convert WAV to MP3 on a background thread, with a 30s timeout so a
+        // hung LAME encoder can never wedge the recorder permanently.
+        _ = Task.Run(async () =>
         {
             try
             {
-                ConvertToMp3(tempWav, targetMp3);
+                await Task.Run(() => ConvertToMp3(tempWav, targetMp3))
+                    .WaitAsync(TimeSpan.FromSeconds(30));
 
-                // Delete temp WAV
+                // Delete temp WAV only after a successful MP3 write — on
+                // timeout/error we keep the WAV as a fallback so the audio
+                // isn't lost.
                 try { File.Delete(tempWav); } catch { }
 
                 var fileInfo = new FileInfo(targetMp3);
@@ -511,27 +544,26 @@ public class AudioRecorderService : IDisposable
 
                 Debug.WriteLine($"[Recorder] Completed: {fileName} ({duration}s, {fileInfo.Length} bytes)");
 
-                lock (_lock)
+                RecordingConverted?.Invoke(recordingId ?? "", fileName, duration, fileInfo.Length);
+            }
+            catch (TimeoutException)
+            {
+                Debug.WriteLine($"[Recorder] MP3 conversion timed out after 30s for {fileName} — keeping WAV fallback");
+                _storage.UpdateEntry(fileName, e =>
                 {
-                    _state = RecordingState.Idle;
-                    _tempWavPath = null;
-                    _targetMp3Path = null;
-                    _currentPhoneNumber = null;
-                    _currentRecordingId = null;
-                }
-
-                StateChanged?.Invoke(RecordingState.Idle, null);
-                RecordingCompleted?.Invoke(recordingId ?? "", fileName, phoneNumber ?? "", duration, fileInfo.Length, startTime);
+                    e.Error = "conversion timeout";
+                    e.ConversionComplete = false;
+                });
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Recorder] MP3 conversion failed: {ex.Message}");
-                // Keep the WAV file as fallback
-                lock (_lock)
+                // Keep the WAV file as fallback — do not delete tempWav here.
+                _storage.UpdateEntry(fileName, e =>
                 {
-                    _state = RecordingState.Error;
-                    StateChanged?.Invoke(_state, ex.Message);
-                }
+                    e.Error = ex.Message;
+                    e.ConversionComplete = false;
+                });
             }
         });
     }
@@ -687,20 +719,15 @@ public class AudioRecorderService : IDisposable
                 }
                 break;
 
-            // Always stop/discard on call end, regardless of AutoRecordEnabled
+            // Always stop on call end, regardless of AutoRecordEnabled. Never
+            // discard — even very short / "unanswered" recordings can hold a
+            // voicemail leave, dial-tone confirmation, or otherwise useful
+            // audio. The dashboard decides whether to keep or drop the file.
             case CallState.Ended:
                 if (CurrentState == RecordingState.Recording)
                 {
-                    if (info.DurationSeconds > 0)
-                    {
-                        Debug.WriteLine("[Recorder] Auto-stop on ended");
-                        StopRecording();
-                    }
-                    else
-                    {
-                        Debug.WriteLine("[Recorder] Auto-discard (unanswered)");
-                        DiscardRecording();
-                    }
+                    Debug.WriteLine($"[Recorder] Auto-stop on ended (duration={info.DurationSeconds}s)");
+                    StopRecording();
                 }
                 break;
 

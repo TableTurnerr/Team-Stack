@@ -48,11 +48,11 @@ public class CallStateFusion : IDisposable
     // Sustained-loss confirmation: UI can blink for a single poll during
     // Zoom panel refreshes, so require the signal to be absent for a short
     // window before declaring the call ended.
-    private const double UiLossConfirmSeconds = 1.2;
+    private const double UiLossConfirmSeconds = 0.6;
 
     // WASAPI can legitimately pause briefly on device switches — a small
     // grace window prevents spurious End-then-Start transitions.
-    private const double AudioInactiveThresholdSeconds = 1.0;
+    private const double AudioInactiveThresholdSeconds = 0.5;
 
     // Audio-activity latch window. Zoom's audio session flips IsActive↔
     // Inactive and PeakLevel rises/falls to zero during ringback silence
@@ -61,7 +61,7 @@ public class CallStateFusion : IDisposable
     // Connected↔Idle every few seconds during a real call. We latch on the
     // most recent activity and only declare the call gone when there has
     // been no sign of activity for this many seconds.
-    private const double AudioLatchSeconds = 5.0;
+    private const double AudioLatchSeconds = 2.0;
 
     private const double EndedCooldownSeconds = 1.0;
     private const double RingingTimeoutSeconds = 60.0;
@@ -172,6 +172,19 @@ public class CallStateFusion : IDisposable
         bool effectiveRinging = uiRinging || incomingRingSeen;
         bool effectiveActive = uiActive || (audioAlive && !incomingRingSeen);
 
+        // Intent-driven fast path: when the dashboard has just issued a
+        // dial intent, we don't have to wait for the AudioLatchSeconds
+        // window to fully accumulate. Any peek of audio activity combined
+        // with a fresh outbound intent is enough to jump straight to
+        // Connected, shaving ~2 s off the time-to-Connected for outbound
+        // calls. Inbound rings still suppress this so the Ringing state
+        // can render before Connected.
+        var freshIntent = _intentTracker.MostRecent();
+        bool intentDriven = freshIntent != null
+                            && (audioActive || audioFlowing)
+                            && !incomingRingSeen;
+        effectiveActive = effectiveActive || intentDriven;
+
         // Phone number resolution. UIA is disabled (see ZoomUiWatcher
         // header) so the UI fields are never populated in practice; they
         // remain in the chain for when a safe out-of-process UIA path
@@ -202,13 +215,12 @@ public class CallStateFusion : IDisposable
 
         if ((uiActive || audioAlive) && _direction == null)
         {
-            var intent = _intentTracker.MostRecent();
-            if (intent != null)
+            if (freshIntent != null)
             {
                 _direction = "outbound";
-                _intentId = intent.IntentId;
+                _intentId = freshIntent.IntentId;
                 if (string.IsNullOrWhiteSpace(_phoneNumber))
-                    _phoneNumber = intent.PhoneE164;
+                    _phoneNumber = freshIntent.PhoneE164;
             }
             else
             {
@@ -302,7 +314,10 @@ public class CallStateFusion : IDisposable
                         _connectedAt = null;
                         _ringingAt = null;
                         _endedAt = null;
-                        _audioActiveLastSeen = null;
+                        // Intentionally do not reset _audioActiveLastSeen
+                        // — a flapping audio session that briefly drops
+                        // shouldn't lose its history. The latch window
+                        // itself is short enough to keep this safe.
                         _audioInactiveSince = null;
                         _uiCallGoneSince = null;
                     }

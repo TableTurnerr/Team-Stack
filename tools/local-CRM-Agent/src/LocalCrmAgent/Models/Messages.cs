@@ -298,6 +298,46 @@ public class UploadQueueStatusMessage : AgentMessage
     public UploadQueueStatusMessage() => Type = "uploadQueueStatus";
 }
 
+public class UploadProgressMessage : AgentMessage
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("bytesSent")]
+    public long BytesSent { get; set; }
+
+    [JsonPropertyName("bytesTotal")]
+    public long BytesTotal { get; set; }
+
+    public UploadProgressMessage() => Type = "uploadProgress";
+}
+
+public class FailedUploadDto
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("phoneNumber")]
+    public string PhoneNumber { get; set; } = "";
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    [JsonPropertyName("retryCount")]
+    public int RetryCount { get; set; }
+
+    [JsonPropertyName("callLogId")]
+    public string? CallLogId { get; set; }
+}
+
+public class FailedUploadsMessage : AgentMessage
+{
+    [JsonPropertyName("uploads")]
+    public List<FailedUploadDto> Uploads { get; set; } = [];
+
+    public FailedUploadsMessage() => Type = "failedUploads";
+}
+
 // ─── Call Controller Messages ────────────────────────────────────────────────
 
 public class DialResultMessage : AgentMessage

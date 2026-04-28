@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
@@ -41,6 +42,7 @@ public class RecordingUploadService : IDisposable
 
     public event Action<string, string?, string?, bool, string?>? UploadCompleted;
     public event Action? UploadAuthExpired;
+    public event Action<string, long, long>? UploadProgress;
 
     public bool IsConfigured
     {
@@ -209,8 +211,14 @@ public class RecordingUploadService : IDisposable
 
             using var form = new MultipartFormDataContent();
             using var fileStream = File.OpenRead(filePath);
-            var fileContent = new StreamContent(fileStream);
+            var totalBytes = fileStream.Length;
+            var fileNameForProgress = entry.FileName;
+            var fileContent = new ProgressableStreamContent(fileStream, (sent, total) =>
+            {
+                try { UploadProgress?.Invoke(fileNameForProgress, sent, total); } catch { }
+            });
             fileContent.Headers.ContentType = new MediaTypeHeaderValue("audio/mpeg");
+            fileContent.Headers.ContentLength = totalBytes;
             form.Add(fileContent, "file", entry.FileName);
 
             form.Add(new StringContent(entry.PhoneNumber), "phone_number");
@@ -233,10 +241,26 @@ public class RecordingUploadService : IDisposable
 
             CurrentUpload = null;
 
-            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 Debug.WriteLine("[Upload] Auth expired (401)");
                 UploadAuthExpired?.Invoke();
+                return;
+            }
+
+            // 4xx (other than 401) → permanent failure: server rejected the request
+            // and retrying without changes won't help.
+            if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
+            {
+                var body = await SafeReadBody(response, ct);
+                var errMsg = $"HTTP {(int)response.StatusCode}: {body}";
+                Debug.WriteLine($"[Upload] Permanent failure: {entry.FileName} — {errMsg}");
+                _storage.UpdateEntry(entry.FileName, e =>
+                {
+                    e.Error = errMsg;
+                });
+                UploadCompleted?.Invoke(entry.FileName, null, callLogId, false, errMsg);
+                lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
                 return;
             }
 
@@ -272,6 +296,27 @@ public class RecordingUploadService : IDisposable
 
             UploadCompleted?.Invoke(entry.FileName, recordingId, callLogId, true, null);
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Treat HttpClient timeout cancellations as network errors.
+            CurrentUpload = null;
+            Debug.WriteLine($"[Upload] Network timeout: {entry.FileName}");
+            HandleNetworkFailure(entry, "Network timeout");
+        }
+        catch (HttpRequestException ex)
+        {
+            CurrentUpload = null;
+            Debug.WriteLine($"[Upload] Network failure: {entry.FileName} — {ex.Message}");
+            HandleNetworkFailure(entry, ex.Message);
+        }
+        catch (IOException ex)
+        {
+            // Connection reset / stream interrupted mid-transfer — also network.
+            CurrentUpload = null;
+            Debug.WriteLine($"[Upload] IO failure: {entry.FileName} — {ex.Message}");
+            HandleNetworkFailure(entry, ex.Message);
+        }
+        catch (OperationCanceledException) { CurrentUpload = null; throw; }
         catch (Exception ex)
         {
             CurrentUpload = null;
@@ -287,6 +332,34 @@ public class RecordingUploadService : IDisposable
                 UploadCompleted?.Invoke(entry.FileName, null, entry.CallLogId, false, ex.Message);
             }
         }
+    }
+
+    /// <summary>
+    /// Network failures never mark the entry as permanently failed — we cap
+    /// RetryCount at the largest backoff index so the loop keeps retrying at
+    /// the max-backoff cadence (15 min) until the network recovers.
+    /// </summary>
+    private void HandleNetworkFailure(RecordingEntry entry, string message)
+    {
+        _storage.UpdateEntry(entry.FileName, e =>
+        {
+            // Cap at the index that yields the longest backoff slot so retries
+            // continue every ~15 min indefinitely without ever being treated
+            // as permanent failures.
+            var cap = BackoffDelays.Length;
+            if (e.RetryCount < cap) e.RetryCount++;
+            e.Error = null;
+        });
+    }
+
+    private static async Task<string> SafeReadBody(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            return body.Length > 500 ? body[..500] : body;
+        }
+        catch { return ""; }
     }
 
     private async Task<(string? phoneNumberRecordId, string? companyId)> ResolvePhoneNumber(
@@ -401,6 +474,20 @@ public class RecordingUploadService : IDisposable
         Wake();
     }
 
+    /// <summary>
+    /// Reset all failed entries (Error cleared, RetryCount = 0) and wake the
+    /// loop so they re-attempt immediately.
+    /// </summary>
+    public void RetryAll()
+    {
+        _storage.RetryFailed();
+        lock (_lastAttemptTime) { _lastAttemptTime.Clear(); }
+        Wake();
+    }
+
+    /// <summary>Snapshot of recordings that failed to upload (4xx or out-of-retries).</summary>
+    public List<RecordingEntry> GetFailedUploads() => _storage.GetFailedUploads();
+
     public void Stop()
     {
         _cts?.Cancel();
@@ -415,5 +502,47 @@ public class RecordingUploadService : IDisposable
         Stop();
         _wakeSignal.Dispose();
         _httpClient.Dispose();
+    }
+}
+
+/// <summary>
+/// StreamContent wrapper that reports bytes-written to a callback so the
+/// dashboard can show real upload progress instead of a static spinner.
+/// </summary>
+internal sealed class ProgressableStreamContent : StreamContent
+{
+    private const int BufferSize = 81920;
+    private readonly Stream _content;
+    private readonly Action<long, long> _onProgress;
+
+    public ProgressableStreamContent(Stream content, Action<long, long> onProgress) : base(content)
+    {
+        _content = content;
+        _onProgress = onProgress;
+    }
+
+    protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+    {
+        var total = TryGetTotal();
+        var buffer = new byte[BufferSize];
+        long sent = 0;
+        int read;
+        while ((read = await _content.ReadAsync(buffer.AsMemory(0, BufferSize)).ConfigureAwait(false)) > 0)
+        {
+            await stream.WriteAsync(buffer.AsMemory(0, read)).ConfigureAwait(false);
+            sent += read;
+            try { _onProgress(sent, total); } catch { }
+        }
+    }
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = TryGetTotal();
+        return length > 0;
+    }
+
+    private long TryGetTotal()
+    {
+        try { return _content.CanSeek ? _content.Length : 0; } catch { return 0; }
     }
 }

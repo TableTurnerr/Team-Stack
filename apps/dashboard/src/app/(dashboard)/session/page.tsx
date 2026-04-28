@@ -60,6 +60,18 @@ const SESSION_TAB_LOCK_KEY = 'crm:session:tab-lock';
 const SESSION_TAB_LOCK_TTL = 8000; // ms — another tab is considered active if heartbeat is this fresh
 const SESSION_TAB_LOCK_HEARTBEAT = 4000; // ms — heartbeat interval
 
+// Cap on in-flight call snapshots — handleSaveCall consumes the matching entry,
+// excess entries are dropped FIFO when the map overflows.
+const MAX_PENDING_SNAPSHOTS = 5;
+
+interface PendingCallSnapshot {
+    phoneDigits: string;
+    ringStartTime: number | null;
+    connectTime: number | null;
+    endTime: number;
+    pickupIncremented: boolean;
+}
+
 interface UnsavedCallStoragePayload {
     phoneNumber: string;
     hasUnsavedCall: boolean;
@@ -156,18 +168,16 @@ export default function SessionPage() {
     // Tracks the exact moment the call ended so duration calculation uses real end time,
     // not the (possibly much later) form submission time.
     const callEndTimeRef = useRef<number | null>(null);
-    // Snapshot of the ending call's timing + pickup state. Captured on transition to
-    // 'ended' so we can reset the counter state for the NEXT call (negative-delay power
-    // dialer overlap, where call N+1 starts ringing before the user submits call N's
-    // form). Without this, call N+1's dial/pickup increments are skipped because the
-    // effect's `!ringStartTime` / `!connectTime` / `!dialCountIncremented` guards
-    // still see call N's values.
-    const pendingCallSnapshotRef = useRef<{
-        ringStartTime: number | null;
-        connectTime: number | null;
-        endTime: number;
-        pickupIncremented: boolean;
-    } | null>(null);
+    // Snapshots of ending calls' timing + pickup state, keyed by phoneDigits + ringStartTime.
+    // Captured on transition to 'ended' so we can reset the counter state for the NEXT call
+    // (negative-delay power dialer overlap, where call N+1 starts ringing before the user
+    // submits call N's form). Without this, call N+1's dial/pickup increments are skipped
+    // because the effect's `!ringStartTime` / `!connectTime` / `!dialCountIncremented`
+    // guards still see call N's values.
+    //
+    // Holds up to MAX_PENDING_SNAPSHOTS in-flight entries; oldest is dropped on overflow.
+    // handleSaveCall consumes the matching snapshot via the saved data.phoneNumber digits.
+    const pendingCallSnapshotsRef = useRef<Map<string, PendingCallSnapshot>>(new Map());
     const prevCallStatusForResetRef = useRef(callStatus);
 
     // Track unsaved call state — true when call ended but form not yet submitted
@@ -772,16 +782,27 @@ export default function SessionPage() {
                 // Capture this call's timing/pickup state so the NEXT call (negative-
                 // delay power dialer overlap) can reset state and track its own counts
                 // without losing this call's data for handleSaveCall's duration calc.
-                // Don't overwrite an existing snapshot: if the user is slow and a third
-                // call ends before the first form is submitted, the first snapshot is
-                // the one handleSaveCall needs.
-                if (!pendingCallSnapshotRef.current) {
-                    pendingCallSnapshotRef.current = {
-                        ringStartTime,
-                        connectTime,
-                        endTime,
-                        pickupIncremented: pickupCountIncremented,
-                    };
+                // Keyed by phone-digits + ringStartTime so multiple in-flight calls
+                // (overlapping power-dialer mode) each get their own slot.
+                const phoneDigits = (currentPhoneNumber || '').replace(/\D/g, '').slice(-10);
+                if (phoneDigits) {
+                    const key = `${phoneDigits}:${ringStartTime ?? endTime}`;
+                    const map = pendingCallSnapshotsRef.current;
+                    if (!map.has(key)) {
+                        map.set(key, {
+                            phoneDigits,
+                            ringStartTime,
+                            connectTime,
+                            endTime,
+                            pickupIncremented: pickupCountIncremented,
+                        });
+                        // Cap the map at MAX_PENDING_SNAPSHOTS — drop oldest on overflow.
+                        while (map.size > MAX_PENDING_SNAPSHOTS) {
+                            const oldestKey = map.keys().next().value;
+                            if (oldestKey === undefined) break;
+                            map.delete(oldestKey);
+                        }
+                    }
                 }
 
                 // Reset counter state so the next call (started before this form is
@@ -840,6 +861,37 @@ export default function SessionPage() {
             }
         };
     }, [connectTime]);
+
+    // ---------------------------------------------------------------------------
+    // Force-start safety net — if the dashboard's callStatus enters 'ringing' or
+    // 'connected' but the local agent's recording state stays 'idle' for >1 s,
+    // send a forceStartRecording command. This recovers from cases where the
+    // agent missed the WASAPI/SIP signal that would normally start the recording
+    // automatically (very short calls, shared Zoom account, lost-then-recovered
+    // audio session, etc.).
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        if (!isSessionActive) return;
+        if (callStatus !== 'ringing' && callStatus !== 'connected') return;
+        if (!agentConnected) return;
+        if (agentRecordingState && agentRecordingState.state !== 'idle') return;
+
+        const phoneNumber = currentPhoneNumber || activeCallNumber || '';
+        if (!phoneNumber) return;
+
+        const timer = setTimeout(() => {
+            // Re-check at fire time — the recorder may have started in the gap.
+            if (agentRecordingState && agentRecordingState.state !== 'idle') return;
+            console.log('[Session Page] Recorder still idle after 1 s — forcing start:', phoneNumber);
+            sendAgentCommand({
+                type: 'forceStartRecording',
+                phoneNumber,
+                clientCallId: ownership?.intentId ?? null,
+            });
+        }, 1000);
+
+        return () => clearTimeout(timer);
+    }, [callStatus, isSessionActive, agentConnected, agentRecordingState, currentPhoneNumber, activeCallNumber, sendAgentCommand, ownership?.intentId]);
 
     // ---------------------------------------------------------------------------
     // Power dialer — negative delay: auto-dial next number N seconds after call ends
@@ -1450,10 +1502,16 @@ export default function SessionPage() {
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
         callEndTimeRef.current = null;
-        // Drop the just-ended leg's snapshot — the new leg will capture its own
-        // on 'ended', and handleSaveCall should use the final (most recent) leg's
-        // timing, matching the original behavior of reading live state.
-        pendingCallSnapshotRef.current = null;
+        // Drop the just-ended leg's snapshot(s) for THIS phone number — the new
+        // leg will capture its own on 'ended', and handleSaveCall should use the
+        // final (most recent) leg's timing, matching the original behavior.
+        const callbackDigits = currentPhoneNumber.replace(/\D/g, '').slice(-10);
+        if (callbackDigits) {
+            const map = pendingCallSnapshotsRef.current;
+            for (const [key, snap] of map) {
+                if (snap.phoneDigits === callbackDigits) map.delete(key);
+            }
+        }
 
         // The previous leg's recording is already queued (added in onstop when the call ended).
         // Deferred mode remains active so the new leg will also be queued.
@@ -1474,12 +1532,24 @@ export default function SessionPage() {
         // over live state, so that in negative-delay power dialer overlap — where the
         // next call may have already started and overwritten live state — we still save
         // THIS call's real ring/connect/end timing and pickup-incremented flag.
-        const snapshot = pendingCallSnapshotRef.current;
+        // Match by the saved phone-number digits and consume the OLDEST matching entry
+        // (FIFO) so multiple in-flight calls each save against their own snapshot.
+        const savedPhoneDigits = data.phoneNumber.replace(/\D/g, '').slice(-10);
+        const snapshotMap = pendingCallSnapshotsRef.current;
+        let snapshotKey: string | null = null;
+        let snapshot: PendingCallSnapshot | undefined;
+        for (const [key, snap] of snapshotMap) {
+            if (snap.phoneDigits === savedPhoneDigits) {
+                snapshotKey = key;
+                snapshot = snap;
+                break;
+            }
+        }
         const capturedRingStart = snapshot?.ringStartTime ?? ringStartTime;
         const capturedConnectTime = snapshot?.connectTime ?? connectTime;
         const capturedEndTime = snapshot?.endTime ?? callEndTimeRef.current ?? Date.now();
         const capturedPickupIncremented = snapshot?.pickupIncremented ?? pickupCountIncremented;
-        pendingCallSnapshotRef.current = null;
+        if (snapshotKey) snapshotMap.delete(snapshotKey);
 
         // Determine if this call involved callbacks
         const hasCallbacks = (data.callbackEvents?.length ?? 0) > 0;
@@ -1552,61 +1622,59 @@ export default function SessionPage() {
         // ── BACKGROUND SAVE ── fire-and-forget API work
         void (async () => {
             try {
-                // If the form passed a `newCompanyName` (free-text branch), create the
-                // company in parallel with the phone-number lookup. If newCompanyName is
-                // undefined, fall through to the pre-existing data.companyId path.
-                const newCompanyName = data.newCompanyName;
-                let resolvedCompanyId = data.companyId;
-                const companyCreatePromise: Promise<string | null> = (newCompanyName && !resolvedCompanyId)
-                    ? pb.collection(COLLECTIONS.COMPANIES).create<Company>({
-                        company_name: newCompanyName,
-                        owner_name: data.ownerName || undefined,
-                        source: 'Cold Call',
-                        first_contacted: new Date().toISOString(),
-                        last_contacted: new Date().toISOString(),
-                        assigned_to: user.id,
-                    }).then(c => {
-                        resolvedCompanyId = c.id;
-                        return c.id;
-                    }).catch(err => {
-                        console.error('Failed to create company:', err);
-                        return null;
-                    })
-                    : Promise.resolve(data.companyId || null);
+                // Resolve companyId — when the user typed a brand-new company name
+                // (Unit 7 fast path), create the company in parallel with the phone
+                // lookup so neither blocks the call-log create.
+                const companyCreatePromise: Promise<string | null> =
+                    !data.companyId && data.newCompanyName?.trim()
+                        ? pb.collection(COLLECTIONS.COMPANIES).create<{ id: string }>({
+                            company_name: data.newCompanyName.trim(),
+                            owner_name: data.ownerName || undefined,
+                            source: 'Cold Call',
+                            first_contacted: new Date().toISOString(),
+                            last_contacted: new Date().toISOString(),
+                            assigned_to: user.id,
+                        }).then(c => c.id).catch(err => {
+                            console.error('Failed to create company:', err);
+                            return null;
+                        })
+                        : Promise.resolve(data.companyId || null);
 
-                // Find or create phone number record
-                let phoneNumberRecordId = '';
-                try {
-                    const companyId = data.companyId || (await companyCreatePromise);
-                    if (!companyId) throw new Error('No company id resolved');
-                    resolvedCompanyId = companyId;
-                    const digits = data.phoneNumber.replace(/\D/g, '');
-                    const last10 = digits.slice(-10);
-                    const filterParts = [`phone_number = "${data.phoneNumber}"`];
-                    if (digits !== data.phoneNumber) filterParts.push(`phone_number ~ "${digits}"`);
-                    if (last10 !== digits && last10.length >= 7) filterParts.push(`phone_number ~ "${last10}"`);
+                // Find or create phone number record (kicked off in parallel with
+                // company creation; resolved once we have a companyId).
+                const phoneLookupPromise: Promise<string> = (async () => {
+                    const cid = await companyCreatePromise;
+                    if (!cid) return '';
+                    try {
+                        const digits = data.phoneNumber.replace(/\D/g, '');
+                        const last10 = digits.slice(-10);
+                        const filterParts = [`phone_number = "${data.phoneNumber}"`];
+                        if (digits !== data.phoneNumber) filterParts.push(`phone_number ~ "${digits}"`);
+                        if (last10 !== digits && last10.length >= 7) filterParts.push(`phone_number ~ "${last10}"`);
 
-                    const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                        filter: `company = "${companyId}" && (${filterParts.join(' || ')})`,
-                    });
-                    if (phoneRecords.items.length > 0) {
-                        phoneNumberRecordId = phoneRecords.items[0].id;
-                    } else {
+                        const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
+                            filter: `company = "${cid}" && (${filterParts.join(' || ')})`,
+                        });
+                        if (phoneRecords.items.length > 0) {
+                            return phoneRecords.items[0].id;
+                        }
                         const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
-                            company: companyId,
+                            company: cid,
                             phone_number: data.phoneNumber,
                             receptionist_name: data.receptionistName || undefined,
                             last_called: new Date().toISOString(),
                         });
-                        phoneNumberRecordId = newPhone.id;
+                        return newPhone.id;
+                    } catch {
+                        return '';
                     }
-                } catch { /* ignore — still log the call */ }
+                })();
 
-                // If the company create promise failed earlier, bail before creating
-                // a call_log with an empty company id.
+                const resolvedCompanyId = await companyCreatePromise;
+                const phoneNumberRecordId = await phoneLookupPromise;
                 if (!resolvedCompanyId) {
-                    await companyCreatePromise; // ensure error surfaces in console
-                    if (!resolvedCompanyId) throw new Error('Company id unresolved — call_log not saved');
+                    console.error('Failed to resolve company for call log — aborting');
+                    return;
                 }
 
                 // Calculate call durations from captured values.
@@ -1663,24 +1731,27 @@ export default function SessionPage() {
                 // For calls with callback legs, merge ALL queued segments into one recording
                 // (each callback re-dial creates a separate segment). For normal calls,
                 // pop only the oldest segment so other calls' recordings stay in the queue.
+                //
+                // Mark has_recording = true synchronously immediately after submitFn returns
+                // (fire-and-forget) so the call_log shows the recording icon as soon as the
+                // upload is queued — we don't wait for the actual upload to finish.
                 if (!data.callOutcome.includes('No Answer')) {
                     const submitFn = hasCallbacks
                         ? submitDeferredRecording    // merge all segments (callback legs)
                         : submitOldestDeferredRecording; // pop one segment (normal call)
-                    submitFn(callLog.id).then(recordingId => {
-                        if (recordingId) {
-                            pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
-                                has_recording: true,
-                            }).then(() => {
-                                // Update last call preview so the recording icon appears
-                                setLastCallLog(prev =>
-                                    prev?.id === callLog.id
-                                        ? { ...prev, has_recording: true }
-                                        : prev
-                                );
-                            }).catch(err => console.error('Failed to mark has_recording:', err));
-                        }
-                    }).catch(err => console.error('Failed to submit recording:', err));
+                    void submitFn(callLog.id);
+                    // Optimistically mark the call log; the agent will perform the actual
+                    // upload in the background. If the recording ends up empty/failed the
+                    // flag is harmless — the recordings collection will just be empty.
+                    pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
+                        has_recording: true,
+                    }).then(() => {
+                        setLastCallLog(prev =>
+                            prev?.id === callLog.id
+                                ? { ...prev, has_recording: true }
+                                : prev
+                        );
+                    }).catch(err => console.error('Failed to mark has_recording:', err));
                     setContextPhoneNumber('');
                 }
 
@@ -1805,7 +1876,12 @@ export default function SessionPage() {
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
         callEndTimeRef.current = null;
-        pendingCallSnapshotRef.current = null;
+        if (discardedDigits) {
+            const map = pendingCallSnapshotsRef.current;
+            for (const [key, snap] of map) {
+                if (snap.phoneDigits === discardedDigits) map.delete(key);
+            }
+        }
         window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
 
         // Cancel any pending power dialer auto-dial

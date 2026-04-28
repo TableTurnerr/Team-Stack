@@ -22,6 +22,7 @@ public class AgentWebSocketServer : IDisposable
     private ZoomCallController? _callController;
     private ZoomPhoneApiService? _zoomApi;
     private DialIntentTracker? _intentTracker;
+    private AgentConfig? _config;
     private WebSocketServer? _server;
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
@@ -89,6 +90,15 @@ public class AgentWebSocketServer : IDisposable
     public void SetDialIntentTracker(DialIntentTracker tracker)
     {
         _intentTracker = tracker;
+    }
+
+    /// <summary>
+    /// Wire the persisted agent config so command handlers can save toggle
+    /// + auth changes back to disk for survival across restarts.
+    /// </summary>
+    public void SetAgentConfig(AgentConfig config)
+    {
+        _config = config;
     }
 
     /// <summary>
@@ -183,6 +193,9 @@ public class AgentWebSocketServer : IDisposable
                     break;
                 case "startRecording":
                     HandleStartRecording(doc.RootElement);
+                    break;
+                case "forceStartRecording":
+                    HandleForceStartRecording(doc.RootElement);
                     break;
                 case "stopRecording":
                     HandleStopRecording();
@@ -288,6 +301,14 @@ public class AgentWebSocketServer : IDisposable
         Debug.WriteLine($"[WS] startRecording: success={success} error={error}");
     }
 
+    private void HandleForceStartRecording(JsonElement root)
+    {
+        if (_recorder == null) return;
+        var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
+        var (success, error) = _recorder.StartRecording(phone);
+        Debug.WriteLine($"[WS] forceStartRecording: success={success} error={error}");
+    }
+
     private void HandleStopRecording()
     {
         _recorder?.StopRecording();
@@ -306,6 +327,13 @@ public class AgentWebSocketServer : IDisposable
         if (root.TryGetProperty("onRinging", out var onRinging))
             _recorder.RecordOnRinging = onRinging.GetBoolean();
         Debug.WriteLine($"[WS] setAutoRecord: enabled={_recorder.AutoRecordEnabled} onRinging={_recorder.RecordOnRinging}");
+
+        if (_config != null)
+        {
+            _config.AutoRecordEnabled = _recorder.AutoRecordEnabled;
+            _config.RecordOnRinging = _recorder.RecordOnRinging;
+            _config.Save();
+        }
     }
 
     private void HandleGetRecordingStatus(IWebSocketConnection client)
@@ -363,7 +391,11 @@ public class AgentWebSocketServer : IDisposable
         var token = root.TryGetProperty("authToken", out var t) ? t.GetString() : null;
         var uploader = root.TryGetProperty("uploaderId", out var i) ? i.GetString() : null;
         if (url != null && token != null && uploader != null)
+        {
             _uploader.SetAuth(url, token, uploader);
+            _config?.SetAuth(url, token, uploader);
+            _config?.Save();
+        }
     }
 
     // ─── Microphone command handlers ────────────────────────────────────────

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -42,7 +42,19 @@ import { useColumnVisibility, type ColumnDefinition } from '@/hooks/use-column-v
 import { ExportLeadsModal } from '@/components/export-leads-modal';
 import { ImportLeadsModal } from '@/components/import-leads-modal';
 import { LeadCategorySelect } from '@/components/lead-category-select';
-import { CompaniesFilterBuilder, buildCompaniesFilter, type FilterCondition, type FilterLogic } from '@/components/companies-filter-builder';
+import {
+  FilterBuilder,
+  FilterChips,
+  runFilterSearch,
+  useFilterSelection,
+  fetchAllMatchingIds,
+  shouldConfirmSelectAll,
+  type FilterCondition,
+  type FilterFieldDef,
+  type FilterLogic,
+} from '@/components/filter-builder';
+import { DEFAULT_OUTCOMES } from '@/lib/call-outcomes';
+import { useCustomCallOutcomes } from '@/hooks/use-custom-call-outcomes';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { PageGuard } from '@/components/page-guard';
@@ -52,7 +64,6 @@ import {
   HeaderIndexCell,
   ResizableTh,
   useResizableColumns,
-  useTableSelection,
   TablePagination,
   TableEmptyState,
   SelectionToolbar,
@@ -82,7 +93,48 @@ const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
   'Instagram': { bg: 'bg-[var(--accent-red-subtle)]', text: 'text-[var(--accent-red)]' },
 };
 
-// Status is now a JSON array (computed from call outcomes) — no fixed options
+// Status is a JSON array (computed from call outcomes) — last call per phone, deduplicated.
+const COMPANY_STATUSES = ['Cold No Reply', 'Replied', 'Warm', 'Booked', 'Paid', 'Client', 'Excluded'] as const;
+const COMPANY_SOURCES = ['Cold Call', 'Google Maps', 'Manual', 'Instagram'] as const;
+const CALL_DIRECTIONS = ['outbound', 'inbound'] as const;
+
+function buildCompaniesFilterFields(customOutcomes: readonly string[]): readonly FilterFieldDef[] {
+  const statusOptions = [...DEFAULT_OUTCOMES, ...customOutcomes, ...COMPANY_STATUSES];
+  const anyOutcomeOptions = [...DEFAULT_OUTCOMES, ...customOutcomes];
+  return [
+  { key: 'lead_category', label: 'Lead Category', type: 'rel_id', relCollection: 'lead_categories', group: 'Company' },
+  {
+    key: 'call_outcome',
+    label: 'Call Outcome',
+    type: 'multi_enum',
+    group: 'Calls',
+    scopes: {
+      last: { key: 'status', type: 'multi_enum', options: statusOptions },
+      any: { key: 'call_logs_via_company.call_outcome', type: 'rel_select', options: anyOutcomeOptions },
+    },
+  },
+  { key: 'source', label: 'Source', type: 'enum', options: COMPANY_SOURCES, group: 'Company' },
+  { key: 'company_location', label: 'Location', type: 'text', group: 'Company' },
+  { key: 'email', label: 'Email', type: 'text', group: 'Company' },
+  { key: 'website', label: 'Website', type: 'text', group: 'Company' },
+  { key: 'instagram_handle', label: 'Instagram', type: 'text', group: 'Company' },
+  { key: 'last_contacted', label: 'Last Contacted', type: 'date', group: 'Calls' },
+  { key: 'do_not_contact', label: 'Do Not Contact', type: 'boolean', group: 'Company' },
+
+  // Call attributes without a denormalized last-call equivalent on the company — only "any call" scope is useful.
+  { key: 'call_logs_via_company.direction', label: 'Call Direction', type: 'rel_select', options: CALL_DIRECTIONS, group: 'Calls' },
+  { key: 'call_logs_via_company.status_changed_to', label: 'Call Status Changed To', type: 'rel_select', options: COMPANY_STATUSES, group: 'Calls' },
+  { key: 'call_logs_via_company.caller', label: 'Called By', type: 'rel_id', relCollection: 'users', group: 'Calls' },
+  { key: 'call_logs_via_company.post_call_notes', label: 'Call Notes Contain', type: 'rel_text', group: 'Calls' },
+  { key: 'call_logs_via_company.owner_reached', label: 'Owner Reached', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.appointment_set', label: 'Appointment Set', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.pitch_completed', label: 'Pitch Completed', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.has_recording', label: 'Has Recording', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.duration', label: 'Total Duration (s)', type: 'rel_number', group: 'Calls' },
+  { key: 'call_logs_via_company.call_duration', label: 'Talk Duration (s)', type: 'rel_number', group: 'Calls' },
+  { key: 'call_logs_via_company.call_time', label: 'Call Date', type: 'rel_date', group: 'Calls' },
+  ];
+}
 
 // Company row with inline edit
 function CompanyRow({
@@ -720,6 +772,8 @@ export default function CompaniesPage() {
   const canAccessExtensionLeads = isAdmin || hasPermission('can_access_extension_leads_directly');
   const teamMembers = useTeamMembers();
   const { preferences } = useUserPreferences();
+  const { customOutcomes } = useCustomCallOutcomes();
+  const filterFields = useMemo(() => buildCompaniesFilterFields(customOutcomes), [customOutcomes]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [categories, setCategories] = useState<LeadCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -743,8 +797,11 @@ export default function CompaniesPage() {
   // Column visibility
   const { visibleColumns, toggleColumn, isColumnVisible, columns, resetToDefault } = useColumnVisibility('companies', COMPANY_COLUMNS);
 
-  // Table selection
-  const selection = useTableSelection(companies);
+  // Table selection — supports both visible-mode and all_filtered-mode
+  const selection = useFilterSelection();
+  const visibleIds = companies.map(c => c.id);
+  const isPageAllSelected = selection.isPageAllSelected(visibleIds);
+  const isPageSomeSelected = !isPageAllSelected && companies.some(c => selection.isSelected(c.id));
 
   // Bulk actions
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -763,17 +820,30 @@ export default function CompaniesPage() {
   }, [bulkMenu]);
 
   const handleBulkUpdate = async (patch: Partial<Company>) => {
-    if (selection.count === 0) return;
-    const ids = Array.from(selection.selectedIds);
+    if (selection.selectedCount === 0) return;
     setBulkBusy(true);
     setBulkMenu(null);
     try {
+      const ids = await selection.materialize(() =>
+        fetchAllMatchingIds({
+          collection: COLLECTIONS.COMPANIES,
+          fields: filterFields,
+          conditions: appliedConditions,
+          logic: appliedLogic,
+        }),
+      );
+      if (ids.length === 0) return;
+      if (shouldConfirmSelectAll(ids.length)) {
+        const ok = window.confirm(`This will update ${ids.length} companies. Continue?`);
+        if (!ok) return;
+      }
+      const selectedIdSet = new Set(ids);
       await Promise.all(
         ids.map(id => pb.collection(COLLECTIONS.COMPANIES).update(id, patch))
       );
       setCompanies(prev =>
         prev.map(c => {
-          if (!selection.isSelected(c.id)) return c;
+          if (!selectedIdSet.has(c.id)) return c;
           const next: Company = { ...c, ...patch } as Company;
           if ('assigned_to' in patch) {
             const uid = patch.assigned_to as string;
@@ -825,7 +895,6 @@ export default function CompaniesPage() {
           searchFilter += ` || ${buildPhoneSearchFilter('phone_number', searchTerm)}`;
         }
       }
-      const conditionsFilter = buildCompaniesFilter(appliedConditions, appliedLogic);
       let assigneeFilterStr = '';
       if (assigneeFilter === 'mine' && user?.id) {
         assigneeFilterStr = `assigned_to = "${user.id}"`;
@@ -840,13 +909,19 @@ export default function CompaniesPage() {
       const hideUnassigned = !canAccessExtensionLeads && assigneeFilter === 'all'
         ? `assigned_to != ""`
         : '';
-      const filterParts = [searchFilter && `(${searchFilter})`, conditionsFilter, assigneeFilterStr, hideUnassigned].filter(Boolean);
-      const filter = filterParts.join(' && ');
+      const extraParts = [searchFilter && `(${searchFilter})`, assigneeFilterStr, hideUnassigned].filter(Boolean);
+      const extraFilter = extraParts.join(' && ');
 
-      const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
+      const result = await runFilterSearch<Company>({
+        collection: COLLECTIONS.COMPANIES,
+        fields: filterFields,
+        conditions: appliedConditions,
+        logic: appliedLogic,
+        page,
+        perPage,
         sort: '-created',
         expand: 'lead_category,assigned_to',
-        ...(filter && { filter }),
+        extraFilter: extraFilter || undefined,
       });
 
       setCompanies(result.items);
@@ -860,7 +935,7 @@ export default function CompaniesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchTerm, appliedConditions, appliedLogic, isAuthenticated, assigneeFilter, user?.id, canAccessExtensionLeads]);
+  }, [page, searchTerm, appliedConditions, appliedLogic, isAuthenticated, assigneeFilter, user?.id, canAccessExtensionLeads, filterFields]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -948,12 +1023,22 @@ export default function CompaniesPage() {
             Add Company
           </button>
 
-          <CompaniesFilterBuilder
+          <FilterBuilder
+            fields={filterFields}
             conditions={filterConditions}
             logic={filterLogic}
-            categories={categories}
-            onChange={(c, l) => { setFilterConditions(c); setFilterLogic(l); }}
-            onApply={() => { setAppliedConditions(filterConditions); setAppliedLogic(filterLogic); setPage(1); }}
+            relData={{
+              lead_categories: categories.map(c => ({ id: c.id, label: c.name })),
+            }}
+            onChange={(c, l) => {
+              setFilterConditions(c);
+              setFilterLogic(l);
+              setAppliedConditions(c);
+              setAppliedLogic(l);
+              setPage(1);
+              selection.exitAllFiltered();
+            }}
+            title="Filter"
           />
 
           {(isAdmin || canAccessExtensionLeads) && (
@@ -1022,8 +1107,58 @@ export default function CompaniesPage() {
         </div>
       )}
 
+      {/* Active filters strip */}
+      {appliedConditions.length > 0 && (
+        <FilterChips
+          conditions={appliedConditions}
+          fields={filterFields}
+          relData={{ lead_categories: categories.map(c => ({ id: c.id, label: c.name })) }}
+          onRemove={(id) => {
+            const next = appliedConditions.filter(c => c.id !== id);
+            setFilterConditions(next);
+            setAppliedConditions(next);
+            setPage(1);
+            selection.exitAllFiltered();
+          }}
+          onClear={() => {
+            setFilterConditions([]);
+            setAppliedConditions([]);
+            setPage(1);
+            selection.exitAllFiltered();
+          }}
+        />
+      )}
+
+      {/* Select-all-matching banner */}
+      {selection.mode === 'visible' && isPageAllSelected && totalItems > companies.length && (
+        <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--primary-subtle)] border border-[var(--primary)]/20 text-xs">
+          <span className="text-[var(--primary)]">
+            All {companies.length} on this page are selected.
+          </span>
+          <button
+            onClick={() => selection.enterAllFiltered(totalItems)}
+            className="font-semibold text-[var(--primary)] hover:underline"
+          >
+            Select all {totalItems} matching this filter →
+          </button>
+        </div>
+      )}
+      {selection.mode === 'all_filtered' && (
+        <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--primary-subtle)] border border-[var(--primary)]/20 text-xs">
+          <span className="text-[var(--primary)]">
+            All {selection.selectedCount} matching companies are selected.
+          </span>
+          <button
+            onClick={selection.exitAllFiltered}
+            className="font-semibold text-[var(--primary)] hover:underline"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {/* Selection Toolbar */}
-      <SelectionToolbar count={selection.count} totalCount={companies.length}>
+      <SelectionToolbar count={selection.selectedCount} totalCount={selection.mode === 'all_filtered' ? totalItems : companies.length}>
         <div className="flex items-center gap-2" ref={bulkMenuRef}>
           {/* Assignee */}
           {isAdmin && (
@@ -1152,9 +1287,9 @@ export default function CompaniesPage() {
                 <thead className="bg-[var(--sidebar-bg)] border-b border-[var(--card-border)]">
                   <tr>
                     <HeaderIndexCell
-                      allSelected={selection.allSelected}
-                      someSelected={selection.someSelected}
-                      onToggleAll={selection.toggleAll}
+                      allSelected={isPageAllSelected}
+                      someSelected={isPageSomeSelected}
+                      onToggleAll={() => selection.togglePageAll(visibleIds)}
                     />
                     {isColumnVisible('company_name') && (
                       <ResizableTh width={getWidth('company_name')} minWidth={100} onResize={(w) => resize('company_name', w)}>Company Name</ResizableTh>
@@ -1202,7 +1337,7 @@ export default function CompaniesPage() {
                       index={(page - 1) * perPage + idx + 1}
                       selected={selection.isSelected(company.id)}
                       onSelect={() => selection.toggle(company.id)}
-                      hasSelection={selection.hasSelection}
+                      hasSelection={selection.selectedCount > 0}
                       timezones={preferences?.timezones}
                       categories={categories}
                       onAddCategory={handleAddCategory}

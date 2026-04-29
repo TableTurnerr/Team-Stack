@@ -59,6 +59,8 @@ public class RecordingStorageManager
     /// Rename a recording file to include the call log ID so that even a
     /// manual upload can be auto-linked.  Returns the new file name.
     /// Format: {timestamp}_{phone}_cl-{callLogId}.mp3
+    /// Atomic: writes a {newPath}.linking sentinel before File.Move so a
+    /// crash mid-rename can be recovered on next LoadManifest().
     /// </summary>
     public string? RenameWithCallLogId(string fileName, string callLogId)
     {
@@ -76,6 +78,23 @@ public class RecordingStorageManager
 
             var oldPath = Path.Combine(_recordingsDir, fileName);
             var newPath = Path.Combine(_recordingsDir, newFileName);
+            var sentinelPath = newPath + ".linking";
+
+            try
+            {
+                var sentinelJson = JsonSerializer.Serialize(new RenameSentinel
+                {
+                    OldFileName = fileName,
+                    NewFileName = newFileName,
+                    CallLogId = callLogId,
+                }, JsonOptions);
+                File.WriteAllText(sentinelPath, sentinelJson);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Storage] Sentinel write failed: {ex.Message}");
+                return null;
+            }
 
             try
             {
@@ -85,12 +104,14 @@ public class RecordingStorageManager
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Storage] Rename failed: {ex.Message}");
+                TryDeleteFile(sentinelPath);
                 return null;
             }
 
             entry.FileName = newFileName;
             entry.CallLogId = callLogId;
             PersistManifest();
+            TryDeleteFile(sentinelPath);
             Debug.WriteLine($"[Storage] Renamed: {fileName} → {newFileName}");
             return newFileName;
         }
@@ -209,6 +230,18 @@ public class RecordingStorageManager
         lock (_lock)
         {
             return _entries.Find(e => e.RecordingId == recordingId);
+        }
+    }
+
+    /// <summary>
+    /// Find a recording entry by its dashboard-supplied client call ID.
+    /// </summary>
+    public RecordingEntry? GetByClientCallId(string clientCallId)
+    {
+        if (string.IsNullOrEmpty(clientCallId)) return null;
+        lock (_lock)
+        {
+            return _entries.Find(e => e.ClientCallId == clientCallId);
         }
     }
 
@@ -334,11 +367,85 @@ public class RecordingStorageManager
                         e.ConversionComplete = true;
                 }
             }
+
+            RecoverFromRenameSentinels();
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[Storage] Failed to load manifest: {ex.Message}");
             _entries = [];
+        }
+    }
+
+    /// <summary>
+    /// Sweep for *.linking sentinels left behind by a crashed RenameWithCallLogId.
+    /// If the rename completed on disk but the manifest still points at the old
+    /// name, retroactively reconcile it. Orphan sentinels are deleted.
+    /// </summary>
+    private void RecoverFromRenameSentinels()
+    {
+        string[] sentinels;
+        try
+        {
+            sentinels = Directory.GetFiles(_recordingsDir, "*.linking");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Storage] Sentinel sweep failed: {ex.Message}");
+            return;
+        }
+
+        if (sentinels.Length == 0) return;
+
+        bool dirty = false;
+        foreach (var sentinelPath in sentinels)
+        {
+            try
+            {
+                var json = File.ReadAllText(sentinelPath);
+                var sentinel = JsonSerializer.Deserialize<RenameSentinel>(json, JsonOptions);
+                if (sentinel == null || string.IsNullOrEmpty(sentinel.NewFileName))
+                {
+                    TryDeleteFile(sentinelPath);
+                    continue;
+                }
+
+                var newPath = Path.Combine(_recordingsDir, sentinel.NewFileName);
+
+                if (File.Exists(newPath) && !string.IsNullOrEmpty(sentinel.OldFileName))
+                {
+                    var entry = _entries.Find(e => e.FileName == sentinel.OldFileName);
+                    if (entry != null)
+                    {
+                        entry.FileName = sentinel.NewFileName;
+                        if (!string.IsNullOrEmpty(sentinel.CallLogId))
+                            entry.CallLogId = sentinel.CallLogId;
+                        dirty = true;
+                        Debug.WriteLine($"[Storage] Recovered rename: {sentinel.OldFileName} → {sentinel.NewFileName}");
+                    }
+                }
+
+                TryDeleteFile(sentinelPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Storage] Sentinel recovery failed for {Path.GetFileName(sentinelPath)}: {ex.Message}");
+                TryDeleteFile(sentinelPath);
+            }
+        }
+
+        if (dirty) PersistManifest();
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Storage] Failed to delete {path}: {ex.Message}");
         }
     }
 
@@ -407,4 +514,19 @@ public class RecordingEntry
 
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+
+    [JsonPropertyName("clientCallId")]
+    public string? ClientCallId { get; set; }
+}
+
+internal sealed class RenameSentinel
+{
+    [JsonPropertyName("oldFileName")]
+    public string OldFileName { get; set; } = "";
+
+    [JsonPropertyName("newFileName")]
+    public string NewFileName { get; set; } = "";
+
+    [JsonPropertyName("callLogId")]
+    public string CallLogId { get; set; } = "";
 }

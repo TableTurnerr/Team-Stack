@@ -52,7 +52,7 @@ interface UseCallRecorderReturn {
      * @param callLogId Optional call log ID to link the recording to.
      * @returns The created recording ID, or null if nothing was uploaded.
      */
-    submitOldestDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    submitOldestDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     /**
      * Discard the OLDEST pending recording from the queue (e.g. for "No Answer").
      * If recording is still active, discards it without queuing.
@@ -65,7 +65,7 @@ interface UseCallRecorderReturn {
      * @param callLogId Optional call log ID to link the recording to.
      * @returns The created recording ID, or null if nothing was uploaded.
      */
-    submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    submitDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     /**
      * Discard ALL queued segments without uploading and exit deferred mode.
      */
@@ -566,7 +566,7 @@ export function useCallRecorder(
      * Call once per form submission so each call's recording is linked to its own call log.
      * If recording is still active (e.g. session ends mid-call), stops it first.
      */
-    const submitOldestDeferredRecording = useCallback(async (callLogId?: string): Promise<string | null> => {
+    const submitOldestDeferredRecording = useCallback(async (callLogId?: string, _clientCallId?: string | null): Promise<string | null> => {
         // Capture phone synchronously before any async gap
         const phoneForUpload = phoneNumberRef.current;
 
@@ -648,7 +648,7 @@ export function useCallRecorder(
      * Stop the active recording (if any), merge ALL queued segments, and upload as one file.
      * Exits deferred mode. Kept for backward-compat / edge cases where merging is desired.
      */
-    const submitDeferredRecording = useCallback(async (callLogId?: string): Promise<string | null> => {
+    const submitDeferredRecording = useCallback(async (callLogId?: string, _clientCallId?: string | null): Promise<string | null> => {
         // Capture phone immediately (synchronously) before any async operations
         const finalPhone = phoneNumberRef.current;
 

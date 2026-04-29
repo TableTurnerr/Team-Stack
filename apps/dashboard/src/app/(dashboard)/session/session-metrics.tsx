@@ -1,23 +1,26 @@
 'use client';
 
-import { Phone, PhoneIncoming, Clock, TrendingUp, PhoneForwarded, PhoneCall } from 'lucide-react';
+import { useState } from 'react';
+import { Phone, PhoneIncoming, Clock, TrendingUp, PhoneForwarded, PhoneCall, Info } from 'lucide-react';
 
 interface SessionMetricsProps {
     totalDials: number;
     totalPickups: number;
     totalCallbacks: number;
     totalIncoming: number;
-    durationSec: number;
+    totalCallTimeSec: number;
 }
 
 function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
+    const safe = Math.max(0, Math.floor(seconds));
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = safe % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, totalIncoming, durationSec }: SessionMetricsProps) {
+export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, totalIncoming, totalCallTimeSec }: SessionMetricsProps) {
+    const [showInfo, setShowInfo] = useState(false);
     const pickupRate = totalDials > 0 ? Math.round((totalPickups / totalDials) * 100) : 0;
 
     const metrics = [
@@ -49,14 +52,7 @@ export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, total
             color: 'var(--warning)',
             bg: 'var(--warning-subtle)',
         },
-        {
-            label: 'Duration',
-            value: formatDuration(durationSec),
-            icon: Clock,
-            color: 'var(--muted)',
-            bg: 'var(--card-hover)',
-        },
-    ];
+    ] as const;
 
     return (
         <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5 space-y-4">
@@ -83,6 +79,44 @@ export function SessionMetrics({ totalDials, totalPickups, totalCallbacks, total
                         <span className="text-xs text-[var(--muted)]">{label}</span>
                     </div>
                 ))}
+
+                {/* Time On Call — talk time, excludes ringing */}
+                <div
+                    className="flex flex-col items-center gap-2 p-3 rounded-lg"
+                    style={{ backgroundColor: 'var(--card-hover)' }}
+                >
+                    <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center"
+                        style={{ backgroundColor: 'color-mix(in srgb, var(--muted) 20%, transparent)' }}
+                    >
+                        <Clock size={16} style={{ color: 'var(--muted)' }} />
+                    </div>
+                    <span className="text-xl font-bold tabular-nums" style={{ color: 'var(--muted)' }}>
+                        {formatDuration(totalCallTimeSec)}
+                    </span>
+                    <div className="relative flex items-center gap-1">
+                        <span className="text-xs text-[var(--muted)]">Time on Call</span>
+                        <button
+                            type="button"
+                            aria-label="What is Time on Call?"
+                            onMouseEnter={() => setShowInfo(true)}
+                            onMouseLeave={() => setShowInfo(false)}
+                            onFocus={() => setShowInfo(true)}
+                            onBlur={() => setShowInfo(false)}
+                            className="inline-flex text-[var(--muted)] hover:text-[var(--foreground)] cursor-help transition-colors"
+                        >
+                            <Info size={11} strokeWidth={2} />
+                        </button>
+                        {showInfo && (
+                            <div
+                                role="tooltip"
+                                className="absolute bottom-full right-0 mb-2 z-30 w-56 rounded-lg border border-[var(--card-border)] bg-[var(--card-bg)] px-3 py-2 text-[11px] leading-snug text-[var(--foreground)] shadow-xl"
+                            >
+                                Total conversation time across all calls in this session. Excludes ringing, dialing, and time between calls — only counts the time spent actually talking after a connect.
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
 
             {/* Pickup Rate */}

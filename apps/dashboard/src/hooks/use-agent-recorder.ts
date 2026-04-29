@@ -26,12 +26,17 @@ interface UseAgentRecorderReturn {
 
     /** Enter deferred mode (no-op for agent — kept for interface compat) */
     enterDeferredMode: () => void;
-    /** Link the latest recording to a call log and return a dummy ID */
-    submitOldestDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    /**
+     * Link the latest recording to a call log and return a dummy ID.
+     * If clientCallId is provided, the agent uses its stable per-call id to
+     * locate the exact recording — sidestepping the global-latest-recording
+     * race that can mis-attribute the previous call's MP3 to this call_log.
+     */
+    submitOldestDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     /** Discard oldest deferred recording */
     discardOldestDeferredRecording: () => void;
     /** Submit all deferred recordings (same as submitOldest for agent) */
-    submitDeferredRecording: (callLogId?: string) => Promise<string | null>;
+    submitDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     /** Discard all deferred recordings */
     discardDeferredRecording: () => void;
     /** Whether deferred mode is active (always true when agent connected) */
@@ -70,6 +75,7 @@ export function useAgentRecorder(
         latestRecording,
         uploadQueueStatus,
         sendCommand,
+        linkRecordingByClientId,
     } = useLocalAgent();
 
     const autoRecordRef = useRef(true);
@@ -106,7 +112,14 @@ export function useAgentRecorder(
         // No-op: agent always manages recordings independently
     }, []);
 
-    const submitOldestDeferredRecording = useCallback(async (callLogId?: string): Promise<string | null> => {
+    const submitOldestDeferredRecording = useCallback(async (callLogId?: string, clientCallId?: string | null): Promise<string | null> => {
+        if (callLogId && clientCallId) {
+            // Stable per-call id path: agent finds the recording by the id
+            // it stamped at start time, eliminating the global-latest-recording
+            // race when MP3 conversion lags.
+            linkRecordingByClientId(clientCallId, callLogId);
+            return latestRecording?.fileName ?? clientCallId;
+        }
         if (!latestRecording) return null;
         if (callLogId) {
             sendCommand({
@@ -118,14 +131,14 @@ export function useAgentRecorder(
         }
         // Return the fileName as a pseudo-ID so callers know a recording exists
         return latestRecording.fileName;
-    }, [latestRecording, sendCommand]);
+    }, [latestRecording, sendCommand, linkRecordingByClientId]);
 
     const discardOldestDeferredRecording = useCallback(() => {
         sendCommand({ type: 'discardRecording' });
     }, [sendCommand]);
 
-    const submitDeferredRecording = useCallback(async (callLogId?: string): Promise<string | null> => {
-        return submitOldestDeferredRecording(callLogId);
+    const submitDeferredRecording = useCallback(async (callLogId?: string, clientCallId?: string | null): Promise<string | null> => {
+        return submitOldestDeferredRecording(callLogId, clientCallId);
     }, [submitOldestDeferredRecording]);
 
     const discardDeferredRecording = useCallback(() => {

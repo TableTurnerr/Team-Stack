@@ -22,6 +22,7 @@ public class AgentWebSocketServer : IDisposable
     private ZoomCallController? _callController;
     private ZoomPhoneApiService? _zoomApi;
     private DialIntentTracker? _intentTracker;
+    private AgentConfig? _config;
     private WebSocketServer? _server;
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
@@ -58,7 +59,9 @@ public class AgentWebSocketServer : IDisposable
         // Subscribe to recording events for broadcasting
         _recorder.StateChanged += OnRecordingStateChanged;
         _recorder.RecordingCompleted += OnRecordingCompleted;
+        _recorder.RecordingConverted += OnRecordingConverted;
         _uploader.UploadCompleted += OnUploadCompleted;
+        _uploader.UploadProgress += OnUploadProgress;
     }
 
     /// <summary>
@@ -89,6 +92,15 @@ public class AgentWebSocketServer : IDisposable
     public void SetDialIntentTracker(DialIntentTracker tracker)
     {
         _intentTracker = tracker;
+    }
+
+    /// <summary>
+    /// Wire the persisted agent config so command handlers can save toggle
+    /// + auth changes back to disk for survival across restarts.
+    /// </summary>
+    public void SetAgentConfig(AgentConfig config)
+    {
+        _config = config;
     }
 
     /// <summary>
@@ -184,6 +196,9 @@ public class AgentWebSocketServer : IDisposable
                 case "startRecording":
                     HandleStartRecording(doc.RootElement);
                     break;
+                case "forceStartRecording":
+                    HandleForceStartRecording(doc.RootElement);
+                    break;
                 case "stopRecording":
                     HandleStopRecording();
                     break;
@@ -199,11 +214,20 @@ public class AgentWebSocketServer : IDisposable
                 case "linkRecording":
                     HandleLinkRecording(doc.RootElement);
                     break;
+                case "linkRecordingByClientId":
+                    HandleLinkRecordingByClientId(doc.RootElement);
+                    break;
                 case "uploadRecording":
                     HandleUploadRecording(doc.RootElement);
                     break;
                 case "cancelPendingUploads":
                     HandleCancelPendingUploads(doc.RootElement);
+                    break;
+                case "retryAllUploads":
+                    HandleRetryAllUploads();
+                    break;
+                case "getFailedUploads":
+                    HandleGetFailedUploads(client);
                     break;
                 case "setUploadConfig":
                     HandleSetUploadConfig(doc.RootElement);
@@ -288,6 +312,14 @@ public class AgentWebSocketServer : IDisposable
         Debug.WriteLine($"[WS] startRecording: success={success} error={error}");
     }
 
+    private void HandleForceStartRecording(JsonElement root)
+    {
+        if (_recorder == null) return;
+        var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
+        var (success, error) = _recorder.StartRecording(phone);
+        Debug.WriteLine($"[WS] forceStartRecording: success={success} error={error}");
+    }
+
     private void HandleStopRecording()
     {
         _recorder?.StopRecording();
@@ -306,6 +338,13 @@ public class AgentWebSocketServer : IDisposable
         if (root.TryGetProperty("onRinging", out var onRinging))
             _recorder.RecordOnRinging = onRinging.GetBoolean();
         Debug.WriteLine($"[WS] setAutoRecord: enabled={_recorder.AutoRecordEnabled} onRinging={_recorder.RecordOnRinging}");
+
+        if (_config != null)
+        {
+            _config.AutoRecordEnabled = _recorder.AutoRecordEnabled;
+            _config.RecordOnRinging = _recorder.RecordOnRinging;
+            _config.Save();
+        }
     }
 
     private void HandleGetRecordingStatus(IWebSocketConnection client)
@@ -325,12 +364,52 @@ public class AgentWebSocketServer : IDisposable
             _uploader.LinkRecording(fileName, callLogId, recordingId);
     }
 
+    // Preferred linking path: dashboard sends the per-call clientCallId it
+    // generated at dial time, agent finds the matching recording (stamped
+    // with the same id) and links it. Eliminates the global-latest-recording
+    // race that mis-attributes recordings when MP3 conversion lags.
+    private void HandleLinkRecordingByClientId(JsonElement root)
+    {
+        if (_uploader == null) return;
+        var clientCallId = root.TryGetProperty("clientCallId", out var c) ? c.GetString() : null;
+        var callLogId = root.TryGetProperty("callLogId", out var l) ? l.GetString() : null;
+        if (!string.IsNullOrEmpty(clientCallId) && !string.IsNullOrEmpty(callLogId))
+            _uploader.LinkRecordingByClientCallId(clientCallId!, callLogId!);
+    }
+
     private void HandleUploadRecording(JsonElement root)
     {
         if (_uploader == null) return;
         var fileName = root.TryGetProperty("fileName", out var f) ? f.GetString() : null;
         if (fileName != null)
             _uploader.EnqueueUpload(fileName);
+    }
+
+    private void HandleRetryAllUploads()
+    {
+        if (_uploader == null) return;
+        _uploader.RetryAll();
+        Debug.WriteLine("[WS] retryAllUploads: reset all failed entries");
+        BroadcastUploadQueueStatus();
+    }
+
+    private void HandleGetFailedUploads(IWebSocketConnection client)
+    {
+        var msg = new FailedUploadsMessage();
+        if (_uploader == null) { SendTo(client, msg); return; }
+
+        foreach (var e in _uploader.GetFailedUploads())
+        {
+            msg.Uploads.Add(new FailedUploadDto
+            {
+                FileName = e.FileName,
+                PhoneNumber = e.PhoneNumber,
+                Error = e.Error,
+                RetryCount = e.RetryCount,
+                CallLogId = e.CallLogId,
+            });
+        }
+        SendTo(client, msg);
     }
 
     private void HandleCancelPendingUploads(JsonElement root)
@@ -363,7 +442,11 @@ public class AgentWebSocketServer : IDisposable
         var token = root.TryGetProperty("authToken", out var t) ? t.GetString() : null;
         var uploader = root.TryGetProperty("uploaderId", out var i) ? i.GetString() : null;
         if (url != null && token != null && uploader != null)
+        {
             _uploader.SetAuth(url, token, uploader);
+            _config?.SetAuth(url, token, uploader);
+            _config?.Save();
+        }
     }
 
     // ─── Microphone command handlers ────────────────────────────────────────
@@ -441,7 +524,7 @@ public class AgentWebSocketServer : IDisposable
         Broadcast(msg);
     }
 
-    private void OnRecordingCompleted(string recordingId, string fileName, string phoneNumber, int duration, long fileSize, DateTime startTime)
+    private void OnRecordingCompleted(string recordingId, string fileName, string phoneNumber, int duration, long fileSize, DateTime startTime, string? clientCallId)
     {
         var msg = new RecordingCompletedMessage
         {
@@ -451,6 +534,19 @@ public class AgentWebSocketServer : IDisposable
             Duration = duration,
             FileSizeBytes = fileSize,
             StartTime = startTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            ClientCallId = clientCallId,
+        };
+        Broadcast(msg);
+    }
+
+    private void OnRecordingConverted(string recordingId, string fileName, int duration, long fileSize)
+    {
+        var msg = new RecordingConvertedMessage
+        {
+            RecordingId = recordingId,
+            FileName = fileName,
+            Duration = duration,
+            FileSizeBytes = fileSize,
         };
         Broadcast(msg);
     }
@@ -464,6 +560,38 @@ public class AgentWebSocketServer : IDisposable
             CallLogId = callLogId,
             Success = success,
             Error = error,
+        };
+        Broadcast(msg);
+    }
+
+    // Throttle progress broadcasts so we don't flood clients on small files —
+    // only emit when the file changes, every ~250ms, or on completion.
+    private readonly object _progressLock = new();
+    private string? _lastProgressFile;
+    private DateTime _lastProgressAt = DateTime.MinValue;
+
+    private void OnUploadProgress(string fileName, long bytesSent, long bytesTotal)
+    {
+        bool shouldEmit;
+        lock (_progressLock)
+        {
+            var now = DateTime.UtcNow;
+            shouldEmit = fileName != _lastProgressFile
+                || (bytesTotal > 0 && bytesSent >= bytesTotal)
+                || (now - _lastProgressAt).TotalMilliseconds >= 250;
+            if (shouldEmit)
+            {
+                _lastProgressFile = fileName;
+                _lastProgressAt = now;
+            }
+        }
+        if (!shouldEmit) return;
+
+        var msg = new UploadProgressMessage
+        {
+            FileName = fileName,
+            BytesSent = bytesSent,
+            BytesTotal = bytesTotal,
         };
         Broadcast(msg);
     }
@@ -708,6 +836,7 @@ public class AgentWebSocketServer : IDisposable
                 Duration = e.DurationSeconds,
                 FileSizeBytes = e.FileSizeBytes,
                 StartTime = e.StartTime.ToString("o"),
+                ClientCallId = e.ClientCallId,
             });
         }
         SendTo(client, msg);
@@ -736,8 +865,9 @@ public class AgentWebSocketServer : IDisposable
         var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() : null;
         var userId = root.TryGetProperty("userId", out var u) ? u.GetString() : null;
         var sessionId = root.TryGetProperty("sessionId", out var s) ? s.GetString() : null;
+        var clientCallId = root.TryGetProperty("clientCallId", out var c) ? c.GetString() : null;
         if (string.IsNullOrWhiteSpace(intentId) || string.IsNullOrWhiteSpace(phone)) return;
-        _intentTracker.Add(intentId!, phone!, userId ?? "", sessionId);
+        _intentTracker.Add(intentId!, phone!, userId ?? "", sessionId, clientCallId);
     }
 
     private void HandleGetDeviceId(IWebSocketConnection client)
@@ -760,10 +890,12 @@ public class AgentWebSocketServer : IDisposable
         {
             _recorder.StateChanged -= OnRecordingStateChanged;
             _recorder.RecordingCompleted -= OnRecordingCompleted;
+            _recorder.RecordingConverted -= OnRecordingConverted;
         }
         if (_uploader != null)
         {
             _uploader.UploadCompleted -= OnUploadCompleted;
+            _uploader.UploadProgress -= OnUploadProgress;
         }
         _micManager = null;
 

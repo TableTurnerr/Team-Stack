@@ -17,6 +17,13 @@ export interface AgentCallState {
     // the active call panel / ring toast.
     deviceId: string | null;
     intentId: string | null;
+    /**
+     * Stable per-call id minted by the dashboard at dial time and threaded
+     * through the dial intent → recording manifest → broadcast. Lets the
+     * dashboard link a recording to the exact call_log it just created
+     * without relying on a global "latest recording" pointer.
+     */
+    clientCallId: string | null;
     zoomCallId: string | null;
     uiSeenHere: boolean;
     audioActiveHere: boolean;
@@ -53,6 +60,12 @@ export interface AgentRecordingCompleted {
     duration: number;
     fileSizeBytes: number;
     startTime: string;
+    /**
+     * Stable per-call id stamped on the recording at start time, copied
+     * from the dial intent. Lets callers link this recording to the exact
+     * call_log they just created without using the global latestRecording.
+     */
+    clientCallId: string | null;
 }
 
 export interface AgentUploadQueueStatus {
@@ -91,6 +104,10 @@ interface LocalAgentContextType {
     unlinkedRecordings: AgentRecordingCompleted[];
     /** Upload queue status */
     uploadQueueStatus: AgentUploadQueueStatus | null;
+    /** Per-recording upload progress, keyed by file name */
+    uploadProgress: Map<string, { bytesSent: number; bytesTotal: number }>;
+    /** Recordings that failed to upload (after retry exhaustion) */
+    failedUploads: Array<{ fileName: string; phoneNumber: string; startTime: string; error: string | null; retryCount: number; callLogId: string | null }>;
     /** Send a command to the agent via WebSocket */
     sendCommand: (command: Record<string, unknown>) => void;
     /**
@@ -100,6 +117,13 @@ interface LocalAgentContextType {
      * request times out.
      */
     fetchLocalRecording: (fileName: string) => Promise<Blob>;
+    /**
+     * Link the recording stamped with this clientCallId to the given call_log.
+     * Preferred over the global "latestRecording" lookup because it stays
+     * correct even when MP3 conversion lag means latestRecording still
+     * points at the previous call when the user submits the new form.
+     */
+    linkRecordingByClientId: (clientCallId: string, callLogId: string) => void;
 }
 
 // ── Context ─────────────────────────────────────────────────────────
@@ -120,6 +144,11 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
     const [latestRecording, setLatestRecording] = useState<AgentRecordingCompleted | null>(null);
     const [unlinkedRecordings, setUnlinkedRecordings] = useState<AgentRecordingCompleted[]>([]);
     const [uploadQueueStatus, setUploadQueueStatus] = useState<AgentUploadQueueStatus | null>(null);
+    const [uploadProgress, setUploadProgress] = useState<Map<string, { bytesSent: number; bytesTotal: number }>>(new Map());
+    const [failedUploads, setFailedUploads] = useState<Array<{
+        fileName: string; phoneNumber: string; startTime: string;
+        error: string | null; retryCount: number; callLogId: string | null;
+    }>>([]);
 
     // Pending local-recording fetch promises keyed by requested file name.
     // Resolved when the matching `localRecording` WebSocket message arrives.
@@ -136,6 +165,23 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         mountedRef.current = true;
+
+        // Re-relay PocketBase auth to the agent whenever the token changes
+        // (login, refresh, logout). The initial setUploadConfig is sent on
+        // ws.onopen below; this keeps the agent's auth in sync afterwards.
+        const unsubscribeAuth = pb.authStore.onChange(() => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            try {
+                ws.send(JSON.stringify({
+                    type: 'setUploadConfig',
+                    pocketbaseUrl: process.env.NEXT_PUBLIC_POCKETBASE_URL || '',
+                    authToken: pb.authStore.token || '',
+                    uploaderId: pb.authStore.model?.id || '',
+                }));
+                console.log('[LocalAgent] Re-sent upload config after auth change');
+            } catch { /* ignore */ }
+        });
 
         function connect() {
             if (!mountedRef.current) return;
@@ -190,6 +236,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     confidence: msg.confidence ?? 'low',
                                     deviceId: msg.deviceId ?? null,
                                     intentId: msg.intentId ?? null,
+                                    clientCallId: msg.clientCallId ?? null,
                                     zoomCallId: msg.zoomCallId ?? null,
                                     uiSeenHere: Boolean(msg.uiSeenHere),
                                     audioActiveHere: Boolean(msg.audioActiveHere),
@@ -230,6 +277,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     duration: msg.duration ?? 0,
                                     fileSizeBytes: msg.fileSizeBytes ?? 0,
                                     startTime: msg.startTime ?? '',
+                                    clientCallId: msg.clientCallId ?? null,
                                 };
                                 setLatestRecording(completed);
                                 // Keep the unlinked list in sync so the
@@ -260,6 +308,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                         duration: (r.duration as number) ?? 0,
                                         fileSizeBytes: (r.fileSizeBytes as number) ?? 0,
                                         startTime: (r.startTime as string) ?? '',
+                                        clientCallId: (r.clientCallId as string | null | undefined) ?? null,
                                     }))
                                     : [];
                                 setUnlinkedRecordings(list);
@@ -309,7 +358,54 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     failedCount: msg.failedCount ?? 0,
                                     currentUpload: msg.currentUpload ?? null,
                                 });
+                                if ((msg.failedCount ?? 0) > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
+                                    wsRef.current.send(JSON.stringify({ type: 'getFailedUploads' }));
+                                }
                                 break;
+                            case 'recordingConverted': {
+                                // Same shape as recordingCompleted but fires after MP3 conversion.
+                                // Update unlinkedRecordings/latestRecording with final duration +
+                                // fileSize, since recordingCompleted may have been broadcast pre-
+                                // conversion with placeholder values.
+                                const fn: string = msg.fileName ?? '';
+                                const dur: number = msg.duration ?? 0;
+                                const fs: number = msg.fileSizeBytes ?? 0;
+                                if (!fn) break;
+                                setUnlinkedRecordings(prev => prev.map(r =>
+                                    r.fileName === fn ? { ...r, duration: dur, fileSizeBytes: fs } : r
+                                ));
+                                setLatestRecording(prev => (prev && prev.fileName === fn)
+                                    ? { ...prev, duration: dur, fileSizeBytes: fs }
+                                    : prev
+                                );
+                                break;
+                            }
+                            case 'uploadProgress': {
+                                // Per-recording byte progress while uploading.
+                                const fn: string = msg.fileName ?? '';
+                                const sent: number = msg.bytesSent ?? 0;
+                                const total: number = msg.bytesTotal ?? 0;
+                                if (!fn) break;
+                                setUploadProgress(prev => {
+                                    const next = new Map(prev);
+                                    if (sent >= total && total > 0) next.delete(fn); // upload finished
+                                    else next.set(fn, { bytesSent: sent, bytesTotal: total });
+                                    return next;
+                                });
+                                break;
+                            }
+                            case 'failedUploads': {
+                                const list = Array.isArray(msg.recordings) ? msg.recordings.map((r: Record<string, unknown>) => ({
+                                    fileName: (r.fileName as string) ?? '',
+                                    phoneNumber: (r.phoneNumber as string) ?? '',
+                                    startTime: (r.startTime as string) ?? '',
+                                    error: (r.error as string | null) ?? null,
+                                    retryCount: (r.retryCount as number) ?? 0,
+                                    callLogId: (r.callLogId as string | null) ?? null,
+                                })) : [];
+                                setFailedUploads(list);
+                                break;
+                            }
                         }
                     } catch { /* ignore malformed messages */ }
                 };
@@ -347,6 +443,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
 
         return () => {
             mountedRef.current = false;
+            unsubscribeAuth();
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;
@@ -398,6 +495,15 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
         } catch { /* ignore send errors */ }
     }, []);
 
+    const linkRecordingByClientId = useCallback((clientCallId: string, callLogId: string) => {
+        if (!clientCallId || !callLogId) return;
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        try {
+            ws.send(JSON.stringify({ type: 'linkRecordingByClientId', clientCallId, callLogId }));
+        } catch { /* ignore send errors */ }
+    }, []);
+
     const launchAgent = useCallback(() => {
         try {
             // Use an anchor element to trigger the protocol handler
@@ -427,7 +533,8 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
             zoomDetected, agentUptime, launchAgent,
             launchZoom, zoomLaunching,
             recordingState, latestRecording, unlinkedRecordings, uploadQueueStatus,
-            sendCommand, fetchLocalRecording,
+            uploadProgress, failedUploads,
+            sendCommand, fetchLocalRecording, linkRecordingByClientId,
         }}>
             {children}
         </LocalAgentContext.Provider>
@@ -454,7 +561,10 @@ export function useLocalAgent(): LocalAgentContextType {
         latestRecording: null,
         unlinkedRecordings: [],
         uploadQueueStatus: null,
+        uploadProgress: new Map(),
+        failedUploads: [],
         sendCommand: () => {},
         fetchLocalRecording: () => Promise.reject(new Error('Local agent is not connected')),
+        linkRecordingByClientId: () => {},
     };
 }

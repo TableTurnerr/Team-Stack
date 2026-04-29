@@ -276,6 +276,7 @@ export function IncomingCallHandler() {
                 if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
                 if (data.appointmentSet) sessionUpdates['appointment_set+'] = 1;
                 if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
+                if (callDuration > 0) sessionUpdates['total_call_time+'] = callDuration;
                 if (Object.keys(sessionUpdates).length > 0) {
                     const updated = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(activeSession.id, sessionUpdates);
                     setSession(updated);

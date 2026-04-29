@@ -38,6 +38,9 @@ public class CallStateMessage : AgentMessage
     [JsonPropertyName("intentId")]
     public string? IntentId { get; set; }
 
+    [JsonPropertyName("clientCallId")]
+    public string? ClientCallId { get; set; }
+
     [JsonPropertyName("zoomCallId")]
     public string? ZoomCallId { get; set; }
 
@@ -61,6 +64,7 @@ public class CallStateMessage : AgentMessage
         Confidence = info.Confidence.ToString().ToLowerInvariant(),
         DeviceId = info.DeviceId,
         IntentId = info.IntentId,
+        ClientCallId = info.ClientCallId,
         ZoomCallId = info.ZoomCallId,
         UiSeenHere = info.UiSeenHere,
         AudioActiveHere = info.AudioActiveHere,
@@ -180,7 +184,38 @@ public class RecordingCompletedMessage : AgentMessage
     [JsonPropertyName("startTime")]
     public string StartTime { get; set; } = "";
 
+    /// <summary>
+    /// Dashboard-issued stable per-call id, copied from the dial intent that
+    /// triggered this recording. Lets the dashboard correlate the broadcast
+    /// to the exact call_log it just created without relying on a global
+    /// "latest recording" pointer that MP3 conversion lag can stale-read.
+    /// </summary>
+    [JsonPropertyName("clientCallId")]
+    public string? ClientCallId { get; set; }
+
     public RecordingCompletedMessage() => Type = "recordingCompleted";
+}
+
+/// <summary>
+/// Fired after WAV→MP3 conversion completes successfully — carries the
+/// final duration / file size that weren't yet known when
+/// <see cref="RecordingCompletedMessage"/> was broadcast.
+/// </summary>
+public class RecordingConvertedMessage : AgentMessage
+{
+    [JsonPropertyName("recordingId")]
+    public string RecordingId { get; set; } = "";
+
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("duration")]
+    public int Duration { get; set; }
+
+    [JsonPropertyName("fileSizeBytes")]
+    public long FileSizeBytes { get; set; }
+
+    public RecordingConvertedMessage() => Type = "recordingConverted";
 }
 
 public class RecordingUploadedMessage : AgentMessage
@@ -252,6 +287,9 @@ public class UnlinkedRecordingDto
 
     [JsonPropertyName("startTime")]
     public string StartTime { get; set; } = "";
+
+    [JsonPropertyName("clientCallId")]
+    public string? ClientCallId { get; set; }
 }
 
 public class UnlinkedRecordingsMessage : AgentMessage
@@ -274,6 +312,46 @@ public class UploadQueueStatusMessage : AgentMessage
     public string? CurrentUpload { get; set; }
 
     public UploadQueueStatusMessage() => Type = "uploadQueueStatus";
+}
+
+public class UploadProgressMessage : AgentMessage
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("bytesSent")]
+    public long BytesSent { get; set; }
+
+    [JsonPropertyName("bytesTotal")]
+    public long BytesTotal { get; set; }
+
+    public UploadProgressMessage() => Type = "uploadProgress";
+}
+
+public class FailedUploadDto
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = "";
+
+    [JsonPropertyName("phoneNumber")]
+    public string PhoneNumber { get; set; } = "";
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    [JsonPropertyName("retryCount")]
+    public int RetryCount { get; set; }
+
+    [JsonPropertyName("callLogId")]
+    public string? CallLogId { get; set; }
+}
+
+public class FailedUploadsMessage : AgentMessage
+{
+    [JsonPropertyName("uploads")]
+    public List<FailedUploadDto> Uploads { get; set; } = [];
+
+    public FailedUploadsMessage() => Type = "failedUploads";
 }
 
 // ─── Call Controller Messages ────────────────────────────────────────────────

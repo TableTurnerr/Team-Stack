@@ -22,15 +22,16 @@ public class DialIntentTracker
         string PhoneE164,
         string UserId,
         string? SessionId,
-        DateTime CreatedAt);
+        DateTime CreatedAt,
+        string? ClientCallId = null);
 
-    public void Add(string intentId, string phone, string userId, string? sessionId = null)
+    public void Add(string intentId, string phone, string userId, string? sessionId = null, string? clientCallId = null)
     {
         if (string.IsNullOrWhiteSpace(intentId) || string.IsNullOrWhiteSpace(phone)) return;
         var e164 = PhoneNormalize.ToE164Loose(phone);
         if (e164 == null) return;
-        _intents[intentId] = new Intent(intentId, e164, userId ?? "", sessionId, DateTime.UtcNow);
-        Debug.WriteLine($"[DialIntent] +{intentId} phone={e164} user={userId}");
+        _intents[intentId] = new Intent(intentId, e164, userId ?? "", sessionId, DateTime.UtcNow, clientCallId);
+        Debug.WriteLine($"[DialIntent] +{intentId} phone={e164} user={userId} clientCallId={clientCallId ?? "(none)"}");
         Prune();
     }
 

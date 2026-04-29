@@ -1129,6 +1129,7 @@ export default function SessionPage() {
                 total_dials: 0,
                 total_pickups: 0,
                 total_duration_sec: 0,
+                total_call_time: 0,
                 owner_reached: 0,
                 pitch_completed: 0,
                 appointment_set: 0,
@@ -1814,6 +1815,7 @@ export default function SessionPage() {
                         if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
                         if (data.appointmentSet) sessionUpdates['appointment_set+'] = 1;
                         if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
+                        if (callDuration > 0) sessionUpdates['total_call_time+'] = callDuration;
                         if (data.callOutcome.includes('No Answer') && capturedPickupIncremented) {
                             // Atomically decrement — PB's min:0 constraint prevents going negative
                             sessionUpdates['total_pickups-'] = 1;
@@ -2833,7 +2835,7 @@ export default function SessionPage() {
                             totalPickups={session.total_pickups || 0}
                             totalCallbacks={session.total_callbacks || 0}
                             totalIncoming={session.total_incoming || 0}
-                            durationSec={elapsedSec}
+                            totalCallTimeSec={session.total_call_time || 0}
                         />
                         <PerformanceTracker
                             ownerReached={session.owner_reached || 0}

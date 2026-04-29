@@ -253,6 +253,7 @@ export interface ColdCallingSession extends RecordModel {
   total_dials: number;
   total_pickups: number;
   total_duration_sec: number;
+  total_call_time?: number;
   owner_reached: number;
   pitch_completed: number;
   appointment_set: number;

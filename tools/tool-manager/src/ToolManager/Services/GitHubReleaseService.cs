@@ -18,7 +18,7 @@ namespace ToolManager.Services;
 ///   - Self-update info extracted from same API response (no separate call)
 ///   - RefreshInstalledStatus updates cached tools from registry without API call
 /// </summary>
-public partial class GitHubReleaseService
+public partial class GitHubReleaseService : IDisposable
 {
     private const string GitHubOwner = "TableTurnerr";
     private const string GitHubRepo = "Team-Stack";
@@ -162,6 +162,8 @@ public partial class GitHubReleaseService
         _lastApiCall = default;
         Debug.WriteLine("[GitHub] Token cleared");
     }
+
+    public void Dispose() => _http.Dispose();
 
     private bool ShouldThrottle()
     {

@@ -24,6 +24,8 @@ public class AgentWebSocketServer : IDisposable
     private DialIntentTracker? _intentTracker;
     private AgentConfig? _config;
     private WebSocketServer? _server;
+    private bool _authRequired;
+    private string _authRequiredReason = "decryption_failed";
     private readonly List<IWebSocketConnection> _clients = [];
     private readonly object _clientLock = new();
     private readonly JsonSerializerOptions _jsonOptions = new()
@@ -149,6 +151,15 @@ public class AgentWebSocketServer : IDisposable
                 var stateMsg = CallStateMessage.From(_fusion.CurrentState);
                 var json = JsonSerializer.Serialize(stateMsg, _jsonOptions);
                 socket.Send(json);
+
+                // Notify newly connected dashboards if auth was lost so the
+                // user is prompted to re-authenticate even if they connect
+                // after the agent started.
+                if (_authRequired)
+                {
+                    var authMsg = new AuthRequiredMessage { Reason = _authRequiredReason };
+                    socket.Send(JsonSerializer.Serialize(authMsg, _jsonOptions));
+                }
             };
 
             socket.OnClose = () =>
@@ -168,7 +179,14 @@ public class AgentWebSocketServer : IDisposable
             socket.OnMessage = msg =>
             {
                 Debug.WriteLine($"[WS] Received: {msg}");
-                _ = HandleClientMessage(msg, socket);
+                _ = HandleClientMessage(msg, socket).ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        FileLogger.Write($"[WS] Unhandled handler exception: {t.Exception?.GetBaseException().Message}");
+                        TrySendError(socket, "handler", t.Exception?.GetBaseException().Message ?? "unknown error");
+                    }
+                }, TaskScheduler.Default);
             };
         });
 
@@ -180,10 +198,16 @@ public class AgentWebSocketServer : IDisposable
 
     private async Task HandleClientMessage(string message, IWebSocketConnection client)
     {
+        string? type = null;
         try
         {
             using var doc = JsonDocument.Parse(message);
-            var type = doc.RootElement.GetProperty("type").GetString();
+            if (!doc.RootElement.TryGetProperty("type", out var typeProp) || typeProp.ValueKind != JsonValueKind.String)
+            {
+                TrySendError(client, "parse", "Missing or invalid 'type' field");
+                return;
+            }
+            type = typeProp.GetString();
 
             switch (type)
             {
@@ -270,9 +294,29 @@ public class AgentWebSocketServer : IDisposable
                     break;
             }
         }
+        catch (JsonException jex)
+        {
+            FileLogger.Write($"[WS] Malformed JSON: {jex.Message}");
+            TrySendError(client, "parse", "Malformed JSON");
+        }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[WS] Error handling client message: {ex.Message}");
+            FileLogger.Write($"[WS] Handler '{type ?? "?"}' failed: {ex}");
+            TrySendError(client, type ?? "handler", ex.Message);
+        }
+    }
+
+    private void TrySendError(IWebSocketConnection client, string context, string messageText)
+    {
+        try
+        {
+            var payload = new { type = "error", context, message = messageText };
+            var json = JsonSerializer.Serialize(payload, _jsonOptions);
+            client.Send(json);
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Write($"[WS] Failed to send error frame ({context}): {ex.Message}");
         }
     }
 
@@ -446,6 +490,8 @@ public class AgentWebSocketServer : IDisposable
             _uploader.SetAuth(url, token, uploader);
             _config?.SetAuth(url, token, uploader);
             _config?.Save();
+            // Re-auth from the dashboard clears any pending auth_required state.
+            ClearAuthRequired();
         }
     }
 
@@ -655,6 +701,24 @@ public class AgentWebSocketServer : IDisposable
     {
         var msg = CallStateMessage.From(info);
         Broadcast(msg);
+    }
+
+    /// <summary>
+    /// Mark the agent as requiring re-authentication and broadcast it to all
+    /// currently-connected dashboards. Sticky: any dashboard that connects
+    /// later also receives the message in OnOpen until <see cref="ClearAuthRequired"/>
+    /// is called (e.g. after a successful re-auth from the dashboard).
+    /// </summary>
+    public void SetAuthRequired(string reason)
+    {
+        _authRequired = true;
+        _authRequiredReason = reason;
+        Broadcast(new AuthRequiredMessage { Reason = reason });
+    }
+
+    public void ClearAuthRequired()
+    {
+        _authRequired = false;
     }
 
     /// <summary>

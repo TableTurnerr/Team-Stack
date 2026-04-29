@@ -38,6 +38,9 @@ static class Program
         bool isInteractive = args.Contains("--interactive");
         bool isBackground = args.Contains("--background");
 
+        // Diagnostics file (Release: Debug.WriteLine is inert; new code uses FileLogger.Write).
+        FileLogger.Init(Path.Combine(Models.InstalledToolsRegistry.BaseDir, "diagnostic.log"));
+
         // Single instance only for the tray/background process, not for interactive CLI sessions
         Mutex? mutex = null;
         if (!isInteractive)
@@ -65,7 +68,7 @@ static class Program
         var downloadService = new DownloadService();
         var installer = new InstallService(registry, downloadService);
         var scheduler = new UpdateScheduler(github, installer, registry, settingsService);
-        var selfUpdater = new SelfUpdateService(github, downloadService);
+        var selfUpdater = new SelfUpdateService(github, downloadService, settingsService);
 
         // ── Interactive CLI mode ──────────────────────────────
         if (isInteractive)
@@ -122,13 +125,15 @@ static class Program
         if (SynchronizationContext.Current is not WindowsFormsSynchronizationContext)
             SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
 
-        using var tray = new TrayIconManager(scheduler, selfUpdater);
+        using var tray = new TrayIconManager(scheduler, selfUpdater, github);
         Application.Run();
 
         // Cleanup
         startupWatchdog.Dispose();
         selfUpdater.Dispose();
         scheduler.Dispose();
+        github.Dispose();
+        downloadService.Dispose();
         Debug.WriteLine("[Main] Exiting");
     }
 

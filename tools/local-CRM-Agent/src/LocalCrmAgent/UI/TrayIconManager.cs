@@ -433,10 +433,28 @@ public class TrayIconManager : IDisposable
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
+
+            // Lucide "zap" lightning bolt path scaled from 24×24 → 16×16
+            var pts = new PointF[]
+            {
+                new(2.67f,  9.33f),
+                new(2.15f,  8.25f),
+                new(8.75f,  1.45f),
+                new(9.33f,  1.73f),
+                new(8.04f,  5.77f),
+                new(8.67f,  6.67f),
+                new(13.33f, 6.67f),
+                new(13.85f, 7.75f),
+                new(7.25f,  14.55f),
+                new(6.68f,  14.25f),
+                new(7.96f,  10.23f),
+                new(7.33f,  9.33f),
+            };
+
+            using var path = new GraphicsPath();
+            path.AddPolygon(pts);
             using var brush = new SolidBrush(color);
-            g.FillEllipse(brush, 2, 2, 12, 12);
-            using var pen = new Pen(Color.FromArgb(180, 255, 255, 255), 1f);
-            g.DrawEllipse(pen, 2, 2, 12, 12);
+            g.FillPath(brush, path);
         }
         var hIcon = bmp.GetHicon();
         // Clone the icon so we own the lifetime; the HICON from GetHicon()

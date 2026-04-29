@@ -12,6 +12,7 @@ public class SelfUpdateService : IDisposable
 {
     private readonly GitHubReleaseService _github;
     private readonly DownloadService _downloadService;
+    private readonly SettingsService _settings;
 
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
@@ -35,11 +36,13 @@ public class SelfUpdateService : IDisposable
     public bool UpdateAvailable => LatestVersion != null && !IsDevBuild && LatestVersion > CurrentVersion;
 
     public event Action<Version>? UpdateFound;
+    public event Action<Version, string>? UpdateApplyFailed;
 
-    public SelfUpdateService(GitHubReleaseService github, DownloadService downloadService)
+    public SelfUpdateService(GitHubReleaseService github, DownloadService downloadService, SettingsService settings)
     {
         _github = github;
         _downloadService = downloadService;
+        _settings = settings;
     }
 
     public void Start()
@@ -63,6 +66,14 @@ public class SelfUpdateService : IDisposable
                     LatestVersion = version;
                     Debug.WriteLine($"[SelfUpdate] Found: v{version}");
                     UpdateFound?.Invoke(version);
+
+                    if (_settings.Settings.AutoUpdateEnabled)
+                    {
+                        FileLogger.Write($"[SelfUpdate] Auto-applying v{version}");
+                        var ok = await ApplyUpdate(ct);
+                        if (ok) return;
+                        // ApplyUpdate failed — UpdateApplyFailed already fired; loop again next interval.
+                    }
                 }
             }
             catch (Exception ex)
@@ -87,19 +98,19 @@ public class SelfUpdateService : IDisposable
         }
     }
 
-    public async Task<bool> ApplyUpdate()
+    public async Task<bool> ApplyUpdate(CancellationToken ct = default)
     {
         // Use cached result from CheckNow/Loop to avoid redundant API call
-        var (version, url) = _lastCheck.version != null ? _lastCheck : await _github.CheckSelfUpdate();
+        var (version, url) = _lastCheck.version != null ? _lastCheck : await _github.CheckSelfUpdate(ct);
         if (version == null || url == null) return false;
-        return await ApplySpecificVersion(version, url);
+        return await ApplySpecificVersion(version, url, ct);
     }
 
     /// <summary>
     /// Apply a specific version by URL. Used for switching from dev build to release
     /// when the numeric version matches (so normal ApplyUpdate won't find it).
     /// </summary>
-    public async Task<bool> ApplySpecificVersion(Version version, string url)
+    public async Task<bool> ApplySpecificVersion(Version version, string url, CancellationToken ct = default)
     {
 
         string? zipPath = null;
@@ -108,7 +119,7 @@ public class SelfUpdateService : IDisposable
 
         try
         {
-            zipPath = await _downloadService.DownloadAsync(url);
+            zipPath = await _downloadService.DownloadAsync(url, ct: ct);
             tempDir = Path.Combine(Path.GetTempPath(), $"ToolManager_SelfUpdate_{version}");
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
             ZipFile.ExtractToDirectory(zipPath, tempDir);
@@ -159,22 +170,23 @@ public class SelfUpdateService : IDisposable
                 del "%~f0" >nul 2>&1
                 """);
 
-            Debug.WriteLine("[SelfUpdate] Launching updater, exiting...");
-            Process.Start(new ProcessStartInfo
+            FileLogger.Write($"[SelfUpdate] Launching updater for v{version}, exiting...");
+            using (Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
                 Arguments = $"/c \"{script}\"",
                 CreateNoWindow = true,
                 UseShellExecute = false,
                 WindowStyle = ProcessWindowStyle.Hidden,
-            });
+            })) { /* handle disposed; child detached */ }
 
             Environment.Exit(0);
             return true;
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[SelfUpdate] Failed: {ex.Message}");
+            FileLogger.Write($"[SelfUpdate] Failed to apply v{version}: {ex.Message}");
+            UpdateApplyFailed?.Invoke(version, ex.Message);
             // Clean up on failure
             if (script != null) try { File.Delete(script); } catch { }
             if (zipPath != null) try { File.Delete(zipPath); } catch { }
@@ -186,7 +198,9 @@ public class SelfUpdateService : IDisposable
     public void Dispose()
     {
         _cts?.Cancel();
-        try { _loopTask?.Wait(3000); } catch { }
+        try { _loopTask?.Wait(3000); }
+        catch (AggregateException ae) when (ae.InnerExceptions.All(e => e is OperationCanceledException)) { }
+        catch (Exception ex) { FileLogger.Write($"[SelfUpdate] Shutdown error: {ex}"); }
         _cts?.Dispose();
     }
 }

@@ -144,8 +144,18 @@ public class AgentService : IDisposable
         IsRunning = false;
 
         _cts?.Cancel();
-        try { Task.WhenAll(_broadcastTask ?? Task.CompletedTask, _networkTask ?? Task.CompletedTask).Wait(3000); }
-        catch { }
+        try
+        {
+            Task.WhenAll(_broadcastTask ?? Task.CompletedTask, _networkTask ?? Task.CompletedTask).Wait(3000);
+        }
+        catch (AggregateException ae) when (ae.InnerExceptions.All(e => e is OperationCanceledException))
+        {
+            // Expected on cancellation — swallow.
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Write($"[Agent] Shutdown error: {ex}");
+        }
 
         _micManager?.Dispose();
         _recorder?.Dispose();

@@ -53,7 +53,8 @@ public class UpdateScheduler : IDisposable
     {
         // Startup check after 10s
         await Task.Delay(TimeSpan.FromSeconds(10), ct);
-        await CheckAndUpdateInstalled(ct);
+        try { await CheckAndUpdateInstalled(ct); }
+        catch (Exception ex) { Debug.WriteLine($"[UpdateScheduler] Startup error: {ex.Message}"); }
 
         // Check every 15 minutes
         while (!ct.IsCancellationRequested)
@@ -120,7 +121,9 @@ public class UpdateScheduler : IDisposable
     public void Dispose()
     {
         _cts?.Cancel();
-        try { _loopTask?.Wait(3000); } catch { }
+        try { _loopTask?.Wait(3000); }
+        catch (AggregateException ae) when (ae.InnerExceptions.All(e => e is OperationCanceledException)) { }
+        catch (Exception ex) { FileLogger.Write($"[UpdateScheduler] Shutdown error: {ex}"); }
         _cts?.Dispose();
     }
 }

@@ -1,5 +1,6 @@
 @echo off
 setlocal
+cd /d "%~dp0"
 
 :: Extract version from csproj
 for /f "tokens=3 delims=><" %%v in ('findstr /r "<Version>" src\ToolManager\ToolManager.csproj') do set VERSION=%%v

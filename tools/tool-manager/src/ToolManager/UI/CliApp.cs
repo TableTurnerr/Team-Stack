@@ -328,7 +328,7 @@ public class CliApp
         }
         AnsiConsole.WriteLine();
 
-        if (!AnsiConsole.Confirm("Apply updates now?", defaultValue: true))
+        if (!Confirm("Apply updates now?", defaultValue: true))
             return;
 
         AnsiConsole.WriteLine();
@@ -476,7 +476,7 @@ public class CliApp
         if (idx < 0 || idx >= tools.Count) return;
         var tool = tools[idx];
 
-        if (!AnsiConsole.Confirm($"Uninstall [bold red]{Markup.Escape(tool.DisplayName)}[/]?", defaultValue: false))
+        if (!Confirm($"Uninstall {tool.DisplayName}?", defaultValue: false))
             return;
 
         await AnsiConsole.Status()
@@ -538,9 +538,7 @@ public class CliApp
                 return;
             }
 
-            if (!AnsiConsole.Confirm(
-                    $"Replace dev build [cyan]{Markup.Escape(_selfUpdater.CurrentVersionDisplay)}[/] with release [green]v{ver.ToString(3)}[/]?",
-                    defaultValue: true))
+            if (!Confirm($"Replace dev build {_selfUpdater.CurrentVersionDisplay} with release v{ver.ToString(3)}?", defaultValue: true))
                 return;
 
             AnsiConsole.MarkupLine("[yellow]Switching to release \u2014 the app will restart...[/]");
@@ -552,9 +550,7 @@ public class CliApp
         if (toolIdx < 0 || toolIdx >= devTools.Count) return;
         var tool = devTools[toolIdx];
 
-        if (!AnsiConsole.Confirm(
-                $"Replace dev build [cyan]{Markup.Escape(tool.InstalledVersionRaw ?? "")}[/] with release [green]v{FormatVersionRaw(tool.LatestVersion)}[/]?",
-                defaultValue: true))
+        if (!Confirm($"Replace dev build {tool.InstalledVersionRaw ?? ""} with release v{FormatVersionRaw(tool.LatestVersion)}?", defaultValue: true))
             return;
 
         await RunInstallWithProgress(tool, "Switching to release");
@@ -884,10 +880,10 @@ public class CliApp
         if (selectedVersion == null) return;
 
         var confirmMsg = tool.IsInstalled
-            ? $"Replace [bold]v{tool.InstalledVersionRaw ?? FormatVersionRaw(tool.InstalledVersion)}[/] with [bold]v{FormatVersionRaw(selectedVersion)}[/]?"
-            : $"Install [bold]v{FormatVersionRaw(selectedVersion)}[/]?";
+            ? $"Replace v{tool.InstalledVersionRaw ?? FormatVersionRaw(tool.InstalledVersion)} with v{FormatVersionRaw(selectedVersion)}?"
+            : $"Install v{FormatVersionRaw(selectedVersion)}?";
 
-        if (!AnsiConsole.Confirm(confirmMsg, defaultValue: true))
+        if (!Confirm(confirmMsg, defaultValue: true))
             return;
 
         await RunInstallWithProgress(tool, "Installing", selectedUrl, selectedVersion);
@@ -916,7 +912,7 @@ public class CliApp
             return;
         }
 
-        if (!AnsiConsole.Confirm($"Re-install [bold]{Markup.Escape(tool.DisplayName)}[/] v{FormatVersionRaw(target.Version)}?", defaultValue: true))
+        if (!Confirm($"Re-install {tool.DisplayName} v{FormatVersionRaw(target.Version)}?", defaultValue: true))
             return;
 
         await RunInstallWithProgress(tool, "Repairing", target.DownloadUrl, target.Version);
@@ -974,7 +970,7 @@ public class CliApp
                 break;
 
             case "Clear All":
-                if (AnsiConsole.Confirm($"Delete all {cached.Count} cached version(s)?", defaultValue: false))
+                if (Confirm($"Delete all {cached.Count} cached version(s)?", defaultValue: false))
                 {
                     InstallService.ClearCache(tool.TagPrefix);
                     AnsiConsole.MarkupLine("[green]Cache cleared.[/]");
@@ -1039,7 +1035,7 @@ public class CliApp
                 {
                     AnsiConsole.MarkupLine("[dim]Cache is already empty.[/]");
                 }
-                else if (AnsiConsole.Confirm($"Delete all cached downloads ({cacheSizeMb:F1} MB)?", defaultValue: false))
+                else if (Confirm($"Delete all cached downloads ({cacheSizeMb:F1} MB)?", defaultValue: false))
                 {
                     if (Directory.Exists(InstallService.CacheDir))
                         Directory.Delete(InstallService.CacheDir, true);
@@ -1067,6 +1063,7 @@ public class CliApp
         AnsiConsole.WriteLine();
 
         var existing = GitHubReleaseService.GetSavedToken();
+        var auth = new GitHubAuthService();
 
         var actions = new List<string>();
         if (existing != null)
@@ -1076,19 +1073,24 @@ public class CliApp
                 : new string('*', existing.Length);
             AnsiConsole.MarkupLine($"  Saved token: [dim]{Markup.Escape(masked)}[/]");
             AnsiConsole.WriteLine();
-            actions.AddRange(["Replace Token", "Remove Token", "Cancel"]);
+            if (auth.IsConfigured) actions.Add("Sign in with GitHub");
+            actions.AddRange(["Paste Token", "Remove Token", "Cancel"]);
         }
         else
         {
-            actions.AddRange(["Add Token", "Cancel"]);
+            if (auth.IsConfigured) actions.Add("Sign in with GitHub");
+            actions.AddRange(["Paste Token", "Cancel"]);
         }
 
         var action = NumberedMenu.Show("[bold]Token action:[/]", actions);
 
         switch (action)
         {
-            case "Add Token":
-            case "Replace Token":
+            case "Sign in with GitHub":
+                SignInWithGitHub(auth).GetAwaiter().GetResult();
+                break;
+
+            case "Paste Token":
                 AnsiConsole.MarkupLine("[dim]Create a fine-grained token at github.com with read-only access to the Team-Stack repo.[/]");
                 var token = AnsiConsole.Prompt(
                     new TextPrompt<string>("[bold]Paste your GitHub token:[/]")
@@ -1108,6 +1110,50 @@ public class CliApp
                 _github.ClearToken();
                 AnsiConsole.MarkupLine("[yellow]Token removed. Using unauthenticated requests.[/]");
                 break;
+        }
+    }
+
+    private async Task SignInWithGitHub(GitHubAuthService auth)
+    {
+        AnsiConsole.WriteLine();
+
+        GitHubAuthService.DeviceCodeResponse code;
+        try
+        {
+            code = await auth.RequestDeviceCodeAsync();
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Could not start GitHub sign-in: {Markup.Escape(ex.Message)}[/]");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"  1. Open: [link]{code.VerificationUri}[/]");
+        AnsiConsole.MarkupLine($"  2. Enter code: [bold yellow]{code.UserCode}[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[dim]Opening browser...[/]");
+        GitHubAuthService.OpenBrowser(code.VerificationUri);
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+        try
+        {
+            var token = await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Waiting for GitHub authorization (Ctrl+C to cancel)...",
+                    async _ => await auth.PollForTokenAsync(code, cts.Token));
+
+            _github.SetToken(token);
+            AnsiConsole.MarkupLine("[green]Signed in. Token saved.[/]");
+        }
+        catch (OperationCanceledException)
+        {
+            AnsiConsole.MarkupLine("[yellow]Sign-in cancelled.[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Sign-in failed: {Markup.Escape(ex.Message)}[/]");
         }
     }
 
@@ -1267,5 +1313,31 @@ public class CliApp
         if (elapsed.TotalMinutes < 1) return "just now";
         if (elapsed.TotalHours < 1) return $"{(int)elapsed.TotalMinutes} min ago";
         return $"{(int)elapsed.TotalHours}h ago";
+    }
+
+    private static bool Confirm(string prompt, bool defaultValue = true)
+    {
+        var hint = defaultValue ? "[[Y/n]]" : "[[y/N]]";
+        AnsiConsole.Markup($"{prompt} {hint} ");
+
+        while (true)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Y)
+            {
+                AnsiConsole.MarkupLine("[green]y[/]");
+                return true;
+            }
+            if (key.Key == ConsoleKey.N)
+            {
+                AnsiConsole.MarkupLine("[red]n[/]");
+                return false;
+            }
+            if (key.Key == ConsoleKey.Enter)
+            {
+                AnsiConsole.MarkupLine(defaultValue ? "[green]y[/]" : "[red]n[/]");
+                return defaultValue;
+            }
+        }
     }
 }

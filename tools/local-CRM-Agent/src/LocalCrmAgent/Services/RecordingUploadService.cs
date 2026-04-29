@@ -18,8 +18,20 @@ namespace LocalCrmAgent.Services;
 public class RecordingUploadService : IDisposable
 {
     private readonly RecordingStorageManager _storage;
-    private readonly HttpClient _httpClient = new();
+    // Default HttpClient.Timeout (100 s) is too tight for large MP3 uploads
+    // on slow links and too lenient for completely wedged sockets. Five
+    // minutes is a reasonable upper bound for any single upload attempt;
+    // backoff handles the retry side.
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromMinutes(5) };
     private readonly object _lock = new();
+
+    // Lightweight global circuit breaker: after this many consecutive upload
+    // failures across any file we pause all uploads for the cooldown window
+    // so we don't hammer PocketBase during a wider outage / token revocation.
+    private const int CircuitFailureThreshold = 5;
+    private static readonly TimeSpan CircuitCooldown = TimeSpan.FromSeconds(60);
+    private int _consecutiveFailures;
+    private DateTime _circuitOpenUntil = DateTime.MinValue;
 
     private string? _pocketbaseUrl;
     private string? _authToken;
@@ -91,6 +103,13 @@ public class RecordingUploadService : IDisposable
                 {
                     // Wait for auth — wake signal or 5s timeout
                     await WaitForSignal(5000, ct);
+                    continue;
+                }
+
+                if (IsCircuitOpen())
+                {
+                    var wait = (int)Math.Max(500, (_circuitOpenUntil - DateTime.UtcNow).TotalMilliseconds);
+                    await WaitForSignal(wait, ct);
                     continue;
                 }
 
@@ -293,6 +312,8 @@ public class RecordingUploadService : IDisposable
 
             // Clean up backoff tracking
             lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
+            // Reset breaker on any successful upload — partial outages clear.
+            Interlocked.Exchange(ref _consecutiveFailures, 0);
 
             UploadCompleted?.Invoke(entry.FileName, recordingId, callLogId, true, null);
         }
@@ -350,6 +371,21 @@ public class RecordingUploadService : IDisposable
             if (e.RetryCount < cap) e.RetryCount++;
             e.Error = null;
         });
+
+        // Trip the global breaker after enough consecutive failures across
+        // any file — likely a wider outage / token revocation. Cools down
+        // for CircuitCooldown so we don't hammer PocketBase.
+        var failures = Interlocked.Increment(ref _consecutiveFailures);
+        if (failures >= CircuitFailureThreshold)
+        {
+            _circuitOpenUntil = DateTime.UtcNow + CircuitCooldown;
+            FileLogger.Write($"[Upload] Circuit opened after {failures} consecutive failures; cooling down {CircuitCooldown.TotalSeconds:F0}s. Last error: {message}");
+        }
+    }
+
+    private bool IsCircuitOpen()
+    {
+        return DateTime.UtcNow < _circuitOpenUntil;
     }
 
     private static async Task<string> SafeReadBody(HttpResponseMessage response, CancellationToken ct)

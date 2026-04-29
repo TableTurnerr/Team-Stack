@@ -55,6 +55,22 @@ public class RecordingUploadService : IDisposable
     public event Action<string, string?, string?, bool, string?>? UploadCompleted;
     public event Action? UploadAuthExpired;
     public event Action<string, long, long>? UploadProgress;
+    /// <summary>
+    /// Fired when consecutive failures trip the global circuit breaker so
+    /// the dashboard can surface a clear "uploads paused" indicator instead
+    /// of leaving the user to wonder why pending uploads stopped progressing.
+    /// </summary>
+    public event Action<int, string?>? CircuitBreakerTripped;
+
+    // Cache of phone-number → (phoneRecordId, companyId) lookups. PocketBase
+    // is queried per-upload and most batches share a small set of numbers
+    // (one outbound campaign hits the same lead list); without a cache the
+    // upload loop made N serial HTTP round-trips per batch and the slowest
+    // one stalled Task.WhenAll for the rest. TTL is short enough that
+    // company reassignments still propagate within minutes.
+    private static readonly TimeSpan PhoneCacheTtl = TimeSpan.FromMinutes(5);
+    private readonly Dictionary<string, (DateTime expires, string? phoneId, string? companyId)> _phoneCache = new();
+    private readonly object _phoneCacheLock = new();
 
     public bool IsConfigured
     {
@@ -212,15 +228,50 @@ public class RecordingUploadService : IDisposable
                 ? VerifyCallLogExists(pocketbaseUrl, authToken, callLogId, ct)
                 : Task.FromResult(true);
 
-            await Task.WhenAll(resolveTask, verifyTask);
-
-            var (phoneNumberRecordId, companyId) = resolveTask.Result;
-
-            if (callLogId != null && !verifyTask.Result)
+            try { await Task.WhenAll(resolveTask, verifyTask); }
+            catch
             {
-                Debug.WriteLine($"[Upload] Call log {callLogId} deleted — discarding {entry.FileName}");
-                _storage.RemoveEntry(entry.FileName);
-                try { File.Delete(filePath); } catch { }
+                // Surface either inner exception below via the awaited
+                // .Result accesses; Task.WhenAll only rethrows the first.
+            }
+
+            (string? phoneNumberRecordId, string? companyId) resolved;
+            bool callLogStillExists;
+            try
+            {
+                resolved = await resolveTask;
+                callLogStillExists = await verifyTask;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Upload] Pre-upload checks failed: {entry.FileName} — {ex.Message}");
+                HandleNetworkFailure(entry, ex.Message);
+                return;
+            }
+
+            var (phoneNumberRecordId, companyId) = resolved;
+
+            if (callLogId != null && !callLogStillExists)
+            {
+                // Don't delete the file if it's still in use by the converter
+                // (caller will retry on next pass once the file is released).
+                if (entry.Uploaded)
+                {
+                    Debug.WriteLine($"[Upload] Call log {callLogId} deleted, file already uploaded — clearing entry: {entry.FileName}");
+                    _storage.RemoveEntry(entry.FileName);
+                }
+                else if (IsFileInUse(filePath))
+                {
+                    Debug.WriteLine($"[Upload] Call log {callLogId} deleted but file in use — deferring discard: {entry.FileName}");
+                    return; // try again next pass when conversion finishes
+                }
+                else
+                {
+                    Debug.WriteLine($"[Upload] Call log {callLogId} deleted — discarding {entry.FileName}");
+                    _storage.RemoveEntry(entry.FileName);
+                    try { File.Delete(filePath); } catch (Exception ex) { Debug.WriteLine($"[Upload] File delete failed: {ex.Message}"); }
+                }
                 UploadCompleted?.Invoke(entry.FileName, null, callLogId, false, "Call log deleted");
                 return;
             }
@@ -378,8 +429,17 @@ public class RecordingUploadService : IDisposable
         var failures = Interlocked.Increment(ref _consecutiveFailures);
         if (failures >= CircuitFailureThreshold)
         {
+            // Edge-trigger: only fire the breaker event the first time we
+            // cross the threshold within a cooldown window. Otherwise every
+            // failed upload during the cooldown window would re-broadcast.
+            var alreadyOpen = DateTime.UtcNow < _circuitOpenUntil;
             _circuitOpenUntil = DateTime.UtcNow + CircuitCooldown;
             FileLogger.Write($"[Upload] Circuit opened after {failures} consecutive failures; cooling down {CircuitCooldown.TotalSeconds:F0}s. Last error: {message}");
+            if (!alreadyOpen)
+            {
+                try { CircuitBreakerTripped?.Invoke((int)CircuitCooldown.TotalSeconds, message); }
+                catch { /* event handler errors must not crash the upload loop */ }
+            }
         }
     }
 
@@ -401,11 +461,18 @@ public class RecordingUploadService : IDisposable
     private async Task<(string? phoneNumberRecordId, string? companyId)> ResolvePhoneNumber(
         string pocketbaseUrl, string authToken, string phoneNumber, CancellationToken ct)
     {
+        var cleanNumber = new string(phoneNumber.Where(c => char.IsDigit(c) || c == '+').ToArray());
+        if (string.IsNullOrEmpty(cleanNumber)) return (null, null);
+
+        // Cache hit: avoid the round-trip and unblock the parallel batch.
+        lock (_phoneCacheLock)
+        {
+            if (_phoneCache.TryGetValue(cleanNumber, out var cached) && cached.expires > DateTime.UtcNow)
+                return (cached.phoneId, cached.companyId);
+        }
+
         try
         {
-            var cleanNumber = new string(phoneNumber.Where(c => char.IsDigit(c) || c == '+').ToArray());
-            if (string.IsNullOrEmpty(cleanNumber)) return (null, null);
-
             var url = $"{pocketbaseUrl}/api/collections/phone_numbers/records?filter=phone_number~\"{cleanNumber}\"&expand=company&perPage=1";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.TryAddWithoutValidation("Authorization", authToken);
@@ -416,7 +483,16 @@ public class RecordingUploadService : IDisposable
             var json = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
             var items = doc.RootElement.GetProperty("items");
-            if (items.GetArrayLength() == 0) return (null, null);
+            if (items.GetArrayLength() == 0)
+            {
+                // Cache the negative result too so a wave of uploads for an
+                // unknown number doesn't trigger N identical lookups.
+                lock (_phoneCacheLock)
+                {
+                    _phoneCache[cleanNumber] = (DateTime.UtcNow + PhoneCacheTtl, null, null);
+                }
+                return (null, null);
+            }
 
             var first = items[0];
             var phoneId = first.GetProperty("id").GetString();
@@ -425,6 +501,17 @@ public class RecordingUploadService : IDisposable
             if (first.TryGetProperty("company", out var companyProp) && companyProp.ValueKind == JsonValueKind.String)
                 companyId = companyProp.GetString();
 
+            lock (_phoneCacheLock)
+            {
+                _phoneCache[cleanNumber] = (DateTime.UtcNow + PhoneCacheTtl, phoneId, companyId);
+                // Cap the cache to prevent unbounded growth in a long-running
+                // session that touches thousands of distinct numbers.
+                if (_phoneCache.Count > 1024)
+                {
+                    var stale = _phoneCache.Where(kv => kv.Value.expires < DateTime.UtcNow).Select(kv => kv.Key).ToList();
+                    foreach (var k in stale) _phoneCache.Remove(k);
+                }
+            }
             return (phoneId, companyId);
         }
         catch (Exception ex)
@@ -432,6 +519,17 @@ public class RecordingUploadService : IDisposable
             Debug.WriteLine($"[Upload] Phone resolution failed: {ex.Message}");
             return (null, null);
         }
+    }
+
+    private static bool IsFileInUse(string path)
+    {
+        try
+        {
+            using var fs = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            return false;
+        }
+        catch (IOException) { return true; }
+        catch { return false; }
     }
 
     private async Task<bool> VerifyCallLogExists(string pocketbaseUrl, string authToken, string callLogId, CancellationToken ct)

@@ -1,5 +1,6 @@
 @echo off
 setlocal
+cd /d "%~dp0"
 
 :: Extract version from csproj so the banner stays in sync automatically
 for /f "tokens=3 delims=><" %%v in ('findstr /r "<Version>" src\LocalCrmAgent\LocalCrmAgent.csproj') do set VERSION=%%v

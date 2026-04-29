@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ToolManager.Services;
 
 namespace ToolManager.Models;
 
@@ -75,8 +76,18 @@ public class InstalledToolsRegistry
             var json = File.ReadAllText(FilePath);
             _tools = JsonSerializer.Deserialize<List<InstalledTool>>(json, JsonOptions) ?? [];
         }
-        catch
+        catch (Exception ex)
         {
+            try
+            {
+                var quarantine = $"{FilePath}.corrupt-{DateTime.Now:yyyyMMddHHmmss}";
+                File.Move(FilePath, quarantine);
+                FileLogger.Write($"[Registry] Corrupt installed.json quarantined to {quarantine}: {ex.Message}");
+            }
+            catch (Exception moveEx)
+            {
+                FileLogger.Write($"[Registry] Corrupt installed.json could not be quarantined ({moveEx.Message}); ignoring: {ex.Message}");
+            }
             _tools = [];
         }
     }

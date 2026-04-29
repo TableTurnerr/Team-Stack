@@ -6,8 +6,9 @@ import { useAuth } from '@/contexts/auth-context';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { useLocalAgent } from '@/contexts/local-agent-context';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type CustomCallOutcome, type FollowUp, type CompanyNote } from '@/lib/types';
+import { COLLECTIONS, type Company, type PhoneNumber, type CallLog, type Recording, type FollowUp, type CompanyNote } from '@/lib/types';
 import { cn, timeAgo, formatDateTime, formatPhoneNumber } from '@/lib/utils';
+import { useCustomCallOutcomes, flushPendingOutcomes } from '@/hooks/use-custom-call-outcomes';
 import { FollowUpScheduler } from '@/components/follow-up-scheduler';
 import { PhoneHoverCard } from '@/components/phone-hover-card';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
@@ -122,19 +123,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [receptionistName, setReceptionistName] = useState('');
     const [ownerName, setOwnerName] = useState('');
     const [callOutcome, setCallOutcome] = useState<string[]>([]);
-    const [customOutcomes, setCustomOutcomes] = useState<string[]>([]);
+    const { customOutcomes, addCustomOutcome } = useCustomCallOutcomes();
     const [showOtherInput, setShowOtherInput] = useState(false);
     const [otherInputValue, setOtherInputValue] = useState('');
     const otherInputRef = useRef<HTMLInputElement>(null);
-
-    // Load custom outcomes from DB once
-    useEffect(() => {
-        pb.collection(COLLECTIONS.CUSTOM_CALL_OUTCOMES).getFullList<CustomCallOutcome>({
-            sort: 'name',
-        }).then(records => {
-            setCustomOutcomes(records.map(r => r.name));
-        }).catch(() => {});
-    }, []);
 
     /** Toggle an outcome tag respecting max-3 rules */
     const toggleOutcome = (outcome: string) => {
@@ -904,6 +896,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 };
 
             try {
+                // Wait for any in-flight custom-outcome creates so the
+                // server-side enum widen runs before the call_log is written
+                // (otherwise PB rejects the new value as not in the enum).
+                await flushPendingOutcomes();
                 onSave(payload);
                 resetForm();
             } catch (err) {
@@ -1557,14 +1553,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                     type="text"
                                                     value={otherInputValue}
                                                     onChange={e => setOtherInputValue(e.target.value)}
-                                                    onKeyDown={e => {
+                                                    onKeyDown={async e => {
                                                         if (e.key === 'Enter' && otherInputValue.trim()) {
                                                             const name = otherInputValue.trim();
-                                                            // Add custom outcome to DB (ignore duplicates)
-                                                            pb.collection(COLLECTIONS.CUSTOM_CALL_OUTCOMES).create({ name }).catch(() => {});
-                                                            if (!customOutcomes.includes(name)) {
-                                                                setCustomOutcomes(prev => [...prev, name]);
-                                                            }
+                                                            await addCustomOutcome(name);
                                                             toggleOutcome(name);
                                                             setOtherInputValue('');
                                                             setShowOtherInput(false);
@@ -1578,13 +1570,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                                                     className="flex-1 px-2 py-1.5 rounded border border-[var(--card-border)] bg-[var(--sidebar-bg)] text-xs focus:outline-none focus:border-[var(--primary)]"
                                                 />
                                                 <button
-                                                    onClick={() => {
+                                                    onClick={async () => {
                                                         const name = otherInputValue.trim();
                                                         if (!name) return;
-                                                        pb.collection(COLLECTIONS.CUSTOM_CALL_OUTCOMES).create({ name }).catch(() => {});
-                                                        if (!customOutcomes.includes(name)) {
-                                                            setCustomOutcomes(prev => [...prev, name]);
-                                                        }
+                                                        await addCustomOutcome(name);
                                                         toggleOutcome(name);
                                                         setOtherInputValue('');
                                                         setShowOtherInput(false);

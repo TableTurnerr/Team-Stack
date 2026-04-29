@@ -17,13 +17,15 @@ public class TrayIconManager : IDisposable
     private readonly NotifyIcon _trayIcon;
     private readonly UpdateScheduler _scheduler;
     private readonly SelfUpdateService _selfUpdater;
+    private readonly GitHubReleaseService _github;
     private readonly SynchronizationContext? _uiContext;
     private DateTime _lastLaunch = DateTime.MinValue;
 
-    public TrayIconManager(UpdateScheduler scheduler, SelfUpdateService selfUpdater)
+    public TrayIconManager(UpdateScheduler scheduler, SelfUpdateService selfUpdater, GitHubReleaseService github)
     {
         _scheduler = scheduler;
         _selfUpdater = selfUpdater;
+        _github = github;
         // Captured here so background-thread events can marshal NotifyIcon updates
         // back to the UI thread that owns the tray icon's hidden window.
         _uiContext = SynchronizationContext.Current;
@@ -109,6 +111,34 @@ public class TrayIconManager : IDisposable
 
         menu.Items.Add(new ToolStripSeparator());
 
+        // GitHub auth — only shown if Device Flow is configured.
+        var auth = new GitHubAuthService();
+        if (auth.IsConfigured)
+        {
+            var authItem = new ToolStripMenuItem();
+            void RefreshAuthLabel()
+            {
+                authItem.Text = _github.IsAuthenticated ? "Sign out of GitHub" : "Sign in to GitHub…";
+            }
+            RefreshAuthLabel();
+            authItem.Click += async (_, _) =>
+            {
+                if (_github.IsAuthenticated)
+                {
+                    _github.ClearToken();
+                    RefreshAuthLabel();
+                    ShowBalloon("Signed out", "GitHub token removed.", ToolTipIcon.Info);
+                }
+                else
+                {
+                    await SignInWithGitHub(auth);
+                    RefreshAuthLabel();
+                }
+            };
+            menu.Items.Add(authItem);
+            menu.Items.Add(new ToolStripSeparator());
+        }
+
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) =>
         {
@@ -118,6 +148,48 @@ public class TrayIconManager : IDisposable
         menu.Items.Add(exitItem);
 
         return menu;
+    }
+
+    private async Task SignInWithGitHub(GitHubAuthService auth)
+    {
+        GitHubAuthService.DeviceCodeResponse code;
+        try
+        {
+            code = await auth.RequestDeviceCodeAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowBalloon("Sign-in failed", ex.Message, ToolTipIcon.Error);
+            FileLogger.Write($"[Tray] Device code request failed: {ex}");
+            return;
+        }
+
+        try { Clipboard.SetText(code.UserCode); } catch { }
+        GitHubAuthService.OpenBrowser(code.VerificationUri);
+
+        using var form = new GitHubSignInForm(code);
+        form.Show();
+        form.BringToFront();
+
+        try
+        {
+            var token = await auth.PollForTokenAsync(code, form.CancellationToken);
+            _github.SetToken(token);
+            ShowBalloon("Signed in", "GitHub token saved.", ToolTipIcon.Info);
+        }
+        catch (OperationCanceledException)
+        {
+            ShowBalloon("Sign-in cancelled", "No token saved.", ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            ShowBalloon("Sign-in failed", ex.Message, ToolTipIcon.Error);
+            FileLogger.Write($"[Tray] Sign-in failed: {ex}");
+        }
+        finally
+        {
+            if (!form.IsDisposed) form.Close();
+        }
     }
 
     private void ShowBalloon(string title, string text, ToolTipIcon icon)

@@ -9,6 +9,11 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        var diagDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "CrmAgent");
+        FileLogger.Init(Path.Combine(diagDir, "diagnostic.log"));
+
         // Self-heal the Run key + protocol handler on every launch, *before*
         // the single-instance gate. Running the exe a second time is the
         // user's natural way to repair a broken install (e.g. after the Run
@@ -66,6 +71,14 @@ static class Program
             uploader.SetAuth(config.LastPocketbaseUrl, savedToken, config.LastUploaderId);
         }
         wsServer.SetAgentConfig(config);
+        // If a token existed but DPAPI couldn't decrypt it (e.g. profile
+        // changed), surface the failure so the dashboard prompts re-auth
+        // instead of silently dropping uploads.
+        if (config.AuthDecryptionFailed)
+        {
+            FileLogger.Write("[Main] Saved auth token failed to decrypt — broadcasting auth_required");
+            wsServer.SetAuthRequired("decryption_failed");
+        }
 
         // ── Start agent ────────────────────────────────────────────
         agent.Start();

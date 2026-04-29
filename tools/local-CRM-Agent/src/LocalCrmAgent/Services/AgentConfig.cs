@@ -14,6 +14,14 @@ namespace LocalCrmAgent.Services;
 /// </summary>
 public class AgentConfig
 {
+    /// <summary>
+    /// Set to true when a saved DPAPI-protected token failed to decrypt (e.g.
+    /// after a user profile change). Surfaced to the dashboard via an
+    /// auth_required broadcast so the user is prompted to re-authenticate
+    /// instead of silently failing to upload recordings.
+    /// </summary>
+    [JsonIgnore] public bool AuthDecryptionFailed { get; private set; }
+
     [JsonPropertyName("autoRecordEnabled")] public bool AutoRecordEnabled { get; set; } = true;
     [JsonPropertyName("recordOnRinging")] public bool RecordOnRinging { get; set; }
     [JsonPropertyName("lastPocketbaseUrl")] public string? LastPocketbaseUrl { get; set; }
@@ -95,7 +103,8 @@ public class AgentConfig
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[Config] DPAPI unprotect failed: {ex.Message}");
+            FileLogger.Write($"[Config] DPAPI unprotect failed (auth lost): {ex.Message}");
+            AuthDecryptionFailed = true;
             return null;
         }
     }

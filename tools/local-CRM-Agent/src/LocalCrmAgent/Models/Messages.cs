@@ -12,6 +12,14 @@ public class AgentMessage
     public long Timestamp { get; set; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 }
 
+public class AuthRequiredMessage : AgentMessage
+{
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "decryption_failed";
+
+    public AuthRequiredMessage() => Type = "auth_required";
+}
+
 public class CallStateMessage : AgentMessage
 {
     [JsonPropertyName("state")]

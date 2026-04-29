@@ -14,6 +14,11 @@ namespace LocalCrmAgent.Services;
 public class DialIntentTracker
 {
     private static readonly TimeSpan MaxIntentAge = TimeSpan.FromSeconds(20);
+    // Hard upper bound on tracked intents. The TTL alone is enough under
+    // normal use, but a malformed dashboard or a rapid-fire test harness
+    // could otherwise let the dictionary grow without bound and turn
+    // MatchByPhone into an O(n) scan over thousands of dead entries.
+    private const int MaxTrackedIntents = 200;
 
     private readonly ConcurrentDictionary<string, Intent> _intents = new();
 
@@ -83,5 +88,17 @@ public class DialIntentTracker
         foreach (var kv in _intents)
             if (kv.Value.CreatedAt < cutoff)
                 _intents.TryRemove(kv.Key, out _);
+
+        // Defensive cap: if Add is racing far faster than Prune (rapid
+        // bulk redials) and entries haven't aged out yet, drop the oldest
+        // until we're back under the cap. Keeps lookup latency bounded.
+        if (_intents.Count > MaxTrackedIntents)
+        {
+            var ordered = _intents.ToArray()
+                .OrderBy(kv => kv.Value.CreatedAt)
+                .Take(_intents.Count - MaxTrackedIntents)
+                .Select(kv => kv.Key);
+            foreach (var k in ordered) _intents.TryRemove(k, out _);
+        }
     }
 }

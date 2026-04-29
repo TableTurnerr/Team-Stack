@@ -280,12 +280,14 @@ public class CallStateFusion : IDisposable
                         // account answered, or the user declined).
                         _state = CallState.Ended;
                         _endedAt = DateTime.UtcNow;
+                        _audioActiveLastSeen = null;
                     }
                     else if (_ringingAt.HasValue &&
                              (DateTime.UtcNow - _ringingAt.Value).TotalSeconds > RingingTimeoutSeconds)
                     {
                         _state = CallState.Ended;
                         _endedAt = DateTime.UtcNow;
+                        _audioActiveLastSeen = null;
                     }
                     break;
 
@@ -297,6 +299,11 @@ public class CallStateFusion : IDisposable
                         {
                             _state = CallState.Ended;
                             _endedAt = DateTime.UtcNow;
+                            // Clear the audio latch on confirmed end so the
+                            // Ended-cooldown window cannot be artificially
+                            // extended by stale latched activity, and so a
+                            // new call's first poll sees a fresh signal.
+                            _audioActiveLastSeen = null;
                         }
                     }
                     else
@@ -312,16 +319,17 @@ public class CallStateFusion : IDisposable
                     break;
 
                 case CallState.Ended:
-                    if (effectiveActive)
-                    {
-                        _state = CallState.Connected;
-                        _connectedAt = DateTime.UtcNow;
-                        _endedAt = null;
-                        _uiCallGoneSince = null;
-                        _audioInactiveSince = null;
-                    }
-                    else if (_endedAt.HasValue &&
-                             (DateTime.UtcNow - _endedAt.Value).TotalSeconds > EndedCooldownSeconds)
+                    // Once Ended is reached we do NOT bounce back to
+                    // Connected. Connected→Ended already required
+                    // UiLossConfirmSeconds of sustained inactivity, so the
+                    // call genuinely ended. Allowing re-entry to Connected
+                    // here let a flapping audio session create an
+                    // Ended↔Connected loop that reset _endedAt every cycle
+                    // and prevented the cleanup transition to Idle from
+                    // ever running. A real new call will re-enter through
+                    // Idle→Connected once the cooldown expires.
+                    if (_endedAt.HasValue &&
+                        (DateTime.UtcNow - _endedAt.Value).TotalSeconds > EndedCooldownSeconds)
                     {
                         _state = CallState.Idle;
                         _phoneNumber = null;
@@ -331,10 +339,10 @@ public class CallStateFusion : IDisposable
                         _connectedAt = null;
                         _ringingAt = null;
                         _endedAt = null;
-                        // Intentionally do not reset _audioActiveLastSeen
-                        // — a flapping audio session that briefly drops
-                        // shouldn't lose its history. The latch window
-                        // itself is short enough to keep this safe.
+                        // Reset the audio latch so a brief stale signal
+                        // from the prior call cannot trigger Idle→Connected
+                        // on the very next poll for a back-to-back call.
+                        _audioActiveLastSeen = null;
                         _audioInactiveSince = null;
                         _uiCallGoneSince = null;
                     }

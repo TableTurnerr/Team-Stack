@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Filter, Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { FilterCondition, FilterFieldDef, FilterLogic, FilterRelData, OperatorKey } from './types';
+import type { FilterCondition, FilterFieldDef, FilterLogic, FilterRelData, FilterScope, OperatorKey } from './types';
 import {
   defaultOperatorForType,
   isMultiValueOp,
@@ -13,11 +14,16 @@ import {
   operatorsForType,
   OPERATOR_LABELS,
 } from './operators';
+import { resolveScopedField } from './build-filter';
 import { MultiValuePicker } from './MultiValuePicker';
 
 let _uid = 0;
 function uid() {
   return `c${++_uid}`;
+}
+
+function effectiveDef(field: FilterFieldDef, scope?: FilterScope): FilterFieldDef {
+  return field.scopes ? resolveScopedField(field, scope) : field;
 }
 
 function defaultValuesFor(field: FilterFieldDef, operator: OperatorKey, relData: FilterRelData): string[] {
@@ -57,12 +63,15 @@ function activeConditionCount(conditions: FilterCondition[], fields: readonly Fi
 }
 
 export function makeCondition(field: FilterFieldDef, relData: FilterRelData = {}): FilterCondition {
-  const op = defaultOperatorForType(field.type);
+  const scope: FilterScope | undefined = field.scopes ? 'last' : undefined;
+  const eff = effectiveDef(field, scope);
+  const op = defaultOperatorForType(eff.type);
   return {
     id: uid(),
     field: field.key,
     operator: op,
-    values: defaultValuesFor(field, op, relData),
+    values: defaultValuesFor(eff, op, relData),
+    ...(scope ? { scope } : {}),
   };
 }
 
@@ -75,15 +84,37 @@ interface ConditionRowProps {
 }
 
 function ConditionRow({ condition, fields, relData, onChange, onRemove }: ConditionRowProps) {
-  const def = isFieldDef(fields, condition.field) ?? fields[0];
+  const rawDef = isFieldDef(fields, condition.field) ?? fields[0];
+  const def = effectiveDef(rawDef, condition.scope);
   const ops = operatorsForType(def.type);
   const op = condition.operator;
 
   const handleFieldChange = (fieldKey: string) => {
-    const newDef = isFieldDef(fields, fieldKey);
-    if (!newDef) return;
+    const newRaw = isFieldDef(fields, fieldKey);
+    if (!newRaw) return;
+    const scope: FilterScope | undefined = newRaw.scopes ? 'last' : undefined;
+    const newDef = effectiveDef(newRaw, scope);
     const newOp = defaultOperatorForType(newDef.type);
-    onChange({ ...condition, field: fieldKey, operator: newOp, values: defaultValuesFor(newDef, newOp, relData) });
+    onChange({
+      ...condition,
+      field: fieldKey,
+      operator: newOp,
+      values: defaultValuesFor(newDef, newOp, relData),
+      ...(scope ? { scope } : { scope: undefined }),
+    });
+  };
+
+  const handleScopeChange = (newScope: FilterScope) => {
+    if (!rawDef.scopes || condition.scope === newScope) return;
+    const newDef = effectiveDef(rawDef, newScope);
+    const stillValid = operatorsForType(newDef.type).includes(op);
+    const newOp = stillValid ? op : defaultOperatorForType(newDef.type);
+    onChange({
+      ...condition,
+      scope: newScope,
+      operator: newOp,
+      values: stillValid ? condition.values : defaultValuesFor(newDef, newOp, relData),
+    });
   };
 
   const handleOperatorChange = (newOp: OperatorKey) => {
@@ -112,7 +143,7 @@ function ConditionRow({ condition, fields, relData, onChange, onRemove }: Condit
         <select
           value={condition.field}
           onChange={(e) => handleFieldChange(e.target.value)}
-          className="appearance-none pl-2.5 pr-7 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] max-w-48"
+          className="appearance-none h-8 pl-2.5 pr-7 text-xs leading-none rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] max-w-48"
         >
           {showGroups
             ? grouped.map(g => (
@@ -126,11 +157,42 @@ function ConditionRow({ condition, fields, relData, onChange, onRemove }: Condit
         <ChevronDown size={10} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--muted)]" />
       </div>
 
+      {rawDef.scopes && (
+        <div className="inline-flex h-8 rounded-lg border border-[var(--card-border)] overflow-hidden text-[10px]">
+          <button
+            type="button"
+            onClick={() => handleScopeChange('last')}
+            className={cn(
+              'px-2 font-semibold transition-colors',
+              (condition.scope ?? 'last') === 'last'
+                ? 'bg-[var(--foreground)] text-[var(--background)]'
+                : 'text-[var(--muted)] hover:bg-[var(--card-hover)]',
+            )}
+            title="Match the most recent call only"
+          >
+            Last call
+          </button>
+          <button
+            type="button"
+            onClick={() => handleScopeChange('any')}
+            className={cn(
+              'px-2 font-semibold transition-colors border-l border-[var(--card-border)]',
+              condition.scope === 'any'
+                ? 'bg-[var(--foreground)] text-[var(--background)]'
+                : 'text-[var(--muted)] hover:bg-[var(--card-hover)]',
+            )}
+            title="Match if any call to this company satisfies the filter"
+          >
+            Any call
+          </button>
+        </div>
+      )}
+
       <div className="relative">
         <select
           value={op}
           onChange={(e) => handleOperatorChange(e.target.value as OperatorKey)}
-          className="appearance-none pl-2.5 pr-7 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+          className="appearance-none h-8 pl-2.5 pr-7 text-xs leading-none rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
         >
           {ops.map(o => <option key={o} value={o}>{OPERATOR_LABELS[o]}</option>)}
         </select>
@@ -177,14 +239,14 @@ function ValueInput({ condition, field, relData, onChange }: ValueInputProps) {
           type={inputType}
           value={condition.values[0] ?? ''}
           onChange={(e) => setValueAt(0, e.target.value)}
-          className="px-2.5 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-32"
+          className="h-8 px-2.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-32"
         />
         <span className="text-[10px] text-[var(--muted)]">and</span>
         <input
           type={inputType}
           value={condition.values[1] ?? ''}
           onChange={(e) => setValueAt(1, e.target.value)}
-          className="px-2.5 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-32"
+          className="h-8 px-2.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-32"
         />
       </span>
     );
@@ -198,7 +260,7 @@ function ValueInput({ condition, field, relData, onChange }: ValueInputProps) {
         value={condition.values[0] ?? ''}
         onChange={(e) => setValueAt(0, e.target.value)}
         placeholder="days"
-        className="px-2.5 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-20"
+        className="h-8 px-2.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-20"
       />
     );
   }
@@ -221,7 +283,7 @@ function ValueInput({ condition, field, relData, onChange }: ValueInputProps) {
         <select
           value={condition.values[0] ?? ''}
           onChange={(e) => setValueAt(0, e.target.value)}
-          className="appearance-none pl-2.5 pr-7 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] min-w-36"
+          className="appearance-none h-8 pl-2.5 pr-7 text-xs leading-none rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] min-w-36"
         >
           {opts.length === 0 && <option value="">Select…</option>}
           {opts.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
@@ -237,7 +299,7 @@ function ValueInput({ condition, field, relData, onChange }: ValueInputProps) {
         <select
           value={condition.values[0] ?? ''}
           onChange={(e) => setValueAt(0, e.target.value)}
-          className="appearance-none pl-2.5 pr-7 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] min-w-36"
+          className="appearance-none h-8 pl-2.5 pr-7 text-xs leading-none rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] min-w-36"
         >
           {field.options.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
@@ -252,7 +314,7 @@ function ValueInput({ condition, field, relData, onChange }: ValueInputProps) {
         type="date"
         value={condition.values[0] ?? ''}
         onChange={(e) => setValueAt(0, e.target.value)}
-        className="px-2.5 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+        className="h-8 px-2.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
       />
     );
   }
@@ -264,7 +326,7 @@ function ValueInput({ condition, field, relData, onChange }: ValueInputProps) {
         value={condition.values[0] ?? ''}
         onChange={(e) => setValueAt(0, e.target.value)}
         placeholder="0"
-        className="px-2.5 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-24"
+        className="h-8 px-2.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] w-24"
       />
     );
   }
@@ -275,7 +337,7 @@ function ValueInput({ condition, field, relData, onChange }: ValueInputProps) {
       value={condition.values[0] ?? ''}
       onChange={(e) => setValueAt(0, e.target.value)}
       placeholder="Value…"
-      className="px-2.5 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] min-w-36"
+      className="h-8 px-2.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] min-w-36"
     />
   );
 }
@@ -302,6 +364,9 @@ export function FilterBuilder({
   const [draftConditions, setDraftConditions] = useState<FilterCondition[]>(conditions);
   const [draftLogic, setDraftLogic] = useState<FilterLogic>(logic);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number; openUp: boolean }>({ top: 0, left: 0, maxHeight: 480, openUp: false });
   const activeCount = activeConditionCount(conditions, fields);
   const draftActiveCount = activeConditionCount(draftConditions, fields);
   const isDirty =
@@ -320,10 +385,43 @@ export function FilterBuilder({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const updatePos = () => {
+      const rect = buttonRef.current!.getBoundingClientRect();
+      const desired = 480;
+      const spaceBelow = window.innerHeight - rect.bottom - 12;
+      const spaceAbove = rect.top - 12;
+      const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
+      const maxHeight = Math.min(desired, Math.max(200, openUp ? spaceAbove : spaceBelow));
+      const minWidth = 560;
+      const left = Math.min(
+        Math.max(8, rect.right - minWidth),
+        window.innerWidth - minWidth - 8,
+      );
+      setPos({
+        top: openUp ? rect.top - 8 : rect.bottom + 8,
+        left,
+        maxHeight,
+        openUp,
+      });
+    };
+    updatePos();
+    window.addEventListener('scroll', updatePos, true);
+    window.addEventListener('resize', updatePos);
+    return () => {
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+    };
   }, [open]);
 
   const addCondition = () => {
@@ -351,6 +449,7 @@ export function FilterBuilder({
   return (
     <div ref={ref} className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen(v => !v)}
         className={cn(
           'flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors',
@@ -369,8 +468,18 @@ export function FilterBuilder({
         )}
       </button>
 
-      {open && (
-        <div className="absolute top-full right-0 mt-2 z-40 w-max min-w-[560px] max-w-[92vw] bg-[var(--background)] border border-[var(--card-border)] rounded-xl shadow-2xl">
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={popoverRef}
+          style={{
+            position: 'fixed',
+            top: pos.openUp ? undefined : pos.top,
+            bottom: pos.openUp ? window.innerHeight - pos.top : undefined,
+            left: pos.left,
+            maxHeight: pos.maxHeight,
+          }}
+          className="z-[10000] w-max min-w-[560px] max-w-[92vw] bg-[var(--background)] border border-[var(--card-border)] rounded-xl shadow-2xl flex flex-col overflow-hidden"
+        >
           <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--card-border)] gap-3">
             <span className="text-sm font-semibold">{title}</span>
             <div className="flex items-center gap-2">
@@ -403,7 +512,7 @@ export function FilterBuilder({
             </div>
           </div>
 
-          <div className="p-4 space-y-2.5 max-h-96 overflow-y-auto">
+          <div className="p-4 space-y-2.5 overflow-y-auto flex-1 min-h-0">
             {draftConditions.length === 0 ? (
               <p className="text-xs text-[var(--muted)] text-center py-2">
                 No filters. Add a condition below to narrow down results.
@@ -433,19 +542,20 @@ export function FilterBuilder({
           <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--card-border)]">
             <button
               onClick={cancel}
-              className="px-3 py-1.5 text-xs rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors"
+              className="h-8 px-3 text-xs rounded-lg border border-[var(--card-border)] hover:bg-[var(--card-hover)] transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={apply}
               disabled={!isDirty}
-              className="px-3 py-1.5 text-xs rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="h-8 px-3 text-xs rounded-lg bg-[var(--foreground)] text-[var(--background)] hover:opacity-90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Apply{isDirty ? ' changes' : ''}
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

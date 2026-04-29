@@ -1,7 +1,33 @@
-import type { FilterCondition, FilterFieldDef, FilterLogic, OperatorKey } from './types';
+import type { FilterCondition, FilterFieldDef, FilterLogic, FilterScope, OperatorKey } from './types';
 import { isValuelessOp } from './operators';
 
 const ARRAY_REL_FIELDS = new Set(['call_outcome', 'objections', 'pain_points']);
+
+export function resolveScopedField(
+  field: FilterFieldDef,
+  scope: FilterScope | undefined,
+): FilterFieldDef {
+  if (!field.scopes) return field;
+  const variant = field.scopes[scope ?? 'last'];
+  return {
+    key: variant.key,
+    label: field.label,
+    type: variant.type,
+    group: field.group,
+    options: variant.options,
+    relCollection: variant.relCollection,
+    realField: variant.realField,
+  };
+}
+
+export function resolveCondition(
+  condition: FilterCondition,
+  field: FilterFieldDef,
+): { def: FilterFieldDef; condition: FilterCondition } {
+  if (!field.scopes) return { def: field, condition };
+  const def = resolveScopedField(field, condition.scope);
+  return { def, condition: { ...condition, field: def.key } };
+}
 
 export function escapeFilterString(value: string): string {
   if (!value) return '';
@@ -177,10 +203,11 @@ export function buildDirectFilter(
 ): string {
   const parts: string[] = [];
   for (const c of conditions) {
-    if (isRelFilterField(c.field)) continue;
-    const def = fields.find(f => f.key === c.field);
-    if (!def) continue;
-    const clause = buildClause(c, def);
+    const rawDef = fields.find(f => f.key === c.field);
+    if (!rawDef) continue;
+    const { def, condition } = resolveCondition(c, rawDef);
+    if (isRelFilterField(def.key)) continue;
+    const clause = buildClause(condition, def);
     if (clause) parts.push(clause);
   }
   if (parts.length === 0) return '';

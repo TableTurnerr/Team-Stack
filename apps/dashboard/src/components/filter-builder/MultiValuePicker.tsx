@@ -20,14 +20,45 @@ interface MultiValuePickerProps {
 export function MultiValuePicker({ options, values, onChange, placeholder = 'Select…', className }: MultiValuePickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number; maxHeight: number; openUp: boolean }>({ top: 0, left: 0, width: 0, maxHeight: 256, openUp: false });
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const updatePos = () => {
+      const rect = buttonRef.current!.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom - 8;
+      const spaceAbove = rect.top - 8;
+      const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+      const maxHeight = Math.min(256, Math.max(120, openUp ? spaceAbove : spaceBelow));
+      setMenuStyle({
+        top: openUp ? rect.top - 4 : rect.bottom + 4,
+        left: rect.left,
+        width: Math.max(rect.width, 176),
+        maxHeight,
+        openUp,
+      });
+    };
+    updatePos();
+    window.addEventListener('scroll', updatePos, true);
+    window.addEventListener('resize', updatePos);
+    return () => {
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+    };
   }, [open]);
 
   const valueSet = new Set(values);
@@ -46,9 +77,10 @@ export function MultiValuePicker({ options, values, onChange, placeholder = 'Sel
   return (
     <div ref={ref} className={cn('relative', className)}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1 min-w-36 max-w-72 pl-2.5 pr-7 py-1.5 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] relative"
+        className="flex items-center gap-1 h-8 min-w-36 max-w-72 pl-2.5 pr-7 text-xs rounded-lg border border-[var(--card-border)] bg-[var(--background)] hover:bg-[var(--card-hover)] transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--foreground)] relative"
       >
         {selectedLabels.length === 0 ? (
           <span className="text-[var(--muted)]">{placeholder}</span>
@@ -76,7 +108,18 @@ export function MultiValuePicker({ options, values, onChange, placeholder = 'Sel
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 min-w-44 max-w-80 max-h-64 overflow-y-auto bg-[var(--background)] border border-[var(--card-border)] rounded-lg shadow-xl py-1">
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            top: menuStyle.openUp ? undefined : menuStyle.top,
+            bottom: menuStyle.openUp ? window.innerHeight - menuStyle.top : undefined,
+            left: menuStyle.left,
+            minWidth: menuStyle.width,
+            maxHeight: menuStyle.maxHeight,
+          }}
+          className="z-[60] max-w-80 overflow-y-auto bg-[var(--background)] border border-[var(--card-border)] rounded-lg shadow-xl py-1">
+
           {options.length === 0 && (
             <div className="px-2 py-1.5 text-xs text-[var(--muted)]">No options</div>
           )}

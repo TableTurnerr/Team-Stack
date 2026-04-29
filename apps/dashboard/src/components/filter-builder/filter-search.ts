@@ -1,7 +1,7 @@
 import { pb } from '@/lib/pocketbase';
 import type { RecordModel } from 'pocketbase';
 import type { FilterCondition, FilterFieldDef, FilterLogic } from './types';
-import { buildDirectFilter, isRelFilterField } from './build-filter';
+import { buildDirectFilter, isRelFilterField, resolveCondition } from './build-filter';
 import { fetchIdsForRelCondition } from './build-rel-filter';
 import { isValuelessOp } from './operators';
 
@@ -36,6 +36,20 @@ export function readyConditions(conditions: FilterCondition[], fields: readonly 
   return conditions.filter(c => isConditionReady(c, fields));
 }
 
+/** Resolve scopable conditions to their concrete (key + field def) form. */
+function resolveConditions(
+  conditions: FilterCondition[],
+  fields: readonly FilterFieldDef[],
+): { condition: FilterCondition; def: FilterFieldDef }[] {
+  const out: { condition: FilterCondition; def: FilterFieldDef }[] = [];
+  for (const c of conditions) {
+    const rawDef = fields.find(f => f.key === c.field);
+    if (!rawDef) continue;
+    out.push(resolveCondition(c, rawDef));
+  }
+  return out;
+}
+
 function combineFilters(parts: string[]): string {
   return parts.filter(Boolean).join(' && ');
 }
@@ -43,17 +57,20 @@ function combineFilters(parts: string[]): string {
 export async function runFilterSearch<T extends RecordModel>(input: FilterSearchInput): Promise<FilterSearchResult<T>> {
   const { collection, fields, conditions, logic, page, perPage, sort, expand, extraFilter } = input;
   const ready = readyConditions(conditions, fields);
+  const resolved = resolveConditions(ready, fields);
 
-  const directConditions = ready.filter(c => !isRelFilterField(c.field));
-  const relConditions = ready.filter(c => isRelFilterField(c.field));
+  const directConditionsOriginal: FilterCondition[] = [];
+  const relResolved: { condition: FilterCondition; def: FilterFieldDef }[] = [];
+  for (let i = 0; i < resolved.length; i++) {
+    if (isRelFilterField(resolved[i].def.key)) relResolved.push(resolved[i]);
+    else directConditionsOriginal.push(ready[i]);
+  }
 
-  const directFilterStr = buildDirectFilter(directConditions, logic, fields);
+  const directFilterStr = buildDirectFilter(directConditionsOriginal, logic, fields);
 
-  const relIdSets = await Promise.all(relConditions.map(rc => {
-    const def = fields.find(f => f.key === rc.field);
-    if (!def) return Promise.resolve(null);
-    return fetchIdsForRelCondition(rc, def);
-  }));
+  const relIdSets = await Promise.all(relResolved.map(({ condition, def }) =>
+    fetchIdsForRelCondition(condition, def)
+  ));
   const validRelIdSets = relIdSets.filter((s): s is Set<string> => s !== null);
 
   let allowedIds: Set<string> | null = null;
@@ -78,7 +95,7 @@ export async function runFilterSearch<T extends RecordModel>(input: FilterSearch
   if (validRelIdSets.length === 0) {
     const filterStr = combineFilters([directFilterStr, extraFilter ?? '']);
     const result = await pb.collection(collection).getList<T>(page, perPage, {
-      filter: filterStr || undefined,
+      ...(filterStr ? { filter: filterStr } : {}),
       sort: sort ?? '-updated',
       ...(expand ? { expand } : {}),
     });
@@ -158,15 +175,20 @@ export async function runFilterSearch<T extends RecordModel>(input: FilterSearch
 export async function fetchAllMatchingIds(input: Omit<FilterSearchInput, 'page' | 'perPage' | 'sort' | 'expand'>): Promise<string[]> {
   const { collection, fields, conditions, logic, extraFilter } = input;
   const ready = readyConditions(conditions, fields);
-  const directConditions = ready.filter(c => !isRelFilterField(c.field));
-  const relConditions = ready.filter(c => isRelFilterField(c.field));
-  const directFilterStr = buildDirectFilter(directConditions, logic, fields);
+  const resolved = resolveConditions(ready, fields);
 
-  const relIdSets = await Promise.all(relConditions.map(rc => {
-    const def = fields.find(f => f.key === rc.field);
-    if (!def) return Promise.resolve(null);
-    return fetchIdsForRelCondition(rc, def);
-  }));
+  const directConditionsOriginal: FilterCondition[] = [];
+  const relResolved: { condition: FilterCondition; def: FilterFieldDef }[] = [];
+  for (let i = 0; i < resolved.length; i++) {
+    if (isRelFilterField(resolved[i].def.key)) relResolved.push(resolved[i]);
+    else directConditionsOriginal.push(ready[i]);
+  }
+
+  const directFilterStr = buildDirectFilter(directConditionsOriginal, logic, fields);
+
+  const relIdSets = await Promise.all(relResolved.map(({ condition, def }) =>
+    fetchIdsForRelCondition(condition, def)
+  ));
   const validRelIdSets = relIdSets.filter((s): s is Set<string> => s !== null);
 
   let allowedIds: Set<string> | null = null;

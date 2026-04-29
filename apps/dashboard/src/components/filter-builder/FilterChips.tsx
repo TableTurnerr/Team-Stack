@@ -18,8 +18,12 @@ function relLabel(field: FilterFieldDef, id: string, relData: FilterRelData): st
   return list.find(o => o.id === id)?.label ?? id;
 }
 
-function summarize(c: FilterCondition, field: FilterFieldDef, relData: FilterRelData): string {
+function summarize(c: FilterCondition, rawField: FilterFieldDef, relData: FilterRelData): string {
   const opLabel = OPERATOR_LABELS[c.operator];
+  const label = rawField.scopes
+    ? `${c.scope === 'any' ? 'Any Call' : 'Last Call'}: ${rawField.label}`
+    : rawField.label;
+  const field: FilterFieldDef = { ...rawField, label };
   if (isValuelessOp(c.operator)) return `${field.label} ${opLabel}`;
   if (isRangeOp(c.operator)) {
     const a = c.values[0] ?? '';

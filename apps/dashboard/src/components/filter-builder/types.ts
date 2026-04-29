@@ -48,6 +48,16 @@ export interface RelOption {
   label: string;
 }
 
+export type FilterScope = 'last' | 'any';
+
+export interface ScopeVariant {
+  key: string;
+  type: FieldType;
+  options?: readonly string[];
+  relCollection?: 'users' | 'lead_categories';
+  realField?: string;
+}
+
 export interface FilterFieldDef {
   key: string;
   label: string;
@@ -56,6 +66,8 @@ export interface FilterFieldDef {
   options?: readonly string[];
   relCollection?: 'users' | 'lead_categories';
   realField?: string;
+  /** When set, this field is scopable: condition stores `scope` and resolves to one of these variants. */
+  scopes?: { last: ScopeVariant; any: ScopeVariant };
 }
 
 export interface FilterCondition {
@@ -63,6 +75,8 @@ export interface FilterCondition {
   field: string;
   operator: OperatorKey;
   values: string[];
+  /** Only meaningful when the field is scopable. */
+  scope?: FilterScope;
 }
 
 export interface FilterRelData {

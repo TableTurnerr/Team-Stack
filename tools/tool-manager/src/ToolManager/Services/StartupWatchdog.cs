@@ -45,7 +45,9 @@ public class StartupWatchdog : IDisposable
     public void Dispose()
     {
         _cts?.Cancel();
-        try { _loopTask?.Wait(3000); } catch { }
+        try { _loopTask?.Wait(3000); }
+        catch (AggregateException ae) when (ae.InnerExceptions.All(e => e is OperationCanceledException)) { }
+        catch (Exception ex) { FileLogger.Write($"[StartupWatchdog] Shutdown error: {ex}"); }
         _cts?.Dispose();
     }
 }

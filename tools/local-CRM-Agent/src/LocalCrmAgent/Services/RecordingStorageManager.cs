@@ -36,23 +36,29 @@ public class RecordingStorageManager
 
     /// <summary>
     /// Generate a recording file path with timestamp + sanitized phone number.
+    /// When <paramref name="recordingId"/> is supplied it is folded into the
+    /// filename so back-to-back calls to the same number within the same
+    /// millisecond cannot collide on disk (the prior format relied on the
+    /// timestamp alone, which is rare-but-possible to repeat under load).
     /// </summary>
-    public string GenerateFilePath(string phoneNumber)
+    public string GenerateFilePath(string phoneNumber, string? recordingId = null)
     {
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff");
         var sanitized = SanitizePhoneNumber(phoneNumber);
-        var fileName = $"{timestamp}_{sanitized}.mp3";
+        var idPart = string.IsNullOrEmpty(recordingId) ? "" : $"_{recordingId}";
+        var fileName = $"{timestamp}_{sanitized}{idPart}.mp3";
         return Path.Combine(_recordingsDir, fileName);
     }
 
     /// <summary>
     /// Generate a temp WAV path for recording before MP3 conversion.
     /// </summary>
-    public string GenerateTempWavPath(string phoneNumber)
+    public string GenerateTempWavPath(string phoneNumber, string? recordingId = null)
     {
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff");
         var sanitized = SanitizePhoneNumber(phoneNumber);
-        return Path.Combine(_recordingsDir, $".tmp_{timestamp}_{sanitized}.wav");
+        var idPart = string.IsNullOrEmpty(recordingId) ? "" : $"_{recordingId}";
+        return Path.Combine(_recordingsDir, $".tmp_{timestamp}_{sanitized}{idPart}.wav");
     }
 
     /// <summary>

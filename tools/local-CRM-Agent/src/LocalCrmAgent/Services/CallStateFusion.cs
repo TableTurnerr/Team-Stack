@@ -125,6 +125,23 @@ public class CallStateFusion : IDisposable
 
     private void Evaluate()
     {
+        // Evaluate runs from three sources (audio event, UI event, polling
+        // loop) and must serialize all signal-source reads + state writes —
+        // the per-block lock below was insufficient because fields like
+        // _audioActiveLastSeen / _phoneNumber / _direction were touched
+        // before it. Hold the lock for the whole computation, then release
+        // before invoking subscribers (StateChanged) so subscriber code
+        // cannot deadlock against fusion state.
+        CallStateInfo? notify;
+        lock (_lock)
+        {
+            notify = EvaluateLocked();
+        }
+        if (notify != null) StateChanged?.Invoke(notify);
+    }
+
+    private CallStateInfo? EvaluateLocked()
+    {
         var audio = _audioMonitor.GetZoomAudioState();
         var window = _windowMonitor.GetZoomWindowInfo();
         var ui = _uiWatcher.CurrentState;
@@ -230,12 +247,9 @@ public class CallStateFusion : IDisposable
             }
         }
 
-        CallState prev;
-        lock (_lock)
+        CallState prev = _state;
+        switch (_state)
         {
-            prev = _state;
-            switch (_state)
-            {
                 case CallState.Idle:
                     if (effectiveActive)
                     {
@@ -325,7 +339,6 @@ public class CallStateFusion : IDisposable
                         _uiCallGoneSince = null;
                     }
                     break;
-            }
         }
 
         // Confidence tiers:
@@ -369,13 +382,14 @@ public class CallStateFusion : IDisposable
         if (_state != prev)
         {
             Debug.WriteLine($"[Fusion] {prev} → {_state} | phone={_phoneNumber} conf={conf} ui={uiActive}/{uiRinging} audio(active={audioActive} flow={audioFlowing} alive={audioAlive}) window(timer={window.IsTimerDetected} calling={window.IsCallingDetected} incoming={window.IsIncomingDetected}) teammate={info.TeammateOnCall}");
-            StateChanged?.Invoke(info);
+            return info;
         }
-        else if (teammateChanged)
+        if (teammateChanged)
         {
             Debug.WriteLine($"[Fusion] teammateOnCall → {info.TeammateOnCall}");
-            StateChanged?.Invoke(info);
+            return info;
         }
+        return null;
     }
 
     public void Dispose() => Stop();

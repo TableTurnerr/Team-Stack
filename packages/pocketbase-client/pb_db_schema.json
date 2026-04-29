@@ -2093,6 +2093,18 @@
             },
             {
                 "hidden": false,
+                "id": "number_total_call_time",
+                "max": null,
+                "min": 0,
+                "name": "total_call_time",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
                 "id": "number_owner_reached",
                 "max": null,
                 "min": 0,

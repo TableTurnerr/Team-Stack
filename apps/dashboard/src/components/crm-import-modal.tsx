@@ -19,6 +19,7 @@ import { COLLECTIONS } from '@/lib/types';
 import type { Company, PhoneNumber, User as UserType, LeadCategory } from '@/lib/types';
 import { sanitizeFilterValue } from '@/lib/utils';
 import { getOutcomeColors, DEFAULT_OUTCOMES } from '@/lib/call-outcomes';
+import { useCustomCallOutcomes } from '@/hooks/use-custom-call-outcomes';
 import {
   FilterBuilder,
   FilterChips,
@@ -34,7 +35,6 @@ import {
 const COMPANY_STATUSES = ['Cold No Reply', 'Replied', 'Warm', 'Booked', 'Paid', 'Client', 'Excluded'] as const;
 const CALL_DIRECTIONS = ['outbound', 'inbound'] as const;
 const SOURCES = ['Cold Call', 'Google Maps', 'Manual', 'Instagram'] as const;
-const STATUS_OPTIONS = [...DEFAULT_OUTCOMES, ...COMPANY_STATUSES] as const;
 
 export interface CRMImportEntry {
     number: string;
@@ -47,11 +47,23 @@ interface CRMImportModalProps {
     onImport: (entries: CRMImportEntry[]) => void;
 }
 
-const FILTER_FIELDS: readonly FilterFieldDef[] = [
+function buildFilterFields(customOutcomes: readonly string[]): readonly FilterFieldDef[] {
+  const statusOptions = [...DEFAULT_OUTCOMES, ...customOutcomes, ...COMPANY_STATUSES];
+  const anyOutcomeOptions = [...DEFAULT_OUTCOMES, ...customOutcomes];
+  return [
     // Company
     { key: 'company_name', label: 'Company Name', type: 'text', group: 'Company' },
     { key: 'owner_name', label: 'Owner Name', type: 'text', group: 'Company' },
-    { key: 'status', label: 'Last Call: Outcome', type: 'multi_enum', options: STATUS_OPTIONS, group: 'Calls' },
+    {
+      key: 'call_outcome',
+      label: 'Call Outcome',
+      type: 'multi_enum',
+      group: 'Calls',
+      scopes: {
+        last: { key: 'status', type: 'multi_enum', options: statusOptions },
+        any: { key: 'call_logs_via_company.call_outcome', type: 'rel_select', options: anyOutcomeOptions },
+      },
+    },
     { key: 'source', label: 'Source', type: 'enum', options: SOURCES, group: 'Company' },
     { key: 'company_location', label: 'Location', type: 'text', group: 'Company' },
     { key: 'industry', label: 'Industry', type: 'text', group: 'Company' },
@@ -74,23 +86,23 @@ const FILTER_FIELDS: readonly FilterFieldDef[] = [
     { key: 'lead_category', label: 'Lead Category', type: 'rel_id', relCollection: 'lead_categories', group: 'Assignment' },
     { key: 'lead_category_present', label: 'Has Lead Category', type: 'boolean', realField: 'lead_category', group: 'Assignment' },
 
-    // Calls (any-call rel filters)
-    { key: 'call_logs_via_company.call_outcome', label: 'Any Call: Outcome', type: 'rel_select', options: [...DEFAULT_OUTCOMES, 'Other'], group: 'Calls' },
-    { key: 'call_logs_via_company.direction', label: 'Any Call: Direction', type: 'rel_select', options: CALL_DIRECTIONS, group: 'Calls' },
-    { key: 'call_logs_via_company.status_changed_to', label: 'Any Call: Status Changed To', type: 'rel_select', options: COMPANY_STATUSES, group: 'Calls' },
-    { key: 'call_logs_via_company.caller', label: 'Any Call: Called By', type: 'rel_id', relCollection: 'users', group: 'Calls' },
-    { key: 'call_logs_via_company.post_call_notes', label: 'Any Call: Notes Contain', type: 'rel_text', group: 'Calls' },
-    { key: 'call_logs_via_company.owner_reached', label: 'Any Call: Owner Reached', type: 'rel_boolean', group: 'Calls' },
-    { key: 'call_logs_via_company.appointment_set', label: 'Any Call: Appointment Set', type: 'rel_boolean', group: 'Calls' },
-    { key: 'call_logs_via_company.pitch_completed', label: 'Any Call: Pitch Completed', type: 'rel_boolean', group: 'Calls' },
-    { key: 'call_logs_via_company.has_recording', label: 'Any Call: Has Recording', type: 'rel_boolean', group: 'Calls' },
-    { key: 'call_logs_via_company.duration', label: 'Any Call: Total Duration (s)', type: 'rel_number', group: 'Calls' },
-    { key: 'call_logs_via_company.call_duration', label: 'Any Call: Talk Duration (s)', type: 'rel_number', group: 'Calls' },
-    { key: 'call_logs_via_company.call_time', label: 'Any Call: Date', type: 'rel_date', group: 'Calls' },
+    // Call attributes (only "any call" scope makes sense — no last-call denorm on the company).
+    { key: 'call_logs_via_company.direction', label: 'Call Direction', type: 'rel_select', options: CALL_DIRECTIONS, group: 'Calls' },
+    { key: 'call_logs_via_company.status_changed_to', label: 'Call Status Changed To', type: 'rel_select', options: COMPANY_STATUSES, group: 'Calls' },
+    { key: 'call_logs_via_company.caller', label: 'Called By', type: 'rel_id', relCollection: 'users', group: 'Calls' },
+    { key: 'call_logs_via_company.post_call_notes', label: 'Call Notes Contain', type: 'rel_text', group: 'Calls' },
+    { key: 'call_logs_via_company.owner_reached', label: 'Owner Reached', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.appointment_set', label: 'Appointment Set', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.pitch_completed', label: 'Pitch Completed', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.has_recording', label: 'Has Recording', type: 'rel_boolean', group: 'Calls' },
+    { key: 'call_logs_via_company.duration', label: 'Total Duration (s)', type: 'rel_number', group: 'Calls' },
+    { key: 'call_logs_via_company.call_duration', label: 'Talk Duration (s)', type: 'rel_number', group: 'Calls' },
+    { key: 'call_logs_via_company.call_time', label: 'Call Date', type: 'rel_date', group: 'Calls' },
 
     // Notes
     { key: 'company_notes_via_company.content', label: 'Pre-Call Note Contains', type: 'rel_text', group: 'Notes' },
-];
+  ];
+}
 
 const PER_PAGE = 25;
 
@@ -167,6 +179,8 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
 
     const [users, setUsers] = useState<UserType[]>([]);
     const [leadCategories, setLeadCategories] = useState<LeadCategory[]>([]);
+    const { customOutcomes } = useCustomCallOutcomes();
+    const filterFields = useMemo(() => buildFilterFields(customOutcomes), [customOutcomes]);
 
     const selection = useFilterSelection();
     const [selectedDetails, setSelectedDetails] = useState<Map<string, { number: string; company: string }>>(new Map());
@@ -215,7 +229,8 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
         setTotalPages(1);
         setSelectedDetails(new Map());
         selection.clear();
-    }, [open, selection]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     const runSearch = useCallback(async (targetPage: number) => {
         const seq = ++seqRef.current;
@@ -227,7 +242,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
 
             const result = await runFilterSearch<Company>({
                 collection: COLLECTIONS.COMPANIES,
-                fields: FILTER_FIELDS,
+                fields: filterFields,
                 conditions,
                 logic,
                 page: targetPage,
@@ -252,12 +267,21 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
         } finally {
             if (seq === seqRef.current) setLoading(false);
         }
-    }, [conditions, logic, searchQuery]);
+    }, [conditions, logic, searchQuery, filterFields]);
 
-    // Debounced search trigger
+    // Debounced search trigger — only when the user has typed a query or applied filters.
     useEffect(() => {
         if (!open) return;
         if (debounceRef.current) clearTimeout(debounceRef.current);
+        const hasQuery = searchQuery.trim().length > 0;
+        const hasFilters = conditions.length > 0;
+        if (!hasQuery && !hasFilters) {
+            setResults([]);
+            setMatchCount(null);
+            setPage(1);
+            setTotalPages(1);
+            return;
+        }
         debounceRef.current = setTimeout(() => {
             runSearch(1);
             selection.exitAllFiltered();
@@ -343,7 +367,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
 
             const ids = await fetchAllMatchingIds({
                 collection: COLLECTIONS.COMPANIES,
-                fields: FILTER_FIELDS,
+                fields: filterFields,
                 conditions,
                 logic,
                 extraFilter: extras || undefined,
@@ -424,7 +448,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                             />
                         </div>
                         <FilterBuilder
-                            fields={FILTER_FIELDS}
+                            fields={filterFields}
                             conditions={conditions}
                             logic={logic}
                             relData={relData}
@@ -435,7 +459,7 @@ export function CRMImportModal({ open, onClose, onImport }: CRMImportModalProps)
                     {conditions.length > 0 && (
                         <FilterChips
                             conditions={conditions}
-                            fields={FILTER_FIELDS}
+                            fields={filterFields}
                             relData={relData}
                             onRemove={(id) => setConditions(conditions.filter(c => c.id !== id))}
                             onClear={() => setConditions([])}

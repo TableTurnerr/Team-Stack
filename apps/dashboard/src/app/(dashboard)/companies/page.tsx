@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -45,7 +45,7 @@ import { LeadCategorySelect } from '@/components/lead-category-select';
 import {
   FilterBuilder,
   FilterChips,
-  buildDirectFilter,
+  runFilterSearch,
   useFilterSelection,
   fetchAllMatchingIds,
   shouldConfirmSelectAll,
@@ -54,6 +54,7 @@ import {
   type FilterLogic,
 } from '@/components/filter-builder';
 import { DEFAULT_OUTCOMES } from '@/lib/call-outcomes';
+import { useCustomCallOutcomes } from '@/hooks/use-custom-call-outcomes';
 import { RelativeTime } from '@/components/relative-time';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { PageGuard } from '@/components/page-guard';
@@ -95,11 +96,23 @@ const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
 // Status is a JSON array (computed from call outcomes) — last call per phone, deduplicated.
 const COMPANY_STATUSES = ['Cold No Reply', 'Replied', 'Warm', 'Booked', 'Paid', 'Client', 'Excluded'] as const;
 const COMPANY_SOURCES = ['Cold Call', 'Google Maps', 'Manual', 'Instagram'] as const;
-const COMPANY_STATUS_OPTIONS = [...DEFAULT_OUTCOMES, ...COMPANY_STATUSES] as const;
+const CALL_DIRECTIONS = ['outbound', 'inbound'] as const;
 
-const COMPANIES_FILTER_FIELDS: readonly FilterFieldDef[] = [
+function buildCompaniesFilterFields(customOutcomes: readonly string[]): readonly FilterFieldDef[] {
+  const statusOptions = [...DEFAULT_OUTCOMES, ...customOutcomes, ...COMPANY_STATUSES];
+  const anyOutcomeOptions = [...DEFAULT_OUTCOMES, ...customOutcomes];
+  return [
   { key: 'lead_category', label: 'Lead Category', type: 'rel_id', relCollection: 'lead_categories', group: 'Company' },
-  { key: 'status', label: 'Last Call: Outcome', type: 'multi_enum', options: COMPANY_STATUS_OPTIONS, group: 'Calls' },
+  {
+    key: 'call_outcome',
+    label: 'Call Outcome',
+    type: 'multi_enum',
+    group: 'Calls',
+    scopes: {
+      last: { key: 'status', type: 'multi_enum', options: statusOptions },
+      any: { key: 'call_logs_via_company.call_outcome', type: 'rel_select', options: anyOutcomeOptions },
+    },
+  },
   { key: 'source', label: 'Source', type: 'enum', options: COMPANY_SOURCES, group: 'Company' },
   { key: 'company_location', label: 'Location', type: 'text', group: 'Company' },
   { key: 'email', label: 'Email', type: 'text', group: 'Company' },
@@ -107,7 +120,21 @@ const COMPANIES_FILTER_FIELDS: readonly FilterFieldDef[] = [
   { key: 'instagram_handle', label: 'Instagram', type: 'text', group: 'Company' },
   { key: 'last_contacted', label: 'Last Contacted', type: 'date', group: 'Calls' },
   { key: 'do_not_contact', label: 'Do Not Contact', type: 'boolean', group: 'Company' },
-];
+
+  // Call attributes without a denormalized last-call equivalent on the company — only "any call" scope is useful.
+  { key: 'call_logs_via_company.direction', label: 'Call Direction', type: 'rel_select', options: CALL_DIRECTIONS, group: 'Calls' },
+  { key: 'call_logs_via_company.status_changed_to', label: 'Call Status Changed To', type: 'rel_select', options: COMPANY_STATUSES, group: 'Calls' },
+  { key: 'call_logs_via_company.caller', label: 'Called By', type: 'rel_id', relCollection: 'users', group: 'Calls' },
+  { key: 'call_logs_via_company.post_call_notes', label: 'Call Notes Contain', type: 'rel_text', group: 'Calls' },
+  { key: 'call_logs_via_company.owner_reached', label: 'Owner Reached', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.appointment_set', label: 'Appointment Set', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.pitch_completed', label: 'Pitch Completed', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.has_recording', label: 'Has Recording', type: 'rel_boolean', group: 'Calls' },
+  { key: 'call_logs_via_company.duration', label: 'Total Duration (s)', type: 'rel_number', group: 'Calls' },
+  { key: 'call_logs_via_company.call_duration', label: 'Talk Duration (s)', type: 'rel_number', group: 'Calls' },
+  { key: 'call_logs_via_company.call_time', label: 'Call Date', type: 'rel_date', group: 'Calls' },
+  ];
+}
 
 // Company row with inline edit
 function CompanyRow({
@@ -745,6 +772,8 @@ export default function CompaniesPage() {
   const canAccessExtensionLeads = isAdmin || hasPermission('can_access_extension_leads_directly');
   const teamMembers = useTeamMembers();
   const { preferences } = useUserPreferences();
+  const { customOutcomes } = useCustomCallOutcomes();
+  const filterFields = useMemo(() => buildCompaniesFilterFields(customOutcomes), [customOutcomes]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [categories, setCategories] = useState<LeadCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -798,7 +827,7 @@ export default function CompaniesPage() {
       const ids = await selection.materialize(() =>
         fetchAllMatchingIds({
           collection: COLLECTIONS.COMPANIES,
-          fields: COMPANIES_FILTER_FIELDS,
+          fields: filterFields,
           conditions: appliedConditions,
           logic: appliedLogic,
         }),
@@ -866,7 +895,6 @@ export default function CompaniesPage() {
           searchFilter += ` || ${buildPhoneSearchFilter('phone_number', searchTerm)}`;
         }
       }
-      const conditionsFilter = buildDirectFilter(appliedConditions, appliedLogic, COMPANIES_FILTER_FIELDS);
       let assigneeFilterStr = '';
       if (assigneeFilter === 'mine' && user?.id) {
         assigneeFilterStr = `assigned_to = "${user.id}"`;
@@ -881,13 +909,19 @@ export default function CompaniesPage() {
       const hideUnassigned = !canAccessExtensionLeads && assigneeFilter === 'all'
         ? `assigned_to != ""`
         : '';
-      const filterParts = [searchFilter && `(${searchFilter})`, conditionsFilter, assigneeFilterStr, hideUnassigned].filter(Boolean);
-      const filter = filterParts.join(' && ');
+      const extraParts = [searchFilter && `(${searchFilter})`, assigneeFilterStr, hideUnassigned].filter(Boolean);
+      const extraFilter = extraParts.join(' && ');
 
-      const result = await pb.collection(COLLECTIONS.COMPANIES).getList<Company>(page, perPage, {
+      const result = await runFilterSearch<Company>({
+        collection: COLLECTIONS.COMPANIES,
+        fields: filterFields,
+        conditions: appliedConditions,
+        logic: appliedLogic,
+        page,
+        perPage,
         sort: '-created',
         expand: 'lead_category,assigned_to',
-        ...(filter && { filter }),
+        extraFilter: extraFilter || undefined,
       });
 
       setCompanies(result.items);
@@ -901,7 +935,7 @@ export default function CompaniesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchTerm, appliedConditions, appliedLogic, isAuthenticated, assigneeFilter, user?.id, canAccessExtensionLeads]);
+  }, [page, searchTerm, appliedConditions, appliedLogic, isAuthenticated, assigneeFilter, user?.id, canAccessExtensionLeads, filterFields]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -990,7 +1024,7 @@ export default function CompaniesPage() {
           </button>
 
           <FilterBuilder
-            fields={COMPANIES_FILTER_FIELDS}
+            fields={filterFields}
             conditions={filterConditions}
             logic={filterLogic}
             relData={{
@@ -1077,7 +1111,7 @@ export default function CompaniesPage() {
       {appliedConditions.length > 0 && (
         <FilterChips
           conditions={appliedConditions}
-          fields={COMPANIES_FILTER_FIELDS}
+          fields={filterFields}
           relData={{ lead_categories: categories.map(c => ({ id: c.id, label: c.name })) }}
           onRemove={(id) => {
             const next = appliedConditions.filter(c => c.id !== id);

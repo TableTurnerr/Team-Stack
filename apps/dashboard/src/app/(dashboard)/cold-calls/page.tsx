@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -47,6 +47,7 @@ import {
   type FilterLogic,
 } from '@/components/filter-builder';
 import { DEFAULT_OUTCOMES } from '@/lib/call-outcomes';
+import { useCustomCallOutcomes } from '@/hooks/use-custom-call-outcomes';
 import {
   TableContainer,
   IndexCell,
@@ -113,24 +114,26 @@ type TabType = 'call_logs' | 'phone_numbers';
 
 // ─── Filter fields ───────────────────────────────────────────────────────────
 
-const COLD_CALL_OUTCOME_OPTIONS = [...DEFAULT_OUTCOMES, 'Other +'] as const;
-
-const COLD_CALLS_FILTER_FIELDS: readonly FilterFieldDef[] = [
-  { key: 'call_outcome', label: 'Outcome', type: 'json_array', options: COLD_CALL_OUTCOME_OPTIONS, group: 'Calls' },
-  { key: 'call_time', label: 'Date', type: 'date', group: 'Calls' },
-  { key: 'direction', label: 'Direction', type: 'enum', options: ['outbound', 'inbound'] as const, group: 'Calls' },
-  { key: 'owner_reached', label: 'Owner Reached', type: 'boolean', group: 'Calls' },
-  { key: 'pitch_completed', label: 'Pitch Completed', type: 'boolean', group: 'Calls' },
-  { key: 'appointment_set', label: 'Appointment Set', type: 'boolean', group: 'Calls' },
-  { key: 'has_recording', label: 'Has Recording', type: 'boolean', group: 'Calls' },
-  { key: 'post_call_notes', label: 'Notes', type: 'text', group: 'Notes' },
-];
+function buildColdCallsFilterFields(customOutcomes: readonly string[]): readonly FilterFieldDef[] {
+  return [
+    { key: 'call_outcome', label: 'Outcome', type: 'json_array', options: [...DEFAULT_OUTCOMES, ...customOutcomes], group: 'Calls' },
+    { key: 'call_time', label: 'Date', type: 'date', group: 'Calls' },
+    { key: 'direction', label: 'Direction', type: 'enum', options: ['outbound', 'inbound'] as const, group: 'Calls' },
+    { key: 'owner_reached', label: 'Owner Reached', type: 'boolean', group: 'Calls' },
+    { key: 'pitch_completed', label: 'Pitch Completed', type: 'boolean', group: 'Calls' },
+    { key: 'appointment_set', label: 'Appointment Set', type: 'boolean', group: 'Calls' },
+    { key: 'has_recording', label: 'Has Recording', type: 'boolean', group: 'Calls' },
+    { key: 'post_call_notes', label: 'Notes', type: 'text', group: 'Notes' },
+  ];
+}
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function ColdCallsPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { preferences } = useUserPreferences();
+  const { customOutcomes } = useCustomCallOutcomes();
+  const filterFields = useMemo(() => buildColdCallsFilterFields(customOutcomes), [customOutcomes]);
   const [activeTab, setActiveTab] = useState<TabType>('call_logs');
 
   // Call Logs state
@@ -209,7 +212,7 @@ export default function ColdCallsPage() {
           : `phone_number_record.phone_number ~ "${safe}"`;
         filters.push(`(company.company_name ~ "${safe}" || ${phoneCondition} || owner_name_found ~ "${safe}" || post_call_notes ~ "${safe}")`);
       }
-      const conditionsFilter = buildDirectFilter(appliedConditions, appliedLogic, COLD_CALLS_FILTER_FIELDS);
+      const conditionsFilter = buildDirectFilter(appliedConditions, appliedLogic, filterFields);
       if (conditionsFilter) filters.push(conditionsFilter);
 
       const sortField = sort.field;
@@ -229,7 +232,7 @@ export default function ColdCallsPage() {
     } finally {
       setCallLogsLoading(false);
     }
-  }, [callLogsPage, sort, searchTerm, appliedConditions, appliedLogic, isAuthenticated]);
+  }, [callLogsPage, sort, searchTerm, appliedConditions, appliedLogic, isAuthenticated, filterFields]);
 
   // Fetch on mount and when deps change
   useEffect(() => {
@@ -311,7 +314,7 @@ export default function ColdCallsPage() {
           {activeTab === 'call_logs' && (
             <>
               <FilterBuilder
-                fields={COLD_CALLS_FILTER_FIELDS}
+                fields={filterFields}
                 conditions={filterConditions}
                 logic={filterLogic}
                 onChange={(c, l) => {
@@ -388,7 +391,7 @@ export default function ColdCallsPage() {
       {activeTab === 'call_logs' && appliedConditions.length > 0 && (
         <FilterChips
           conditions={appliedConditions}
-          fields={COLD_CALLS_FILTER_FIELDS}
+          fields={filterFields}
           onRemove={(id) => {
             const next = appliedConditions.filter(c => c.id !== id);
             setFilterConditions(next);

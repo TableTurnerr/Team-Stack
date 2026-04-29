@@ -116,15 +116,21 @@ export function IncomingCallHandler() {
         lookupIncomingNumber(incomingCallerNumber);
 
         // Increment session total_incoming only (inbound calls are not dials)
-        // Uses PocketBase atomic increment to prevent race conditions with stale session state
-        if (session) {
+        // Uses PocketBase atomic increment to prevent race conditions with stale session state.
+        // Ownership guard: skip the increment if the active session does not
+        // belong to the currently signed-in user. This prevents an in-flight
+        // ring (after user switch / logout-relogin) from being counted on
+        // the previous user's session.
+        if (session && user && session.user === user.id) {
             pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(session.id, {
                 'total_incoming+': 1,
             } as any).then(updated => {
                 setSession(updated);
             }).catch(err => console.error('[IncomingCallHandler] Failed to increment incoming count:', err));
+        } else if (session && user && session.user !== user.id) {
+            console.warn('[IncomingCallHandler] Skipped total_incoming increment — session owner mismatch', { sessionUser: session.user, currentUser: user.id });
         }
-    }, [callStatus, callDirection, incomingCallerNumber, session, setSession, lookupIncomingNumber, isActiveForCalls]);
+    }, [callStatus, callDirection, incomingCallerNumber, session, setSession, lookupIncomingNumber, isActiveForCalls, user]);
 
     // ── Effect 2: Inbound call answered ──
     useEffect(() => {

@@ -227,22 +227,33 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     try {
                         const msg = JSON.parse(event.data);
                         switch (msg.type) {
-                            case 'callState':
+                            case 'callState': {
+                                // Defensive: when the agent reports idle the
+                                // call is over, so any per-call identifiers
+                                // (intentId / clientCallId / phone) MUST be
+                                // wiped here even if the agent payload still
+                                // carries leftover values. This prevents the
+                                // form from attributing the next call to the
+                                // previous call's clientCallId during the
+                                // idle→ringing race window.
+                                const incomingState = msg.state ?? 'idle';
+                                const isIdle = incomingState === 'idle';
                                 setCallState({
-                                    state: msg.state ?? 'idle',
-                                    phoneNumber: msg.phoneNumber ?? null,
-                                    direction: msg.direction ?? null,
+                                    state: incomingState,
+                                    phoneNumber: isIdle ? null : (msg.phoneNumber ?? null),
+                                    direction: isIdle ? null : (msg.direction ?? null),
                                     duration: msg.duration ?? 0,
                                     confidence: msg.confidence ?? 'low',
                                     deviceId: msg.deviceId ?? null,
-                                    intentId: msg.intentId ?? null,
-                                    clientCallId: msg.clientCallId ?? null,
-                                    zoomCallId: msg.zoomCallId ?? null,
-                                    uiSeenHere: Boolean(msg.uiSeenHere),
-                                    audioActiveHere: Boolean(msg.audioActiveHere),
+                                    intentId: isIdle ? null : (msg.intentId ?? null),
+                                    clientCallId: isIdle ? null : (msg.clientCallId ?? null),
+                                    zoomCallId: isIdle ? null : (msg.zoomCallId ?? null),
+                                    uiSeenHere: !isIdle && Boolean(msg.uiSeenHere),
+                                    audioActiveHere: !isIdle && Boolean(msg.audioActiveHere),
                                     teammateOnCall: Boolean(msg.teammateOnCall),
                                 });
                                 break;
+                            }
                             case 'networkQuality':
                                 setNetworkQuality({
                                     latencyMs: msg.latencyMs ?? 0,
@@ -404,6 +415,64 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     callLogId: (r.callLogId as string | null) ?? null,
                                 })) : [];
                                 setFailedUploads(list);
+                                // Drop any in-flight progress entries for
+                                // permanently-failed uploads so the map
+                                // doesn't grow unbounded across retries.
+                                if (list.length > 0) {
+                                    setUploadProgress(prev => {
+                                        if (prev.size === 0) return prev;
+                                        const next = new Map(prev);
+                                        let changed = false;
+                                        for (const r of list) {
+                                            if (r.fileName && next.delete(r.fileName)) changed = true;
+                                        }
+                                        return changed ? next : prev;
+                                    });
+                                }
+                                break;
+                            }
+                            case 'uploadCompleted': {
+                                // Final outcome of a single upload attempt.
+                                // Whether success or failure, the in-flight
+                                // progress entry is no longer relevant — drop
+                                // it so the map cannot leak across many calls.
+                                const fn: string = msg.fileName ?? '';
+                                if (fn) {
+                                    setUploadProgress(prev => {
+                                        if (!prev.has(fn)) return prev;
+                                        const next = new Map(prev);
+                                        next.delete(fn);
+                                        return next;
+                                    });
+                                }
+                                break;
+                            }
+                            case 'circuitBreakerTripped': {
+                                console.warn(
+                                    '[LocalAgent] Upload circuit breaker tripped — pausing %ds. Reason: %s',
+                                    msg.cooldownSeconds ?? 60,
+                                    msg.reason ?? 'consecutive failures',
+                                );
+                                setUploadQueueStatus(prev => prev
+                                    ? { ...prev, currentUpload: null }
+                                    : prev);
+                                break;
+                            }
+                            case 'authRestored': {
+                                // Agent re-acquired credentials; ensure the
+                                // dashboard knows uploads can resume by
+                                // re-broadcasting the latest auth token.
+                                if (pb.authStore.isValid && pb.authStore.token &&
+                                    wsRef.current?.readyState === WebSocket.OPEN) {
+                                    try {
+                                        wsRef.current.send(JSON.stringify({
+                                            type: 'setUploadConfig',
+                                            pocketbaseUrl: process.env.NEXT_PUBLIC_POCKETBASE_URL || '',
+                                            authToken: pb.authStore.token,
+                                            uploaderId: pb.authStore.model?.id || '',
+                                        }));
+                                    } catch { /* ignore */ }
+                                }
                                 break;
                             }
                         }

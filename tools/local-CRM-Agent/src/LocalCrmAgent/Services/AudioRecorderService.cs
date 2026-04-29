@@ -137,6 +137,24 @@ public class AudioRecorderService : IDisposable
     /// </summary>
     public (bool success, string? error) StartRecording(string phoneNumber)
     {
+        // Idempotent re-entry: a duplicate startRecording for the same phone
+        // within a couple of seconds (e.g. dashboard sent it twice due to a
+        // network hiccup, or auto-record fired alongside an explicit start)
+        // should be a no-op rather than tearing down a healthy recording.
+        // Without this guard the second call force-discards the first and
+        // produces an orphan WAV/manifest entry that the upload loop later
+        // has to clean up.
+        lock (_lock)
+        {
+            if (_state == RecordingState.Recording &&
+                string.Equals(_currentPhoneNumber, phoneNumber, StringComparison.Ordinal) &&
+                (DateTime.UtcNow - _recordingStartTime).TotalSeconds < 2.0)
+            {
+                Debug.WriteLine($"[Recorder] Idempotent skip — recording for {phoneNumber} started <2s ago");
+                return (true, null);
+            }
+        }
+
         // Clean up any non-Idle state before starting a new recording.
         var currentState = CurrentState;
         if (currentState != RecordingState.Idle)
@@ -183,9 +201,11 @@ public class AudioRecorderService : IDisposable
                 var intent = _intentTracker?.MostRecent();
                 _currentClientCallId = intent?.ClientCallId;
 
-                // Generate file paths
-                _tempWavPath = _storage.GenerateTempWavPath(phoneNumber);
-                _targetMp3Path = _storage.GenerateFilePath(phoneNumber);
+                // Generate file paths — pass the recordingId so back-to-back
+                // calls to the same number within the same millisecond don't
+                // collide on disk.
+                _tempWavPath = _storage.GenerateTempWavPath(phoneNumber, _currentRecordingId);
+                _targetMp3Path = _storage.GenerateFilePath(phoneNumber, _currentRecordingId);
 
                 // Loopback capture (system audio — remote party's voice)
                 _loopbackCapture = new WasapiLoopbackCapture();

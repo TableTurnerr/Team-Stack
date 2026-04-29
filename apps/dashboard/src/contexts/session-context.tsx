@@ -5,6 +5,7 @@ import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession } from '@/lib/types';
 import { useAuth } from './auth-context';
 import { usePhone } from './phone-context';
+import { useLocalAgent } from './local-agent-context';
 
 interface SessionContextType {
     /** The current user's active session (if any) */
@@ -31,6 +32,7 @@ const SessionContext = createContext<SessionContextType | undefined>(undefined);
 export function SessionProvider({ children }: { children: React.ReactNode }) {
     const { user, isAuthenticated } = useAuth();
     const { callStatus } = usePhone();
+    const { isConnected: agentConnected } = useLocalAgent();
     const [session, setSession] = useState<ColdCallingSession | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isStandaloneMode, setStandaloneMode] = useState(false);
@@ -117,13 +119,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const prevOnCallRef = useRef<boolean>(false);
     useEffect(() => {
         if (!session || session.status !== 'active') return;
-        const isOnCall = callStatus === 'ringing' || callStatus === 'connected';
+        // Force on_call=false whenever the local agent is disconnected,
+        // regardless of stale callStatus in phone-context. Without this
+        // belt-and-suspenders sync, an agent crash during a connected
+        // call could leave on_call=true forever (until manual correction)
+        // because the phone-context idle-cascade timer might be missed
+        // during navigation/unmount races.
+        const isOnCall = agentConnected && (callStatus === 'ringing' || callStatus === 'connected');
         if (isOnCall === prevOnCallRef.current) return;
         prevOnCallRef.current = isOnCall;
         pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, { on_call: isOnCall }).catch(err => {
             console.error('[Session Context] Failed to sync on_call status:', err);
         });
-    }, [callStatus, session]);
+    }, [callStatus, session, agentConnected]);
 
     return (
         <SessionContext.Provider value={{

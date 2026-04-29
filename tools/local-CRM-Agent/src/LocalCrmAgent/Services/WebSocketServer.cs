@@ -64,6 +64,24 @@ public class AgentWebSocketServer : IDisposable
         _recorder.RecordingConverted += OnRecordingConverted;
         _uploader.UploadCompleted += OnUploadCompleted;
         _uploader.UploadProgress += OnUploadProgress;
+        _uploader.CircuitBreakerTripped += OnUploadCircuitBreakerTripped;
+    }
+
+    private void OnUploadCircuitBreakerTripped(int cooldownSeconds, string? reason)
+    {
+        var payload = new
+        {
+            type = "circuitBreakerTripped",
+            cooldownSeconds,
+            reason = reason ?? "consecutive failures",
+        };
+        var json = JsonSerializer.Serialize(payload, _jsonOptions);
+        List<IWebSocketConnection> snapshot;
+        lock (_clientLock) snapshot = [.. _clients];
+        foreach (var c in snapshot)
+        {
+            try { if (c.IsAvailable) c.Send(json); } catch { /* ignore */ }
+        }
     }
 
     /// <summary>
@@ -154,10 +172,15 @@ public class AgentWebSocketServer : IDisposable
 
                 // Notify newly connected dashboards if auth was lost so the
                 // user is prompted to re-authenticate even if they connect
-                // after the agent started.
-                if (_authRequired)
+                // after the agent started. Read the flag under the same
+                // lock that protects writes to keep the read consistent
+                // with concurrent setUploadConfig handlers.
+                bool authRequired;
+                string authReason;
+                lock (_clientLock) { authRequired = _authRequired; authReason = _authRequiredReason; }
+                if (authRequired)
                 {
-                    var authMsg = new AuthRequiredMessage { Reason = _authRequiredReason };
+                    var authMsg = new AuthRequiredMessage { Reason = authReason };
                     socket.Send(JsonSerializer.Serialize(authMsg, _jsonOptions));
                 }
             };
@@ -711,14 +734,36 @@ public class AgentWebSocketServer : IDisposable
     /// </summary>
     public void SetAuthRequired(string reason)
     {
-        _authRequired = true;
-        _authRequiredReason = reason;
+        lock (_clientLock)
+        {
+            _authRequired = true;
+            _authRequiredReason = reason;
+        }
         Broadcast(new AuthRequiredMessage { Reason = reason });
     }
 
     public void ClearAuthRequired()
     {
-        _authRequired = false;
+        bool wasRequired;
+        lock (_clientLock)
+        {
+            wasRequired = _authRequired;
+            _authRequired = false;
+        }
+        // Edge-trigger: only emit authRestored on a real transition. Avoids
+        // spamming connected dashboards every time setUploadConfig arrives
+        // during normal token refresh cycles.
+        if (wasRequired)
+        {
+            var payload = new { type = "authRestored" };
+            var json = JsonSerializer.Serialize(payload, _jsonOptions);
+            List<IWebSocketConnection> snapshot;
+            lock (_clientLock) snapshot = [.. _clients];
+            foreach (var c in snapshot)
+            {
+                try { if (c.IsAvailable) c.Send(json); } catch { /* ignore */ }
+            }
+        }
     }
 
     /// <summary>
@@ -960,6 +1005,7 @@ public class AgentWebSocketServer : IDisposable
         {
             _uploader.UploadCompleted -= OnUploadCompleted;
             _uploader.UploadProgress -= OnUploadProgress;
+            _uploader.CircuitBreakerTripped -= OnUploadCircuitBreakerTripped;
         }
         _micManager = null;
 

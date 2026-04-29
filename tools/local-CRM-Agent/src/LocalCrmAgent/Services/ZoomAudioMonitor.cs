@@ -490,7 +490,11 @@ public class ZoomAudioMonitor : IDisposable
         _sessionListeners.Clear();
         _sessionWatchers.Clear();
         _watchedManagers.Clear();
-        foreach (var d in _watchedDevices) try { d.Dispose(); } catch { }
+        foreach (var d in _watchedDevices)
+        {
+            try { d.Dispose(); }
+            catch (Exception ex) { FileLogger.Write($"[ZoomAudio] Device dispose failed: {ex.Message}"); }
+        }
         _watchedDevices.Clear();
         _enumerator?.Dispose();
         _enumerator = null;

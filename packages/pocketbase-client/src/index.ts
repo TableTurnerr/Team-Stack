@@ -117,7 +117,7 @@ export interface OutreachLog extends RecordModel {
 }
 
 export interface Goal extends RecordModel {
-    metric: 'Total Messages Sent' | 'Unique Profiles Contacted' | 'Replies Received' | 'Warm Leads Generated' | 'Bookings Made' | 'Payments Received' | 'Calls Made' | 'Calls Transcribed';
+    metric: 'Total Messages Sent' | 'Unique Profiles Contacted' | 'Replies Received' | 'Warm Lead Generated' | 'Bookings Made' | 'Payments Received' | 'Calls Made' | 'Calls Transcribed';
     target_value: number;
     frequency: 'Daily' | 'Weekly' | 'Monthly';
     assigned_to_user?: string;

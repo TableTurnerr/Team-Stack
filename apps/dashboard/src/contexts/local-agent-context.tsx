@@ -98,6 +98,13 @@ interface LocalAgentContextType {
     zoomDetected: boolean;
     /** Number of seconds the agent has been running */
     agentUptime: number;
+    /**
+     * Wall-clock ms timestamp of the last frame received from the agent
+     * (any type, including pongs/heartbeats). Updated on every WebSocket
+     * message so consumers can detect a frozen-but-still-open socket
+     * without re-implementing their own staleness tracking.
+     */
+    lastMessageAt: number;
     /** Attempt to launch the local agent via protocol handler */
     launchAgent: () => void;
     /** Ask the agent to launch Zoom (find and start the process) */
@@ -153,6 +160,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
     const [zoomDetected, setZoomDetected] = useState(false);
     const [agentUptime, setAgentUptime] = useState(0);
     const [zoomLaunching, setZoomLaunching] = useState(false);
+    const [lastMessageAt, setLastMessageAt] = useState<number>(() => Date.now());
     const [recordingState, setRecordingState] = useState<AgentRecordingState | null>(null);
     const [latestRecording, setLatestRecording] = useState<AgentRecordingCompleted | null>(null);
     const [unlinkedRecordings, setUnlinkedRecordings] = useState<AgentRecordingCompleted[]>([]);
@@ -270,7 +278,9 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     if (!mountedRef.current) return;
                     // Mark liveness on EVERY frame, including unknown types
                     // — the watchdog only cares that the socket is talking.
-                    lastMessageAtRef.current = Date.now();
+                    const now = Date.now();
+                    lastMessageAtRef.current = now;
+                    setLastMessageAt(now);
                     try {
                         const msg = JSON.parse(event.data);
                         switch (msg.type) {
@@ -659,7 +669,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
     return (
         <LocalAgentContext.Provider value={{
             isConnected, callState, networkQuality,
-            zoomDetected, agentUptime, launchAgent,
+            zoomDetected, agentUptime, lastMessageAt, launchAgent,
             launchZoom, zoomLaunching,
             recordingState, latestRecording, unlinkedRecordings, uploadQueueStatus,
             uploadProgress, failedUploads,
@@ -683,6 +693,7 @@ export function useLocalAgent(): LocalAgentContextType {
         networkQuality: null,
         zoomDetected: false,
         agentUptime: 0,
+        lastMessageAt: 0,
         launchAgent: () => {},
         launchZoom: () => {},
         zoomLaunching: false,

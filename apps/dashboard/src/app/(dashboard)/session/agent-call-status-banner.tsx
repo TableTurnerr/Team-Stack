@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, PhoneOff, Phone, Loader2 } from 'lucide-react';
 import { usePhone } from '@/contexts/phone-context';
 import { useLocalAgent } from '@/contexts/local-agent-context';
@@ -22,44 +22,31 @@ import { useLocalAgent } from '@/contexts/local-agent-context';
  */
 export function AgentCallStatusBanner() {
     const { tentativeEnd, silenceStartedAt, confirmCallEnded, dismissTentativeEnd, callStatus } = usePhone();
-    const { isConnected: agentConnected, callState } = useLocalAgent();
+    const { isConnected: agentConnected, lastMessageAt } = useLocalAgent();
 
     // Heartbeat-staleness detection. agentConnected only tells us if the
     // WebSocket is open; it can stay true while the agent process freezes
-    // and stops broadcasting. Track the last message we received and flag
-    // the agent as unresponsive if nothing arrives for 12 s (heartbeat is
-    // every 5 s, so 12 s = 2 missed beats).
-    const [agentStaleSince, setAgentStaleSince] = useState<number | null>(null);
-    const lastSeenRef = useRef<number>(Date.now());
+    // and stops broadcasting. lastMessageAt is the single source of truth
+    // updated on EVERY agent frame (heartbeat, callState, pong, etc.) by
+    // the LocalAgent context. We tick a clock and compare.
+    const [now, setNow] = useState<number>(() => Date.now());
 
     useEffect(() => {
-        // Any new callState payload counts as a sign of life from the agent.
-        lastSeenRef.current = Date.now();
-        setAgentStaleSince(null);
-    }, [callState]);
-
-    useEffect(() => {
-        if (!agentConnected) {
-            setAgentStaleSince(null);
-            return;
-        }
-        // Heartbeat is 1 s on the agent side, so 4 s without ANY message
-        // (including callState/recordingState that also tick every second
-        // during a call) is 4 missed beats — well past noise. Lower than
-        // this and a single GC pause / WebSocket frame backup creates
-        // false alarms.
-        const interval = setInterval(() => {
-            const elapsed = Date.now() - lastSeenRef.current;
-            if (elapsed > 4_000) {
-                setAgentStaleSince(prev => prev ?? lastSeenRef.current);
-            } else {
-                setAgentStaleSince(null);
-            }
-        }, 1_000);
+        if (!agentConnected) return;
+        const interval = setInterval(() => setNow(Date.now()), 1_000);
         return () => clearInterval(interval);
     }, [agentConnected]);
 
-    const showAgentWarning = !agentConnected || agentStaleSince != null;
+    // Heartbeat is 1 s on the agent side, so 4 s without ANY message
+    // (including callState/recordingState that also tick every second
+    // during a call) is 4 missed beats — well past noise. Lower than
+    // this and a single GC pause / WebSocket frame backup creates
+    // false alarms.
+    const elapsedSinceMessage = now - lastMessageAt;
+    const isStale = agentConnected && elapsedSinceMessage > 4_000;
+    const agentStaleSince = isStale ? lastMessageAt : null;
+
+    const showAgentWarning = !agentConnected || isStale;
     const showTentativePrompt = tentativeEnd && (callStatus === 'connected' || callStatus === 'ringing');
 
     if (!showAgentWarning && !showTentativePrompt) return null;

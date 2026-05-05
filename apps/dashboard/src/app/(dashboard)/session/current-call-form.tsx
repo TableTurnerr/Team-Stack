@@ -1764,7 +1764,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                             }}
                             className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                         />
-                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Appointment Set</span>
+                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Warm Lead</span>
                     </label>
                 </div>
             </div>

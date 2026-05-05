@@ -293,7 +293,7 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                     <PerformanceCounterInline
                         value={session.appointment_set || 0}
                         onSave={(value) => handleUpdateCounter('appointment_set', value)}
-                        label="Appointment Set"
+                        label="Warm Lead"
                     />
                 </td>
                 )}

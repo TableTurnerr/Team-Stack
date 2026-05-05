@@ -127,7 +127,7 @@ export function PerformanceTracker({
             <div className="border-t border-[var(--card-border)]" />
 
             <CounterRow
-                label="Appointment Set"
+                label="Warm Lead"
                 value={appointmentSet}
                 icon={CalendarCheck}
                 color="var(--warning)"

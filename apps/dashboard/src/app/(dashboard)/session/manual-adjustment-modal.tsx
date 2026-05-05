@@ -26,7 +26,7 @@ const COUNTER_FIELDS: CounterField[] = [
     { key: 'total_callbacks', label: 'Total Callbacks', sessionKey: 'total_callbacks', color: 'var(--warning)' },
     { key: 'owner_reached', label: 'Owner Reached', sessionKey: 'owner_reached', color: 'var(--success)' },
     { key: 'pitch_completed', label: 'Pitch Completed', sessionKey: 'pitch_completed', color: 'var(--info)' },
-    { key: 'appointment_set', label: 'Appointment Set', sessionKey: 'appointment_set', color: 'var(--warning)' },
+    { key: 'appointment_set', label: 'Warm Lead', sessionKey: 'appointment_set', color: 'var(--warning)' },
 ];
 
 export function ManualAdjustmentModal({ session, onApplied, onClose }: ManualAdjustmentModalProps) {

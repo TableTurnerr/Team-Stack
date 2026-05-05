@@ -469,7 +469,7 @@ export async function fillAndSubmitCallForm(
         if ((await pitchBtn.count()) > 0) await pitchBtn.click();
     }
     if (opts.appointmentSet) {
-        const apptBtn = page.locator('button, label').filter({ hasText: /appointment set/i }).first();
+        const apptBtn = page.locator('button, label').filter({ hasText: /warm lead/i }).first();
         if ((await apptBtn.count()) > 0) await apptBtn.click();
     }
 

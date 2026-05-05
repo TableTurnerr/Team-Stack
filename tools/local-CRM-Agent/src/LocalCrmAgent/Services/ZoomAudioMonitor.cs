@@ -60,6 +60,15 @@ public class ZoomAudioMonitor : IDisposable
     /// </summary>
     public event Action<bool>? ZoomAudioStateChanged;
 
+    /// <summary>
+    /// Fired when a tracked Zoom audio session disconnects entirely
+    /// (i.e. the underlying COM session went away). Strong signal that
+    /// the call really ended — fusion uses this to bypass the audio
+    /// latch so Connected→Ended is immediate instead of waiting out
+    /// the silence-tolerance window.
+    /// </summary>
+    public event Action? ZoomAudioSessionGone;
+
     // Persistent references — must stay alive for callbacks to fire.
     private MMDeviceEnumerator? _enumerator;
     private readonly List<MMDevice> _watchedDevices = new();
@@ -175,6 +184,23 @@ public class ZoomAudioMonitor : IDisposable
         var state = GetZoomAudioState();
         bool isActive = state is { IsActive: true };
         ZoomAudioStateChanged?.Invoke(isActive);
+    }
+
+    /// <summary>
+    /// Called by a session listener when its underlying session disconnects.
+    /// Drops the listener from our tracking list (otherwise stale listeners
+    /// from prior calls accumulate over a long power-dial session and can
+    /// keep firing spurious events) and notifies fusion that audio is truly
+    /// gone so it can short-circuit the silence-tolerance latch.
+    /// </summary>
+    internal void OnSessionGone(int pid)
+    {
+        lock (_lock)
+        {
+            _sessionListeners.RemoveAll(l => l.ProcessId == pid);
+        }
+        ZoomAudioSessionGone?.Invoke();
+        OnSessionEvent($"Disconnected PID={pid} (listener removed)");
     }
 
     /// <summary>
@@ -569,13 +595,19 @@ public class ZoomAudioMonitor : IDisposable
         public void OnStateChanged(AudioSessionState state)
         {
             Debug.WriteLine($"[AudioMonitor] Session PID={ProcessId} state → {state}");
-            _monitor.OnSessionEvent($"StateChanged PID={ProcessId} state={state}");
+            // Expired = the COM session is dead and won't fire further
+            // events; treat it as a hard disconnect so we drop the listener
+            // and fast-path the fusion's silence latch.
+            if (state == AudioSessionState.AudioSessionStateExpired)
+                _monitor.OnSessionGone(ProcessId);
+            else
+                _monitor.OnSessionEvent($"StateChanged PID={ProcessId} state={state}");
         }
 
         public void OnSessionDisconnected(AudioSessionDisconnectReason disconnectReason)
         {
             Debug.WriteLine($"[AudioMonitor] Session PID={ProcessId} disconnected: {disconnectReason}");
-            _monitor.OnSessionEvent($"Disconnected PID={ProcessId} reason={disconnectReason}");
+            _monitor.OnSessionGone(ProcessId);
         }
 
         // Required by interface but not needed for our use case

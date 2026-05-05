@@ -182,7 +182,7 @@ export interface SessionStats {
   pickupRate: number;
   ownerRate: number;
   pitchRate: number;
-  appointmentRate: number;
+  warmLeadRate: number;
   averageCallDuration: number;
   pickupRateColor: string;
   ownerRateColor: string;
@@ -200,7 +200,7 @@ export function calculateSessionStats(session: {
   total_duration_sec: number;
   owner_reached: number;
   pitch_completed: number;
-  appointment_set: number;
+  warm_lead: number;
 }): SessionStats {
   const totalDials = session.total_dials || 0;
   const totalPickups = session.total_pickups || 0;
@@ -209,7 +209,7 @@ export function calculateSessionStats(session: {
   const pickupRate = totalDials > 0 ? Math.round((totalPickups / totalDials) * 100) : 0;
   const ownerRate = totalDials > 0 ? Math.round(((session.owner_reached || 0) / totalDials) * 100) : 0;
   const pitchRate = totalPickups > 0 ? Math.round(((session.pitch_completed || 0) / totalPickups) * 100) : 0;
-  const appointmentRate = totalPickups > 0 ? Math.round(((session.appointment_set || 0) / totalPickups) * 100) : 0;
+  const warmLeadRate = totalPickups > 0 ? Math.round(((session.warm_lead || 0) / totalPickups) * 100) : 0;
 
   // Calculate average call duration
   const averageCallDuration = totalPickups > 0
@@ -224,7 +224,7 @@ export function calculateSessionStats(session: {
     pickupRate,
     ownerRate,
     pitchRate,
-    appointmentRate,
+    warmLeadRate,
     averageCallDuration,
     pickupRateColor,
     ownerRateColor,
@@ -264,7 +264,7 @@ export function calculateAggregateStats(sessions: Array<{
   total_duration_sec: number;
   owner_reached: number;
   pitch_completed: number;
-  appointment_set: number;
+  warm_lead: number;
 }>) {
   if (sessions.length === 0) {
     return {
@@ -274,7 +274,7 @@ export function calculateAggregateStats(sessions: Array<{
       totalDuration: 0,
       averagePickupRate: 0,
       averageOwnerRate: 0,
-      totalAppointments: 0,
+      totalWarmLeads: 0,
     };
   }
 
@@ -284,9 +284,9 @@ export function calculateAggregateStats(sessions: Array<{
       pickups: acc.pickups + (session.total_pickups || 0),
       duration: acc.duration + (session.total_duration_sec || 0),
       ownerReached: acc.ownerReached + (session.owner_reached || 0),
-      appointments: acc.appointments + (session.appointment_set || 0),
+      warmLeads: acc.warmLeads + (session.warm_lead || 0),
     }),
-    { dials: 0, pickups: 0, duration: 0, ownerReached: 0, appointments: 0 }
+    { dials: 0, pickups: 0, duration: 0, ownerReached: 0, warmLeads: 0 }
   );
 
   const averagePickupRate = totals.dials > 0
@@ -304,6 +304,6 @@ export function calculateAggregateStats(sessions: Array<{
     totalDuration: totals.duration,
     averagePickupRate,
     averageOwnerRate,
-    totalAppointments: totals.appointments,
+    totalWarmLeads: totals.warmLeads,
   };
 }

@@ -109,11 +109,13 @@ interface CurrentCallFormProps {
     callbackEvents?: Array<{ reason: string; timestamp: string }>;
     /** Suggested company name from power dialer queue */
     suggestedCompanyName?: string;
+    /** Called when user manually confirms the call has ended */
+    onCallEndedManually?: () => void;
 }
 
 const EMPTY_CALLBACK_EVENTS: Array<{ reason: string; timestamp: string }> = [];
 
-export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS, suggestedCompanyName }: CurrentCallFormProps) {
+export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, initialDraft, onDraftChange, onDiscard, isCallLive, onCallback, callbackEvents = EMPTY_CALLBACK_EVENTS, suggestedCompanyName, onCallEndedManually }: CurrentCallFormProps) {
     const { user } = useAuth();
     const { addToast } = useToast();
     const [companySearch, setCompanySearch] = useState('');
@@ -1943,6 +1945,18 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     <AlertCircle size={14} className="shrink-0" />
                     <span>{formError}</span>
                 </div>
+            )}
+
+            {/* Has the call ended? — shown while a live call is in progress so the
+                user can manually signal hangup when the phone system doesn't detect it */}
+            {isCallLive && !hasUnsavedCall && (
+                <button
+                    type="button"
+                    onClick={onCallEndedManually}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm border border-[var(--card-border)] bg-[var(--sidebar-bg)] text-[var(--muted)] hover:bg-[var(--card-hover)] hover:text-[var(--foreground)] transition-all"
+                >
+                    Has the call ended?
+                </button>
             )}
 
             {/* Action buttons */}

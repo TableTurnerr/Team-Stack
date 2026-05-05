@@ -257,7 +257,7 @@ function CallLogDetail({ log }: { log: CallLog }) {
               : "bg-[var(--sidebar-bg)] border-[var(--card-border)] opacity-40"
           )}>
             <CalendarCheck size={16} className={log.appointment_set ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
-            <span className="text-sm font-medium">Appointment Set</span>
+            <span className="text-sm font-medium">Warm Lead</span>
           </div>
         </div>
       </div>

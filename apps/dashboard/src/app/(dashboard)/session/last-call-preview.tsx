@@ -664,7 +664,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                                     onChange={e => setAppointmentSet(e.target.checked)}
                                     className="w-3.5 h-3.5 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                                 />
-                                <span className="text-xs group-hover:text-[var(--foreground)] transition-colors">Appointment Set</span>
+                                <span className="text-xs group-hover:text-[var(--foreground)] transition-colors">Warm Lead</span>
                                 {appointmentSet && <Check size={12} className="text-[var(--success)]" />}
                             </label>
                         </div>

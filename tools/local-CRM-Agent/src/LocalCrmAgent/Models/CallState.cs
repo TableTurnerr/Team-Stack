@@ -42,4 +42,14 @@ public class CallStateInfo
     //   (a) reinforcing "I do not own this call" on the dashboard,
     //   (b) showing a "line busy (teammate)" hint so we can act as fallback.
     public bool TeammateOnCall { get; set; }
+
+    // Tentative-end signal: fusion's audio/UI signals went quiet long
+    // enough to look like a hangup, but no HARD termination signal (audio
+    // session disconnected, UI panel removed, user-confirmed end) has
+    // arrived. The dashboard should keep treating the call as live but
+    // surface a "Has the call ended?" prompt to the user. See
+    // <see cref="SilenceStartedAt"/> for when the silence began — talk-time
+    // calculations should clip to that timestamp once the user confirms.
+    public bool TentativeEnd { get; set; }
+    public DateTime? SilenceStartedAt { get; set; }
 }

@@ -72,7 +72,7 @@ test.describe('Integration: Data Flow Between Components', () => {
         total_duration_sec: 900,
         owner_reached: 1,
         pitch_completed: 1,
-        appointment_set: 0,
+        warm_lead: 0,
         status: 'completed',
         session_notes: `[${TEST_PREFIX}] Integration test session`,
         total_paused_sec: 0,
@@ -91,7 +91,7 @@ test.describe('Integration: Data Flow Between Components', () => {
       post_call_notes: `[${TEST_PREFIX}] Integration call log - callback scheduled`,
       owner_reached: true,
       pitch_completed: false,
-      appointment_set: false,
+      warm_lead: false,
       has_recording: false,
       ring_duration: 15,
       call_duration: 120,
@@ -273,12 +273,12 @@ test.describe('Integration: Data Flow Between Components', () => {
       total_pickups: number;
       owner_reached: number;
       pitch_completed: number;
-      appointment_set: number;
+      warm_lead: number;
       status: string;
     }>(
       'cold_calling_sessions',
       `id = "${sessionId}"`,
-      'id,total_dials,total_pickups,owner_reached,pitch_completed,appointment_set,status'
+      'id,total_dials,total_pickups,owner_reached,pitch_completed,warm_lead,status'
     );
 
     expect(sessions.length).toBe(1);
@@ -288,6 +288,6 @@ test.describe('Integration: Data Flow Between Components', () => {
     expect(session.total_pickups).toBe(2);
     expect(session.owner_reached).toBe(1);
     expect(session.pitch_completed).toBe(1);
-    expect(session.appointment_set).toBe(0);
+    expect(session.warm_lead).toBe(0);
   });
 });

@@ -410,7 +410,7 @@ export async function fillAndSubmitCallForm(
         notes?: string;
         ownerReached?: boolean;
         pitchCompleted?: boolean;
-        appointmentSet?: boolean;
+        warmLead?: boolean;
     },
 ): Promise<boolean> {
     await page.waitForTimeout(500);
@@ -468,9 +468,9 @@ export async function fillAndSubmitCallForm(
         const pitchBtn = page.locator('button, label').filter({ hasText: /pitch completed/i }).first();
         if ((await pitchBtn.count()) > 0) await pitchBtn.click();
     }
-    if (opts.appointmentSet) {
-        const apptBtn = page.locator('button, label').filter({ hasText: /warm lead/i }).first();
-        if ((await apptBtn.count()) > 0) await apptBtn.click();
+    if (opts.warmLead) {
+        const warmBtn = page.locator('button, label').filter({ hasText: /warm lead/i }).first();
+        if ((await warmBtn.count()) > 0) await warmBtn.click();
     }
 
     // Notes — target the call form's notes textarea specifically (not the

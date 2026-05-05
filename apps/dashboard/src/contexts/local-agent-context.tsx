@@ -35,6 +35,19 @@ export interface AgentCallState {
      * (b) indicate that the shared line is currently busy with a teammate.
      */
     teammateOnCall: boolean;
+    /**
+     * Soft-end signal: the agent's audio/UI sources stayed quiet long
+     * enough to look like a hangup, but no HARD termination signal has
+     * arrived. Treated as still-connected by the dashboard, which surfaces
+     * a "Has the call ended?" prompt to the user.
+     */
+    tentativeEnd: boolean;
+    /**
+     * UTC ISO-8601 timestamp marking when the silence began. Once the
+     * user confirms the call ended, this is the cutoff used for talk-time
+     * / recording duration so hold/mute periods aren't billed.
+     */
+    silenceStartedAt: string | null;
 }
 
 export interface AgentNetworkQuality {
@@ -162,6 +175,13 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const attemptRef = useRef(0);
     const mountedRef = useRef(true);
+    // Pulse-watcher: tracks when we last received ANY message from the
+    // agent. A loopback WebSocket can stay "open" for several seconds
+    // after the peer process has died (the OS hasn't reaped the TCP
+    // socket yet), which masks the issue from the dashboard. We send a
+    // periodic ping and force-close + reconnect if no reply arrives.
+    const lastMessageAtRef = useRef<number>(Date.now());
+    const pulseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -196,6 +216,30 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     console.log('[LocalAgent] Connected to agent');
                     setIsConnected(true);
                     attemptRef.current = 0;
+                    lastMessageAtRef.current = Date.now();
+
+                    // Start the pulse-watcher: every 3 s, if we haven't
+                    // heard ANYTHING from the agent in >4 s (heartbeat is
+                    // 1 s, so 4 missed beats), force-close the socket so
+                    // onclose fires and the reconnect ladder kicks in.
+                    // This catches half-open TCP sockets that the OS
+                    // hasn't reaped — without it the dashboard waits on
+                    // a ghost connection forever.
+                    if (pulseTimerRef.current) clearInterval(pulseTimerRef.current);
+                    pulseTimerRef.current = setInterval(() => {
+                        const sock = wsRef.current;
+                        if (!sock || sock.readyState !== WebSocket.OPEN) return;
+                        const elapsed = Date.now() - lastMessageAtRef.current;
+                        if (elapsed > 4_000) {
+                            console.warn(`[LocalAgent] No agent message for ${elapsed}ms — force-closing socket to recover`);
+                            try { sock.close(); } catch { /* onclose schedules reconnect */ }
+                            return;
+                        }
+                        // Emit a lightweight ping so the agent has reason
+                        // to send something back even when nothing else
+                        // is happening.
+                        try { sock.send(JSON.stringify({ type: 'ping' })); } catch { /* will be detected next tick */ }
+                    }, 3_000);
 
                     // Relay PocketBase auth to agent for background uploads
                     try {
@@ -224,9 +268,15 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
 
                 ws.onmessage = (event) => {
                     if (!mountedRef.current) return;
+                    // Mark liveness on EVERY frame, including unknown types
+                    // — the watchdog only cares that the socket is talking.
+                    lastMessageAtRef.current = Date.now();
                     try {
                         const msg = JSON.parse(event.data);
                         switch (msg.type) {
+                            case 'pong':
+                                // No-op — liveness already recorded above.
+                                break;
                             case 'callState': {
                                 // Defensive: when the agent reports idle the
                                 // call is over, so any per-call identifiers
@@ -251,6 +301,8 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                     uiSeenHere: !isIdle && Boolean(msg.uiSeenHere),
                                     audioActiveHere: !isIdle && Boolean(msg.audioActiveHere),
                                     teammateOnCall: Boolean(msg.teammateOnCall),
+                                    tentativeEnd: !isIdle && Boolean(msg.tentativeEnd),
+                                    silenceStartedAt: isIdle ? null : (msg.silenceStartedAt ?? null),
                                 });
                                 break;
                             }
@@ -485,6 +537,10 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     setIsConnected(false);
                     setCallState(null);
                     wsRef.current = null;
+                    if (pulseTimerRef.current) {
+                        clearInterval(pulseTimerRef.current);
+                        pulseTimerRef.current = null;
+                    }
                     scheduleReconnect();
                 };
 
@@ -516,6 +572,10 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;
+            }
+            if (pulseTimerRef.current) {
+                clearInterval(pulseTimerRef.current);
+                pulseTimerRef.current = null;
             }
             if (wsRef.current) {
                 wsRef.current.onclose = null; // prevent reconnect on unmount

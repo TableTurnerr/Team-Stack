@@ -388,6 +388,10 @@ export default function SessionPage() {
     const [pinnedFormPhoneNumber, setPinnedFormPhoneNumber] = useState('');
     // Company name suggested from power dialer queue for the current call
     const [suggestedCompanyName, setSuggestedCompanyName] = useState('');
+    // Live ref for currentPhoneNumber so callbacks (handleSaveCall, handleDiscardCall)
+    // can read the latest value without putting it in their deps and re-creating
+    // the callback on every keystroke.
+    const currentPhoneNumberRef = useRef('');
     // Auto-hangup: ON by default when power dialer is active
     const [autoHangupEnabled, setAutoHangupEnabled] = useState(false);
     const [autoHangupSeconds, setAutoHangupSeconds] = useState(15);
@@ -409,6 +413,7 @@ export default function SessionPage() {
     powerDialerActiveRef.current = powerDialerActive;
     powerDialerPausedRef.current = powerDialerPaused;
     powerDialerDelayRef.current = powerDialerDelay;
+    currentPhoneNumberRef.current = currentPhoneNumber;
 
     // ---------------------------------------------------------------------------
     // Follow-up Notifications state
@@ -1610,12 +1615,24 @@ export default function SessionPage() {
         // and the activeCallNumber sync effect won't restore it because
         // callStatus has already transitioned to 'idle'.
         const savedDigits = data.phoneNumber.replace(/\D/g, '').slice(-10);
+        // Read the live current phone number via ref so we can decide whether
+        // suggestedCompanyName still belongs to this (just-saved) call or to a
+        // newer call that already started (negative-delay power dialer overlap).
+        const livePhone = currentPhoneNumberRef.current;
+        const livePhoneDigits = livePhone?.replace(/\D/g, '').slice(-10) || '';
+        const livePhoneMatchesSaved = !livePhone || livePhoneDigits === savedDigits;
         setCurrentPhoneNumber(prev => {
             const prevDigits = prev?.replace(/\D/g, '').slice(-10) || '';
             if (!prev || prevDigits === savedDigits) return '';
             // Phone number belongs to a different (newer) call — preserve it
             return prev;
         });
+        // Clear the saved call's company suggestion only when no newer call has
+        // taken over the live phone slot. Otherwise the next call (handleDial
+        // already set sCN to its own company) would lose its suggestion.
+        if (livePhoneMatchesSaved) {
+            setSuggestedCompanyName('');
+        }
         setHasUnsavedCall(false);
         setCallDraft(null);
         setCallbackEvents([]);
@@ -1885,6 +1902,15 @@ export default function SessionPage() {
         })();
     }, [session, user, discardOldestDeferredRecording, discardDeferredRecording, submitOldestDeferredRecording, submitDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp, completeFollowUp, addToast]);
 
+    const handleCallEndedManually = useCallback(() => {
+        if (!currentPhoneNumber) return;
+        setHasUnsavedCall(true);
+        setPinnedFormPhoneNumber(currentPhoneNumber);
+        if (isSessionActive && recorderStatus === 'recording') {
+            stopRecording();
+        }
+    }, [currentPhoneNumber, isSessionActive, recorderStatus, stopRecording]);
+
     const handleDiscardCall = useCallback(() => {
         // Discard ALL segments if callbacks exist (multiple recording segments queued),
         // otherwise just discard the oldest one
@@ -1903,11 +1929,17 @@ export default function SessionPage() {
         // currentPhoneNumber to the next call's number before the user
         // discarded this form. Clearing it unconditionally loses that number.
         const discardedDigits = currentPhoneNumber?.replace(/\D/g, '').slice(-10) || '';
+        const liveDiscardPhone = currentPhoneNumberRef.current;
+        const liveDiscardDigits = liveDiscardPhone?.replace(/\D/g, '').slice(-10) || '';
+        const liveDiscardMatches = !liveDiscardPhone || liveDiscardDigits === discardedDigits;
         setCurrentPhoneNumber(prev => {
             const prevDigits = prev?.replace(/\D/g, '').slice(-10) || '';
             if (!prev || prevDigits === discardedDigits) return '';
             return prev;
         });
+        if (liveDiscardMatches) {
+            setSuggestedCompanyName('');
+        }
         setPinnedFormPhoneNumber('');
         setRingStartTime(null);
         setConnectTime(null);
@@ -2816,19 +2848,38 @@ export default function SessionPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                     {/* Left column — 60% */}
                     <div className="lg:col-span-3 space-y-6">
-                        <CurrentCallForm
-                            phoneNumber={hasUnsavedCall ? (pinnedFormPhoneNumber || currentPhoneNumber) : (currentPhoneNumber || powerDialerQueue[powerDialerIndex]?.number || '')}
-                            onSave={handleSaveCall}
-                            saving={savingCall}
-                            hasUnsavedCall={hasUnsavedCall}
-                            initialDraft={callDraft}
-                            onDraftChange={setCallDraft}
-                            onDiscard={handleDiscardCall}
-                            isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
-                            onCallback={handleCallback}
-                            callbackEvents={callbackEvents}
-                            suggestedCompanyName={suggestedCompanyName}
-                        />
+                        {(() => {
+                            // When no call is in flight and no unsaved call is pinned,
+                            // mirror the next-up power dialer entry into BOTH the phone
+                            // number and the company suggestion so the form previews the
+                            // company we're about to call instead of leaking the previous
+                            // call's company name (stale suggestedCompanyName state).
+                            const showLookahead = !hasUnsavedCall && !currentPhoneNumber;
+                            const lookaheadEntry = showLookahead ? powerDialerQueue[powerDialerIndex] : null;
+                            const formPhoneNumber = hasUnsavedCall
+                                ? (pinnedFormPhoneNumber || currentPhoneNumber)
+                                : (currentPhoneNumber || lookaheadEntry?.number || '');
+                            // Prefer state (set by handleDial / explicit follow-up selection);
+                            // otherwise fall back to the queue lookahead so the form's
+                            // phone number and company stay in sync.
+                            const formSuggestedCompany = suggestedCompanyName || lookaheadEntry?.company || '';
+                            return (
+                                <CurrentCallForm
+                                    phoneNumber={formPhoneNumber}
+                                    onSave={handleSaveCall}
+                                    saving={savingCall}
+                                    hasUnsavedCall={hasUnsavedCall}
+                                    initialDraft={callDraft}
+                                    onDraftChange={setCallDraft}
+                                    onDiscard={handleDiscardCall}
+                                    isCallLive={callStatus === 'ringing' || callStatus === 'connected'}
+                                    onCallback={handleCallback}
+                                    callbackEvents={callbackEvents}
+                                    suggestedCompanyName={formSuggestedCompany}
+                                    onCallEndedManually={handleCallEndedManually}
+                                />
+                            );
+                        })()}
                     </div>
 
                     {/* Right column — 40% */}

@@ -55,6 +55,24 @@ public class CallStateFusion : IDisposable
     private bool _hardEnd;          // last end transition came from a hard signal
     private bool _lastTentative;    // last broadcast tentative-end flag (edge detect)
 
+    // Most recent moment we saw real audio FLOW (peak > noise floor).
+    // Tracked separately from _audioActiveLastSeen because Zoom can leave
+    // the WASAPI session in IsActive=true for several seconds after a
+    // hangup (especially during power-dial bursts) without ever firing
+    // ZoomAudioSessionGone. Without this stricter signal the audio latch
+    // self-refreshes forever and the tentative-end branch never fires.
+    private DateTime? _audioFlowLastSeen;
+
+    // Latched when the user clicks "Yes, the call ended" on the
+    // tentative-end prompt. Blocks the Idle→Connected transition until
+    // Zoom actually releases its audio session — otherwise fusion would
+    // bounce Connected→Ended→Idle→Connected on the very next poll
+    // (because IsActive=true keeps refreshing _audioActiveLastSeen),
+    // re-locking the dashboard form right after the user confirmed the
+    // call ended. Cleared by OnAudioSessionGone, observing audioActive=
+    // false, or a fresh dial intent.
+    private bool _userConfirmedEnd;
+
     private CancellationTokenSource? _cts;
     private Task? _pollingTask;
     private readonly object _lock = new();
@@ -78,6 +96,15 @@ public class CallStateFusion : IDisposable
     // dashboard then prompts the user to confirm the hangup so silent
     // hold music / mute / long pauses don't terminate a live call.
     private const double AudioLatchSeconds = 2.0;
+
+    // Stricter silence fallback for tentative-end. The session-active
+    // latch above can keep effectiveActive=true indefinitely if Zoom
+    // doesn't tear down its WASAPI session on hangup, masking the call
+    // end. If we go this many seconds without observing peak > noise
+    // while in Connected, surface a tentative-end prompt even though
+    // effectiveActive is still true. Sized comfortably longer than a
+    // natural conversation pause.
+    private const double AudioFlowSilenceTentativeSeconds = 6.0;
 
     private const double EndedCooldownSeconds = 1.0;
     private const double RingingTimeoutSeconds = 60.0;
@@ -142,7 +169,11 @@ public class CallStateFusion : IDisposable
         lock (_lock)
         {
             _audioActiveLastSeen = null;
+            _audioFlowLastSeen = null;
             _hardEnd = true;
+            // Session is truly gone — release the user-confirmed-end latch
+            // so a brand-new call after this one isn't suppressed.
+            _userConfirmedEnd = false;
         }
         Evaluate();
     }
@@ -163,9 +194,11 @@ public class CallStateFusion : IDisposable
                 return; // already ended/idle; nothing to do
 
             _hardEnd = true;
+            _userConfirmedEnd = true;
             _state = CallState.Ended;
             _endedAt = _tentativeEndAt ?? DateTime.UtcNow;
             _audioActiveLastSeen = null;
+            _audioFlowLastSeen = null;
             _uiCallGoneSince = null;
             notify = BuildStateInfoLocked();
             CurrentState = notify;
@@ -237,6 +270,8 @@ public class CallStateFusion : IDisposable
         // in progress. See AudioLatchSeconds for why this matters.
         if (audioActive || audioFlowing)
             _audioActiveLastSeen = DateTime.UtcNow;
+        if (audioFlowing)
+            _audioFlowLastSeen = DateTime.UtcNow;
         bool audioAlive = _audioActiveLastSeen.HasValue
             && (DateTime.UtcNow - _audioActiveLastSeen.Value).TotalSeconds < AudioLatchSeconds;
 
@@ -331,12 +366,29 @@ public class CallStateFusion : IDisposable
         switch (_state)
         {
                 case CallState.Idle:
+                    // If the user just confirmed a tentative-end, suppress
+                    // re-entry to Connected until Zoom actually drops the
+                    // session (or a fresh dial intent arrives — the user
+                    // explicitly wants a new call). Without this, the
+                    // lingering IsActive=true from the prior call bounces
+                    // us straight back to Connected on the next poll and
+                    // re-locks the dashboard form.
+                    if (_userConfirmedEnd && freshIntent == null)
+                    {
+                        if (!audioActive)
+                            _userConfirmedEnd = false;
+                        break;
+                    }
+                    _userConfirmedEnd = false;
                     if (effectiveActive)
                     {
                         _state = CallState.Connected;
                         _connectedAt = DateTime.UtcNow;
                         _audioInactiveSince = null;
                         _uiCallGoneSince = null;
+                        // Seed the flow latch so the silence fallback below
+                        // doesn't fire spuriously before the first peak.
+                        _audioFlowLastSeen ??= DateTime.UtcNow;
                     }
                     else if (effectiveRinging)
                     {
@@ -352,6 +404,7 @@ public class CallStateFusion : IDisposable
                         _connectedAt = DateTime.UtcNow;
                         _audioInactiveSince = null;
                         _uiCallGoneSince = null;
+                        _audioFlowLastSeen ??= DateTime.UtcNow;
                     }
                     else if (!effectiveRinging)
                     {
@@ -401,9 +454,25 @@ public class CallStateFusion : IDisposable
                     else
                     {
                         // Activity returned — call is clearly still live,
-                        // tear down any pending tentative state.
+                        // tear down any pending tentative state…
                         _uiCallGoneSince = null;
                         _tentativeEndAt = null;
+
+                        // …UNLESS the only "activity" is the WASAPI session
+                        // sitting in IsActive=true with no real audio flow.
+                        // Zoom can leave the session armed for several
+                        // seconds after a hangup without firing
+                        // ZoomAudioSessionGone, which keeps
+                        // _audioActiveLastSeen refreshed and prevents the
+                        // !effectiveActive branch from ever running. Use a
+                        // stricter flow-based silence window as a fallback
+                        // so the dashboard still gets the tentative-end
+                        // prompt and the user can save the call.
+                        bool flowSilenceLong = _audioFlowLastSeen.HasValue
+                            && (DateTime.UtcNow - _audioFlowLastSeen.Value).TotalSeconds
+                                > AudioFlowSilenceTentativeSeconds;
+                        if (flowSilenceLong)
+                            _tentativeEndAt = _audioFlowLastSeen;
                     }
 
                     // Independently track audio dropouts for confidence.
@@ -440,6 +509,7 @@ public class CallStateFusion : IDisposable
                         // from the prior call cannot trigger Idle→Connected
                         // on the very next poll for a back-to-back call.
                         _audioActiveLastSeen = null;
+                        _audioFlowLastSeen = null;
                         _audioInactiveSince = null;
                         _uiCallGoneSince = null;
                     }

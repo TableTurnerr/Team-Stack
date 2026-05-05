@@ -339,10 +339,10 @@ export default function TeamPage() {
                           <div className="text-[10px] text-[var(--muted)] uppercase tracking-wider">Pickups</div>
                         </div>
                         <div>
-                          <div className="text-base font-bold">{activeSession.appointment_set}</div>
+                          <div className="text-base font-bold">{activeSession.warm_lead}</div>
                           <div className="text-[10px] text-[var(--muted)] uppercase tracking-wider flex items-center justify-center gap-0.5">
                             <Trophy size={8} />
-                            Appts
+                            Warm
                           </div>
                         </div>
                       </div>

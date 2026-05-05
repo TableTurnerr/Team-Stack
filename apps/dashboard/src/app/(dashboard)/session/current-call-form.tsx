@@ -43,7 +43,7 @@ export interface CallFormData {
     wasPickedUp: boolean;
     ownerReached: boolean;
     pitchCompleted: boolean;
-    appointmentSet: boolean;
+    warmLead: boolean;
     followUp?: { scheduledTime: string; timezone: string; notes: string } | null;
     callbackEvents?: Array<{ reason: string; timestamp: string }>;
     additionalPhoneNumber?: string;
@@ -61,7 +61,7 @@ export interface CallFormDraft {
     postCallNotes: string;
     ownerReached: boolean;
     pitchCompleted: boolean;
-    appointmentSet: boolean;
+    warmLead: boolean;
     noneSelected: boolean;
     isNewCompany: boolean;
     showFollowUp: boolean;
@@ -81,7 +81,7 @@ const EMPTY_DRAFT: CallFormDraft = {
     postCallNotes: '',
     ownerReached: false,
     pitchCompleted: false,
-    appointmentSet: false,
+    warmLead: false,
     noneSelected: true,
     isNewCompany: false,
     showFollowUp: false,
@@ -128,22 +128,24 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
     const [otherInputValue, setOtherInputValue] = useState('');
     const otherInputRef = useRef<HTMLInputElement>(null);
 
-    /** Toggle an outcome tag respecting max-3 rules */
+    /** Toggle an outcome tag respecting max-3 rules. Mirrors "Warm Lead" → warmLead boolean. */
     const toggleOutcome = (outcome: string) => {
         setCallOutcome(prev => {
             // Deselect if already selected
             if (prev.includes(outcome)) {
+                if (outcome === 'Warm Lead') setWarmLead(false);
                 return prev.filter(o => o !== outcome);
             }
             // Enforce max
             if (prev.length >= MAX_OUTCOMES) return prev;
+            if (outcome === 'Warm Lead') setWarmLead(true);
             return [...prev, outcome];
         });
     };
     const [postCallNotes, setPostCallNotes] = useState('');
     const [ownerReached, setOwnerReached] = useState(false);
     const [pitchCompleted, setPitchCompleted] = useState(false);
-    const [appointmentSet, setAppointmentSet] = useState(false);
+    const [warmLead, setWarmLead] = useState(false);
     const [noneSelected, setNoneSelected] = useState(true);
     const [isNewCompany, setIsNewCompany] = useState(false);
     const [showCallbackDropdown, setShowCallbackDropdown] = useState(false);
@@ -408,7 +410,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setPostCallNotes('');
         setOwnerReached(false);
         setPitchCompleted(false);
-        setAppointmentSet(false);
+        setWarmLead(false);
         setNoneSelected(true);
         setShowFollowUp(false);
         setFollowUpData(null);
@@ -441,7 +443,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setPostCallNotes(initialDraft.postCallNotes || '');
         setOwnerReached(!!initialDraft.ownerReached);
         setPitchCompleted(!!initialDraft.pitchCompleted);
-        setAppointmentSet(!!initialDraft.appointmentSet);
+        setWarmLead(!!initialDraft.warmLead);
         setNoneSelected(initialDraft.noneSelected ?? true);
         setIsNewCompany(!!initialDraft.isNewCompany);
         setShowFollowUp(!!initialDraft.showFollowUp);
@@ -469,7 +471,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             postCallNotes,
             ownerReached,
             pitchCompleted,
-            appointmentSet,
+            warmLead,
             noneSelected,
             isNewCompany,
             showFollowUp,
@@ -479,7 +481,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             additionalPhoneNote,
             email,
         });
-    }, [companySearch, selectedCompany, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, onDraftChange]);
+    }, [companySearch, selectedCompany, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, warmLead, noneSelected, isNewCompany, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, onDraftChange]);
 
     // Clear the inline Save validation banner whenever the user fixes the
     // relevant fields (company name or call outcome). Keeps the banner
@@ -615,10 +617,10 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
 
     // Sync "None" with other performance options
     useEffect(() => {
-        if (ownerReached || pitchCompleted || appointmentSet) {
+        if (ownerReached || pitchCompleted || warmLead) {
             setNoneSelected(false);
         }
-    }, [ownerReached, pitchCompleted, appointmentSet]);
+    }, [ownerReached, pitchCompleted, warmLead]);
 
     // Check phone uniqueness when company changes (only for new companies)
     useEffect(() => {
@@ -799,7 +801,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setNoneSelected(true);
         setOwnerReached(false);
         setPitchCompleted(false);
-        setAppointmentSet(false);
+        setWarmLead(false);
     };
 
     const isSavingRef = useRef(false);
@@ -860,7 +862,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     wasPickedUp,
                     ownerReached,
                     pitchCompleted,
-                    appointmentSet,
+                    warmLead,
                     followUp: showFollowUp ? followUpData : null,
                     callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
                     additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
@@ -884,7 +886,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     wasPickedUp,
                     ownerReached,
                     pitchCompleted,
-                    appointmentSet,
+                    warmLead,
                     followUp: showFollowUp ? followUpData : null,
                     callbackEvents: callbackEvents.length > 0 ? callbackEvents : undefined,
                     additionalPhoneNumber: additionalPhoneNumber.trim() || undefined,
@@ -908,7 +910,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         } finally {
             isSavingRef.current = false;
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, appointmentSet, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, completeFollowUps, pendingFollowUps, resetForm]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, warmLead, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, completeFollowUps, pendingFollowUps, resetForm]);
 
     const hasDraftValues =
         companySearch.trim().length > 0 ||
@@ -919,7 +921,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         postCallNotes.trim().length > 0 ||
         ownerReached ||
         pitchCompleted ||
-        appointmentSet ||
+        warmLead ||
         showFollowUp ||
         !!followUpData;
 
@@ -1757,14 +1759,25 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                     <label className="flex items-center gap-2 cursor-pointer group">
                         <input
                             type="checkbox"
-                            checked={appointmentSet}
+                            checked={warmLead}
                             onChange={e => {
-                                setAppointmentSet(e.target.checked);
-                                if (e.target.checked) setNoneSelected(false);
+                                const next = e.target.checked;
+                                setWarmLead(next);
+                                if (next) setNoneSelected(false);
+                                // Mirror into call_outcome so the chip stays in sync with the boolean.
+                                setCallOutcome(prev => {
+                                    const has = prev.includes('Warm Lead');
+                                    if (next && !has) {
+                                        if (prev.length >= MAX_OUTCOMES) return prev;
+                                        return [...prev, 'Warm Lead'];
+                                    }
+                                    if (!next && has) return prev.filter(o => o !== 'Warm Lead');
+                                    return prev;
+                                });
                             }}
                             className="w-4 h-4 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                         />
-                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Appointment Set</span>
+                        <span className="text-sm group-hover:text-[var(--foreground)] transition-colors">Warm Lead</span>
                     </label>
                 </div>
             </div>

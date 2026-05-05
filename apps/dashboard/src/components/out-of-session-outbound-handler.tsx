@@ -231,7 +231,7 @@ export function OutOfSessionOutboundHandler() {
                 session: activeSession?.id,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
-                appointment_set: data.appointmentSet,
+                warm_lead: data.warmLead,
                 callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                 is_callback: hasCallbacks ? true : undefined,
                 direction: 'outbound',
@@ -258,7 +258,7 @@ export function OutOfSessionOutboundHandler() {
                 const sessionUpdates: Record<string, number> = {};
                 if (data.ownerReached) sessionUpdates['owner_reached+'] = 1;
                 if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
-                if (data.appointmentSet) sessionUpdates['appointment_set+'] = 1;
+                if (data.warmLead) sessionUpdates['warm_lead+'] = 1;
                 if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
                 if (Object.keys(sessionUpdates).length > 0) {
                     const updated = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update<ColdCallingSession>(

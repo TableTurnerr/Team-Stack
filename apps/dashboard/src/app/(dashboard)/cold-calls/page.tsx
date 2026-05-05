@@ -121,7 +121,7 @@ function buildColdCallsFilterFields(customOutcomes: readonly string[]): readonly
     { key: 'direction', label: 'Direction', type: 'enum', options: ['outbound', 'inbound'] as const, group: 'Calls' },
     { key: 'owner_reached', label: 'Owner Reached', type: 'boolean', group: 'Calls' },
     { key: 'pitch_completed', label: 'Pitch Completed', type: 'boolean', group: 'Calls' },
-    { key: 'appointment_set', label: 'Appointment Set', type: 'boolean', group: 'Calls' },
+    { key: 'warm_lead', label: 'Warm Lead', type: 'boolean', group: 'Calls' },
     { key: 'has_recording', label: 'Has Recording', type: 'boolean', group: 'Calls' },
     { key: 'post_call_notes', label: 'Notes', type: 'text', group: 'Notes' },
   ];
@@ -259,7 +259,7 @@ export default function ColdCallsPage() {
   // ─── CSV Export ──────────────────────────────────────────────────────────
 
   const exportToCSV = () => {
-    const headers = ['Date', 'Company', 'Phone', 'Recipient', 'Outcome', 'Duration (s)', 'Owner Reached', 'Pitch Completed', 'Appointment Set', 'AI Transcript', 'Session', 'Caller', 'Notes'];
+    const headers = ['Date', 'Company', 'Phone', 'Recipient', 'Outcome', 'Duration (s)', 'Owner Reached', 'Pitch Completed', 'Warm Lead', 'AI Transcript', 'Session', 'Caller', 'Notes'];
     const rows = callLogs.map(log => [
       log.call_time ? formatDate(log.call_time) : '',
       log.expand?.company?.company_name || 'Unknown',
@@ -269,7 +269,7 @@ export default function ColdCallsPage() {
       log.duration?.toString() || '',
       log.owner_reached ? 'Yes' : 'No',
       log.pitch_completed ? 'Yes' : 'No',
-      log.appointment_set ? 'Yes' : 'No',
+      log.warm_lead ? 'Yes' : 'No',
       log.cold_call ? 'Yes' : 'No',
       log.session ? 'Yes' : '',
       log.expand?.caller?.name || '',
@@ -835,8 +835,8 @@ function CallLogsTable({
                               </span>
                             </Tooltip>
                           )}
-                          {log.appointment_set && (
-                            <Tooltip content="Appointment Set">
+                          {log.warm_lead && (
+                            <Tooltip content="Warm Lead">
                               <span className="p-1 rounded bg-[var(--warning-subtle)] inline-flex items-center justify-center">
                                 <CalendarCheck size={12} className="text-[var(--warning)]" />
                               </span>

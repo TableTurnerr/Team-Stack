@@ -149,7 +149,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
     const [notes, setNotes] = useState('');
     const [ownerReached, setOwnerReached] = useState(false);
     const [pitchCompleted, setPitchCompleted] = useState(false);
-    const [appointmentSet, setAppointmentSet] = useState(false);
+    const [warmLead, setWarmLead] = useState(false);
     const [receptionistName, setReceptionistName] = useState('');
     const [ownerName, setOwnerName] = useState('');
 
@@ -213,7 +213,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
             setNotes(displayCall?.post_call_notes || '');
             setOwnerReached(displayCall?.owner_reached || false);
             setPitchCompleted(displayCall?.pitch_completed || false);
-            setAppointmentSet(displayCall?.appointment_set || false);
+            setWarmLead(displayCall?.warm_lead || false);
             setReceptionistName(displayCall?.receptionist_name || '');
             setOwnerName(displayCall?.owner_name_found || '');
             setUpdated(false);
@@ -340,7 +340,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                 post_call_notes: notes,
                 owner_reached: ownerReached,
                 pitch_completed: pitchCompleted,
-                appointment_set: appointmentSet,
+                warm_lead: warmLead,
                 receptionist_name: receptionistName,
                 owner_name_found: ownerName,
             });
@@ -356,7 +356,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
         } finally {
             setUpdating(false);
         }
-    }, [displayCall, notes, ownerReached, pitchCompleted, appointmentSet, receptionistName, ownerName, isViewingOlderCall, handleBackToLastCall]);
+    }, [displayCall, notes, ownerReached, pitchCompleted, warmLead, receptionistName, ownerName, isViewingOlderCall, handleBackToLastCall]);
 
     // Recording status pill — find any in-flight or failed upload tied to the
     // displayed call_log. Match by callLogId on the entry, with a fallback that
@@ -476,7 +476,7 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
         notes !== (displayCall.post_call_notes || '') ||
         ownerReached !== (displayCall.owner_reached || false) ||
         pitchCompleted !== (displayCall.pitch_completed || false) ||
-        appointmentSet !== (displayCall.appointment_set || false) ||
+        warmLead !== (displayCall.warm_lead || false) ||
         receptionistName !== (displayCall.receptionist_name || '') ||
         ownerName !== (displayCall.owner_name_found || '');
 
@@ -660,12 +660,12 @@ export function LastCallPreview({ callLog, companyName, sessionId }: LastCallPre
                             <label className="flex items-center gap-2 cursor-pointer group">
                                 <input
                                     type="checkbox"
-                                    checked={appointmentSet}
-                                    onChange={e => setAppointmentSet(e.target.checked)}
+                                    checked={warmLead}
+                                    onChange={e => setWarmLead(e.target.checked)}
                                     className="w-3.5 h-3.5 rounded border-[var(--card-border)] bg-[var(--sidebar-bg)] checked:bg-[var(--success)] checked:border-[var(--success)] transition-colors"
                                 />
-                                <span className="text-xs group-hover:text-[var(--foreground)] transition-colors">Appointment Set</span>
-                                {appointmentSet && <Check size={12} className="text-[var(--success)]" />}
+                                <span className="text-xs group-hover:text-[var(--foreground)] transition-colors">Warm Lead</span>
+                                {warmLead && <Check size={12} className="text-[var(--success)]" />}
                             </label>
                         </div>
                     </div>

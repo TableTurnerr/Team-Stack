@@ -26,7 +26,7 @@ const COUNTER_FIELDS: CounterField[] = [
     { key: 'total_callbacks', label: 'Total Callbacks', sessionKey: 'total_callbacks', color: 'var(--warning)' },
     { key: 'owner_reached', label: 'Owner Reached', sessionKey: 'owner_reached', color: 'var(--success)' },
     { key: 'pitch_completed', label: 'Pitch Completed', sessionKey: 'pitch_completed', color: 'var(--info)' },
-    { key: 'appointment_set', label: 'Appointment Set', sessionKey: 'appointment_set', color: 'var(--warning)' },
+    { key: 'warm_lead', label: 'Warm Lead', sessionKey: 'warm_lead', color: 'var(--warning)' },
 ];
 
 export function ManualAdjustmentModal({ session, onApplied, onClose }: ManualAdjustmentModalProps) {
@@ -62,7 +62,7 @@ export function ManualAdjustmentModal({ session, onApplied, onClose }: ManualAdj
                 }).length;
                 const loggedOwnerReached = logs.filter(l => l.owner_reached).length;
                 const loggedPitchCompleted = logs.filter(l => l.pitch_completed).length;
-                const loggedAppointmentSet = logs.filter(l => l.appointment_set).length;
+                const loggedWarmLead = logs.filter(l => l.warm_lead).length;
 
                 mins = {
                     total_dials: loggedDials,
@@ -71,7 +71,7 @@ export function ManualAdjustmentModal({ session, onApplied, onClose }: ManualAdj
                     total_callbacks: loggedCallbacks,
                     owner_reached: loggedOwnerReached,
                     pitch_completed: loggedPitchCompleted,
-                    appointment_set: loggedAppointmentSet,
+                    warm_lead: loggedWarmLead,
                 };
             } catch (err) {
                 console.error('Failed to fetch call logs for minimums:', err);

@@ -252,12 +252,12 @@ function CallLogDetail({ log }: { log: CallLog }) {
           </div>
           <div className={cn(
             "flex items-center gap-2 p-3 rounded-lg border",
-            log.appointment_set
+            log.warm_lead
               ? "bg-[var(--warning-subtle)] border-[var(--warning)]/30"
               : "bg-[var(--sidebar-bg)] border-[var(--card-border)] opacity-40"
           )}>
-            <CalendarCheck size={16} className={log.appointment_set ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
-            <span className="text-sm font-medium">Appointment Set</span>
+            <CalendarCheck size={16} className={log.warm_lead ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
+            <span className="text-sm font-medium">Warm Lead</span>
           </div>
         </div>
       </div>

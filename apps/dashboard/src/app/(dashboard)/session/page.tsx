@@ -36,6 +36,7 @@ import { StandaloneCallInterface } from './standalone-call-interface';
 import { PhoneDialer } from '@/components/phone-dialer';
 import { PowerDialerPanel, type DialerEntry } from './power-dialer-panel';
 import { SessionFollowUps } from './session-followups';
+import { AgentCallStatusBanner } from './agent-call-status-banner';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useFollowUpNotifications, type FollowUpNotification } from '@/hooks/use-followup-notifications';
 import { FollowUpNotificationContainer } from '@/components/followup-notification-toast';
@@ -91,7 +92,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
         draft.pitchCompleted ||
-        draft.appointmentSet ||
+        draft.warmLead ||
         draft.showFollowUp ||
         !!draft.followUpData
     );
@@ -1132,7 +1133,7 @@ export default function SessionPage() {
                 total_call_time: 0,
                 owner_reached: 0,
                 pitch_completed: 0,
-                appointment_set: 0,
+                warm_lead: 0,
                 status: 'active',
                 paused_at: null,
                 total_paused_sec: 0,
@@ -1743,7 +1744,7 @@ export default function SessionPage() {
                     session: session.id,
                     owner_reached: data.ownerReached,
                     pitch_completed: data.pitchCompleted,
-                    appointment_set: data.appointmentSet,
+                    warm_lead: data.warmLead,
                     callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                     is_callback: hasCallbacks ? true : undefined,
                     zoom_call_id: ownership?.zoomCallId ?? undefined,
@@ -1813,7 +1814,7 @@ export default function SessionPage() {
                         const sessionUpdates: Record<string, number> = {};
                         if (data.ownerReached) sessionUpdates['owner_reached+'] = 1;
                         if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
-                        if (data.appointmentSet) sessionUpdates['appointment_set+'] = 1;
+                        if (data.warmLead) sessionUpdates['warm_lead+'] = 1;
                         if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
                         if (callDuration > 0) sessionUpdates['total_call_time+'] = callDuration;
                         if (data.callOutcome.includes('No Answer') && capturedPickupIncremented) {
@@ -2060,7 +2061,7 @@ export default function SessionPage() {
     // Update performance counters
     // ---------------------------------------------------------------------------
     const handlePerformanceUpdate = useCallback(async (
-        field: 'owner_reached' | 'pitch_completed' | 'appointment_set',
+        field: 'owner_reached' | 'pitch_completed' | 'warm_lead',
         value: number
     ) => {
         if (!session) return;
@@ -2599,6 +2600,8 @@ export default function SessionPage() {
                     </div>
                 </div>
 
+                <AgentCallStatusBanner />
+
                 {/* Current Call Timer - shown when call is active */}
                 {(callStatus === 'ringing' || callStatus === 'connected') && (
                     <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4">
@@ -2840,7 +2843,7 @@ export default function SessionPage() {
                         <PerformanceTracker
                             ownerReached={session.owner_reached || 0}
                             pitchCompleted={session.pitch_completed || 0}
-                            appointmentSet={session.appointment_set || 0}
+                            warmLead={session.warm_lead || 0}
                             onUpdate={handlePerformanceUpdate}
                         />
                         <SessionFollowUps

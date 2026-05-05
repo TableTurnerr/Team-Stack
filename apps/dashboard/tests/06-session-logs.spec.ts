@@ -34,7 +34,7 @@ test.describe('Session Logs Page', () => {
         total_duration_sec: 1800,
         owner_reached: 2,
         pitch_completed: 2,
-        appointment_set: 1,
+        warm_lead: 1,
         status: 'completed',
         session_notes: `[${TEST_PREFIX}] Playwright test session`,
         total_paused_sec: 0,

@@ -122,7 +122,7 @@ export interface OutreachLog extends RecordModel {
 }
 
 export interface Goal extends RecordModel {
-  metric: 'Total Messages Sent' | 'Unique Profiles Contacted' | 'Replies Received' | 'Warm Leads Generated' | 'Bookings Made' | 'Payments Received' | 'Calls Made' | 'Calls Transcribed';
+  metric: 'Total Messages Sent' | 'Unique Profiles Contacted' | 'Replies Received' | 'Warm Lead Generated' | 'Bookings Made' | 'Payments Received' | 'Calls Made' | 'Calls Transcribed';
   target_value: number;
   frequency: 'Daily' | 'Weekly' | 'Monthly';
   assigned_to_user?: string;
@@ -220,7 +220,7 @@ export interface CallLog extends RecordModel {
   // Per-call performance tracking (tied to specific calls, aggregated to session level)
   owner_reached?: boolean;
   pitch_completed?: boolean;
-  appointment_set?: boolean;
+  warm_lead?: boolean;
   // Callback tracking: array of {reason, timestamp} for each callback made during this call
   callback_events?: Array<{ reason: string; timestamp: string }>;
   /** True when this call log was created via the callback feature (i.e. it is a re-dial) */
@@ -256,7 +256,7 @@ export interface ColdCallingSession extends RecordModel {
   total_call_time?: number;
   owner_reached: number;
   pitch_completed: number;
-  appointment_set: number;
+  warm_lead: number;
   status: 'active' | 'completed';
   session_notes?: string; // Optional notes about the session (e.g., overall observations, issues)
   paused_at?: string; // ISO timestamp set when session is paused, null when resumed

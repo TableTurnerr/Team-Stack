@@ -49,7 +49,7 @@ test.describe('Cold Calls Page', () => {
       post_call_notes: `[${TEST_PREFIX}] Playwright automated test call`,
       owner_reached: true,
       pitch_completed: true,
-      appointment_set: false,
+      warm_lead: false,
     });
     testCallLogId = callLog.id;
   });

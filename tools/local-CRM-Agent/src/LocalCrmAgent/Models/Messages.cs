@@ -61,6 +61,22 @@ public class CallStateMessage : AgentMessage
     [JsonPropertyName("teammateOnCall")]
     public bool TeammateOnCall { get; set; }
 
+    /// <summary>
+    /// True when fusion suspects the call ended (audio/UI signals quiet
+    /// past the latch window) but has no HARD confirmation. Dashboard
+    /// keeps the call as live and surfaces a "Has the call ended?" prompt.
+    /// </summary>
+    [JsonPropertyName("tentativeEnd")]
+    public bool TentativeEnd { get; set; }
+
+    /// <summary>
+    /// UTC timestamp (ISO-8601) of when the silence began. Dashboard
+    /// uses this as the effective end time once the user confirms, so
+    /// hold/mute time isn't billed as talk time.
+    /// </summary>
+    [JsonPropertyName("silenceStartedAt")]
+    public string? SilenceStartedAt { get; set; }
+
     public CallStateMessage() => Type = "callState";
 
     public static CallStateMessage From(CallStateInfo info) => new()
@@ -77,6 +93,8 @@ public class CallStateMessage : AgentMessage
         UiSeenHere = info.UiSeenHere,
         AudioActiveHere = info.AudioActiveHere,
         TeammateOnCall = info.TeammateOnCall,
+        TentativeEnd = info.TentativeEnd,
+        SilenceStartedAt = info.SilenceStartedAt?.ToString("o"),
     };
 }
 

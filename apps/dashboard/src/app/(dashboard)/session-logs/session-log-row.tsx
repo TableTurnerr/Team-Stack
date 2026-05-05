@@ -73,7 +73,7 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
         : 0;
 
     const handleUpdateCounter = async (
-        field: 'owner_reached' | 'pitch_completed' | 'appointment_set',
+        field: 'owner_reached' | 'pitch_completed' | 'warm_lead',
         value: number
     ) => {
         try {
@@ -291,9 +291,9 @@ export function SessionLogRow({ session, index, selected, onSelect, hasSelection
                 {isColumnVisible('appt') && (
                 <td className="px-3 py-3 text-center">
                     <PerformanceCounterInline
-                        value={session.appointment_set || 0}
-                        onSave={(value) => handleUpdateCounter('appointment_set', value)}
-                        label="Appointment Set"
+                        value={session.warm_lead || 0}
+                        onSave={(value) => handleUpdateCounter('warm_lead', value)}
+                        label="Warm Lead"
                     />
                 </td>
                 )}

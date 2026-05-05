@@ -54,7 +54,7 @@ export interface CsvCompanyRow {
   // Reference-only (never applied on import)
   total_calls: number;
   total_pickups: number;
-  appointment_set_count: number;
+  warm_lead_count: number;
   last_call_time: string;
   last_call_outcome: string;
   session_ids: string[];
@@ -80,7 +80,7 @@ export interface ExportOptions {
 export interface CompanyCallStats {
   total_calls: number;
   total_pickups: number;
-  appointment_set_count: number;
+  warm_lead_count: number;
   last_call_time: string;
   last_call_outcome: string;
   session_ids: string[];
@@ -335,7 +335,7 @@ const CSV_HEADERS = [
   'phone_numbers_json',
   'total_calls',
   'total_pickups',
-  'appointment_set_count',
+  'warm_lead_count',
   'last_call_time',
   'last_call_outcome',
   'session_ids',
@@ -407,7 +407,7 @@ export function generateLeadsCSV(
     const stats = callStatsMap.get(company.id);
     const totalCalls = options.includeCallStats ? (stats?.total_calls ?? 0) : 0;
     const totalPickups = options.includeCallStats ? (stats?.total_pickups ?? 0) : 0;
-    const appointmentCount = options.includeCallStats ? (stats?.appointment_set_count ?? 0) : 0;
+    const warmLeadCount = options.includeCallStats ? (stats?.warm_lead_count ?? 0) : 0;
     const lastCallTime = options.includeCallStats ? (stats?.last_call_time ?? '') : '';
     const lastCallOutcome = options.includeCallStats ? (stats?.last_call_outcome ?? '') : '';
 
@@ -448,7 +448,7 @@ export function generateLeadsCSV(
       phoneJsonCell,
       escapeCsvCell(String(totalCalls)),
       escapeCsvCell(String(totalPickups)),
-      escapeCsvCell(String(appointmentCount)),
+      escapeCsvCell(String(warmLeadCount)),
       escapeCsvCell(lastCallTime),
       escapeCsvCell(lastCallOutcome),
       escapeCsvCell(sessionIds),
@@ -538,7 +538,7 @@ export function parseLeadsCSV(csvText: string): ParseResult {
     // Parse numeric reference fields
     const totalCalls = parseInt(get('total_calls'), 10) || 0;
     const totalPickups = parseInt(get('total_pickups'), 10) || 0;
-    const appointmentSetCount = parseInt(get('appointment_set_count'), 10) || 0;
+    const warmLeadCountVal = parseInt(get('warm_lead_count'), 10) || 0;
 
     // Parse semicolon-delimited ID lists
     const parseIdList = (col: string): string[] => {
@@ -578,7 +578,7 @@ export function parseLeadsCSV(csvText: string): ParseResult {
       phone_numbers_json: phoneNumbersJson,
       total_calls: totalCalls,
       total_pickups: totalPickups,
-      appointment_set_count: appointmentSetCount,
+      warm_lead_count: warmLeadCountVal,
       last_call_time: get('last_call_time'),
       last_call_outcome: get('last_call_outcome'),
       session_ids: parseIdList('session_ids'),
@@ -1043,7 +1043,7 @@ export async function fetchCallStatsForCompanies(
       const callLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
         filter,
         sort: '-call_time',
-        fields: 'id,company,call_outcome,call_time,owner_reached,appointment_set,session',
+        fields: 'id,company,call_outcome,call_time,owner_reached,warm_lead,session',
       });
 
       // Aggregate per company
@@ -1062,7 +1062,7 @@ export async function fetchCallStatsForCompanies(
         result.set(companyId, {
           total_calls: logs.length,
           total_pickups: logs.filter(l => !l.call_outcome?.includes('No Answer')).length,
-          appointment_set_count: logs.filter(l => l.appointment_set).length,
+          warm_lead_count: logs.filter(l => l.warm_lead).length,
           last_call_time: mostRecent?.call_time ?? '',
           last_call_outcome: Array.isArray(mostRecent?.call_outcome) ? mostRecent.call_outcome.join(', ') : (mostRecent?.call_outcome ?? ''),
           session_ids: sessionIds,

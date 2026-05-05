@@ -1736,7 +1736,8 @@
                     "Hung Up (Rude Recep)",
                     "Hung Up (Other)",
                     "Other",
-                    "Missed Call"
+                    "Missed Call",
+                    "Warm Lead"
                 ]
             },
             {
@@ -1880,7 +1881,7 @@
             {
                 "hidden": false,
                 "id": "bool_appointment_set",
-                "name": "appointment_set",
+                "name": "warm_lead",
                 "presentable": false,
                 "required": false,
                 "system": false,
@@ -2132,7 +2133,7 @@
                 "id": "number_appointment_set",
                 "max": null,
                 "min": 0,
-                "name": "appointment_set",
+                "name": "warm_lead",
                 "onlyInt": true,
                 "presentable": false,
                 "required": false,
@@ -2364,7 +2365,8 @@
                     "Send Email",
                     "Hung Up (Rude Recep)",
                     "Hung Up (Other)",
-                    "Other"
+                    "Other",
+                    "Warm Lead"
                 ]
             },
             {
@@ -5350,7 +5352,7 @@
                     "Total Messages Sent",
                     "Unique Profiles Contacted",
                     "Replies Received",
-                    "Warm Leads Generated",
+                    "Warm Lead Generated",
                     "Bookings Made",
                     "Payments Received",
                     "Calls Made",

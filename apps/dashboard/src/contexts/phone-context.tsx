@@ -49,6 +49,22 @@ interface PhoneContextType {
     agentRequired: boolean;
     /** Duration of the current call in seconds (from agent) */
     callDuration: number;
+    /**
+     * True when the agent's audio/UI sources have gone quiet long enough
+     * to look like a hangup but no HARD termination signal has arrived.
+     * The dashboard surfaces a "Has the call ended?" prompt; talk-time and
+     * recording duration are clipped to <see cref="silenceStartedAt"/>.
+     */
+    tentativeEnd: boolean;
+    /**
+     * UTC ISO-8601 timestamp marking when the silence began. Becomes the
+     * effective end time once the user confirms the call ended.
+     */
+    silenceStartedAt: string | null;
+    /** Confirm the silence-detected hangup — transitions the call to ended. */
+    confirmCallEnded: () => void;
+    /** Dismiss the silence prompt — call is still live (hold/mute/long pause). */
+    dismissTentativeEnd: () => void;
 }
 
 const PhoneContext = createContext<PhoneContextType | null>(null);
@@ -225,6 +241,22 @@ export function PhoneProvider({ children }: { children: ReactNode }) {
         sendCommand({ type: 'endCall' });
     }, [sendCommand]);
 
+    // ── Tentative-end (silence-detected) confirmation ─────────────────
+    // The agent sets `tentativeEnd=true` when audio/UI signals quiet down
+    // long enough to look like a hangup but no HARD termination signal has
+    // arrived. The dashboard surfaces a "Has the call ended?" prompt;
+    // these callbacks let the user resolve it without waiting on the
+    // unreliable silence detector to either time-out or recover.
+    const confirmCallEnded = useCallback(() => {
+        console.log('[Phone] confirmCallEnded — user confirmed silence was a hangup');
+        sendCommand({ type: 'confirmCallEnded' });
+    }, [sendCommand]);
+
+    const dismissTentativeEnd = useCallback(() => {
+        console.log('[Phone] dismissTentativeEnd — user says call is still live');
+        sendCommand({ type: 'dismissTentativeEnd' });
+    }, [sendCommand]);
+
     // Call duration from agent
     const callDuration = agentCallState?.duration ?? 0;
 
@@ -323,6 +355,10 @@ export function PhoneProvider({ children }: { children: ReactNode }) {
             callDirection, incomingCallerNumber,
             agentRequired: !agentConnected,
             callDuration,
+            tentativeEnd: agentCallState?.tentativeEnd ?? false,
+            silenceStartedAt: agentCallState?.silenceStartedAt ?? null,
+            confirmCallEnded,
+            dismissTentativeEnd,
         }}>
             {children}
         </PhoneContext.Provider>

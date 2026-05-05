@@ -42,6 +42,19 @@ public class CallStateFusion : IDisposable
     private string? _intentId;
     private string? _clientCallId;
 
+    // Tentative-end tracking. When fusion's signal sources (audio peak +
+    // UIA, both unreliable for hold/mute/long-silence cases) suggest the
+    // call ended but no HARD signal (audio session disconnected, UIA
+    // reports the active-call panel is gone) confirmed it, we hold the
+    // state in Connected and surface a "did the call end?" prompt to the
+    // dashboard via TentativeEnd / SilenceStartedAt instead of forcing a
+    // hangup. The user can confirm via ConfirmEnd() — endTime/durations
+    // get rewound to silenceStartedAt so on-hold time is never billed as
+    // talk time.
+    private DateTime? _tentativeEndAt;
+    private bool _hardEnd;          // last end transition came from a hard signal
+    private bool _lastTentative;    // last broadcast tentative-end flag (edge detect)
+
     private CancellationTokenSource? _cts;
     private Task? _pollingTask;
     private readonly object _lock = new();
@@ -60,8 +73,10 @@ public class CallStateFusion : IDisposable
     // gaps (2 s on / 4 s off) and natural conversation pauses. If we
     // treated instantaneous silence as "call ended" the state would flap
     // Connected↔Idle every few seconds during a real call. We latch on the
-    // most recent activity and only declare the call gone when there has
-    // been no sign of activity for this many seconds.
+    // most recent activity and only mark the call as TENTATIVELY ended
+    // when there has been no sign of activity for this many seconds — the
+    // dashboard then prompts the user to confirm the hangup so silent
+    // hold music / mute / long pauses don't terminate a live call.
     private const double AudioLatchSeconds = 2.0;
 
     private const double EndedCooldownSeconds = 1.0;
@@ -87,6 +102,7 @@ public class CallStateFusion : IDisposable
         _cts = new CancellationTokenSource();
 
         _audioMonitor.ZoomAudioStateChanged += OnAudioEvent;
+        _audioMonitor.ZoomAudioSessionGone += OnAudioSessionGone;
         _audioMonitor.StartWatching();
 
         _uiWatcher.StateChanged += OnUiEvent;
@@ -99,6 +115,7 @@ public class CallStateFusion : IDisposable
     public void Stop()
     {
         _audioMonitor.ZoomAudioStateChanged -= OnAudioEvent;
+        _audioMonitor.ZoomAudioSessionGone -= OnAudioSessionGone;
         _uiWatcher.StateChanged -= OnUiEvent;
         _uiWatcher.Stop();
 
@@ -111,6 +128,69 @@ public class CallStateFusion : IDisposable
 
     private void OnAudioEvent(bool isActive) => Evaluate();
     private void OnUiEvent(ZoomUiState _) => Evaluate();
+
+    // Hard "audio truly gone" signal from WASAPI: fired when the Zoom audio
+    // session disconnects (call really ended). The audio latch exists to
+    // ride out brief silence dips, but a session-gone event removes any
+    // doubt — clear the latch and mark the next end transition as a HARD
+    // end so the fusion bypasses the tentative-end prompt and goes straight
+    // to Ended. Without this, after a long power-dial session the
+    // dashboard's "Call in progress" tooltip can linger several seconds
+    // past the actual hangup.
+    private void OnAudioSessionGone()
+    {
+        lock (_lock)
+        {
+            _audioActiveLastSeen = null;
+            _hardEnd = true;
+        }
+        Evaluate();
+    }
+
+    /// <summary>
+    /// User confirmed (via the dashboard's "Has the call ended?" prompt)
+    /// that the silence detected by fusion was a real hangup. Forces the
+    /// transition to Ended now and rewinds the recorded end time to when
+    /// the silence started, so hold-music / mute / long-pause time is
+    /// never counted as talk time.
+    /// </summary>
+    public void ConfirmEnd()
+    {
+        CallStateInfo? notify;
+        lock (_lock)
+        {
+            if (_state != CallState.Connected && _state != CallState.Ringing)
+                return; // already ended/idle; nothing to do
+
+            _hardEnd = true;
+            _state = CallState.Ended;
+            _endedAt = _tentativeEndAt ?? DateTime.UtcNow;
+            _audioActiveLastSeen = null;
+            _uiCallGoneSince = null;
+            notify = BuildStateInfoLocked();
+            CurrentState = notify;
+        }
+        StateChanged?.Invoke(notify);
+    }
+
+    /// <summary>
+    /// User dismissed the "Has the call ended?" prompt — they're still on
+    /// the call. Clear the tentative flag and re-arm the audio latch so a
+    /// fresh silence window can be detected.
+    /// </summary>
+    public void DismissTentativeEnd()
+    {
+        CallStateInfo? notify = null;
+        lock (_lock)
+        {
+            if (_tentativeEndAt == null) return;
+            _tentativeEndAt = null;
+            _audioActiveLastSeen = DateTime.UtcNow;
+            notify = BuildStateInfoLocked();
+            CurrentState = notify;
+        }
+        if (notify != null) StateChanged?.Invoke(notify);
+    }
 
     private async Task FallbackPollLoop(CancellationToken ct)
     {
@@ -292,23 +372,38 @@ public class CallStateFusion : IDisposable
                     break;
 
                 case CallState.Connected:
-                    if (!effectiveActive)
+                    if (_hardEnd)
+                    {
+                        // Hard end signal (audio session disconnected, UI
+                        // panel removed, or user-confirmed silence) — go
+                        // straight to Ended. Use the silence start time so
+                        // hold-music / mute time isn't billed as talk time.
+                        _state = CallState.Ended;
+                        _endedAt = _tentativeEndAt ?? _uiCallGoneSince ?? DateTime.UtcNow;
+                        _tentativeEndAt = null;
+                        _audioActiveLastSeen = null;
+                        _hardEnd = false;
+                    }
+                    else if (!effectiveActive)
                     {
                         _uiCallGoneSince ??= DateTime.UtcNow;
                         if ((DateTime.UtcNow - _uiCallGoneSince.Value).TotalSeconds > UiLossConfirmSeconds)
                         {
-                            _state = CallState.Ended;
-                            _endedAt = DateTime.UtcNow;
-                            // Clear the audio latch on confirmed end so the
-                            // Ended-cooldown window cannot be artificially
-                            // extended by stale latched activity, and so a
-                            // new call's first poll sees a fresh signal.
-                            _audioActiveLastSeen = null;
+                            // Audio-only silence is unreliable — the user
+                            // could be on hold, muted, or in a long pause.
+                            // Surface a TENTATIVE end to the dashboard so it
+                            // can prompt the user to confirm; do NOT force
+                            // Ended here. ConfirmEnd() and OnAudioSessionGone
+                            // are the only paths that flip _hardEnd=true.
+                            _tentativeEndAt ??= _uiCallGoneSince;
                         }
                     }
                     else
                     {
+                        // Activity returned — call is clearly still live,
+                        // tear down any pending tentative state.
                         _uiCallGoneSince = null;
+                        _tentativeEndAt = null;
                     }
 
                     // Independently track audio dropouts for confidence.
@@ -339,6 +434,8 @@ public class CallStateFusion : IDisposable
                         _connectedAt = null;
                         _ringingAt = null;
                         _endedAt = null;
+                        _tentativeEndAt = null;
+                        _hardEnd = false;
                         // Reset the audio latch so a brief stale signal
                         // from the prior call cannot trigger Idle→Connected
                         // on the very next poll for a back-to-back call.
@@ -358,9 +455,15 @@ public class CallStateFusion : IDisposable
         else if (uiActive || audioFlowing) conf = SignalConfidence.Medium;
         else conf = SignalConfidence.Low;
 
+        // For talk-time, prefer the tentative end timestamp over "now" once
+        // silence has been detected — that way a hold/mute/long-pause that
+        // the user later confirms ended doesn't keep ticking the duration.
+        DateTime durationCutoff = _endedAt ?? _tentativeEndAt ?? DateTime.UtcNow;
         int duration = _connectedAt.HasValue
-            ? (int)Math.Ceiling(((_endedAt ?? DateTime.UtcNow) - _connectedAt.Value).TotalSeconds)
+            ? (int)Math.Ceiling((durationCutoff - _connectedAt.Value).TotalSeconds)
             : 0;
+
+        bool tentative = _state == CallState.Connected && _tentativeEndAt != null;
 
         var info = new CallStateInfo
         {
@@ -380,6 +483,8 @@ public class CallStateFusion : IDisposable
             // Teammate-busy: account-wide presence shows "On a call" while
             // THIS device has no active/ring UI — must be another teammate.
             TeammateOnCall = ui.AccountPresenceOnCall && !uiActive && !uiRinging,
+            TentativeEnd = tentative,
+            SilenceStartedAt = tentative ? _tentativeEndAt : null,
         };
 
         CurrentState = info;
@@ -387,9 +492,20 @@ public class CallStateFusion : IDisposable
         bool teammateChanged = info.TeammateOnCall != _lastTeammateOnCall;
         _lastTeammateOnCall = info.TeammateOnCall;
 
+        // Edge-detect tentative-end transitions so the dashboard learns
+        // about them even when CallState itself doesn't change (we stay in
+        // Connected during a tentative hangup window).
+        bool tentativeChanged = tentative != _lastTentative;
+        _lastTentative = tentative;
+
         if (_state != prev)
         {
             Debug.WriteLine($"[Fusion] {prev} → {_state} | phone={_phoneNumber} conf={conf} ui={uiActive}/{uiRinging} audio(active={audioActive} flow={audioFlowing} alive={audioAlive}) window(timer={window.IsTimerDetected} calling={window.IsCallingDetected} incoming={window.IsIncomingDetected}) teammate={info.TeammateOnCall}");
+            return info;
+        }
+        if (tentativeChanged)
+        {
+            Debug.WriteLine($"[Fusion] tentativeEnd → {tentative} (silenceStartedAt={_tentativeEndAt:o})");
             return info;
         }
         if (teammateChanged)
@@ -398,6 +514,36 @@ public class CallStateFusion : IDisposable
             return info;
         }
         return null;
+    }
+
+    private CallStateInfo BuildStateInfoLocked()
+    {
+        // Used by ConfirmEnd / DismissTentativeEnd to surface a fresh state
+        // info to subscribers without going through a full Evaluate pass.
+        DateTime durationCutoff = _endedAt ?? _tentativeEndAt ?? DateTime.UtcNow;
+        int duration = _connectedAt.HasValue
+            ? (int)Math.Ceiling((durationCutoff - _connectedAt.Value).TotalSeconds)
+            : 0;
+        bool tentative = _state == CallState.Connected && _tentativeEndAt != null;
+        return new CallStateInfo
+        {
+            State = _state,
+            PhoneNumber = _phoneNumber,
+            Direction = _direction,
+            Confidence = CurrentState.Confidence,
+            StartTime = _ringingAt ?? _connectedAt,
+            ConnectTime = _connectedAt,
+            EndTime = _endedAt,
+            DurationSeconds = duration,
+            DeviceId = DeviceIdentity.DeviceId,
+            IntentId = _intentId,
+            ClientCallId = _clientCallId,
+            UiSeenHere = CurrentState.UiSeenHere,
+            AudioActiveHere = CurrentState.AudioActiveHere,
+            TeammateOnCall = CurrentState.TeammateOnCall,
+            TentativeEnd = tentative,
+            SilenceStartedAt = tentative ? _tentativeEndAt : null,
+        };
     }
 
     public void Dispose() => Stop();

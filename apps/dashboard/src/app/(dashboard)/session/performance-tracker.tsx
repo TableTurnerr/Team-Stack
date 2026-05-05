@@ -6,8 +6,8 @@ import { Plus, Minus, UserCheck, Presentation, CalendarCheck, type LucideIcon } 
 interface PerformanceTrackerProps {
     ownerReached: number;
     pitchCompleted: number;
-    appointmentSet: number;
-    onUpdate: (field: 'owner_reached' | 'pitch_completed' | 'appointment_set', value: number) => void;
+    warmLead: number;
+    onUpdate: (field: 'owner_reached' | 'pitch_completed' | 'warm_lead', value: number) => void;
 }
 
 interface CounterRowProps {
@@ -62,18 +62,18 @@ function CounterRow({ label, value, icon: Icon, color, onIncrement, onDecrement 
 export function PerformanceTracker({
     ownerReached,
     pitchCompleted,
-    appointmentSet,
+    warmLead,
     onUpdate,
 }: PerformanceTrackerProps) {
     const handleIncrement = useCallback(
-        (field: 'owner_reached' | 'pitch_completed' | 'appointment_set', current: number) => {
+        (field: 'owner_reached' | 'pitch_completed' | 'warm_lead', current: number) => {
             onUpdate(field, current + 1);
         },
         [onUpdate]
     );
 
     const handleDecrement = useCallback(
-        (field: 'owner_reached' | 'pitch_completed' | 'appointment_set', current: number) => {
+        (field: 'owner_reached' | 'pitch_completed' | 'warm_lead', current: number) => {
             if (current > 0) onUpdate(field, current - 1);
         },
         [onUpdate]
@@ -91,12 +91,12 @@ export function PerformanceTracker({
                 handleIncrement('pitch_completed', pitchCompleted);
             } else if (e.key === '3') {
                 e.preventDefault();
-                handleIncrement('appointment_set', appointmentSet);
+                handleIncrement('warm_lead', warmLead);
             }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [ownerReached, pitchCompleted, appointmentSet, handleIncrement]);
+    }, [ownerReached, pitchCompleted, warmLead, handleIncrement]);
 
     return (
         <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-5 space-y-1">
@@ -127,12 +127,12 @@ export function PerformanceTracker({
             <div className="border-t border-[var(--card-border)]" />
 
             <CounterRow
-                label="Appointment Set"
-                value={appointmentSet}
+                label="Warm Lead"
+                value={warmLead}
                 icon={CalendarCheck}
                 color="var(--warning)"
-                onIncrement={() => handleIncrement('appointment_set', appointmentSet)}
-                onDecrement={() => handleDecrement('appointment_set', appointmentSet)}
+                onIncrement={() => handleIncrement('warm_lead', warmLead)}
+                onDecrement={() => handleDecrement('warm_lead', warmLead)}
             />
 
             <p className="text-[10px] text-[var(--muted)] pt-2">

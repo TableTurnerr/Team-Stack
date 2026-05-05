@@ -303,6 +303,19 @@ public class AgentWebSocketServer : IDisposable
                 case "endCall":
                     await HandleEndCall(client);
                     break;
+                case "confirmCallEnded":
+                    _fusion.ConfirmEnd();
+                    break;
+                case "dismissTentativeEnd":
+                    _fusion.DismissTentativeEnd();
+                    break;
+                case "ping":
+                    // Liveness round-trip used by the dashboard's pulse-
+                    // watcher. Reply with a tiny pong so a quiet socket
+                    // (no calls in progress) still gets a response inside
+                    // the dashboard's 4 s stale window.
+                    HandlePing(client);
+                    break;
                 case "setZoomApiConfig":
                     HandleSetZoomApiConfig(doc.RootElement);
                     break;
@@ -326,6 +339,20 @@ public class AgentWebSocketServer : IDisposable
         {
             FileLogger.Write($"[WS] Handler '{type ?? "?"}' failed: {ex}");
             TrySendError(client, type ?? "handler", ex.Message);
+        }
+    }
+
+    private void HandlePing(IWebSocketConnection client)
+    {
+        try
+        {
+            var payload = new { type = "pong", timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
+            var json = JsonSerializer.Serialize(payload, _jsonOptions);
+            if (client.IsAvailable) client.Send(json);
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Write($"[WS] Failed to send pong: {ex.Message}");
         }
     }
 
@@ -810,19 +837,27 @@ public class AgentWebSocketServer : IDisposable
         List<IWebSocketConnection> snapshot;
         lock (_clientLock) snapshot = [.. _clients];
 
+        bool anyDropped = false;
         foreach (var client in snapshot)
         {
+            // Pre-check IsAvailable so a half-dead socket (TCP keepalive
+            // hasn't noticed the peer is gone yet) gets evicted before we
+            // try to send. Any send failure also evicts.
+            if (!client.IsAvailable)
+            {
+                lock (_clientLock) anyDropped |= _clients.Remove(client);
+                continue;
+            }
             try
             {
-                if (client.IsAvailable)
-                    client.Send(json);
+                client.Send(json);
             }
             catch
             {
-                lock (_clientLock) _clients.Remove(client);
-                ConnectionCountChanged?.Invoke(ConnectionCount);
+                lock (_clientLock) anyDropped |= _clients.Remove(client);
             }
         }
+        if (anyDropped) ConnectionCountChanged?.Invoke(ConnectionCount);
     }
 
     // ─── Call controller command handlers ───────────────────────────────────

@@ -71,8 +71,15 @@ public class AgentService : IDisposable
     }
 
     /// <summary>
-    /// Broadcasts call state every 1s (for duration updates) and
-    /// heartbeat every 5s.
+    /// Broadcasts call state every 1 s (live duration), recording state
+    /// every 1 s, a HEARTBEAT every 1 s (used by the dashboard's stale-
+    /// watchdog — anything sparser made the "agent unresponsive" detector
+    /// noisy), and the upload queue status every 10 s.
+    ///
+    /// The localhost WebSocket between dashboard and agent is on the same
+    /// machine, so cost is negligible — the bottleneck is detection
+    /// latency, not bandwidth, and a 1 s heartbeat lets the dashboard
+    /// flag a frozen agent in ~3 s instead of ~12 s.
     /// </summary>
     private async Task BroadcastLoop(CancellationToken ct)
     {
@@ -88,13 +95,12 @@ public class AgentService : IDisposable
                 // Every second: broadcast recording state (for live duration)
                 _wsServer.BroadcastRecordingState();
 
-                // Every 5 seconds: heartbeat
-                if (tick % 5 == 0)
-                {
-                    var uptime = (int)(DateTime.UtcNow - _startTime).TotalSeconds;
-                    var zoomDetected = _audioMonitor.IsZoomRunning();
-                    _wsServer.BroadcastHeartbeat(uptime, zoomDetected);
-                }
+                // Every second: heartbeat. Cheap (single small JSON frame
+                // over loopback) and lets the dashboard pulse-watcher fire
+                // on a missed beat instead of after several missed beats.
+                var uptime = (int)(DateTime.UtcNow - _startTime).TotalSeconds;
+                var zoomDetected = _audioMonitor.IsZoomRunning();
+                _wsServer.BroadcastHeartbeat(uptime, zoomDetected);
 
                 // Every 10 seconds: upload queue status
                 if (tick % 10 == 0 && _wsServer.ConnectionCount > 0)

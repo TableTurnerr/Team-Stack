@@ -15,6 +15,7 @@ import { PhoneDialer } from '@/components/phone-dialer';
 import { CurrentCallForm, type CallFormData, type CallFormDraft, type CallbackReason } from './current-call-form';
 import { LastCallPreview } from './last-call-preview';
 import { SessionFollowUps } from './session-followups';
+import { AgentCallStatusBanner } from './agent-call-status-banner';
 import { ConfirmationModal } from '@/components/ui/confirmation-modal';
 import { useFollowUps } from '@/contexts/follow-up-context';
 import { useFollowUpNotifications, type FollowUpNotification } from '@/hooks/use-followup-notifications';
@@ -45,7 +46,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
         draft.postCallNotes.trim().length > 0 ||
         draft.ownerReached ||
         draft.pitchCompleted ||
-        draft.appointmentSet ||
+        draft.warmLead ||
         draft.showFollowUp ||
         !!draft.followUpData
     );
@@ -316,7 +317,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
                 owner_name_found: data.ownerName || undefined,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
-                appointment_set: data.appointmentSet,
+                warm_lead: data.warmLead,
                 callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                 zoom_call_id: ownership?.zoomCallId ?? undefined,
                 // session field is omitted (will be null) - this marks it as a standalone call
@@ -504,6 +505,7 @@ export function StandaloneCallInterface({ onExit }: StandaloneCallInterfaceProps
 
                 <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
                     <div className="max-w-4xl mx-auto space-y-6">
+                        <AgentCallStatusBanner />
                         <CurrentCallForm
                             phoneNumber={currentPhoneNumber}
                             onSave={handleSaveCall}

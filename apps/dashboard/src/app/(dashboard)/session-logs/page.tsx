@@ -211,7 +211,7 @@ export default function SessionLogsPage() {
 
     const handleExportCSV = () => {
         // CSV export functionality
-        const csvHeader = 'Date,Duration,Dials,Pickups,Pickup Rate,Owner Reached,Pitch Completed,Appointments,User,Status\n';
+        const csvHeader = 'Date,Duration,Dials,Pickups,Pickup Rate,Owner Reached,Pitch Completed,Warm Lead,User,Status\n';
         const csvRows = sessions.map(session => {
             const pickupRate = session.total_dials > 0
                 ? Math.round((session.total_pickups / session.total_dials) * 100)
@@ -225,7 +225,7 @@ export default function SessionLogsPage() {
                 `${pickupRate}%`,
                 session.owner_reached || 0,
                 session.pitch_completed || 0,
-                session.appointment_set || 0,
+                session.warm_lead || 0,
                 session.expand?.user?.name || '',
                 session.status,
             ].join(',');

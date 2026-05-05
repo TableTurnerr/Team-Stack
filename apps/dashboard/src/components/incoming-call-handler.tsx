@@ -251,7 +251,7 @@ export function IncomingCallHandler() {
                 session: activeSession?.id,
                 owner_reached: data.ownerReached,
                 pitch_completed: data.pitchCompleted,
-                appointment_set: data.appointmentSet,
+                warm_lead: data.warmLead,
                 callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
                 is_callback: hasCallbacks ? true : undefined,
                 direction: 'inbound',
@@ -280,7 +280,7 @@ export function IncomingCallHandler() {
                 const sessionUpdates: Record<string, number> = {};
                 if (data.ownerReached) sessionUpdates['owner_reached+'] = 1;
                 if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
-                if (data.appointmentSet) sessionUpdates['appointment_set+'] = 1;
+                if (data.warmLead) sessionUpdates['warm_lead+'] = 1;
                 if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
                 if (callDuration > 0) sessionUpdates['total_call_time+'] = callDuration;
                 if (Object.keys(sessionUpdates).length > 0) {

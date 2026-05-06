@@ -65,6 +65,16 @@ public class AgentWebSocketServer : IDisposable
         _uploader.UploadCompleted += OnUploadCompleted;
         _uploader.UploadProgress += OnUploadProgress;
         _uploader.CircuitBreakerTripped += OnUploadCircuitBreakerTripped;
+        // Surface 401s from the upload pipeline so the dashboard can prompt
+        // the user to re-authenticate. Without this, expired tokens silently
+        // wedge every upload and the user just sees the queue stop draining.
+        _uploader.UploadAuthExpired += OnUploadAuthExpired;
+    }
+
+    private void OnUploadAuthExpired()
+    {
+        FileLogger.Write("[WS] Upload received 401 — broadcasting auth_required");
+        SetAuthRequired("upload_token_expired");
     }
 
     private void OnUploadCircuitBreakerTripped(int cooldownSeconds, string? reason)
@@ -252,6 +262,9 @@ public class AgentWebSocketServer : IDisposable
                 case "discardRecording":
                     HandleDiscardRecording();
                     break;
+                case "discardRecordingByClientId":
+                    HandleDiscardRecordingByClientId(doc.RootElement);
+                    break;
                 case "setAutoRecord":
                     HandleSetAutoRecord(doc.RootElement);
                     break;
@@ -422,6 +435,23 @@ public class AgentWebSocketServer : IDisposable
     private void HandleDiscardRecording()
     {
         _recorder?.DiscardRecording();
+    }
+
+    /// <summary>
+    /// Discard the recording stamped with this clientCallId — does NOT touch
+    /// the currently-recording file. Required for negative-delay power-dialer
+    /// overlap, where Call N's "No Answer" save fires while Call N+1 is
+    /// already being recorded; the older blunt `discardRecording` would have
+    /// killed Call N+1 instead of the just-ended Call N.
+    /// </summary>
+    private void HandleDiscardRecordingByClientId(JsonElement root)
+    {
+        if (_storage == null) return;
+        var clientCallId = root.TryGetProperty("clientCallId", out var c) ? c.GetString() : null;
+        if (string.IsNullOrWhiteSpace(clientCallId)) return;
+        var removed = _storage.DiscardByClientCallId(clientCallId!);
+        Debug.WriteLine($"[WS] discardRecordingByClientId={clientCallId} removed={removed}");
+        if (removed) BroadcastUploadQueueStatus();
     }
 
     private void HandleSetAutoRecord(JsonElement root)
@@ -1041,6 +1071,7 @@ public class AgentWebSocketServer : IDisposable
             _uploader.UploadCompleted -= OnUploadCompleted;
             _uploader.UploadProgress -= OnUploadProgress;
             _uploader.CircuitBreakerTripped -= OnUploadCircuitBreakerTripped;
+            _uploader.UploadAuthExpired -= OnUploadAuthExpired;
         }
         _micManager = null;
 

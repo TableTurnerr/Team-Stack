@@ -100,7 +100,7 @@ const hasDraftContent = (draft: CallFormDraft | null) => {
 
 export default function SessionPage() {
     const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-    const { dialNumber, callStatus, callDirection, isDialing, activeCallNumber, setAutoHangup, endCall, agentRequired } = usePhone();
+    const { dialNumber, callStatus, callDirection, isDialing, activeCallNumber, setAutoHangup, endCall, agentRequired, confirmCallEnded } = usePhone();
     const ownership = useCallOwnershipOptional();
     const { session, setSession, isLoading: sessionLoading, isStandaloneMode, setStandaloneMode } = useSession();
     const { createFollowUp, completeFollowUp } = useFollowUps();
@@ -784,6 +784,13 @@ export default function SessionPage() {
             // Only run the capture+reset on the TRANSITION into 'ended' — the
             // effect re-fires below when we reset ringStartTime/connectTime/etc.,
             // and we must not clobber the snapshot or overwrite the end time.
+            // The pin / hasUnsavedCall / stopRecording side-effects MUST also
+            // live inside this guard: re-firing them on every dep change
+            // (currentPhoneNumber especially) caused setHasUnsavedCall(true)
+            // and setPinnedFormPhoneNumber(currentPhoneNumber) to bounce when
+            // the next call's handleDial mutated currentPhoneNumber while the
+            // agent's callStatus was still 'ended' — re-locking the form to
+            // the wrong number.
             if (prevCallStatus !== 'ended') {
                 // Record the exact call-end time so duration calculations are accurate
                 // regardless of when the user actually submits the form.
@@ -825,19 +832,19 @@ export default function SessionPage() {
                 setConnectTime(null);
                 setDialCountIncremented(false);
                 setPickupCountIncremented(false);
-            }
 
-            if (currentPhoneNumber) {
-                setHasUnsavedCall(true);
-                // Pin the phone number so the form keeps showing the old number
-                // even if the power dialer auto-dials a new call (negative-delay overlap)
-                setPinnedFormPhoneNumber(currentPhoneNumber);
-            }
+                if (currentPhoneNumber) {
+                    setHasUnsavedCall(true);
+                    // Pin the phone number so the form keeps showing the old number
+                    // even if the power dialer auto-dials a new call (negative-delay overlap)
+                    setPinnedFormPhoneNumber(currentPhoneNumber);
+                }
 
-            // Automatically stop the current recording so it gets queued in deferredSegments
-            if (isSessionActive && recorderStatus === 'recording') {
-                console.log('[Session Page] Call ended — auto-stopping recording');
-                stopRecording();
+                // Automatically stop the current recording so it gets queued in deferredSegments
+                if (isSessionActive && recorderStatus === 'recording') {
+                    console.log('[Session Page] Call ended — auto-stopping recording');
+                    stopRecording();
+                }
             }
         }
     }, [callStatus, callDirection, ringStartTime, connectTime, session, dialCountIncremented, pickupCountIncremented, setSession, currentPhoneNumber, isSessionActive, recorderStatus, stopRecording]);
@@ -927,12 +934,14 @@ export default function SessionPage() {
 
         if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
         const delayMs = Math.abs(powerDialerDelayRef.current) * 1000;
+        const entry = powerDialerQueueRef.current[nextIdx];
         powerDialerTimerRef.current = setTimeout(() => {
             if (!powerDialerActiveRef.current || powerDialerPausedRef.current) return;
             setPowerDialerIndex(nextIdx);
-            const entry = powerDialerQueueRef.current[nextIdx];
-            // handleDial is captured via ref to always use the latest version
-            handleDialRef.current(entry.number, entry.company);
+            // Use the polling scheduler so the negative-delay auto-dial is
+            // never silently dropped by a busy channel — handleDial alone
+            // early-returns and would leave the queue stalled.
+            scheduleNextPowerDialRef.current(entry, 0);
         }, delayMs);
     }, [callStatus, session?.paused_at, deferredSegments.length]);
 
@@ -1517,6 +1526,66 @@ export default function SessionPage() {
     const handleDialRef = useRef(handleDial);
     handleDialRef.current = handleDial;
 
+    // Live ref for callStatus so the power-dialer auto-dial timer can poll
+    // for "agent reports the previous call has fully ended" without re-creating
+    // the timer chain on every status change. handleDial early-returns when
+    // callStatus is still ringing/connected (e.g. agent hasn't transitioned
+    // to ended yet because Zoom held the WASAPI session past the hangup),
+    // so before, the next call was silently skipped — the user saved Call N,
+    // the timer fired, was dropped, and the queue stalled until the user
+    // intervened. This ref lets the scheduler retry until the channel is free.
+    const callStatusRef = useRef(callStatus);
+    callStatusRef.current = callStatus;
+    const isDialingRef = useRef(isDialing);
+    isDialingRef.current = isDialing;
+
+    /**
+     * Schedule the next power-dialer entry, polling for an idle channel before
+     * actually dialing. Without the polling guard, handleDial's early-return
+     * silently drops the next dial when the agent's callStatus hasn't caught
+     * up to the user's just-saved hangup.
+     *
+     * Backs off in 500ms steps for up to 8 seconds (16 retries) — anything
+     * longer and something is genuinely wrong; we stop the dialer so the user
+     * can investigate instead of looping forever.
+     */
+    const scheduleNextPowerDial = useCallback((entry: DialerEntry, initialDelayMs: number) => {
+        if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
+
+        const RETRY_INTERVAL_MS = 500;
+        const MAX_RETRIES = 16; // ~8 seconds total
+        let retries = 0;
+
+        const tryDial = () => {
+            powerDialerTimerRef.current = null;
+            // Bail out if the user paused / stopped while we were waiting.
+            if (!powerDialerActiveRef.current || powerDialerPausedRef.current) return;
+
+            const status = callStatusRef.current;
+            const channelBusy = isDialingRef.current || status === 'ringing' || status === 'connected';
+            if (!channelBusy) {
+                handleDialRef.current(entry.number, entry.company);
+                return;
+            }
+
+            if (retries >= MAX_RETRIES) {
+                console.warn('[PowerDialer] Channel still busy after retries, stopping dialer to avoid silent stall');
+                setPowerDialerActive(false);
+                setPowerDialerPaused(true);
+                addToast('warning', 'Power dialer paused — previous call did not release. Resume manually once the line is free.');
+                return;
+            }
+
+            retries++;
+            powerDialerTimerRef.current = setTimeout(tryDial, RETRY_INTERVAL_MS);
+        };
+
+        powerDialerTimerRef.current = setTimeout(tryDial, Math.max(0, initialDelayMs));
+    }, [addToast]);
+
+    const scheduleNextPowerDialRef = useRef(scheduleNextPowerDial);
+    scheduleNextPowerDialRef.current = scheduleNextPowerDial;
+
     // ---------------------------------------------------------------------------
     // Handle callback — dial same number, create a separate queued recording segment
     // ---------------------------------------------------------------------------
@@ -1597,11 +1666,15 @@ export default function SessionPage() {
         // For No Answer, discard recording(s) immediately.
         // For calls with callback legs, discard ALL segments (not just oldest)
         // to prevent orphaned callback recordings from attaching to the next call.
+        // Pass the captured clientCallId so the agent targets THIS call's
+        // on-disk file — the older blunt `discardRecording` command killed
+        // whatever was currently recording, which in negative-delay overlap
+        // is the NEXT call's audio (Call N+1 starts before Call N is saved).
         if (data.callOutcome.includes('No Answer')) {
             if (hasCallbacks) {
-                discardDeferredRecording();
+                discardDeferredRecording(capturedClientCallId);
             } else {
-                discardOldestDeferredRecording();
+                discardOldestDeferredRecording(capturedClientCallId);
             }
             setContextPhoneNumber('');
         }
@@ -1654,12 +1727,14 @@ export default function SessionPage() {
             if (nextIdx >= powerDialerQueueRef.current.length) {
                 setPowerDialerActive(false);
             } else if (!powerDialerPausedRef.current) {
-                if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
                 const delayMs = powerDialerDelayRef.current * 1000;
                 const nextEntry = powerDialerQueueRef.current[nextIdx];
-                powerDialerTimerRef.current = setTimeout(() => {
-                    handleDialRef.current(nextEntry.number, nextEntry.company);
-                }, delayMs);
+                // Use the polling scheduler so the dial isn't silently
+                // dropped when the agent's callStatus hasn't transitioned
+                // to idle yet (Zoom can hold the WASAPI session several
+                // seconds past the actual hangup, especially in bursty
+                // power-dial sessions).
+                scheduleNextPowerDialRef.current(nextEntry, delayMs);
             }
         }
         if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current < 0) {
@@ -1903,21 +1978,47 @@ export default function SessionPage() {
     }, [session, user, discardOldestDeferredRecording, discardDeferredRecording, submitOldestDeferredRecording, submitDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp, completeFollowUp, addToast]);
 
     const handleCallEndedManually = useCallback(() => {
-        if (!currentPhoneNumber) return;
+        // Read the live phone number via ref so this callback isn't re-created
+        // on every keystroke (currentPhoneNumber state would invalidate deps).
+        const livePhone = currentPhoneNumberRef.current;
+        if (!livePhone) return;
+
+        // Tell the agent the call ended too — without this, the agent stays in
+        // its Connected state machine, which keeps the dashboard's callStatus
+        // pinned to 'connected'. That blocks the next power-dial (handleDial
+        // early-returns when callStatus is ringing/connected) and the user
+        // ends up unable to advance the queue. The agent's ConfirmEnd path
+        // also rewinds talk time to the silence-start so hold/mute time isn't
+        // billed when the user manually marks the call ended.
+        confirmCallEnded();
+
         setHasUnsavedCall(true);
-        setPinnedFormPhoneNumber(currentPhoneNumber);
+        setPinnedFormPhoneNumber(livePhone);
         if (isSessionActive && recorderStatus === 'recording') {
             stopRecording();
         }
-    }, [currentPhoneNumber, isSessionActive, recorderStatus, stopRecording]);
+    }, [confirmCallEnded, isSessionActive, recorderStatus, stopRecording]);
 
     const handleDiscardCall = useCallback(() => {
+        // Resolve the clientCallId for the just-discarded call BEFORE we wipe
+        // local state. The form is pinned to pinnedFormPhoneNumber for this
+        // call (set when callStatus transitioned to 'ended'); fall back to
+        // currentPhoneNumber for the no-pin path. Then ask the agent to drop
+        // THIS recording, never the currently-recording (next) one.
+        const pinnedDigits = (pinnedFormPhoneNumber || currentPhoneNumber || '').replace(/\D/g, '').slice(-10);
+        const discardedClientCallId = pinnedDigits
+            ? clientCallIdsRef.current.get(pinnedDigits) ?? null
+            : null;
+        if (discardedClientCallId && pinnedDigits) {
+            clientCallIdsRef.current.delete(pinnedDigits);
+        }
+
         // Discard ALL segments if callbacks exist (multiple recording segments queued),
         // otherwise just discard the oldest one
         if (callbackEvents.length > 0) {
-            discardDeferredRecording();
+            discardDeferredRecording(discardedClientCallId);
         } else {
-            discardOldestDeferredRecording();
+            discardOldestDeferredRecording(discardedClientCallId);
         }
         setContextPhoneNumber('');
 
@@ -1970,9 +2071,7 @@ export default function SessionPage() {
             } else if (!powerDialerPausedRef.current) {
                 const delayMs = powerDialerDelayRef.current * 1000;
                 const nextEntry = powerDialerQueueRef.current[nextIdx];
-                powerDialerTimerRef.current = setTimeout(() => {
-                    handleDialRef.current(nextEntry.number, nextEntry.company);
-                }, delayMs);
+                scheduleNextPowerDialRef.current(nextEntry, delayMs);
             }
         }
         if (powerDialerActiveRef.current && !powerDialerPausedRef.current && powerDialerDelayRef.current < 0) {
@@ -1983,7 +2082,7 @@ export default function SessionPage() {
                 powerDialerNegSubmitCountRef.current = 0;
             }
         }
-    }, [callbackEvents, currentPhoneNumber, discardOldestDeferredRecording, discardDeferredRecording, setContextPhoneNumber]);
+    }, [callbackEvents, currentPhoneNumber, pinnedFormPhoneNumber, discardOldestDeferredRecording, discardDeferredRecording, setContextPhoneNumber]);
 
     // ---------------------------------------------------------------------------
     // Power dialer handlers
@@ -2034,9 +2133,7 @@ export default function SessionPage() {
         ) {
             const entry = powerDialerQueueRef.current[powerDialerIndexRef.current];
             const delayMs = Math.max(0, powerDialerDelayRef.current) * 1000;
-            powerDialerTimerRef.current = setTimeout(() => {
-                handleDialRef.current(entry.number, entry.company);
-            }, delayMs);
+            scheduleNextPowerDialRef.current(entry, delayMs);
         }
     }, [hasUnsavedCall, callStatus]);
 

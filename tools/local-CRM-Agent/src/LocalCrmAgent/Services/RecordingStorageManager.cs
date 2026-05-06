@@ -63,10 +63,30 @@ public class RecordingStorageManager
 
     /// <summary>
     /// Rename a recording file to include the call log ID so that even a
-    /// manual upload can be auto-linked.  Returns the new file name.
+    /// manual upload can be auto-linked.  Returns the new file name on a
+    /// successful rename, the existing file name when the rename was
+    /// deferred (MP3 conversion still in progress), or null on a hard
+    /// failure (sentinel write / move exception).
     /// Format: {timestamp}_{phone}_cl-{callLogId}.mp3
     /// Atomic: writes a {newPath}.linking sentinel before File.Move so a
     /// crash mid-rename can be recovered on next LoadManifest().
+    ///
+    /// IMPORTANT — conversion-vs-link race: the dashboard often links a
+    /// recording within a couple hundred ms of OnRecordingStopped, while
+    /// WAV→MP3 conversion is still running on a background thread. The
+    /// MP3 file at {oldPath} doesn't exist yet, so File.Move is skipped.
+    /// The OLDER version of this method updated entry.FileName anyway,
+    /// which broke two things:
+    ///   1. The conversion task's final UpdateEntry(fileName, …) lookup
+    ///      uses the captured (old) filename and silently misses, so
+    ///      ConversionComplete is never set and GetPendingUploads
+    ///      filters the entry out forever — silent upload stall.
+    ///   2. When conversion writes the MP3 to {oldPath}, the upload (if it
+    ///      ever runs) looks at {newPath} and finds nothing.
+    /// Fix: when the source file doesn't exist yet, just stamp CallLogId
+    /// and leave FileName alone. The rename can happen later (e.g. after
+    /// conversion fires the manifest update) or never — the upload reads
+    /// from entry.FileName so the original name still works.
     /// </summary>
     public string? RenameWithCallLogId(string fileName, string callLogId)
     {
@@ -78,11 +98,24 @@ public class RecordingStorageManager
             // Already renamed?
             if (fileName.Contains($"_cl-{callLogId}")) return fileName;
 
+            var oldPath = Path.Combine(_recordingsDir, fileName);
+
+            // MP3 not yet on disk (conversion in progress) — defer the rename
+            // so we don't desync the manifest from the file location. Just
+            // attach the call_log_id and let the conversion-complete path or
+            // a future explicit rename handle the file rename.
+            if (!File.Exists(oldPath))
+            {
+                entry.CallLogId = callLogId;
+                PersistManifest();
+                Debug.WriteLine($"[Storage] Deferred rename for {fileName} (file not yet on disk); stamped callLogId");
+                return fileName;
+            }
+
             var ext = Path.GetExtension(fileName);
             var baseName = Path.GetFileNameWithoutExtension(fileName);
             var newFileName = $"{baseName}_cl-{callLogId}{ext}";
 
-            var oldPath = Path.Combine(_recordingsDir, fileName);
             var newPath = Path.Combine(_recordingsDir, newFileName);
             var sentinelPath = newPath + ".linking";
 
@@ -104,8 +137,7 @@ public class RecordingStorageManager
 
             try
             {
-                if (File.Exists(oldPath))
-                    File.Move(oldPath, newPath);
+                File.Move(oldPath, newPath);
             }
             catch (Exception ex)
             {
@@ -249,6 +281,39 @@ public class RecordingStorageManager
         {
             return _entries.Find(e => e.ClientCallId == clientCallId);
         }
+    }
+
+    /// <summary>
+    /// Drop the manifest entry whose client call id matches and delete the
+    /// on-disk file. Used by the dashboard's "No Answer" / discard flows in
+    /// agent mode where the recording is already on disk and we want to
+    /// remove it without touching the currently-recording file (which the
+    /// older blunt `discardRecording` command targeted, killing the next
+    /// call's recording during negative-delay overlap).
+    /// Returns true if an entry was found and removed.
+    /// </summary>
+    public bool DiscardByClientCallId(string clientCallId)
+    {
+        if (string.IsNullOrEmpty(clientCallId)) return false;
+        RecordingEntry? entry;
+        lock (_lock)
+        {
+            entry = _entries.Find(e => e.ClientCallId == clientCallId);
+            if (entry == null) return false;
+            _entries.Remove(entry);
+            PersistManifest();
+        }
+        try
+        {
+            var path = Path.Combine(_recordingsDir, entry.FileName);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Storage] Failed to delete {entry.FileName}: {ex.Message}");
+        }
+        Debug.WriteLine($"[Storage] Discarded by clientCallId={clientCallId}: {entry.FileName}");
+        return true;
     }
 
     /// <summary>

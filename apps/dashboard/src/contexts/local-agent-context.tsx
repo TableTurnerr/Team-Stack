@@ -537,6 +537,43 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                                 }
                                 break;
                             }
+                            case 'auth_required': {
+                                // Agent's upload pipeline got a 401 (or the
+                                // saved token failed DPAPI decryption on
+                                // startup). Try to silently refresh the
+                                // dashboard's auth and re-broadcast the new
+                                // token to the agent — if that succeeds the
+                                // user never sees a prompt and the upload
+                                // queue resumes draining within a couple of
+                                // seconds. If it fails, the user has to
+                                // sign in again; surface that via the auth
+                                // store so the global auth guard reroutes.
+                                console.warn('[LocalAgent] Agent reported auth_required:', msg.reason);
+                                (async () => {
+                                    try {
+                                        if (pb.authStore.isValid) {
+                                            await pb.collection('users').authRefresh();
+                                            const sock = wsRef.current;
+                                            if (sock?.readyState === WebSocket.OPEN && pb.authStore.token) {
+                                                sock.send(JSON.stringify({
+                                                    type: 'setUploadConfig',
+                                                    pocketbaseUrl: process.env.NEXT_PUBLIC_POCKETBASE_URL || '',
+                                                    authToken: pb.authStore.token,
+                                                    uploaderId: pb.authStore.model?.id || '',
+                                                }));
+                                                console.log('[LocalAgent] Re-broadcast refreshed auth to agent');
+                                            }
+                                        } else {
+                                            console.warn('[LocalAgent] Cannot recover — dashboard auth is also invalid');
+                                            pb.authStore.clear();
+                                        }
+                                    } catch (err) {
+                                        console.error('[LocalAgent] Auth refresh failed:', err);
+                                        pb.authStore.clear();
+                                    }
+                                })();
+                                break;
+                            }
                         }
                     } catch { /* ignore malformed messages */ }
                 };

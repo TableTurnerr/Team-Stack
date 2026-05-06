@@ -208,8 +208,15 @@ public class CallStateFusion : IDisposable
 
     /// <summary>
     /// User dismissed the "Has the call ended?" prompt — they're still on
-    /// the call. Clear the tentative flag and re-arm the audio latch so a
-    /// fresh silence window can be detected.
+    /// the call. Clear the tentative flag and re-arm BOTH audio latches so
+    /// a fresh silence window can be detected. Resetting _audioFlowLastSeen
+    /// in addition to _audioActiveLastSeen is critical: the new
+    /// AudioFlowSilenceTentativeSeconds branch in EvaluateLocked re-fires
+    /// _tentativeEndAt the moment it runs again, so without this reset the
+    /// prompt instantly snaps back into view and the user can never dismiss
+    /// it. Also clears _uiCallGoneSince so the UI-loss confirmation timer
+    /// starts over rather than carrying its accumulated grace seconds into
+    /// the next silence window.
     /// </summary>
     public void DismissTentativeEnd()
     {
@@ -218,7 +225,10 @@ public class CallStateFusion : IDisposable
         {
             if (_tentativeEndAt == null) return;
             _tentativeEndAt = null;
-            _audioActiveLastSeen = DateTime.UtcNow;
+            var now = DateTime.UtcNow;
+            _audioActiveLastSeen = now;
+            _audioFlowLastSeen = now;
+            _uiCallGoneSince = null;
             notify = BuildStateInfoLocked();
             CurrentState = notify;
         }

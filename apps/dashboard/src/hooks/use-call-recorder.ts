@@ -56,8 +56,12 @@ interface UseCallRecorderReturn {
     /**
      * Discard the OLDEST pending recording from the queue (e.g. for "No Answer").
      * If recording is still active, discards it without queuing.
+     * The clientCallId parameter is accepted for interface parity with the agent
+     * recorder (which needs it to target the right on-disk file) but ignored
+     * here — the browser recorder's in-memory queue is FIFO so "oldest" is
+     * already the right segment.
      */
-    discardOldestDeferredRecording: () => void;
+    discardOldestDeferredRecording: (clientCallId?: string | null) => void;
     /**
      * Stop the active recording (if any), merge ALL queued segments,
      * and upload the result as a single file.
@@ -68,8 +72,9 @@ interface UseCallRecorderReturn {
     submitDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     /**
      * Discard ALL queued segments without uploading and exit deferred mode.
+     * clientCallId is accepted for interface parity with the agent recorder.
      */
-    discardDeferredRecording: () => void;
+    discardDeferredRecording: (clientCallId?: string | null) => void;
     /** Whether deferred mode is currently active */
     isDeferredMode: boolean;
     /** The queue of completed per-call recordings waiting for submission */
@@ -623,7 +628,7 @@ export function useCallRecorder(
      * Discard the OLDEST pending recording from the queue (e.g. for "No Answer" calls).
      * If recording is still active, stops and discards it without queuing.
      */
-    const discardOldestDeferredRecording = useCallback(() => {
+    const discardOldestDeferredRecording = useCallback((_clientCallId?: string | null) => {
         if (mediaRecorderRef.current?.state === 'recording') {
             // Set discard flag so onstop does NOT push to the queue
             shouldDiscardRef.current = true;
@@ -700,7 +705,7 @@ export function useCallRecorder(
     }, [uploadRecording, phoneNumberRef]);
 
     /** Discard ALL queued segments without uploading and exit deferred mode */
-    const discardDeferredRecording = useCallback(() => {
+    const discardDeferredRecording = useCallback((_clientCallId?: string | null) => {
         shouldDiscardRef.current = true;
         deferredSegmentsRef.current = [];
         setDeferredSegments([]);

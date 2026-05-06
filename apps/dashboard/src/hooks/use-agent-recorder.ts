@@ -33,12 +33,18 @@ interface UseAgentRecorderReturn {
      * race that can mis-attribute the previous call's MP3 to this call_log.
      */
     submitOldestDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
-    /** Discard oldest deferred recording */
-    discardOldestDeferredRecording: () => void;
+    /**
+     * Discard the oldest deferred recording. In agent mode, MUST be called
+     * with the clientCallId of the just-ended call so the agent targets the
+     * correct on-disk file. Without the id, the call is a no-op rather than
+     * sending the older blunt `discardRecording` command, which would kill
+     * the actively-recording (next) call's file in negative-delay overlap.
+     */
+    discardOldestDeferredRecording: (clientCallId?: string | null) => void;
     /** Submit all deferred recordings (same as submitOldest for agent) */
     submitDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
     /** Discard all deferred recordings */
-    discardDeferredRecording: () => void;
+    discardDeferredRecording: (clientCallId?: string | null) => void;
     /** Whether deferred mode is active (always true when agent connected) */
     isDeferredMode: boolean;
     /** Deferred segments (empty array — agent manages segments) */
@@ -133,16 +139,30 @@ export function useAgentRecorder(
         return latestRecording.fileName;
     }, [latestRecording, sendCommand, linkRecordingByClientId]);
 
-    const discardOldestDeferredRecording = useCallback(() => {
-        sendCommand({ type: 'discardRecording' });
+    const discardOldestDeferredRecording = useCallback((clientCallId?: string | null) => {
+        // Agent mode: target the specific recording by id so we don't kill the
+        // currently-recording (next) call during negative-delay overlap. Falls
+        // through to no-op when no id is available — better to leave the file
+        // on disk as an orphan than to delete the wrong one.
+        if (clientCallId) {
+            sendCommand({ type: 'discardRecordingByClientId', clientCallId });
+            return;
+        }
+        // No id — only safe to send the blunt discard if we're certain no
+        // newer recording is in flight. Skip it to avoid destroying audio.
+        console.warn('[AgentRecorder] discardOldestDeferredRecording called without clientCallId — skipping to protect in-flight recording');
     }, [sendCommand]);
 
     const submitDeferredRecording = useCallback(async (callLogId?: string, clientCallId?: string | null): Promise<string | null> => {
         return submitOldestDeferredRecording(callLogId, clientCallId);
     }, [submitOldestDeferredRecording]);
 
-    const discardDeferredRecording = useCallback(() => {
-        sendCommand({ type: 'discardRecording' });
+    const discardDeferredRecording = useCallback((clientCallId?: string | null) => {
+        if (clientCallId) {
+            sendCommand({ type: 'discardRecordingByClientId', clientCallId });
+            return;
+        }
+        console.warn('[AgentRecorder] discardDeferredRecording called without clientCallId — skipping to protect in-flight recording');
     }, [sendCommand]);
 
     const startSession = useCallback(async (): Promise<boolean> => {

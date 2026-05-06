@@ -25,9 +25,14 @@ interface CallRecordingContextType {
      * "latest recording" still points at the previous call.
      */
     submitOldestDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
-    discardOldestDeferredRecording: () => void;
+    /**
+     * Discard the oldest deferred recording. Pass clientCallId in agent mode
+     * so the agent targets the correct on-disk file rather than killing the
+     * actively-recording (next) call during negative-delay overlap.
+     */
+    discardOldestDeferredRecording: (clientCallId?: string | null) => void;
     submitDeferredRecording: (callLogId?: string, clientCallId?: string | null) => Promise<string | null>;
-    discardDeferredRecording: () => void;
+    discardDeferredRecording: (clientCallId?: string | null) => void;
     isDeferredMode: boolean;
     deferredSegments: any[];
     /** Latest completed recording from the local agent (null in browser mode) */

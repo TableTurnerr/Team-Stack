@@ -227,7 +227,7 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     lastMessageAtRef.current = Date.now();
 
                     // Start the pulse-watcher: every 3 s, if we haven't
-                    // heard ANYTHING from the agent in >10 s, force-close
+                    // heard ANYTHING from the agent in >15 s, force-close
                     // the socket so onclose fires and the reconnect ladder
                     // kicks in. This catches half-open TCP sockets that
                     // the OS hasn't reaped — without it the dashboard
@@ -235,14 +235,14 @@ export function LocalAgentProvider({ children }: { children: ReactNode }) {
                     // is intentionally generous: agent-side bursts (auth
                     // refresh, MP3 conversion, upload bursts) and browser
                     // tab throttling can legitimately delay heartbeats by
-                    // several seconds. A tighter threshold caused false-
+                    // 10+ seconds, and a tighter threshold caused false-
                     // positive disconnects that auto-paused the session.
                     if (pulseTimerRef.current) clearInterval(pulseTimerRef.current);
                     pulseTimerRef.current = setInterval(() => {
                         const sock = wsRef.current;
                         if (!sock || sock.readyState !== WebSocket.OPEN) return;
                         const elapsed = Date.now() - lastMessageAtRef.current;
-                        if (elapsed > 10_000) {
+                        if (elapsed > 15_000) {
                             console.warn(`[LocalAgent] No agent message for ${elapsed}ms — force-closing socket to recover`);
                             try { sock.close(); } catch { /* onclose schedules reconnect */ }
                             return;

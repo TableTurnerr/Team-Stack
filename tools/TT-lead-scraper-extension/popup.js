@@ -1,10 +1,85 @@
 // ============================================================================
+// Chain-Name Blocklist Matcher (mirrors background.js)
+// ============================================================================
+
+function normalizeChainName(s) {
+    return String(s || '')
+        .toLowerCase()
+        .replace(/['\u2018\u2019]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function chainPhraseMatches(text, phrase) {
+    if (!text || !phrase) return false;
+    if (text === phrase) return true;
+    if (text.indexOf(phrase + ' ') === 0) return true;
+    var tail = ' ' + phrase;
+    if (text.length >= tail.length && text.lastIndexOf(tail) === text.length - tail.length) return true;
+    if (text.indexOf(' ' + phrase + ' ') !== -1) return true;
+    return false;
+}
+
+var CHAIN_LOCATION_WORDS = new Set([
+    'manhattan', 'brooklyn', 'queens', 'bronx', 'staten',
+    'midtown', 'downtown', 'uptown', 'soho', 'noho', 'tribeca',
+    'chelsea', 'harlem', 'flatiron', 'gramercy', 'bowery', 'meatpacking',
+    'east', 'west', 'north', 'south', 'central', 'side', 'village',
+    'square', 'park', 'plaza', 'heights', 'hill', 'hills', 'district',
+    'lower', 'upper', 'mid', 'far',
+    'nyc', 'ny', 'la', 'sf', 'dc', 'chicago', 'boston', 'austin', 'miami',
+    'st', 'street', 'ave', 'avenue', 'blvd'
+]);
+
+function hasTrailingLocationWord(words) {
+    for (var i = 1; i < words.length; i++) {
+        if (CHAIN_LOCATION_WORDS.has(words[i])) return true;
+    }
+    return false;
+}
+
+function chainNameMatchesIgnoreList(name, ignoreSet) {
+    if (!name || !ignoreSet || !ignoreSet.size) return false;
+    var t = normalizeChainName(name);
+    if (!t) return false;
+    for (var ig of ignoreSet) {
+        if (!ig) continue;
+        var b = normalizeChainName(ig);
+        if (!b) continue;
+        if (chainPhraseMatches(t, b)) return true;
+        var words = b.split(' ');
+        if (words.length > 1 && hasTrailingLocationWord(words)) {
+            var firstWord = words[0];
+            if (firstWord.length >= 4 && chainPhraseMatches(t, firstWord)) return true;
+        }
+    }
+    return false;
+}
+
+function industryMatchesIgnoreList(industry, ignoreSet) {
+    if (!industry || !ignoreSet || !ignoreSet.size) return false;
+    var s = String(industry).toLowerCase();
+    for (var ig of ignoreSet) {
+        if (!ig) continue;
+        if (s === ig || s.indexOf(ig) !== -1) return true;
+    }
+    return false;
+}
+
+// ============================================================================
 // PocketBase CRM Helpers
 // ============================================================================
 
 function pbGetSettings(cb) {
     chrome.storage.local.get(['gmes_pb_url', 'gmes_pb_token'], function (data) {
         cb(data.gmes_pb_url || '', data.gmes_pb_token || '');
+    });
+}
+
+function pbIsLoggedIn(cb) {
+    pbGetSettings(function (pbUrl, pbToken) {
+        cb(Boolean(pbUrl && pbToken));
     });
 }
 
@@ -527,25 +602,8 @@ document.addEventListener('DOMContentLoaded', function () {
         // helper to test if an item (title or industry) matches any ignore token
         function itemIsIgnored(item) {
             if (!item) return false;
-
-            // Check title/name
-            if (item.title) {
-                var title = String(item.title).toLowerCase();
-                for (var ig of ignoreNamesSet) {
-                    if (!ig) continue;
-                    if (title === ig || title.indexOf(ig) !== -1) return true;
-                }
-            }
-
-            // Check industry
-            if (item.industry) {
-                var industry = String(item.industry).toLowerCase();
-                for (var ig of ignoreIndustriesSet) {
-                    if (!ig) continue;
-                    if (industry === ig || industry.indexOf(ig) !== -1) return true;
-                }
-            }
-
+            if (chainNameMatchesIgnoreList(item.title, ignoreNamesSet)) return true;
+            if (industryMatchesIgnoreList(item.industry, ignoreIndustriesSet)) return true;
             return false;
         }
         // Stored items persisted to localStorage so the popup can be reopened
@@ -632,6 +690,30 @@ document.addEventListener('DOMContentLoaded', function () {
                             sendBtn.className = 'button';
                             sendBtn.style.cssText = 'padding: 4px 10px; font-size: 12px; border-radius: 12px;';
                         }
+                        // Disable Send to CRM when not logged in; the Connect panel above
+                        // the leads table prompts the user to login to TableTurnerr CRM.
+                        (function (btn, cellEl) {
+                            pbIsLoggedIn(function (loggedIn) {
+                                if (loggedIn) return;
+                                btn.disabled = true;
+                                btn.title = 'Login to TableTurnerr CRM (use the Connect panel above) to enable';
+                                btn.style.cssText = 'padding: 4px 10px; font-size: 12px; border-radius: 12px; background: #e8eaed; color: #80868b; border: none; cursor: not-allowed;';
+                                var hint = document.createElement('a');
+                                hint.href = '#';
+                                hint.textContent = 'Login';
+                                hint.style.cssText = 'display:block; margin-top:4px; font-size:11px; color:#1a73e8; text-decoration:underline; font-weight:600;';
+                                hint.addEventListener('click', function (e) {
+                                    e.preventDefault();
+                                    var connect = document.getElementById('crmConnectBtn');
+                                    if (connect) {
+                                        connect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        connect.style.boxShadow = '0 0 0 3px rgba(26,115,232,0.45)';
+                                        setTimeout(function () { connect.style.boxShadow = ''; }, 1600);
+                                    }
+                                });
+                                cellEl.appendChild(hint);
+                            });
+                        })(sendBtn, cell);
                         (function (capturedItem, capturedCell, capturedBtn) {
                             // Async CRM check — update button if company exists with a different phone
                             if (!capturedItem.crmExistingId && !capturedItem.crmChecked) {

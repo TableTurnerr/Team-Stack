@@ -9,6 +9,12 @@ function pbGetSettings_maps(cb) {
     });
 }
 
+function pbIsLoggedIn_maps(cb) {
+    pbGetSettings_maps(function (pbUrl, pbToken) {
+        cb(Boolean(pbUrl && pbToken));
+    });
+}
+
 // Extract user ID from PocketBase JWT token
 function pbGetUserIdFromToken_maps(token) {
     if (!token) return null;
@@ -300,21 +306,20 @@ function showCrmConfirmation_maps(item, onConfirm) {
         }
     });
 
-    // Live-respond to Auto-Popup toggle changes
+    // Live-respond to Auto-Popup or master-power toggle changes
     chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== 'local') return;
-        if (!changes.gmes_manual_auto_popup) return;
+        if (!changes.gmes_manual_auto_popup && !changes.gmes_extension_enabled) return;
 
-        var newVal = changes.gmes_manual_auto_popup.newValue !== false; // default true
-        if (newVal) {
-            // Toggle turned ON: start overlay if still in manual mode
-            chrome.runtime.sendMessage({ type: 'CHECK_SHOULD_SHOW_OVERLAY' }, (response) => {
-                if (response && response.shouldShow) {
-                    initMapsOverlay();
-                }
-            });
-        } else {
-            // Toggle turned OFF: stop polling and remove overlay
+        var autoPopupOn = changes.gmes_manual_auto_popup
+            ? changes.gmes_manual_auto_popup.newValue !== false
+            : null;
+        var extOn = changes.gmes_extension_enabled
+            ? changes.gmes_extension_enabled.newValue !== false
+            : null;
+
+        // Anything toggled OFF: tear down overlay + polling immediately.
+        if (autoPopupOn === false || extOn === false) {
             if (urlCheckInterval) {
                 clearInterval(urlCheckInterval);
                 urlCheckInterval = null;
@@ -322,7 +327,15 @@ function showCrmConfirmation_maps(item, onConfirm) {
             }
             var overlay = document.getElementById('gmes-manual-overlay');
             if (overlay) overlay.remove();
+            return;
         }
+
+        // A toggle flipped back ON: re-check whether overlay should appear.
+        chrome.runtime.sendMessage({ type: 'CHECK_SHOULD_SHOW_OVERLAY' }, (response) => {
+            if (response && response.shouldShow) {
+                initMapsOverlay();
+            }
+        });
     });
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -331,17 +344,10 @@ function showCrmConfirmation_maps(item, onConfirm) {
         } else if (request.type === 'SHOW_OVERLAY') {
             initMapsOverlay();
         } else if (request.type === 'TRIGGER_MANUAL_ADD') {
-            // Handle keyboard shortcut to add item
+            // Handle keyboard shortcut to add item — note is optional.
             const btn = document.getElementById('gmes-add-btn');
-            const noteInput = document.getElementById('gmes-note-input');
-            if (btn && !btn.disabled && noteInput) {
-                const noteValue = noteInput.value.trim();
-                if (!noteValue) {
-                    noteInput.classList.add('error');
-                    noteInput.focus();
-                } else {
-                    btn.click();
-                }
+            if (btn && !btn.disabled) {
+                btn.click();
             }
         } else if (request.type === 'GET_CURRENT_WEBSITE') {
             try {
@@ -910,9 +916,9 @@ function showCrmConfirmation_maps(item, onConfirm) {
         <div class="gmes-field">
           <div class="gmes-field-label">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            Note <span style="color:#ea4335; margin-left:2px;">*</span>
+            Note <span style="color:#9aa0a6; margin-left:4px; font-weight:500;">(optional)</span>
           </div>
-          <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)" autocomplete="off"></textarea>
+          <textarea id="gmes-note-input" class="note-input" placeholder="Add a note (optional)" autocomplete="off"></textarea>
           <div id="gmes-suggestions-box" class="suggestions-box"></div>
         </div>
         <button class="gmes-add-btn" id="gmes-add-btn">
@@ -1081,16 +1087,10 @@ function showCrmConfirmation_maps(item, onConfirm) {
             const noteInput = document.getElementById('gmes-note-input');
             const noteValue = noteInput.value.trim();
 
-            if (!noteValue) {
-                noteInput.classList.add('error');
-                noteInput.focus();
-                return;
-            }
-
             noteInput.classList.remove('error');
-            
-            // Save note to history
-            saveNoteToHistory(noteValue);
+
+            // Save note to history (only if user actually entered one)
+            if (noteValue) saveNoteToHistory(noteValue);
 
             // Get fresh data at the moment of adding (ensures current URL)
             const freshItem = scrapeCurrentPlace();
@@ -1118,7 +1118,27 @@ function showCrmConfirmation_maps(item, onConfirm) {
         const crmStatusDiv = document.getElementById('gmes-crm-status');
         const crmBtn = document.getElementById('gmes-crm-btn');
         if (crmStatusDiv && crmBtn) {
-            pbCheckDuplicate_maps(item.title, item.phone, (inCrm) => {
+            pbIsLoggedIn_maps((loggedIn) => {
+                if (!loggedIn) {
+                    crmBtn.style.display = 'flex';
+                    crmBtn.disabled = true;
+                    crmBtn.style.opacity = '0.55';
+                    crmBtn.style.cursor = 'not-allowed';
+                    crmBtn.title = 'Login to TableTurnerr CRM to enable';
+                    crmStatusDiv.innerHTML = '\uD83D\uDD12 Login to TableTurnerr CRM to send leads. <a href="#" id="gmes-crm-login-link" style="color:#1a73e8;font-weight:700;text-decoration:underline;">Login \u2192</a>';
+                    crmStatusDiv.style.background = '#fff8e1';
+                    crmStatusDiv.style.color = '#5f4b1c';
+                    crmStatusDiv.style.display = 'block';
+                    const loginLink = document.getElementById('gmes-crm-login-link');
+                    if (loginLink) {
+                        loginLink.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            chrome.runtime.sendMessage({ type: 'OPEN_CRM_LOGIN' });
+                        });
+                    }
+                    return;
+                }
+                pbCheckDuplicate_maps(item.title, item.phone, (inCrm) => {
                 if (inCrm) {
                     crmStatusDiv.textContent = '✓ Already in CRM';
                     crmStatusDiv.style.background = '#e8f5e9';
@@ -1155,6 +1175,7 @@ function showCrmConfirmation_maps(item, onConfirm) {
                         });
                     });
                 }
+                });
             });
         }
 

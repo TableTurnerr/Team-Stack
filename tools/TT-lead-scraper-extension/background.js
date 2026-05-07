@@ -2,6 +2,54 @@
 // function in the active tab, then merges results into chrome.storage.local
 
 // ============================================================================
+// Master Power State (global on/off)
+// ============================================================================
+
+// Module-level cache so handlers can gate sync without an extra storage round-trip.
+// Service-worker memory is reset between wakeups; the storage listener and the
+// initial fetch keep this in sync after each cold start.
+var EXTENSION_ENABLED = true;
+
+function refreshExtensionEnabled(cb) {
+    chrome.storage.local.get(['gmes_extension_enabled'], function (data) {
+        EXTENSION_ENABLED = data.gmes_extension_enabled !== false;
+        if (cb) cb(EXTENSION_ENABLED);
+    });
+}
+
+function updateToolbarBadge() {
+    if (!chrome.action || !chrome.action.setBadgeText) return;
+    if (!EXTENSION_ENABLED) {
+        chrome.action.setBadgeText({ text: 'OFF' });
+        chrome.action.setBadgeBackgroundColor({ color: '#5f6368' });
+        return;
+    }
+    chrome.storage.local.get(['gmes_results'], function (data) {
+        var n = Array.isArray(data.gmes_results) ? data.gmes_results.length : 0;
+        if (n > 0) {
+            chrome.action.setBadgeText({ text: n > 999 ? '999+' : String(n) });
+            chrome.action.setBadgeBackgroundColor({ color: '#1a73e8' });
+        } else {
+            chrome.action.setBadgeText({ text: '' });
+        }
+    });
+}
+
+// Initial sync on service-worker startup
+refreshExtensionEnabled(updateToolbarBadge);
+
+chrome.storage.onChanged.addListener(function (changes, area) {
+    if (area !== 'local') return;
+    if (changes.gmes_extension_enabled) {
+        EXTENSION_ENABLED = changes.gmes_extension_enabled.newValue !== false;
+        updateToolbarBadge();
+    }
+    if (changes.gmes_results) {
+        updateToolbarBadge();
+    }
+});
+
+// ============================================================================
 // Update Checker - Checks for new versions from GitHub
 // ============================================================================
 
@@ -240,6 +288,7 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
     // Background continuous scraping alarm
     var BG_SCRAPE_ALARM = 'gmes_continuous_scrape';
     if (alarm.name === BG_SCRAPE_ALARM) {
+        if (!EXTENSION_ENABLED) return;
         // Find any open Google Maps tabs and run the scraper on each
         chrome.tabs.query({ url: ['*://www.google.com/maps/*'] }, function (tabs) {
             if (!tabs || tabs.length === 0) return;
@@ -276,22 +325,8 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
                             }
 
                             try {
-                                var ignoreMatch = false;
-                                if (item && item.title) {
-                                    var title = String(item.title).toLowerCase();
-                                    for (var ig of ignoreNamesSet) {
-                                        if (!ig) continue;
-                                        if (title === ig || title.indexOf(ig) !== -1) { ignoreMatch = true; break; }
-                                    }
-                                }
-                                if (!ignoreMatch && item && item.industry) {
-                                    var industry = String(item.industry).toLowerCase();
-                                    for (var ig of ignoreIndustriesSet) {
-                                        if (!ig) continue;
-                                        if (industry === ig || industry.indexOf(ig) !== -1) { ignoreMatch = true; break; }
-                                    }
-                                }
-                                if (ignoreMatch) return;
+                                if (chainNameMatchesIgnoreList(item && item.title, ignoreNamesSet)) return;
+                                if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) return;
                             } catch (e) {
                                 // fallback to adding
                             }
@@ -334,6 +369,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 // Accept items posted from injected content scripts and merge them into storage
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || msg.type !== 'INJECTED_SCRAPE_ITEMS' || !Array.isArray(msg.items)) return;
+    if (!EXTENSION_ENABLED) return;
 
     var newItems = msg.items;
     chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled'], function (data) {
@@ -359,16 +395,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
             }
 
             try {
-                var ignoreMatch = false;
-                if (item && item.title) {
-                    var title = String(item.title).toLowerCase();
-                    for (var ig of ignoreNamesSet) { if (!ig) continue; if (title === ig || title.indexOf(ig) !== -1) { ignoreMatch = true; break; } }
-                }
-                if (!ignoreMatch && item && item.industry) {
-                    var industry = String(item.industry).toLowerCase();
-                    for (var ig of ignoreIndustriesSet) { if (!ig) continue; if (industry === ig || industry.indexOf(ig) !== -1) { ignoreMatch = true; break; } }
-                }
-                if (ignoreMatch) return;
+                if (chainNameMatchesIgnoreList(item && item.title, ignoreNamesSet)) return;
+                if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) return;
             } catch (e) { }
 
             seen.add(key);
@@ -506,6 +534,93 @@ function isFoodRelatedIndustry(industry) {
 // ============================================================================
 
 // ============================================================================
+// Chain-Name Blocklist Matcher
+// ============================================================================
+
+// Normalize for chain comparison: lowercase, drop apostrophes, collapse non-alphanum
+// to single spaces. Lets "McDonald's" and "mcdonalds" compare equal.
+function normalizeChainName(s) {
+    return String(s || '')
+        .toLowerCase()
+        .replace(/['\u2018\u2019]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Whole-word phrase match: returns true if `phrase` appears as a complete
+// word sequence inside `text`. Avoids matching "wonder" inside "wonderful".
+function chainPhraseMatches(text, phrase) {
+    if (!text || !phrase) return false;
+    if (text === phrase) return true;
+    if (text.indexOf(phrase + ' ') === 0) return true;
+    var tail = ' ' + phrase;
+    if (text.length >= tail.length && text.lastIndexOf(tail) === text.length - tail.length) return true;
+    if (text.indexOf(' ' + phrase + ' ') !== -1) return true;
+    return false;
+}
+
+// Words used to recognize that a multi-word blocklist entry ends in a
+// location qualifier (e.g. "Wonder Manhattan", "Joe's Pizza Midtown East"),
+// which lets us fall back to matching just the chain prefix.
+var CHAIN_LOCATION_WORDS = new Set([
+    'manhattan', 'brooklyn', 'queens', 'bronx', 'staten',
+    'midtown', 'downtown', 'uptown', 'soho', 'noho', 'tribeca',
+    'chelsea', 'harlem', 'flatiron', 'gramercy', 'bowery', 'meatpacking',
+    'east', 'west', 'north', 'south', 'central', 'side', 'village',
+    'square', 'park', 'plaza', 'heights', 'hill', 'hills', 'district',
+    'lower', 'upper', 'mid', 'far',
+    'nyc', 'ny', 'la', 'sf', 'dc', 'chicago', 'boston', 'austin', 'miami',
+    'st', 'street', 'ave', 'avenue', 'blvd'
+]);
+
+function hasTrailingLocationWord(words) {
+    for (var i = 1; i < words.length; i++) {
+        if (CHAIN_LOCATION_WORDS.has(words[i])) return true;
+    }
+    return false;
+}
+
+// Match a Google Maps title against a blocklist of chain names. Catches
+// location modifiers ("Wonder Lower East Side" blocked by "Wonder") AND
+// over-specific blocklist entries that bake in a location ("Wonder Manhattan"
+// still blocks "Wonder Lower East Side") — but only when the trailing words
+// look like a location, so "Pizza Hut" does NOT incorrectly block "Pizza Place".
+function chainNameMatchesIgnoreList(name, ignoreSet) {
+    if (!name || !ignoreSet || !ignoreSet.size) return false;
+    var t = normalizeChainName(name);
+    if (!t) return false;
+    for (var ig of ignoreSet) {
+        if (!ig) continue;
+        var b = normalizeChainName(ig);
+        if (!b) continue;
+        if (chainPhraseMatches(t, b)) return true;
+        var words = b.split(' ');
+        if (words.length > 1 && hasTrailingLocationWord(words)) {
+            var firstWord = words[0];
+            if (firstWord.length >= 4 && chainPhraseMatches(t, firstWord)) return true;
+        }
+    }
+    return false;
+}
+
+// Industry blocklist: keep the original substring semantics (industries are
+// short categorical tokens, not chain names).
+function industryMatchesIgnoreList(industry, ignoreSet) {
+    if (!industry || !ignoreSet || !ignoreSet.size) return false;
+    var s = String(industry).toLowerCase();
+    for (var ig of ignoreSet) {
+        if (!ig) continue;
+        if (s === ig || s.indexOf(ig) !== -1) return true;
+    }
+    return false;
+}
+
+// ============================================================================
+// End of Chain-Name Blocklist Matcher
+// ============================================================================
+
+// ============================================================================
 // Phone Normalization Helpers
 // ============================================================================
 
@@ -535,6 +650,16 @@ function formatPhoneDisplay(normalized) {
 // ============================================================================
 
 chrome.commands.onCommand.addListener(function (command) {
+    if (!EXTENSION_ENABLED) {
+        // Cheap visual feedback: flash a red OFF badge so the user knows the
+        // shortcut fired but the extension is paused.
+        if (chrome.action && chrome.action.setBadgeText) {
+            chrome.action.setBadgeText({ text: 'OFF' });
+            chrome.action.setBadgeBackgroundColor({ color: '#ea4335' });
+            setTimeout(updateToolbarBadge, 1200);
+        }
+        return;
+    }
     if (command === 'scrape') {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             var tab = tabs && tabs[0];
@@ -573,22 +698,8 @@ chrome.commands.onCommand.addListener(function (command) {
                         }
 
                         try {
-                            var ignoreMatch = false;
-                            if (item && item.title) {
-                                var title = String(item.title).toLowerCase();
-                                for (var ig of ignoreNamesSet) {
-                                    if (!ig) continue;
-                                    if (title === ig || title.indexOf(ig) !== -1) { ignoreMatch = true; break; }
-                                }
-                            }
-                            if (!ignoreMatch && item && item.industry) {
-                                var industry = String(item.industry).toLowerCase();
-                                for (var ig of ignoreIndustriesSet) {
-                                    if (!ig) continue;
-                                    if (industry === ig || industry.indexOf(ig) !== -1) { ignoreMatch = true; break; }
-                                }
-                            }
-                            if (ignoreMatch) return;
+                            if (chainNameMatchesIgnoreList(item && item.title, ignoreNamesSet)) return;
+                            if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) return;
                         } catch (e) {}
 
                         seen.add(key);
@@ -671,11 +782,27 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         // Poll every 30 seconds (minimum allowed by Chrome is ~0.5 min = 30s)
         chrome.alarms.create(CRM_POLL_ALARM, { periodInMinutes: 0.5 });
     }
+    if (msg.type === 'OPEN_CRM_LOGIN') {
+        var loginUrl = CRM_BG_URL + '/login';
+        chrome.tabs.query({ url: CRM_BG_URL + '/*' }, function (tabs) {
+            if (tabs && tabs.length > 0) {
+                chrome.tabs.update(tabs[0].id, { url: loginUrl, active: true });
+            } else {
+                chrome.tabs.create({ url: loginUrl });
+            }
+            chrome.storage.local.set({ gmes_crm_waiting: true });
+            chrome.alarms.create(CRM_POLL_ALARM, { periodInMinutes: 0.5 });
+        });
+    }
 });
 
 // Handle MANUAL_ADD_ITEM messages from content scripts
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || msg.type !== 'MANUAL_ADD_ITEM' || !msg.item) return;
+    if (!EXTENSION_ENABLED) {
+        sendResponse({ success: false, error: 'Extension is paused. Toggle it back on from the popup.' });
+        return;
+    }
 
     handleManualAddItem(msg.item).then(function () {
         sendResponse({ success: true });
@@ -691,6 +818,10 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 // Handle CHECK_SHOULD_SHOW_OVERLAY messages for manual mode
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || msg.type !== 'CHECK_SHOULD_SHOW_OVERLAY') return;
+    if (!EXTENSION_ENABLED) {
+        sendResponse({ shouldShow: false });
+        return;
+    }
 
     chrome.storage.local.get(['gmes_mode', 'gmes_overlay_dismissed', 'gmes_manual_auto_popup', 'gmes_exception_sites'], function (data) {
         var isManualMode = data.gmes_mode === 'manual';
@@ -745,23 +876,19 @@ function handleManualAddItem(item) {
                 return;
             }
 
-            var titleLower = (item.title || '').toLowerCase();
-            var industryLower = (item.industry || '').toLowerCase();
+            var ignoreNamesSet = new Set(ignoreNames.map(function (s) { return String(s).toLowerCase().trim(); }));
+            var ignoreIndustriesSet = new Set(ignoreIndustries.map(function (s) { return String(s).toLowerCase().trim(); }));
 
-            for (var name of ignoreNames) {
-                if (titleLower.includes(name.toLowerCase())) {
-                    console.log('Item ignored by name filter:', item.title);
-                    resolve();
-                    return;
-                }
+            if (chainNameMatchesIgnoreList(item.title, ignoreNamesSet)) {
+                console.log('Item ignored by name filter:', item.title);
+                resolve();
+                return;
             }
 
-            for (var ind of ignoreIndustries) {
-                if (industryLower.includes(ind.toLowerCase())) {
-                    console.log('Item ignored by industry filter:', item.industry);
-                    resolve();
-                    return;
-                }
+            if (industryMatchesIgnoreList(item.industry, ignoreIndustriesSet)) {
+                console.log('Item ignored by industry filter:', item.industry);
+                resolve();
+                return;
             }
 
             existingItems.push(item);

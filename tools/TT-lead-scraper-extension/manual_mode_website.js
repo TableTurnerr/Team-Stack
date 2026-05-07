@@ -9,6 +9,12 @@ function pbGetSettings_website(cb) {
     });
 }
 
+function pbIsLoggedIn_website(cb) {
+    pbGetSettings_website(function (pbUrl, pbToken) {
+        cb(Boolean(pbUrl && pbToken));
+    });
+}
+
 // Extract user ID from PocketBase JWT token
 function pbGetUserIdFromToken_website(token) {
     if (!token) return null;
@@ -535,16 +541,23 @@ function showCrmConfirmation_website(item, onConfirm) {
             : '<div class="info-item empty">No phone numbers found</div>';
 
         const emailsHtml = data.emails.length
-            ? data.emails.map(e => `<div class="info-item"><a href="mailto:${e}">${e}</a></div>`).join('')
+            ? data.emails.map(e => `<div class="info-item email-entry"><a href="mailto:${e}">${e}</a></div>`).join('')
             : '<div class="info-item empty">No emails found</div>';
 
         const addressHtml = data.addresses.length
-            ? data.addresses.map(a => `<div class="info-item">${a}</div>`).join('')
+            ? data.addresses.map(a => `<div class="info-item address-entry">${a}</div>`).join('')
             : '<div class="info-item empty">No address found</div>';
 
         const mapsHtml = data.mapsLinks.length
             ? data.mapsLinks.map(link => `<div class="info-item"><a href="${link}" target="_blank">View on Maps</a></div>`).join('')
             : `<div class="info-item"><a href="https://www.google.com/maps/search/${encodeURIComponent(data.businessName)}" target="_blank">Search on Maps</a></div>`;
+
+        const pageFavicon = (() => {
+            const link = document.querySelector('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
+            if (link && link.href) return link.href;
+            return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(location.hostname)}&sz=64`;
+        })();
+        const headerTitle = data.businessName || location.hostname;
 
         overlay.innerHTML = `
           <style>
@@ -571,18 +584,57 @@ function showCrmConfirmation_website(item, onConfirm) {
               color: white;
               font-weight: 600;
               font-size: 13.5px;
+              cursor: grab;
+              user-select: none;
             }
+            #gmes-website-overlay .gmes-w-header.dragging { cursor: grabbing; }
+            #gmes-website-overlay.collapsed .gmes-w-content,
+            #gmes-website-overlay.collapsed .gmes-w-resize-handle { display: none !important; }
+            #gmes-website-overlay .gmes-w-resize-handle {
+              height: 10px;
+              cursor: ns-resize;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              user-select: none;
+              background: #f8f9fa;
+              border-top: 1px solid #e8eaed;
+              transition: background 0.15s;
+            }
+            #gmes-website-overlay .gmes-w-resize-handle::before {
+              content: '';
+              width: 32px;
+              height: 3px;
+              background: #c4c7cc;
+              border-radius: 2px;
+              transition: background 0.15s;
+            }
+            #gmes-website-overlay .gmes-w-resize-handle:hover { background: #eef3fb; }
+            #gmes-website-overlay .gmes-w-resize-handle:hover::before,
+            #gmes-website-overlay .gmes-w-resize-handle.resizing::before { background: #1a73e8; }
             #gmes-website-overlay .gmes-w-header-left {
               display: flex;
               align-items: center;
               gap: 8px;
+              min-width: 0;
+              flex: 1;
+            }
+            #gmes-website-overlay .gmes-w-header-left > span {
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              min-width: 0;
             }
             #gmes-website-overlay .gmes-w-header-logo {
               width: 22px;
               height: 22px;
               border-radius: 6px;
               flex-shrink: 0;
-              box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+              background: transparent;
+              border: none;
+              box-shadow: none;
+              outline: none;
+              object-fit: contain;
             }
             #gmes-website-overlay .gmes-w-header-actions {
               display: flex;
@@ -625,7 +677,7 @@ function showCrmConfirmation_website(item, onConfirm) {
 
             #gmes-website-overlay .gmes-w-content {
               padding: 14px 16px;
-              max-height: 480px;
+              max-height: calc(100vh - 110px);
               overflow-y: auto;
             }
             #gmes-website-overlay .gmes-w-section { margin-bottom: 13px; }
@@ -688,6 +740,66 @@ function showCrmConfirmation_website(item, onConfirm) {
               margin-top: 3px;
               font-style: italic;
             }
+            #gmes-website-overlay .gmes-w-add-icon {
+              margin-left: auto;
+              background: transparent;
+              border: 1px solid #dadce0;
+              color: #5f6368;
+              width: 18px;
+              height: 18px;
+              border-radius: 4px;
+              cursor: pointer;
+              padding: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              transition: background 0.15s, color 0.15s, border-color 0.15s;
+            }
+            #gmes-website-overlay .gmes-w-add-icon:hover {
+              background: #e8f0fe;
+              color: #1a73e8;
+              border-color: #1a73e8;
+            }
+            #gmes-website-overlay .gmes-w-add-icon svg { display: block; }
+            #gmes-website-overlay .manual-input {
+              flex: 1;
+              padding: 6px 9px;
+              border: 1.5px solid #e2e5eb;
+              border-radius: 6px;
+              font-size: 13px;
+              color: #202124;
+              box-sizing: border-box;
+              transition: border-color 0.15s;
+              font-family: inherit;
+            }
+            #gmes-website-overlay .manual-input:focus {
+              border-color: #1a73e8;
+              outline: none;
+            }
+            #gmes-website-overlay .manual-input-row {
+              display: flex;
+              gap: 6px;
+              align-items: center;
+              padding: 3px 0;
+            }
+            #gmes-website-overlay .manual-remove-btn {
+              background: transparent;
+              border: none;
+              color: #80868b;
+              cursor: pointer;
+              padding: 4px;
+              border-radius: 4px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              transition: background 0.15s, color 0.15s;
+              flex-shrink: 0;
+            }
+            #gmes-website-overlay .manual-remove-btn:hover {
+              background: #fce8e6;
+              color: #ea4335;
+            }
+            #gmes-website-overlay .manual-remove-btn svg { display: block; }
             #gmes-website-overlay .gmes-w-divider {
               height: 1px;
               background: #f1f3f4;
@@ -768,8 +880,8 @@ function showCrmConfirmation_website(item, onConfirm) {
           </style>
           <div class="gmes-w-header">
             <div class="gmes-w-header-left">
-              <img src="${chrome.runtime.getURL('icon.png')}" class="gmes-w-header-logo" alt="">
-              <span>Contact Scanner</span>
+              <img src="${pageFavicon}" class="gmes-w-header-logo" alt="" onerror="this.onerror=null;this.src='https://www.google.com/s2/favicons?domain=${encodeURIComponent(location.hostname)}&sz=64';">
+              <span title="${escapeHtml(headerTitle)}">${escapeHtml(headerTitle)}</span>
             </div>
             <div class="gmes-w-header-actions">
               <div class="gmes-w-hbtn" id="gmes-exception-btn" title="Don't auto-open on this site">
@@ -786,6 +898,9 @@ function showCrmConfirmation_website(item, onConfirm) {
               <div class="gmes-w-section-label">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.07 13.93 19.79 19.79 0 0 1 1 5.18C1 4.09 1.81 3 2.92 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 10.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 17.9v3z"/></svg>
                 Phone Numbers
+                <button type="button" class="gmes-w-add-icon" data-target="phones" title="Add phone number manually">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
               </div>
               <div id="gmes-phones-list">${phonesHtml}</div>
             </div>
@@ -793,15 +908,21 @@ function showCrmConfirmation_website(item, onConfirm) {
               <div class="gmes-w-section-label">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                 Email Addresses
+                <button type="button" class="gmes-w-add-icon" data-target="emails" title="Add email manually">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
               </div>
-              ${emailsHtml}
+              <div id="gmes-emails-list">${emailsHtml}</div>
             </div>
             <div class="gmes-w-section">
               <div class="gmes-w-section-label">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                 Address
+                <button type="button" class="gmes-w-add-icon" data-target="addresses" title="Add address manually">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
               </div>
-              ${addressHtml}
+              <div id="gmes-addresses-list">${addressHtml}</div>
             </div>
             <div class="gmes-w-section">
               <div class="gmes-w-section-label">
@@ -821,9 +942,9 @@ function showCrmConfirmation_website(item, onConfirm) {
             <div class="gmes-w-section">
               <div class="gmes-w-section-label">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                Note <span style="color:#ea4335;margin-left:2px;">*</span>
+                Note <span style="color:#9aa0a6;margin-left:4px;font-weight:500;">(optional)</span>
               </div>
-              <textarea id="gmes-note-input" class="note-input" placeholder="Enter a note (required)"></textarea>
+              <textarea id="gmes-note-input" class="note-input" placeholder="Add a note (optional)"></textarea>
             </div>
             <button class="gmes-w-add-btn" id="gmes-add-btn">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -841,9 +962,134 @@ function showCrmConfirmation_website(item, onConfirm) {
               </button>
             </div>
           </div>
+          <div class="gmes-w-resize-handle" id="gmes-resize-handle" title="Drag to resize • Double-click to fit content"></div>
         `;
 
         document.body.appendChild(overlay);
+
+        // ─── Position / size / collapse persistence ────────────────────────
+        const headerEl = overlay.querySelector('.gmes-w-header');
+        const headerActionsEl = overlay.querySelector('.gmes-w-header-actions');
+        const contentEl = overlay.querySelector('.gmes-w-content');
+        const resizeHandleEl = overlay.querySelector('#gmes-resize-handle');
+
+        function clampToViewport() {
+            const rect = overlay.getBoundingClientRect();
+            const maxLeft = Math.max(0, window.innerWidth - rect.width);
+            const maxTop = Math.max(0, window.innerHeight - 60);
+            if (rect.left > maxLeft || rect.top > maxTop || rect.left < 0 || rect.top < 0) {
+                const newLeft = Math.min(Math.max(0, rect.left), maxLeft);
+                const newTop = Math.min(Math.max(0, rect.top), maxTop);
+                overlay.style.left = newLeft + 'px';
+                overlay.style.top = newTop + 'px';
+                overlay.style.right = 'auto';
+            }
+        }
+
+        chrome.storage.local.get(
+            ['gmes_overlay_position', 'gmes_overlay_manual_height', 'gmes_overlay_collapsed'],
+            (s) => {
+                const pos = s.gmes_overlay_position;
+                if (pos && typeof pos.top === 'number' && typeof pos.left === 'number') {
+                    overlay.style.top = pos.top + 'px';
+                    overlay.style.left = pos.left + 'px';
+                    overlay.style.right = 'auto';
+                    clampToViewport();
+                }
+                const mh = s.gmes_overlay_manual_height;
+                if (mh && typeof mh === 'number' && mh > 0 && contentEl) {
+                    contentEl.style.height = mh + 'px';
+                    contentEl.style.maxHeight = mh + 'px';
+                }
+                if (s.gmes_overlay_collapsed === true) overlay.classList.add('collapsed');
+            }
+        );
+
+        // ─── Drag-to-move / click-to-collapse ──────────────────────────────
+        let dragState = null;
+        headerEl.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (headerActionsEl && headerActionsEl.contains(e.target)) return;
+            const rect = overlay.getBoundingClientRect();
+            dragState = {
+                startX: e.clientX,
+                startY: e.clientY,
+                startLeft: rect.left,
+                startTop: rect.top,
+                moved: false
+            };
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!dragState) return;
+            const dx = e.clientX - dragState.startX;
+            const dy = e.clientY - dragState.startY;
+            if (!dragState.moved && Math.hypot(dx, dy) > 4) {
+                dragState.moved = true;
+                headerEl.classList.add('dragging');
+            }
+            if (dragState.moved) {
+                const newLeft = Math.max(0, Math.min(window.innerWidth - overlay.offsetWidth, dragState.startLeft + dx));
+                const newTop = Math.max(0, Math.min(window.innerHeight - 60, dragState.startTop + dy));
+                overlay.style.left = newLeft + 'px';
+                overlay.style.top = newTop + 'px';
+                overlay.style.right = 'auto';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!dragState) return;
+            const wasDragging = dragState.moved;
+            dragState = null;
+            headerEl.classList.remove('dragging');
+            if (wasDragging) {
+                const rect = overlay.getBoundingClientRect();
+                chrome.storage.local.set({ gmes_overlay_position: { top: rect.top, left: rect.left } });
+            } else {
+                const isCollapsed = overlay.classList.toggle('collapsed');
+                chrome.storage.local.set({ gmes_overlay_collapsed: isCollapsed });
+            }
+        });
+
+        // ─── Resize handle (drag = manual height, dblclick = hug content) ──
+        let resizeState = null;
+        if (resizeHandleEl && contentEl) {
+            resizeHandleEl.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                resizeState = {
+                    startY: e.clientY,
+                    startHeight: contentEl.offsetHeight
+                };
+                resizeHandleEl.classList.add('resizing');
+                document.body.style.userSelect = 'none';
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!resizeState) return;
+                const newHeight = Math.max(60, resizeState.startHeight + (e.clientY - resizeState.startY));
+                contentEl.style.height = newHeight + 'px';
+                contentEl.style.maxHeight = newHeight + 'px';
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!resizeState) return;
+                document.body.style.userSelect = '';
+                resizeHandleEl.classList.remove('resizing');
+                const finalHeight = contentEl.offsetHeight;
+                resizeState = null;
+                chrome.storage.local.set({ gmes_overlay_manual_height: finalHeight });
+            });
+
+            resizeHandleEl.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                contentEl.style.height = '';
+                contentEl.style.maxHeight = '';
+                chrome.storage.local.remove('gmes_overlay_manual_height');
+            });
+        }
 
         const style = document.createElement('style');
         style.textContent = `
@@ -874,6 +1120,65 @@ function showCrmConfirmation_website(item, onConfirm) {
             }
         `;
         document.head.appendChild(style);
+
+        // Manual entry "+" handlers — Phone / Email / Address
+        function clearEmptyState(list) {
+            const empty = list.querySelector('.info-item.empty');
+            if (empty) empty.remove();
+        }
+        const removeIconSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+        function addManualPhoneRow() {
+            const list = document.getElementById('gmes-phones-list');
+            if (!list) return;
+            clearEmptyState(list);
+            const div = document.createElement('div');
+            div.className = 'phone-entry phone-entry-manual';
+            div.innerHTML =
+                '<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">' +
+                '  <input type="checkbox" class="phone-check" checked>' +
+                '  <input type="text" class="phone-number-input manual-input" placeholder="Phone number" style="font-weight:600;">' +
+                '  <button type="button" class="manual-remove-btn" title="Remove">' + removeIconSvg + '</button>' +
+                '</label>' +
+                '<input type="text" class="phone-label-input" placeholder="Label (e.g. Main, Fax, Takeout)">';
+            list.appendChild(div);
+            div.querySelector('.manual-remove-btn').addEventListener('click', () => div.remove());
+            div.querySelector('.phone-number-input').focus();
+        }
+
+        function addManualSimpleRow(listId, inputClass, placeholder, type) {
+            const list = document.getElementById(listId);
+            if (!list) return;
+            clearEmptyState(list);
+            const div = document.createElement('div');
+            div.className = 'info-item manual-input-row';
+            div.innerHTML =
+                '<input type="' + type + '" class="' + inputClass + ' manual-input" placeholder="' + placeholder + '">' +
+                '<button type="button" class="manual-remove-btn" title="Remove">' + removeIconSvg + '</button>';
+            list.appendChild(div);
+            div.querySelector('.manual-remove-btn').addEventListener('click', () => div.remove());
+            div.querySelector('.' + inputClass).focus();
+        }
+
+        overlay.querySelectorAll('.gmes-w-add-icon').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const target = btn.dataset.target;
+                if (target === 'phones') addManualPhoneRow();
+                else if (target === 'emails') addManualSimpleRow('gmes-emails-list', 'email-input', 'email@example.com', 'email');
+                else if (target === 'addresses') addManualSimpleRow('gmes-addresses-list', 'address-input', 'Street address, City, ST', 'text');
+            });
+        });
+
+        function collectManualValues(listId, inputClass) {
+            const list = document.getElementById(listId);
+            const out = [];
+            if (!list) return out;
+            list.querySelectorAll('.' + inputClass).forEach(input => {
+                const v = (input.value || '').trim();
+                if (v) out.push(v);
+            });
+            return out;
+        }
 
         // Close handler
         document.getElementById('gmes-close-btn').addEventListener('click', () => {
@@ -911,11 +1216,6 @@ function showCrmConfirmation_website(item, onConfirm) {
             const noteInput = document.getElementById('gmes-note-input');
             const noteValue = noteInput.value.trim();
 
-            if (!noteValue) {
-                noteInput.classList.add('error');
-                noteInput.focus();
-                return;
-            }
             noteInput.classList.remove('error');
 
             // Collect checked phone entries with their (possibly edited) labels
@@ -926,8 +1226,11 @@ function showCrmConfirmation_website(item, onConfirm) {
                     const cb = entryEl.querySelector('.phone-check');
                     if (cb && cb.checked) {
                         const labelInput = entryEl.querySelector('.phone-label-input');
+                        const numInput = entryEl.querySelector('.phone-number-input');
+                        const number = numInput ? normalizePhone(numInput.value.trim()) : cb.dataset.num;
+                        if (!number) return;
                         checkedPhones.push({
-                            number: cb.dataset.num,
+                            number: number,
                             label: labelInput ? labelInput.value.trim() : '',
                             location_name: '',
                             location_address: ''
@@ -941,6 +1244,15 @@ function showCrmConfirmation_website(item, onConfirm) {
                 ? checkedPhones[0].number
                 : (data.phoneEntries && data.phoneEntries[0] ? data.phoneEntries[0].number : '');
 
+            const manualEmails = collectManualValues('gmes-emails-list', 'email-input');
+            const manualAddresses = collectManualValues('gmes-addresses-list', 'address-input');
+            const finalEmail = manualEmails.length > 0
+                ? manualEmails[0]
+                : (data.emails && data.emails.length > 0 ? data.emails[0] : '');
+            const finalAddress = manualAddresses.length > 0
+                ? manualAddresses[0]
+                : (data.addresses[0] || '');
+
             const item = {
                 title: businessName || 'Unknown Business',
                 closedStatus: '',
@@ -951,13 +1263,13 @@ function showCrmConfirmation_website(item, onConfirm) {
                 industry: '',
                 expensiveness: '',
                 city: '',
-                address: data.addresses[0] || '',
+                address: finalAddress,
                 companyUrl: window.location.href,
                 instaSearch: businessName
                     ? `https://www.google.com/search?q=${encodeURIComponent(businessName + ' Instagram')}`
                     : '',
-                href: data.mapsLinks[0] || `https://www.google.com/maps/search/${encodeURIComponent(businessName + ' ' + (data.addresses[0] || ''))}`,
-                email: data.emails && data.emails.length > 0 ? data.emails[0] : '',
+                href: data.mapsLinks[0] || `https://www.google.com/maps/search/${encodeURIComponent(businessName + ' ' + (finalAddress || ''))}`,
+                email: finalEmail,
                 note: noteValue
             };
 
@@ -983,8 +1295,28 @@ function showCrmConfirmation_website(item, onConfirm) {
         const crmStatusDiv = document.getElementById('gmes-crm-status');
         const crmBtn = document.getElementById('gmes-crm-btn');
         if (crmStatusDiv && crmBtn) {
-            const primaryPhone = data.phoneEntries && data.phoneEntries.length ? data.phoneEntries[0].number : '';
-            pbCheckDuplicate_website(data.businessName, primaryPhone, (inCrm) => {
+            pbIsLoggedIn_website((loggedIn) => {
+                if (!loggedIn) {
+                    crmBtn.style.display = 'flex';
+                    crmBtn.disabled = true;
+                    crmBtn.style.opacity = '0.55';
+                    crmBtn.style.cursor = 'not-allowed';
+                    crmBtn.title = 'Login to TableTurnerr CRM to enable';
+                    crmStatusDiv.innerHTML = '\uD83D\uDD12 Login to TableTurnerr CRM to send leads. <a href="#" id="gmes-crm-login-link-w" style="color:#1a73e8;font-weight:700;text-decoration:underline;">Login \u2192</a>';
+                    crmStatusDiv.style.background = '#fff8e1';
+                    crmStatusDiv.style.color = '#5f4b1c';
+                    crmStatusDiv.style.display = 'block';
+                    const loginLink = document.getElementById('gmes-crm-login-link-w');
+                    if (loginLink) {
+                        loginLink.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            chrome.runtime.sendMessage({ type: 'OPEN_CRM_LOGIN' });
+                        });
+                    }
+                    return;
+                }
+                const primaryPhone = data.phoneEntries && data.phoneEntries.length ? data.phoneEntries[0].number : '';
+                pbCheckDuplicate_website(data.businessName, primaryPhone, (inCrm) => {
                 if (inCrm) {
                     crmStatusDiv.textContent = '✓ Already in CRM';
                     crmStatusDiv.style.background = '#e8f5e9';
@@ -1004,8 +1336,11 @@ function showCrmConfirmation_website(item, onConfirm) {
                                 const cb = entryEl.querySelector('.phone-check');
                                 if (cb && cb.checked) {
                                     const labelInput = entryEl.querySelector('.phone-label-input');
+                                    const numInput = entryEl.querySelector('.phone-number-input');
+                                    const number = numInput ? normalizePhone(numInput.value.trim()) : cb.dataset.num;
+                                    if (!number) return;
                                     checkedPhones.push({
-                                        number: cb.dataset.num,
+                                        number: number,
                                         label: labelInput ? labelInput.value.trim() : '',
                                         location_name: '',
                                         location_address: ''
@@ -1016,14 +1351,23 @@ function showCrmConfirmation_website(item, onConfirm) {
                         // Fallback to phoneEntries if no checkboxes found
                         const phonesToSend = checkedPhones.length > 0 ? checkedPhones : (data.phoneEntries || []);
 
+                        const manualEmailsCrm = collectManualValues('gmes-emails-list', 'email-input');
+                        const manualAddressesCrm = collectManualValues('gmes-addresses-list', 'address-input');
+                        const crmEmail = manualEmailsCrm.length > 0
+                            ? manualEmailsCrm[0]
+                            : (data.emails && data.emails.length > 0 ? data.emails[0] : '');
+                        const crmAddress = manualAddressesCrm.length > 0
+                            ? manualAddressesCrm[0]
+                            : (data.addresses && data.addresses[0] ? data.addresses[0] : '');
+
                         const crmItem = {
                             title: businessName || 'Unknown Business',
                             phone: phonesToSend.length > 0 ? phonesToSend[0].number : '',
                             phones: phonesToSend,
-                            address: data.addresses && data.addresses[0] ? data.addresses[0] : '',
+                            address: crmAddress,
                             companyUrl: window.location.href,
                             href: data.mapsLinks && data.mapsLinks[0] ? data.mapsLinks[0] : '',
-                            email: data.emails && data.emails.length > 0 ? data.emails[0] : '',
+                            email: crmEmail,
                             source: 'Website',
                             note: noteInput ? noteInput.value.trim() : ''
                         };
@@ -1052,6 +1396,7 @@ function showCrmConfirmation_website(item, onConfirm) {
                         });
                     });
                 }
+                });
             });
         }
 
@@ -1076,23 +1421,37 @@ function showCrmConfirmation_website(item, onConfirm) {
         });
     }
 
-    // Initialize
-    const data = scanPage();
-    createOverlay(data);
+    // Initialize — but only if the extension is currently enabled.
+    function initWebsiteOverlay() {
+        if (document.getElementById('gmes-website-overlay')) return;
+        const data = scanPage();
+        createOverlay(data);
+    }
+
+    function teardownWebsiteOverlay() {
+        const overlay = document.getElementById('gmes-website-overlay');
+        if (overlay) overlay.remove();
+    }
+
+    chrome.storage.local.get(['gmes_extension_enabled'], function (data) {
+        if (data.gmes_extension_enabled === false) return;
+        initWebsiteOverlay();
+    });
+
+    // Live-respond to master power toggle: tear down the overlay when the
+    // extension is turned OFF, recreate when turned back ON.
+    chrome.storage.onChanged.addListener(function (changes, area) {
+        if (area !== 'local' || !changes.gmes_extension_enabled) return;
+        var enabled = changes.gmes_extension_enabled.newValue !== false;
+        if (enabled) initWebsiteOverlay();
+        else teardownWebsiteOverlay();
+    });
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.type === 'TRIGGER_MANUAL_ADD') {
             const btn = document.getElementById('gmes-add-btn');
-            const noteInput = document.getElementById('gmes-note-input');
-
-            if (btn && !btn.disabled && noteInput) {
-                const noteValue = noteInput.value.trim();
-                if (!noteValue) {
-                    noteInput.classList.add('error');
-                    noteInput.focus();
-                } else {
-                    btn.click();
-                }
+            if (btn && !btn.disabled) {
+                btn.click();
             }
         } else if (request.type === 'TOGGLE_OVERLAY') {
             const overlay = document.getElementById('gmes-website-overlay');

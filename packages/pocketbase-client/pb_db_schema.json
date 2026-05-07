@@ -6221,7 +6221,7 @@
         "id": "pbc_392670462",
         "listRule": "@request.auth.id != ''",
         "viewRule": "@request.auth.id != ''",
-        "createRule": "@request.auth.role = 'admin'",
+        "createRule": "@request.auth.id != ''",
         "updateRule": "@request.auth.id != ''",
         "deleteRule": "@request.auth.role = 'admin' || call_log.session.is_test = true",
         "name": "recordings",

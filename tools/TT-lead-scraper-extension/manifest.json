@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TableTurner Lead Scraper",
-  "version": "3.0",
+  "version": "3.1",
   "description": "TableTurner Lead Scraper - Chrome extension for lead generation with CRM integration",
   "permissions": [
     "activeTab",

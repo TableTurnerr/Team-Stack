@@ -314,7 +314,13 @@ export default function SessionPage() {
     // reconnect, agent token-refresh stall) shouldn't pause the session and
     // force the user to manually resume the power dialer.
     // ---------------------------------------------------------------------------
-    const AUTO_PAUSE_GRACE_MS = 5_000;
+    // Grace window before a sustained agent/Zoom drop actually pauses the
+    // session. Reports kept coming in of the dialer pausing "randomly" with
+    // a 5 s window — token-refresh stalls, MP3-conversion bursts, browser
+    // tab throttling, and slow networks can routinely make heartbeats lag
+    // 10–25 s without anything being actually wrong. 30 s is wide enough
+    // that only a real, sustained outage trips the pause.
+    const AUTO_PAUSE_GRACE_MS = 30_000;
     // Live refs for the debounced auto-pause timers — they need to read the
     // CURRENT values when they fire (not the stale closure captured at the
     // moment the timer was scheduled), so a brief drop that recovers before
@@ -1603,18 +1609,18 @@ export default function SessionPage() {
      * silently drops the next dial when the agent's callStatus hasn't caught
      * up to the user's just-saved hangup.
      *
-     * Backs off in 500ms steps for up to 60 seconds (120 retries). The
-     * threshold is generous because the user is often legitimately still
-     * wrapping up the previous call — they may submit the form while the
-     * line is still connected, and the queued next-dial should simply wait
-     * until they hang up rather than auto-pause and force a manual resume.
-     * After 60 s the channel really is stuck and pausing is the right call.
+     * Backs off in 500ms steps for up to 5 minutes (600 retries). 60 s was
+     * still tripping during long wrap-up calls and slow agent state
+     * transitions, leaving users to manually resume the dialer. The retry
+     * loop itself is cheap (one setTimeout tick per 500 ms) so a generous
+     * ceiling costs nothing; only a genuinely stuck channel should ever
+     * exhaust it, and 5 minutes is a reasonable upper bound for that.
      */
     const scheduleNextPowerDial = useCallback((entry: DialerEntry, initialDelayMs: number) => {
         if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
 
         const RETRY_INTERVAL_MS = 500;
-        const MAX_RETRIES = 120; // ~60 seconds total
+        const MAX_RETRIES = 600; // ~5 minutes total
         let retries = 0;
 
         const tryDial = () => {
@@ -1810,23 +1816,60 @@ export default function SessionPage() {
         // ── BACKGROUND SAVE ── fire-and-forget API work
         void (async () => {
             try {
+                // Build the phone-number filter once — reused both by the
+                // global pre-check (anti-duplicate-company guard) and by the
+                // company-scoped lookup further down.
+                const phoneDigits = data.phoneNumber.replace(/\D/g, '');
+                const phoneLast10 = phoneDigits.slice(-10);
+                const phoneFilterParts = [`phone_number = "${data.phoneNumber}"`];
+                if (phoneDigits !== data.phoneNumber) phoneFilterParts.push(`phone_number ~ "${phoneDigits}"`);
+                if (phoneLast10 !== phoneDigits && phoneLast10.length >= 7) phoneFilterParts.push(`phone_number ~ "${phoneLast10}"`);
+
+                // Boundary recheck — if the user is creating a NEW company but
+                // the phone number already lives on a different company, adopt
+                // that existing company instead of creating a duplicate. This
+                // catches stale form state, races between auto-lookup and save,
+                // and any code path that bypasses the form's own block.
+                let adoptedCompanyId: string | null = null;
+                if (!data.companyId && data.newCompanyName?.trim() && phoneLast10.length >= 7) {
+                    try {
+                        const existing = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
+                            filter: phoneFilterParts.join(' || '),
+                            expand: 'company',
+                        });
+                        const hit = existing.items[0];
+                        if (hit?.company) {
+                            adoptedCompanyId = hit.company;
+                            const hitCompany = hit.expand?.company as Company | undefined;
+                            console.warn('[call-save] Phone already linked to company', hit.company,
+                                hitCompany ? `(${hitCompany.company_name})` : '',
+                                '— adopting existing company instead of creating duplicate.');
+                        }
+                    } catch {
+                        // Non-fatal: fall through to the original create path.
+                    }
+                }
+
                 // Resolve companyId — when the user typed a brand-new company name
                 // (Unit 7 fast path), create the company in parallel with the phone
-                // lookup so neither blocks the call-log create.
+                // lookup so neither blocks the call-log create. If the boundary
+                // recheck found an existing company on this phone, adopt it.
                 const companyCreatePromise: Promise<string | null> =
-                    !data.companyId && data.newCompanyName?.trim()
-                        ? pb.collection(COLLECTIONS.COMPANIES).create<{ id: string }>({
-                            company_name: data.newCompanyName.trim(),
-                            owner_name: data.ownerName || undefined,
-                            source: 'Cold Call',
-                            first_contacted: new Date().toISOString(),
-                            last_contacted: new Date().toISOString(),
-                            assigned_to: user.id,
-                        }).then(c => c.id).catch(err => {
-                            console.error('Failed to create company:', err);
-                            return null;
-                        })
-                        : Promise.resolve(data.companyId || null);
+                    adoptedCompanyId
+                        ? Promise.resolve(adoptedCompanyId)
+                        : !data.companyId && data.newCompanyName?.trim()
+                            ? pb.collection(COLLECTIONS.COMPANIES).create<{ id: string }>({
+                                company_name: data.newCompanyName.trim(),
+                                owner_name: data.ownerName || undefined,
+                                source: 'Cold Call',
+                                first_contacted: new Date().toISOString(),
+                                last_contacted: new Date().toISOString(),
+                                assigned_to: user.id,
+                            }).then(c => c.id).catch(err => {
+                                console.error('Failed to create company:', err);
+                                return null;
+                            })
+                            : Promise.resolve(data.companyId || null);
 
                 // Find or create phone number record (kicked off in parallel with
                 // company creation; resolved once we have a companyId).
@@ -1834,14 +1877,8 @@ export default function SessionPage() {
                     const cid = await companyCreatePromise;
                     if (!cid) return '';
                     try {
-                        const digits = data.phoneNumber.replace(/\D/g, '');
-                        const last10 = digits.slice(-10);
-                        const filterParts = [`phone_number = "${data.phoneNumber}"`];
-                        if (digits !== data.phoneNumber) filterParts.push(`phone_number ~ "${digits}"`);
-                        if (last10 !== digits && last10.length >= 7) filterParts.push(`phone_number ~ "${last10}"`);
-
                         const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                            filter: `company = "${cid}" && (${filterParts.join(' || ')})`,
+                            filter: `company = "${cid}" && (${phoneFilterParts.join(' || ')})`,
                         });
                         if (phoneRecords.items.length > 0) {
                             return phoneRecords.items[0].id;
@@ -1852,6 +1889,26 @@ export default function SessionPage() {
                             receptionist_name: data.receptionistName || undefined,
                             last_called: new Date().toISOString(),
                         });
+                        // Race-window dedupe: a parallel save (negative-delay
+                        // power dialer) can also pass the empty getList check
+                        // and create a second row for the same (company, phone).
+                        // Re-query immediately after create; if duplicates exist,
+                        // keep the oldest and delete ours.
+                        try {
+                            const dupes = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 5, {
+                                filter: `company = "${cid}" && (${phoneFilterParts.join(' || ')})`,
+                                sort: 'created',
+                            });
+                            if (dupes.items.length > 1) {
+                                const winner = dupes.items[0];
+                                if (winner.id !== newPhone.id) {
+                                    await pb.collection(COLLECTIONS.PHONE_NUMBERS).delete(newPhone.id).catch(() => {});
+                                    return winner.id;
+                                }
+                            }
+                        } catch {
+                            // Non-fatal — duplicate dedupe is best-effort.
+                        }
                         return newPhone.id;
                     } catch {
                         return '';
@@ -2209,8 +2266,50 @@ export default function SessionPage() {
         }
     }, []);
 
-    const handlePowerDialerQueueLoad = useCallback((numbers: DialerEntry[]) => {
-        setPowerDialerQueue(numbers);
+    const handlePowerDialerQueueLoad = useCallback(async (numbers: DialerEntry[]) => {
+        // Pre-screen the queue against `companies.do_not_contact`. The email
+        // module already respects this flag; without the same gate here, a
+        // user who pasted a list (or imported one) could re-dial numbers that
+        // were marked DNC after a bounce/unsubscribe — a compliance risk.
+        let filtered = numbers;
+        try {
+            // Build last-10-digit lookup keys, dedupe, then batch the PB query.
+            const digitsByEntry = numbers.map(n => n.number.replace(/\D/g, '').slice(-10));
+            const uniqueDigits = Array.from(new Set(digitsByEntry.filter(d => d.length >= 7)));
+            if (uniqueDigits.length > 0) {
+                const filterExpr = uniqueDigits.map(d => `phone_number ~ "${d}"`).join(' || ');
+                const phones = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
+                    filter: filterExpr,
+                    expand: 'company',
+                });
+                const dncDigits = new Set<string>();
+                const dncNumbers: string[] = [];
+                for (const p of phones) {
+                    const company = p.expand?.company as Company | undefined;
+                    if (company?.do_not_contact) {
+                        const d = p.phone_number.replace(/\D/g, '').slice(-10);
+                        if (d) {
+                            dncDigits.add(d);
+                            dncNumbers.push(p.phone_number);
+                        }
+                    }
+                }
+                if (dncDigits.size > 0) {
+                    filtered = numbers.filter((_, i) => !dncDigits.has(digitsByEntry[i]));
+                    const skippedCount = numbers.length - filtered.length;
+                    if (skippedCount > 0) {
+                        addToast(
+                            'warning',
+                            `Skipped ${skippedCount} ${skippedCount === 1 ? 'number' : 'numbers'} marked Do Not Contact.`,
+                        );
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('[power-dialer] DNC pre-screen failed — loading queue without filter:', err);
+        }
+
+        setPowerDialerQueue(filtered);
         setPowerDialerIndex(0);
         setPowerDialerActive(false);
         setPowerDialerPaused(false);
@@ -2218,7 +2317,7 @@ export default function SessionPage() {
             clearTimeout(powerDialerTimerRef.current);
             powerDialerTimerRef.current = null;
         }
-    }, []);
+    }, [addToast]);
 
     // Reorder the power dialer queue and adjust currentIndex to maintain consistency
     const handlePowerDialerReorder = useCallback((newQueue: DialerEntry[], fromIndex: number, toIndex: number) => {

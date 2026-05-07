@@ -190,15 +190,34 @@ export default function RecordingsPage() {
         formData.append('uploader', user.id);
         formData.append('original_filename', f.file.name);
 
-        // Auto-match logic
+        // Auto-match logic.
+        // Disambiguation: a phone number can legitimately appear on multiple
+        // companies (e.g. franchise main line shared across locations).
+        // Auto-linking by `getFirstListItem` silently picks an arbitrary one
+        // and permanently mis-attributes the recording. Instead: pull all
+        // matches and only auto-link when EXACTLY ONE company owns the number.
+        // Otherwise, store the raw phone string and require manual linking.
         if (f.matchedPhoneNumber) {
           try {
-            const phoneRecord = await pb.collection('phone_numbers').getFirstListItem(`phone_number ~ "${f.matchedPhoneNumber}"`);
-            if (phoneRecord) {
+            const safePhone = f.matchedPhoneNumber.replace(/"/g, '');
+            const matches = await pb.collection('phone_numbers').getList(1, 50, {
+              filter: `phone_number ~ "${safePhone}"`,
+            });
+            const uniqueCompanyIds = new Set(
+              matches.items.map((p: any) => p.company).filter(Boolean)
+            );
+            if (matches.items.length > 0 && uniqueCompanyIds.size === 1) {
+              const phoneRecord: any = matches.items[0];
               formData.append('phone_number_record', phoneRecord.id);
               formData.append('company', phoneRecord.company);
               formData.append('phone_number', phoneRecord.phone_number);
               onLog?.(`Matched to company via phone: ${f.matchedPhoneNumber}`);
+            } else if (uniqueCompanyIds.size > 1) {
+              formData.append('phone_number', f.matchedPhoneNumber);
+              onLog?.(`Phone ${f.matchedPhoneNumber} matches ${uniqueCompanyIds.size} companies — leaving unlinked for manual review.`);
+            } else {
+              formData.append('phone_number', f.matchedPhoneNumber);
+              onLog?.(`No company match found for phone: ${f.matchedPhoneNumber}`);
             }
           } catch (e) {
             formData.append('phone_number', f.matchedPhoneNumber);

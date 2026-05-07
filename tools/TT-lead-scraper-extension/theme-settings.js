@@ -111,4 +111,70 @@
       this.classList.toggle('open');
     });
   }
+
+  // ── Master Power Toggle (global on/off) ─────────────
+  var masterPowerToggle = document.getElementById('masterPowerToggle');
+  var masterPowerBar = document.getElementById('masterPowerBar');
+  var masterPowerTitle = document.getElementById('masterPowerTitle');
+  var masterPowerSub = document.getElementById('masterPowerSub');
+  var extensionContent = document.getElementById('extensionContent');
+
+  function applyMasterPower(enabled) {
+    var pillText = masterPowerToggle.querySelector('.pill-text');
+    if (enabled) {
+      masterPowerToggle.classList.add('on');
+      masterPowerBar.classList.remove('off');
+      extensionContent.classList.remove('disabled');
+      if (pillText) pillText.textContent = 'ON';
+      masterPowerTitle.textContent = 'Extension Active';
+      masterPowerSub.textContent = 'Scraping, overlays & shortcuts enabled';
+    } else {
+      masterPowerToggle.classList.remove('on');
+      masterPowerBar.classList.add('off');
+      extensionContent.classList.add('disabled');
+      if (pillText) pillText.textContent = 'OFF';
+      masterPowerTitle.textContent = 'Extension Disabled';
+      masterPowerSub.textContent = 'All scraping, overlays & shortcuts paused';
+    }
+  }
+
+  chrome.storage.local.get(['gmes_extension_enabled'], function (data) {
+    // Default ON when unset
+    applyMasterPower(data.gmes_extension_enabled !== false);
+  });
+
+  masterPowerToggle.addEventListener('click', function () {
+    var willBeOn = !masterPowerToggle.classList.contains('on');
+    applyMasterPower(willBeOn);
+    chrome.storage.local.set({ gmes_extension_enabled: willBeOn });
+    chrome.runtime.sendMessage({ type: 'EXTENSION_POWER_CHANGED', enabled: willBeOn }, function () {
+      if (chrome.runtime.lastError) { /* no listeners ready — fine */ }
+    });
+  });
+
+  // ── Leads badge (live count of items in gmes_results) ──
+  var leadsBadge = document.getElementById('leadsBadge');
+
+  function renderLeadsBadge(count) {
+    if (!leadsBadge) return;
+    leadsBadge.textContent = String(count) + (count === 1 ? ' lead' : ' leads');
+    leadsBadge.classList.toggle('has-items', count > 0);
+  }
+
+  chrome.storage.local.get(['gmes_results'], function (data) {
+    var items = Array.isArray(data.gmes_results) ? data.gmes_results : [];
+    renderLeadsBadge(items.length);
+  });
+
+  // Live updates from storage (covers updates from other tabs/scripts)
+  chrome.storage.onChanged.addListener(function (changes, area) {
+    if (area !== 'local') return;
+    if (changes.gmes_results) {
+      var newItems = Array.isArray(changes.gmes_results.newValue) ? changes.gmes_results.newValue : [];
+      renderLeadsBadge(newItems.length);
+    }
+    if (changes.gmes_extension_enabled) {
+      applyMasterPower(changes.gmes_extension_enabled.newValue !== false);
+    }
+  });
 })();

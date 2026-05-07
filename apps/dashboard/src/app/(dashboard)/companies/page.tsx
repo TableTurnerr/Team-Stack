@@ -175,7 +175,40 @@ function CompanyRow({
   });
 
   const handleSave = () => {
-    onEdit(company.id, editData);
+    // Trim every text input before persisting, then enforce minimal validity:
+    // company_name must be non-empty, email (if any) must be a real address,
+    // website (if any) must parse, and instagram_handle is normalised by
+    // dropping a leading '@'. We surface a single-line error via window.alert
+    // because this row uses inline editing and has no toast plumbing.
+    const trimmed = {
+      company_name: editData.company_name.trim(),
+      owner_name: editData.owner_name.trim(),
+      company_location: editData.company_location.trim(),
+      instagram_handle: editData.instagram_handle.trim().replace(/^@+/, ''),
+      email: editData.email.trim(),
+      website: editData.website.trim(),
+    };
+
+    if (!trimmed.company_name) {
+      window.alert('Company name cannot be empty.');
+      return;
+    }
+    if (trimmed.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed.email)) {
+      window.alert('Email is not a valid address.');
+      return;
+    }
+    if (trimmed.website) {
+      try {
+        // Allow bare domains like "example.com" — prepend protocol if missing.
+        const candidate = /^https?:\/\//i.test(trimmed.website) ? trimmed.website : `https://${trimmed.website}`;
+        new URL(candidate);
+      } catch {
+        window.alert('Website URL is not valid.');
+        return;
+      }
+    }
+
+    onEdit(company.id, trimmed);
     setIsEditing(false);
   };
 

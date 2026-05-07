@@ -1,5 +1,5 @@
 {
-  "version": "3.0",
+  "version": "3.1",
   "releaseNotes": "Lead Category + Assign To: pick a lead_category and a specific teammate (assigned_to) when sending leads to CRM. Picking an assignee skips the new-lead pool and routes the lead straight to them. Set defaults in CRM settings; override per-lead in the confirm dialog. Both lists are fetched from PocketBase and cached.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

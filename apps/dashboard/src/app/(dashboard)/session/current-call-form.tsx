@@ -190,25 +190,50 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         setPlayerLoading(call.id);
         setPlayerBlob(null); // Clear blob player
         try {
-            // Try by call_log first
+            // Try by call_log first — this is the only fully unambiguous link.
             let recording: Recording | null = null;
             try {
                 recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
                     pb.filter('call_log = {:callLog}', { callLog: call.id }),
                 );
             } catch {
-                // Fallback: agent mode may upload before linking, so call_log isn't set on PB record.
-                // Match by phone number AND the user who made the call — without the uploader scope
-                // the most recent recording for that number could belong to a different user.
+                // Fallback: agent mode may upload before linking, so call_log
+                // isn't set on the PB record yet.
+                //
+                // Old behaviour matched by phone-digits + uploader, sorted by
+                // -created. That returned the *newest* recording for those
+                // digits — even if it belonged to a different call to the same
+                // number months later. Now we also scope by the call's company
+                // and to a time window around the call_time, so we can't pull
+                // an unrelated future recording onto an old call log.
                 const phone = call.expand?.phone_number_record?.phone_number;
                 if (phone && call.caller) {
                     const digits = phone.replace(/\D/g, '').slice(-10);
+                    const callTime = call.call_time ? new Date(call.call_time).getTime() : NaN;
+                    const windowMs = 6 * 60 * 60 * 1000; // ±6h covers late uploads, deferred segments
+                    const minIso = Number.isFinite(callTime) ? new Date(callTime - windowMs).toISOString() : '';
+                    const maxIso = Number.isFinite(callTime) ? new Date(callTime + windowMs).toISOString() : '';
+                    const filterParts = [
+                        'phone_number ~ {:digits}',
+                        'uploader = {:uploader}',
+                    ];
+                    const params: Record<string, unknown> = { digits, uploader: call.caller };
+                    if (call.company) {
+                        // Recording.company is optional — accept either the
+                        // expected company OR an unset company (agent uploaded
+                        // before linking) but reject mismatched companies.
+                        filterParts.push('(company = {:company} || company = "")');
+                        params.company = call.company;
+                    }
+                    if (minIso && maxIso) {
+                        filterParts.push('created >= {:minIso}');
+                        filterParts.push('created <= {:maxIso}');
+                        params.minIso = minIso;
+                        params.maxIso = maxIso;
+                    }
                     try {
                         recording = await pb.collection(COLLECTIONS.RECORDINGS).getFirstListItem<Recording>(
-                            pb.filter('phone_number ~ {:digits} && uploader = {:uploader}', {
-                                digits,
-                                uploader: call.caller,
-                            }),
+                            pb.filter(filterParts.join(' && '), params),
                             { sort: '-created' },
                         );
                     } catch {
@@ -824,6 +849,19 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             return;
         }
 
+        // Block creating a second company that reuses an existing phone number.
+        // Phone numbers are the strongest identity for a restaurant/lead — if
+        // the auto-lookup already matched one to a different company, force the
+        // user to pick the existing company (one click) instead of fragmenting
+        // call history across duplicate company rows.
+        if (isNewCompany && phoneNumberRecord) {
+            const existing = phoneNumberRecord.expand?.company as Company | undefined;
+            if (existing) {
+                setFormError(`Phone is already linked to "${existing.company_name}". Click "Use existing" in the warning above, or change the phone number.`);
+                return;
+            }
+        }
+
         isSavingRef.current = true;
 
         try {
@@ -835,7 +873,12 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
             // "new company" path and let the page handler create it.
             let resolvedCompany: Company | null = selectedCompany;
 
-            if (!resolvedCompany && !isNewCompany && trimmedSearch.length >= 2) {
+            // Always try an exact-name lookup before creating. Without this, a
+            // user who clicks "create new" while an identically-named company
+            // already exists silently fragments the record. The lookup runs
+            // for both `isNewCompany` and the unselected-typed case; on hit we
+            // adopt the existing company instead of creating a duplicate.
+            if (!resolvedCompany && trimmedSearch.length >= 2) {
                 const lookup = pb.collection(COLLECTIONS.COMPANIES).getList<Company>(1, 1, {
                     filter: `company_name = "${trimmedSearch}"`,
                 }).then(result => result.items[0] ?? null).catch(() => null);
@@ -844,7 +887,9 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 if (winner) {
                     resolvedCompany = winner;
                     setSelectedCompany(winner);
-                } else {
+                    setIsNewCompany(false);
+                    addToast('info', `Found existing company "${winner.company_name}" — using it instead of creating a duplicate.`);
+                } else if (!isNewCompany) {
                     setIsNewCompany(true);
                 }
             }
@@ -912,7 +957,7 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
         } finally {
             isSavingRef.current = false;
         }
-    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, warmLead, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, completeFollowUps, pendingFollowUps, resetForm]);
+    }, [selectedCompany, isNewCompany, companySearch, phoneNumber, receptionistName, ownerName, callOutcome, postCallNotes, ownerReached, pitchCompleted, warmLead, onSave, showFollowUp, followUpData, callbackEvents, additionalPhoneNumber, additionalPhoneNote, email, completeFollowUps, pendingFollowUps, resetForm, phoneNumberRecord, addToast]);
 
     const hasDraftValues =
         companySearch.trim().length > 0 ||
@@ -1329,15 +1374,34 @@ export function CurrentCallForm({ phoneNumber, onSave, saving, hasUnsavedCall, i
                 );
             })()}
 
-            {/* Phone uniqueness warning */}
-            {phoneExistsForOtherCompany && isNewCompany && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--warning-subtle)] border border-[var(--warning)]/20">
-                    <AlertTriangle size={14} className="text-[var(--warning)]" />
-                    <span className="text-xs text-[var(--warning)] font-medium">
-                        This phone number is already linked to another company. Consider selecting the existing company instead.
-                    </span>
-                </div>
-            )}
+            {/* Phone uniqueness warning — blocks save until resolved. */}
+            {phoneExistsForOtherCompany && isNewCompany && (() => {
+                const existingCompany = phoneNumberRecord?.expand?.company as Company | undefined;
+                return (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--warning-subtle)] border border-[var(--warning)]/20">
+                        <AlertTriangle size={14} className="text-[var(--warning)] shrink-0" />
+                        <span className="text-xs text-[var(--warning)] font-medium flex-1">
+                            This phone is already linked to {existingCompany ? `"${existingCompany.company_name}"` : 'another company'}. Pick the existing company or change the phone number.
+                        </span>
+                        {existingCompany && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedCompany(existingCompany);
+                                    setCompanySearch(existingCompany.company_name);
+                                    setIsNewCompany(false);
+                                    if (existingCompany.owner_name) setOwnerName(existingCompany.owner_name);
+                                    if (existingCompany.email) { setEmail(existingCompany.email); setShowEmail(true); }
+                                    setFormError(null);
+                                }}
+                                className="text-xs font-semibold px-2 py-1 rounded bg-[var(--warning)]/10 hover:bg-[var(--warning)]/20 text-[var(--warning)]"
+                            >
+                                Use existing
+                            </button>
+                        )}
+                    </div>
+                );
+            })()}
 
             {/* Company autocomplete */}
             <div className="relative" ref={dropdownRef}>

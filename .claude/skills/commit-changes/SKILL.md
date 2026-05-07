@@ -50,7 +50,13 @@ For EACH logical group identified in step 2:
 
 After all functional changes are committed, perform a single, final commit for all version bumps.
 
-1. **Apply Bumps**: Run `bump_version.js` for the root and all modified components.
+**IMPORTANT — Check for pre-existing version bumps first**: Before running `bump_version.js`, inspect `git diff HEAD` (or the staged/unstaged diff of version files) to detect whether any version files (`package.json`, `manifest.json`, `version.json`, `.csproj`) already contain a version change relative to the last commit.
+
+- If a component's version file was **already bumped** in the uncommitted changes (i.e., the version number changed compared to `git show HEAD:<file>`), **do NOT bump it again** — just stage the already-modified version file as-is.
+- Only run `bump_version.js` for components whose version file has **not** been changed yet.
+- Exception: if the user explicitly requests a higher bump level (e.g., "minor bump" or "major bump"), apply that bump regardless of pre-existing changes.
+
+1. **Apply Bumps** (only for components without pre-existing bumps): Run `bump_version.js` for the root and all modified components.
    ```bash
    node .claude/skills/commit-changes/scripts/bump_version.js apps/dashboard/package.json patch true
    ```

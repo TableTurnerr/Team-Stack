@@ -310,15 +310,34 @@ export default function SessionPage() {
     // ---------------------------------------------------------------------------
     // Mid-session Zoom recovery — when Zoom disappears during an active session,
     // show a warning. When it comes back, refresh only the dialer section.
+    // The auto-pause is debounced: a transient drop (heartbeat lag, brief WS
+    // reconnect, agent token-refresh stall) shouldn't pause the session and
+    // force the user to manually resume the power dialer.
     // ---------------------------------------------------------------------------
+    const AUTO_PAUSE_GRACE_MS = 5_000;
+    // Live refs for the debounced auto-pause timers — they need to read the
+    // CURRENT values when they fire (not the stale closure captured at the
+    // moment the timer was scheduled), so a brief drop that recovers before
+    // the grace window expires correctly suppresses the pause.
+    const agentConnectedRef = useRef(agentConnected);
+    agentConnectedRef.current = agentConnected;
+    const agentZoomDetectedRef = useRef(agentZoomDetected);
+    agentZoomDetectedRef.current = agentZoomDetected;
+    const sessionRef = useRef(session);
+    sessionRef.current = session;
     const [zoomLostDuringSession, setZoomLostDuringSession] = useState(false);
     const prevAgentZoomDetectedRef = useRef<boolean | null>(null);
+    const zoomPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         // Only care about active sessions
         if (!session || session.status !== 'active') {
             setZoomLostDuringSession(false);
             prevAgentZoomDetectedRef.current = null;
+            if (zoomPauseTimerRef.current) {
+                clearTimeout(zoomPauseTimerRef.current);
+                zoomPauseTimerRef.current = null;
+            }
             return;
         }
 
@@ -330,30 +349,55 @@ export default function SessionPage() {
         if (prev === null) return; // first heartbeat — skip transition check
 
         if (prev && !agentZoomDetected) {
-            // Zoom just disappeared mid-session — auto-pause
-            setZoomLostDuringSession(true);
-            if (!session.paused_at) {
-                pauseSessionRef.current();
-                addToast('warning', 'Session auto-paused — Zoom not detected');
-            }
+            // Zoom dropped — schedule the auto-pause but give Zoom a few
+            // seconds to come back before actually pausing. Heartbeats can
+            // briefly report Zoom as missing during process restarts or
+            // detection polls; a hard pause on the first dropped beat was
+            // pausing the dialer constantly under normal conditions.
+            if (zoomPauseTimerRef.current) clearTimeout(zoomPauseTimerRef.current);
+            zoomPauseTimerRef.current = setTimeout(() => {
+                zoomPauseTimerRef.current = null;
+                // Re-check current state at fire time — if Zoom has come
+                // back or the session is no longer active, do nothing.
+                if (!agentZoomDetectedRef.current && sessionRef.current?.status === 'active' && !sessionRef.current?.paused_at) {
+                    setZoomLostDuringSession(true);
+                    pauseSessionRef.current();
+                    addToast('warning', 'Session auto-paused — Zoom not detected');
+                }
+            }, AUTO_PAUSE_GRACE_MS);
         } else if (!prev && agentZoomDetected) {
-            // Zoom recovered — clear the warning (no auto-resume)
-            setZoomLostDuringSession(false);
-            addToast('success', 'Zoom detected. Resume session when ready.');
+            // Zoom recovered. If a pending auto-pause was queued, cancel it
+            // silently — the drop was transient and never warranted a pause.
+            if (zoomPauseTimerRef.current) {
+                clearTimeout(zoomPauseTimerRef.current);
+                zoomPauseTimerRef.current = null;
+            }
+            if (zoomLostDuringSession) {
+                setZoomLostDuringSession(false);
+                addToast('success', 'Zoom detected. Resume session when ready.');
+            }
         }
-    }, [agentConnected, agentZoomDetected, session, addToast]);
+    }, [agentConnected, agentZoomDetected, session, addToast, zoomLostDuringSession]);
 
     // ---------------------------------------------------------------------------
     // Mid-session agent loss — block calls when the local agent disconnects
-    // during an active session.
+    // during an active session. Debounced for the same reason as the Zoom
+    // watcher above: transient WS reconnects (pulse-watcher force-close, brief
+    // network blips) flicker isConnected false→true within 1–3 s and shouldn't
+    // pause the session.
     // ---------------------------------------------------------------------------
     const [agentLostDuringSession, setAgentLostDuringSession] = useState(false);
     const prevAgentConnectedRef = useRef<boolean | null>(null);
+    const agentPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         if (!session || session.status !== 'active') {
             setAgentLostDuringSession(false);
             prevAgentConnectedRef.current = null;
+            if (agentPauseTimerRef.current) {
+                clearTimeout(agentPauseTimerRef.current);
+                agentPauseTimerRef.current = null;
+            }
             return;
         }
 
@@ -363,18 +407,32 @@ export default function SessionPage() {
         if (prev === null) return; // first render — skip transition check
 
         if (prev && !agentConnected) {
-            // Agent disconnected mid-session — auto-pause
-            setAgentLostDuringSession(true);
-            if (!session.paused_at) {
-                pauseSessionRef.current();
-                addToast('warning', 'Session auto-paused — CRM Agent disconnected');
-            }
+            // Agent dropped — schedule the auto-pause but give it a grace
+            // window to reconnect first. The pulse-watcher force-closes
+            // the socket on transient lag and the reconnect ladder kicks
+            // back in within 1–2 s; pausing on the first drop was forcing
+            // users to manually resume the dialer after every blip.
+            if (agentPauseTimerRef.current) clearTimeout(agentPauseTimerRef.current);
+            agentPauseTimerRef.current = setTimeout(() => {
+                agentPauseTimerRef.current = null;
+                if (!agentConnectedRef.current && sessionRef.current?.status === 'active' && !sessionRef.current?.paused_at) {
+                    setAgentLostDuringSession(true);
+                    pauseSessionRef.current();
+                    addToast('warning', 'Session auto-paused — CRM Agent disconnected');
+                }
+            }, AUTO_PAUSE_GRACE_MS);
         } else if (!prev && agentConnected) {
-            // Agent reconnected (no auto-resume)
-            setAgentLostDuringSession(false);
-            addToast('success', 'CRM Agent reconnected. Resume session when ready.');
+            // Agent reconnected. Cancel any pending auto-pause silently.
+            if (agentPauseTimerRef.current) {
+                clearTimeout(agentPauseTimerRef.current);
+                agentPauseTimerRef.current = null;
+            }
+            if (agentLostDuringSession) {
+                setAgentLostDuringSession(false);
+                addToast('success', 'CRM Agent reconnected. Resume session when ready.');
+            }
         }
-    }, [agentConnected, session, addToast]);
+    }, [agentConnected, session, addToast, agentLostDuringSession]);
 
     // ---------------------------------------------------------------------------
     // Power Dialer state
@@ -1545,15 +1603,18 @@ export default function SessionPage() {
      * silently drops the next dial when the agent's callStatus hasn't caught
      * up to the user's just-saved hangup.
      *
-     * Backs off in 500ms steps for up to 8 seconds (16 retries) — anything
-     * longer and something is genuinely wrong; we stop the dialer so the user
-     * can investigate instead of looping forever.
+     * Backs off in 500ms steps for up to 60 seconds (120 retries). The
+     * threshold is generous because the user is often legitimately still
+     * wrapping up the previous call — they may submit the form while the
+     * line is still connected, and the queued next-dial should simply wait
+     * until they hang up rather than auto-pause and force a manual resume.
+     * After 60 s the channel really is stuck and pausing is the right call.
      */
     const scheduleNextPowerDial = useCallback((entry: DialerEntry, initialDelayMs: number) => {
         if (powerDialerTimerRef.current) clearTimeout(powerDialerTimerRef.current);
 
         const RETRY_INTERVAL_MS = 500;
-        const MAX_RETRIES = 16; // ~8 seconds total
+        const MAX_RETRIES = 120; // ~60 seconds total
         let retries = 0;
 
         const tryDial = () => {

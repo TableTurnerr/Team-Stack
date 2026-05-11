@@ -415,6 +415,14 @@ function escapeHtmlModal(str) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+    // Show extension version in header (read from manifest so it always stays in sync)
+    try {
+        var verEl = document.getElementById('appVersionBadge');
+        if (verEl && chrome.runtime && chrome.runtime.getManifest) {
+            verEl.textContent = 'v' + chrome.runtime.getManifest().version;
+        }
+    } catch (e) {}
+
     // Mode handling
     chrome.storage.local.get(['gmes_mode'], function (result) {
         var mode = result.gmes_mode || 'scraping';

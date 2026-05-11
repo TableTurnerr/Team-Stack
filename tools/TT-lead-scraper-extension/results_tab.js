@@ -398,6 +398,14 @@ function showCrmConfirmation(item, onConfirm) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+    // Show extension version in header (read from manifest so it stays in sync)
+    try {
+        const verEl = document.getElementById('pageVersionBadge');
+        if (verEl && chrome.runtime && chrome.runtime.getManifest) {
+            verEl.textContent = 'v' + chrome.runtime.getManifest().version;
+        }
+    } catch (e) {}
+
     const table = document.getElementById('resultsTable');
     const tbody = table.querySelector('tbody');
     const stats = document.getElementById('stats');

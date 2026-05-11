@@ -1,5 +1,5 @@
 {
-  "version": "3.1",
-  "releaseNotes": "Lead Category + Assign To: pick a lead_category and a specific teammate (assigned_to) when sending leads to CRM. Picking an assignee skips the new-lead pool and routes the lead straight to them. Set defaults in CRM settings; override per-lead in the confirm dialog. Both lists are fetched from PocketBase and cached.",
+  "version": "3.2",
+  "releaseNotes": "Bulk mode: fix phone-number extraction (Maps now exposes phones via aria-label on call buttons / place links — text-only regex was missing them). Add 'Send All to CRM' on the Live Results tab: classifies every un-synced lead (new vs add-phone-to-existing vs already-in-CRM), applies one lead_category + assignee to the batch, sends serially with live progress and per-row status updates. Website link now skips google.com hosts so we don't capture search/maps URLs as the business website.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

@@ -103,6 +103,20 @@
     .header-byline { font-size: 12px; opacity: 0.82; }
     .header-byline a { color: white; text-decoration: none; }
     .header-byline a:hover { text-decoration: underline; }
+    .app-version-badge {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      vertical-align: middle;
+      background: rgba(255,255,255,0.22);
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 999px;
+      color: white;
+    }
+    .app-version-badge:empty { display: none; }
 
     /* Header right-side controls */
     .header-controls { display: flex; gap: 8px; align-items: center; }
@@ -654,7 +668,7 @@
     <div class="app-header-top">
       <img src="icon.png" class="app-logo" alt="TableTurner">
       <div class="app-header-titles">
-        <h1>TableTurner Lead Scraper</h1>
+        <h1>TableTurner Lead Scraper <span id="appVersionBadge" class="app-version-badge"></span></h1>
         <div class="header-byline">
           <a href="https://www.youtube.com/@itsmikepowers" target="_blank">By Mike</a>
           &nbsp;·&nbsp;

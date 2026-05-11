@@ -72,6 +72,11 @@
     .button.red-btn { background: #ea4335; }
     .button.red-btn:hover { background: #c5221f; box-shadow: 0 2px 8px rgba(234,67,53,0.28); }
 
+    .button.green-btn { background: #34a853; }
+    .button.green-btn:hover { background: #1e8e3e; box-shadow: 0 2px 8px rgba(52,168,83,0.28); }
+    .button:disabled { background: #e8eaed; color: #80868b; cursor: not-allowed; box-shadow: none; transform: none; }
+    .button:disabled:hover { background: #e8eaed; box-shadow: none; transform: none; }
+
     .stats {
       color: #5f6368;
       font-size: 13px;
@@ -129,6 +134,11 @@
       <button id="exportBtn" class="button">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download CSV
+      </button>
+      <button id="sendAllBtn" class="button green-btn" disabled title="Review and send every un-synced lead to CRM at once">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        Send All to CRM
+        <span id="sendAllCount" style="font-size:11px;font-weight:700;background:rgba(255,255,255,0.25);padding:2px 7px;border-radius:10px;margin-left:2px;">0</span>
       </button>
       <span id="stats" class="stats">Loading...</span>
     </div>

@@ -402,12 +402,16 @@ document.addEventListener('DOMContentLoaded', function () {
     const tbody = table.querySelector('tbody');
     const stats = document.getElementById('stats');
     const exportBtn = document.getElementById('exportBtn');
-    
+    const sendAllBtn = document.getElementById('sendAllBtn');
+    const sendAllCount = document.getElementById('sendAllCount');
+
     // Ignore lists
     let ignoreNamesSet = new Set();
     let ignoreIndustriesSet = new Set();
     // All items (module-level) so CRM sync can persist back to storage
     let allItems = [];
+    // Map href/key -> { row, statusCell, statusBtn } so bulk-send can update rows live
+    const rowIndex = new Map();
 
     function loadData() {
         chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries'], function (data) {
@@ -430,8 +434,75 @@ document.addEventListener('DOMContentLoaded', function () {
         return false;
     }
 
+    function itemKey(item) {
+        return item.href || (item.title + '|' + item.address);
+    }
+
+    function isSendable(item) {
+        if (!item) return false;
+        if (item.crmSynced || item.crmPhoneAdded) return false;
+        if (itemIsIgnored(item)) return false;
+        return true;
+    }
+
+    function refreshSendAllButton() {
+        const pending = allItems.filter(isSendable).length;
+        if (sendAllCount) sendAllCount.textContent = String(pending);
+        if (!sendAllBtn) return;
+        pbIsLoggedIn(loggedIn => {
+            sendAllBtn.disabled = !loggedIn || pending === 0;
+            if (!loggedIn) sendAllBtn.title = 'Login to TableTurnerr CRM first (use the extension popup → Connect)';
+            else if (pending === 0) sendAllBtn.title = 'No un-synced leads to send';
+            else sendAllBtn.title = `Send ${pending} un-synced lead${pending === 1 ? '' : 's'} to CRM`;
+        });
+    }
+
+    function markRowSynced(item) {
+        const entry = rowIndex.get(itemKey(item));
+        if (!entry) return;
+        const td = entry.statusCell;
+        td.innerHTML = '';
+        td.textContent = '✓ Synced';
+        td.style.color = '#34a853';
+        td.style.fontWeight = '600';
+    }
+
+    function markRowPhoneAdded(item) {
+        const entry = rowIndex.get(itemKey(item));
+        if (!entry) return;
+        const td = entry.statusCell;
+        td.innerHTML = '';
+        td.textContent = '✓ Phone Added';
+        td.style.color = '#34a853';
+        td.style.fontWeight = '600';
+    }
+
+    function markRowSending(item, label) {
+        const entry = rowIndex.get(itemKey(item));
+        if (!entry) return;
+        const td = entry.statusCell;
+        td.innerHTML = '';
+        td.textContent = label || 'Sending…';
+        td.style.color = '#1a73e8';
+        td.style.fontWeight = '600';
+    }
+
+    function markRowFailed(item, msg) {
+        const entry = rowIndex.get(itemKey(item));
+        if (!entry) return;
+        const td = entry.statusCell;
+        td.innerHTML = '';
+        const span = document.createElement('span');
+        span.textContent = '✗ Failed';
+        span.style.color = '#ea4335';
+        span.style.fontWeight = '600';
+        span.title = msg || 'Send failed';
+        td.appendChild(span);
+    }
+
     function renderTable(items) {
         tbody.innerHTML = '';
+        rowIndex.clear();
         let count = 0;
         const seen = new Set();
 
@@ -439,7 +510,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const key = item.href || (item.title + '|' + item.address);
             if (!key || seen.has(key)) return;
             if (itemIsIgnored(item)) return;
-            
+
             seen.add(key);
             count++;
             
@@ -586,11 +657,15 @@ document.addEventListener('DOMContentLoaded', function () {
                     td.textContent = val;
                 }
                 tr.appendChild(td);
+                if (colKey === 'crmStatus') {
+                    rowIndex.set(key, { row: tr, statusCell: td });
+                }
             });
             tbody.appendChild(tr);
         });
-        
+
         stats.textContent = `Total Leads: ${count}`;
+        refreshSendAllButton();
     }
 
     // Initial load
@@ -669,4 +744,280 @@ document.addEventListener('DOMContentLoaded', function () {
             alert('Export failed: ' + (e && e.message ? e.message : e));
         }
     });
+
+    // ========================================================================
+    // Bulk "Send All to CRM": review every un-synced lead, then send in batches
+    // ========================================================================
+    function showSendAllModal() {
+        const existing = document.getElementById('gmes-send-all-modal');
+        if (existing) existing.remove();
+
+        const pending = allItems.filter(isSendable);
+        if (!pending.length) {
+            alert('No un-synced leads to send.');
+            return;
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'gmes-send-all-modal';
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Poppins,sans-serif;';
+        modal.innerHTML =
+            '<div style="background:#fff;border-radius:14px;max-width:560px;width:92%;max-height:84vh;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.25);border:1.5px solid #e2e5eb;display:flex;flex-direction:column;">' +
+              '<div style="background:linear-gradient(135deg,#1e8e3e 0%,#34a853 60%,#5bc26a 100%);padding:14px 18px;color:white;font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>' +
+                'Send All Leads to CRM' +
+              '</div>' +
+              '<div id="gmes-send-all-body" style="padding:18px;overflow-y:auto;font-size:13px;color:#3c4043;">' +
+                '<div id="gmes-send-all-summary" style="background:#f8f9fa;border:1px solid #e2e5eb;border-radius:10px;padding:14px;margin-bottom:14px;">' +
+                  '<div style="font-weight:700;font-size:13.5px;margin-bottom:8px;color:#202124;">Reviewing ' + pending.length + ' lead' + (pending.length === 1 ? '' : 's') + '…</div>' +
+                  '<div id="gmes-send-all-counts" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px 14px;font-size:12.5px;">' +
+                    '<div><span style="font-weight:600;color:#1a73e8;">Checking CRM…</span></div>' +
+                  '</div>' +
+                '</div>' +
+                '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;margin-bottom:8px;">' +
+                  '<label style="font-weight:700;font-size:12px;color:#5f6368;">Lead Category</label>' +
+                  '<select id="gmes-send-all-category" style="padding:7px 10px;border:1.5px solid #e2e5eb;border-radius:7px;font-family:inherit;font-size:12.5px;background:#fff;color:#202124;">' +
+                    '<option value="">— None —</option>' +
+                  '</select>' +
+                  '<label style="font-weight:700;font-size:12px;color:#5f6368;">Assign To</label>' +
+                  '<select id="gmes-send-all-assignee" style="padding:7px 10px;border:1.5px solid #e2e5eb;border-radius:7px;font-family:inherit;font-size:12.5px;background:#fff;color:#202124;">' +
+                    '<option value="">— Unassigned (new-lead pool) —</option>' +
+                  '</select>' +
+                '</div>' +
+                '<div style="font-size:11px;color:#5f6368;line-height:1.5;margin-top:4px;">' +
+                  'Applied to <strong>every lead in this batch</strong>. Picking an assignee skips the new-lead pool and routes each lead straight to them. Leads already in CRM with the same phone are skipped automatically.' +
+                '</div>' +
+                '<div id="gmes-send-all-progress" style="display:none;margin-top:14px;">' +
+                  '<div style="display:flex;justify-content:space-between;font-size:12px;color:#5f6368;margin-bottom:6px;">' +
+                    '<span id="gmes-send-all-progress-label">Sending…</span>' +
+                    '<span id="gmes-send-all-progress-count">0 / 0</span>' +
+                  '</div>' +
+                  '<div style="height:8px;background:#e8eaed;border-radius:4px;overflow:hidden;">' +
+                    '<div id="gmes-send-all-progress-bar" style="height:100%;width:0;background:linear-gradient(90deg,#1e8e3e,#34a853);transition:width 0.25s;"></div>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div style="padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #e2e5eb;background:#fafafa;">' +
+                '<button id="gmes-send-all-cancel" style="padding:8px 18px;border:1.5px solid #e2e5eb;border-radius:8px;background:#fff;color:#3c4043;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button>' +
+                '<button id="gmes-send-all-confirm" disabled style="padding:8px 20px;border:none;border-radius:8px;background:#34a853;color:white;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;opacity:0.6;">Checking…</button>' +
+              '</div>' +
+            '</div>';
+
+        document.body.appendChild(modal);
+
+        const cancelBtn = document.getElementById('gmes-send-all-cancel');
+        const confirmBtn = document.getElementById('gmes-send-all-confirm');
+        const categorySelect = document.getElementById('gmes-send-all-category');
+        const assigneeSelect = document.getElementById('gmes-send-all-assignee');
+        const countsEl = document.getElementById('gmes-send-all-counts');
+
+        let canceled = false;
+        cancelBtn.addEventListener('click', () => { canceled = true; modal.remove(); });
+        modal.addEventListener('click', e => { if (e.target === modal) { canceled = true; modal.remove(); } });
+
+        // Populate category + assignee selectors using stored defaults
+        pbFetchLeadCategories(false, cats => {
+            chrome.storage.local.get(['gmes_default_lead_category'], data => {
+                const preselect = data.gmes_default_lead_category || '';
+                (cats || []).forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.id;
+                    opt.textContent = c.name;
+                    if (c.id === preselect) opt.selected = true;
+                    categorySelect.appendChild(opt);
+                });
+            });
+        });
+        pbFetchTeammates(false, mates => {
+            chrome.storage.local.get(['gmes_default_assigned_to'], data => {
+                const preselect = data.gmes_default_assigned_to || '';
+                (mates || []).forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = m.name + (m.email ? ' (' + m.email + ')' : '');
+                    if (m.id === preselect) opt.selected = true;
+                    assigneeSelect.appendChild(opt);
+                });
+            });
+        });
+
+        // Pre-flight: classify every pending lead via pbCheckCompanyStatus.
+        // Run with small concurrency so we don't hammer PocketBase.
+        const buckets = { new: [], existsNewPhone: [], existsSamePhone: [], noPhone: [] };
+        const concurrency = 4;
+        let cursor = 0;
+        let done = 0;
+
+        function classify(item, cb) {
+            const checkPhones = Array.isArray(item.phones) && item.phones.length
+                ? item.phones
+                : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
+            pbCheckCompanyStatus(item.title, checkPhones, statusResult => {
+                if (statusResult.status === 'exists_same_phone') {
+                    item.crmSynced = true;
+                    if (statusResult.companyId) item.crmId = statusResult.companyId;
+                    buckets.existsSamePhone.push(item);
+                    markRowSynced(item);
+                } else if (statusResult.status === 'exists_new_phone') {
+                    item.crmExistingId = statusResult.companyId;
+                    buckets.existsNewPhone.push(item);
+                } else {
+                    if (!checkPhones.length) buckets.noPhone.push(item);
+                    buckets.new.push(item);
+                }
+                cb();
+            });
+        }
+
+        function pump() {
+            while (cursor < pending.length && (cursor - done) < concurrency) {
+                const item = pending[cursor++];
+                classify(item, () => {
+                    done++;
+                    renderCounts();
+                    if (done === pending.length) {
+                        chrome.storage.local.set({ gmes_results: allItems });
+                        refreshSendAllButton();
+                        finalizePreflight();
+                    } else if (!canceled) {
+                        pump();
+                    }
+                });
+            }
+        }
+
+        function renderCounts() {
+            const sending = buckets.new.length + buckets.existsNewPhone.length;
+            countsEl.innerHTML =
+                '<div><span style="color:#5f6368;">New leads:</span> <strong style="color:#1e8e3e;">' + buckets.new.length + '</strong></div>' +
+                '<div><span style="color:#5f6368;">Add phone to existing:</span> <strong style="color:#f29900;">' + buckets.existsNewPhone.length + '</strong></div>' +
+                '<div><span style="color:#5f6368;">Already in CRM (skip):</span> <strong style="color:#5f6368;">' + buckets.existsSamePhone.length + '</strong></div>' +
+                '<div><span style="color:#5f6368;">Missing phone:</span> <strong style="color:#5f6368;">' + buckets.noPhone.length + '</strong></div>' +
+                '<div style="grid-column:1/-1;margin-top:4px;padding-top:8px;border-top:1px solid #e2e5eb;"><span style="color:#202124;font-weight:700;">Will send:</span> <strong style="color:#1a73e8;">' + sending + '</strong> · <span style="color:#5f6368;">Checked ' + done + ' / ' + pending.length + '</span></div>';
+        }
+        renderCounts();
+
+        function finalizePreflight() {
+            const sending = buckets.new.length + buckets.existsNewPhone.length;
+            if (sending === 0) {
+                confirmBtn.textContent = 'Nothing to send';
+                confirmBtn.style.opacity = '0.6';
+                confirmBtn.disabled = true;
+            } else {
+                confirmBtn.textContent = 'Send ' + sending + ' to CRM';
+                confirmBtn.style.opacity = '1';
+                confirmBtn.disabled = false;
+            }
+        }
+        pump();
+
+        confirmBtn.addEventListener('click', () => {
+            if (confirmBtn.disabled) return;
+            const category = categorySelect.value || '';
+            const assignee = assigneeSelect.value || '';
+            confirmBtn.disabled = true;
+            cancelBtn.textContent = 'Close when done';
+            categorySelect.disabled = true;
+            assigneeSelect.disabled = true;
+            document.getElementById('gmes-send-all-progress').style.display = 'block';
+            runBulkSend(buckets, category, assignee, modal);
+        });
+    }
+
+    function runBulkSend(buckets, category, assignee, modal) {
+        const queue = [];
+        buckets.new.forEach(item => queue.push({ item, kind: 'new' }));
+        buckets.existsNewPhone.forEach(item => queue.push({ item, kind: 'addPhone' }));
+
+        const total = queue.length;
+        const label = document.getElementById('gmes-send-all-progress-label');
+        const countEl = document.getElementById('gmes-send-all-progress-count');
+        const bar = document.getElementById('gmes-send-all-progress-bar');
+        let done = 0;
+        let succeeded = 0;
+        let failed = 0;
+        let aborted = false;
+
+        // Serial sending: PocketBase writes touch multiple collections per lead;
+        // staying serial keeps the activity timeline ordered and avoids
+        // rate-limiting on shared tunnels.
+        function next() {
+            if (aborted) return;
+            if (!queue.length) {
+                finish();
+                return;
+            }
+            const { item, kind } = queue.shift();
+            markRowSending(item, kind === 'addPhone' ? 'Adding phone…' : 'Sending…');
+            const stamped = Object.assign({}, item, {
+                lead_category: category || item.lead_category || '',
+                assigned_to: assignee || item.assigned_to || ''
+            });
+            const onDone = (ok, msg) => {
+                done++;
+                if (ok) succeeded++; else failed++;
+                countEl.textContent = done + ' / ' + total;
+                bar.style.width = Math.round((done / total) * 100) + '%';
+                label.textContent = ok
+                    ? 'Sent ' + done + ' of ' + total + (failed ? ' (' + failed + ' failed)' : '')
+                    : 'Failed lead — continuing…';
+                if (!ok) markRowFailed(item, msg);
+                chrome.storage.local.set({ gmes_results: allItems });
+                setTimeout(next, 50);
+            };
+
+            if (kind === 'addPhone' && item.crmExistingId) {
+                const addPhones = Array.isArray(item.phones) && item.phones.length
+                    ? item.phones
+                    : (item.phone ? [{ number: item.phone, label: 'Main' }] : []);
+                pbAddPhoneToCompany(item.crmExistingId, addPhones, result => {
+                    if (result.success) {
+                        item.crmPhoneAdded = true;
+                        markRowPhoneAdded(item);
+                        onDone(true);
+                    } else {
+                        onDone(false, result.error || 'addPhone failed');
+                    }
+                });
+            } else {
+                pbSendToCrm(stamped, result => {
+                    if (result.success) {
+                        item.crmSynced = true;
+                        if (result.recordId) item.crmId = result.recordId;
+                        markRowSynced(item);
+                        onDone(true);
+                    } else {
+                        onDone(false, result.error || 'send failed');
+                    }
+                });
+            }
+        }
+
+        function finish() {
+            label.textContent = 'Done — ' + succeeded + ' sent' + (failed ? ', ' + failed + ' failed' : '');
+            bar.style.width = '100%';
+            refreshSendAllButton();
+            chrome.storage.local.set({ gmes_results: allItems });
+            const cancelBtn = document.getElementById('gmes-send-all-cancel');
+            if (cancelBtn) cancelBtn.textContent = 'Close';
+        }
+
+        if (total === 0) {
+            finish();
+            return;
+        }
+        next();
+    }
+
+    if (sendAllBtn) {
+        sendAllBtn.addEventListener('click', () => {
+            pbIsLoggedIn(loggedIn => {
+                if (!loggedIn) {
+                    alert('Login to TableTurnerr CRM first. Open the extension popup and click "Connect to TableTurnerr CRM".');
+                    return;
+                }
+                showSendAllModal();
+            });
+        });
+    }
 });

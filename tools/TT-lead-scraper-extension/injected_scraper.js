@@ -19,6 +19,48 @@
     return digits;
   }
 
+  // Phone is no longer reliably rendered as visible text in feed cards — Google
+  // Maps now puts it on aria-labels of "Call" buttons or packs the full place
+  // summary (including phone) into the aria-label of the place link. Try each
+  // source in order of reliability before falling back to text regex.
+  var PHONE_REGEX = /(?:\+?1[\s.\-–]?)?(?:\(\s*[2-9]\d{2}\s*\)|[2-9]\d{2})[\s.\-–]?[2-9]\d{2}[\s.\-–]?\d{4}/;
+  function extractPhone(container, containerText) {
+    if (!container) return '';
+    try {
+      var phoneBtn = container.querySelector('button[aria-label^="Phone:"], button[data-value="Phone"], a[aria-label^="Phone:"], [data-tooltip="Copy phone number"]');
+      if (phoneBtn) {
+        var label = phoneBtn.getAttribute('aria-label') || phoneBtn.getAttribute('data-tooltip') || '';
+        var m = label.match(/Phone:\s*(.+)/i);
+        if (m && m[1]) {
+          var matched = m[1].match(PHONE_REGEX);
+          if (matched) return matched[0];
+          return m[1].trim();
+        }
+        var inner = (phoneBtn.textContent || '').match(PHONE_REGEX);
+        if (inner) return inner[0];
+      }
+    } catch (e) {}
+    try {
+      var labelSources = [];
+      var placeLink = container.querySelector('a[href^="https://www.google.com/maps/place"]');
+      if (placeLink && placeLink.getAttribute('aria-label')) labelSources.push(placeLink.getAttribute('aria-label'));
+      if (container.getAttribute && container.getAttribute('aria-label')) labelSources.push(container.getAttribute('aria-label'));
+      container.querySelectorAll('[aria-label]').forEach(function (el) {
+        var v = el.getAttribute('aria-label');
+        if (v) labelSources.push(v);
+      });
+      for (var i = 0; i < labelSources.length; i++) {
+        var match = labelSources[i].match(PHONE_REGEX);
+        if (match) return match[0];
+      }
+    } catch (e) {}
+    try {
+      var m2 = (containerText || '').match(PHONE_REGEX);
+      if (m2) return m2[0];
+    } catch (e) {}
+    return '';
+  }
+
   // create popdown UI
   function ensurePopdown() {
     var id = 'gmes-popdown';
@@ -165,13 +207,19 @@
             }
 
             var allLinks = Array.from(container.querySelectorAll('a[href]'));
-            var filteredLinks = allLinks.filter(a => !a.href.startsWith('https://www.google.com/maps/place/'));
+            var filteredLinks = allLinks.filter(function (a) {
+              if (!a.href) return false;
+              if (a.href.startsWith('https://www.google.com/maps/')) return false;
+              if (a.href.startsWith('https://www.google.com/search')) return false;
+              try {
+                var host = new URL(a.href).hostname.toLowerCase();
+                if (host === 'google.com' || host.endsWith('.google.com')) return false;
+              } catch (e) { return false; }
+              return true;
+            });
             if (filteredLinks.length > 0) companyUrl = filteredLinks[0].href;
 
-            // Better phone regex
-            var phoneRegex = /(?:\+1\s?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[-.\s]?[2-9]\d{2}[-.\s]?\d{4}/;
-            var phoneMatch = containerText.match(phoneRegex);
-            phone = phoneMatch ? phoneMatch[0] : '';
+            phone = extractPhone(container, containerText);
           }
 
           // Normalize phone and build phones array

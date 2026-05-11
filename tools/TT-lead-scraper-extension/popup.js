@@ -1442,20 +1442,63 @@ function scrapeData() {
             }
         }
 
-        // Company URL
+        // Company URL — skip Google-owned hosts so we don't pick up search/maps links as the website
         if (container) {
             var allLinks = Array.from(container.querySelectorAll('a[href]'));
-            var filteredLinks = allLinks.filter(a => !a.href.startsWith("https://www.google.com/maps/place/"));
+            var filteredLinks = allLinks.filter(function (a) {
+                if (!a.href) return false;
+                if (a.href.startsWith('https://www.google.com/maps/')) return false;
+                if (a.href.startsWith('https://www.google.com/search')) return false;
+                try {
+                    var host = new URL(a.href).hostname.toLowerCase();
+                    if (host === 'google.com' || host.endsWith('.google.com')) return false;
+                } catch (e) { return false; }
+                return true;
+            });
             if (filteredLinks.length > 0) {
                 companyUrl = filteredLinks[0].href;
             }
         }
 
-        // Phone Numbers - Better regex requiring area code and proper format
+        // Phone Numbers — try multiple sources in order: explicit phone button,
+        // aria-labels (Maps packs full summary into the place-link aria-label),
+        // then visible text as a last resort.
+        var PHONE_REGEX = /(?:\+?1[\s.\-–]?)?(?:\(\s*[2-9]\d{2}\s*\)|[2-9]\d{2})[\s.\-–]?[2-9]\d{2}[\s.\-–]?\d{4}/;
         if (container) {
-            var phoneRegex = /(?:\+1\s?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[-.\s]?[2-9]\d{2}[-.\s]?\d{4}/;
-            var phoneMatch = containerText.match(phoneRegex);
-            phone = phoneMatch ? phoneMatch[0] : '';
+            try {
+                var phoneBtn = container.querySelector('button[aria-label^="Phone:"], button[data-value="Phone"], a[aria-label^="Phone:"], [data-tooltip="Copy phone number"]');
+                if (phoneBtn) {
+                    var pLabel = phoneBtn.getAttribute('aria-label') || phoneBtn.getAttribute('data-tooltip') || '';
+                    var pm = pLabel.match(/Phone:\s*(.+)/i);
+                    if (pm && pm[1]) {
+                        var pmm = pm[1].match(PHONE_REGEX);
+                        phone = pmm ? pmm[0] : pm[1].trim();
+                    } else {
+                        var inner = (phoneBtn.textContent || '').match(PHONE_REGEX);
+                        if (inner) phone = inner[0];
+                    }
+                }
+            } catch (e) {}
+            if (!phone) {
+                try {
+                    var labelSources = [];
+                    var placeLink = container.querySelector('a[href^="https://www.google.com/maps/place"]');
+                    if (placeLink && placeLink.getAttribute('aria-label')) labelSources.push(placeLink.getAttribute('aria-label'));
+                    if (container.getAttribute && container.getAttribute('aria-label')) labelSources.push(container.getAttribute('aria-label'));
+                    container.querySelectorAll('[aria-label]').forEach(function (el) {
+                        var v = el.getAttribute('aria-label');
+                        if (v) labelSources.push(v);
+                    });
+                    for (var i = 0; i < labelSources.length; i++) {
+                        var lm = labelSources[i].match(PHONE_REGEX);
+                        if (lm) { phone = lm[0]; break; }
+                    }
+                } catch (e) {}
+            }
+            if (!phone) {
+                var phoneMatch = containerText.match(PHONE_REGEX);
+                phone = phoneMatch ? phoneMatch[0] : '';
+            }
         }
 
         // Normalize phone and build phones array

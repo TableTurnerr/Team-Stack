@@ -93,7 +93,7 @@ export default function ConnectPage() {
     setBusy(true);
     setError('');
     try {
-      const res = await authedFetch('/api/ghl/oauth/start');
+      const res = await authedFetch('/api/hl/oauth/start');
       const data = await res.json();
       if (!res.ok || !data.authorizeUrl) throw new Error(data.error || 'Could not start connection');
       window.location.href = data.authorizeUrl;

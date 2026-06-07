@@ -11,9 +11,17 @@ export default function LoginPage() {
     const { login, loginWithGoogle, isAuthenticated, isLoading: isAuthLoading } = useAuth();
     const router = useRouter();
 
+    // Honor a ?redirect=/path param (used by the extension connect flow) so we
+    // can return to where the user came from instead of always the dashboard.
+    const getRedirect = () => {
+        if (typeof window === 'undefined') return '/';
+        const r = new URLSearchParams(window.location.search).get('redirect');
+        return r && r.startsWith('/') ? r : '/';
+    };
+
     useEffect(() => {
         if (!isAuthLoading && isAuthenticated) {
-            router.push('/');
+            router.push(getRedirect());
         }
     }, [isAuthLoading, isAuthenticated, router]);
 
@@ -28,7 +36,7 @@ export default function LoginPage() {
 
         try {
             await login(email, password);
-            router.push('/');
+            router.push(getRedirect());
         } catch (err: unknown) {
             if (err instanceof Error) {
                 setError(err.message || 'Invalid email or password');
@@ -46,7 +54,7 @@ export default function LoginPage() {
 
         try {
             await loginWithGoogle();
-            router.push('/');
+            router.push(getRedirect());
         } catch (err: unknown) {
             console.error('Google Sign In Error Page Log:', err);
             if (err instanceof Error) {

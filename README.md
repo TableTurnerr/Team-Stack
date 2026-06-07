@@ -43,11 +43,6 @@ CRM-Tableturnerr/
 │   └── hubspot/                   # 🔗 HubSpot CRM migration context & mapping
 │
 ├── tools/
-│   ├── TT-lead-scraper-extension/ # 🗺️ Chrome extension for Google Maps lead scraping
-│   │   ├── manifest.json          # Extension config (Manifest V3)
-│   │   ├── popup.js               # Extension popup logic
-│   │   └── background.js          # Service worker
-│   │
 │   ├── audio-recorder/            # 🎙️ PyQt desktop app with hotkey recording
 │   │   ├── recorder.py            # Main GUI application
 │   │   └── installer.nsi          # NSIS installer script
@@ -292,11 +287,8 @@ Node.js/TypeScript background worker:
 - **Auth**: Admin PocketBase auth with automatic token refresh on 401
 - **Entry Point**: `src/index.ts`
 
-### Lead Scraper Extension (`tools/TT-lead-scraper-extension`)
-Chrome extension (Manifest V3) for Google Maps restaurant scraping:
-- **Modes**: Automated list scraping, Manual single-add with overlay
-- **Features**: CRM integration, dark mode, keyboard shortcuts, auto-connect
-- **Output**: Direct PocketBase upload or CSV export
+### Lead Scraper Extension
+Now lives in its own repo at [TableTurnerr/GMaps-Scraper](https://github.com/TableTurnerr/GMaps-Scraper). Chrome extension (Manifest V3) for Google Maps restaurant scraping with direct PocketBase upload.
 
 ---
 
@@ -398,7 +390,7 @@ cd apps/dashboard
 cp .env.local.example .env.local
 pnpm dev  # http://localhost:3000
 
-# 5. Install Tool Manager (handles Local CRM Agent + Lead Scraper + future tools)
+# 5. Install Tool Manager (handles Local CRM Agent + future tools)
 cd tools/tool-manager
 build-release.bat        # Build self-contained exe
 dist\install.bat         # Install, pick tools, auto-updates from there

@@ -6,8 +6,6 @@ const components = [
   { name: 'Dashboard', path: 'apps/dashboard/package.json' },
   { name: 'PocketBase', path: 'packages/pocketbase-client/package.json' },
   { name: 'DiscordBot', path: 'tools/discord-bot/package.json' },
-  { name: 'Scraper (Manifest)', path: 'tools/TT-lead-scraper-extension/manifest.json' },
-  { name: 'Scraper (Version)', path: 'tools/TT-lead-scraper-extension/version.json' },
   { name: 'HubSpot', path: 'packages/hubspot/package.json' },
   { name: 'Local CRM Agent', path: 'tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj', format: 'csproj' }
 ];

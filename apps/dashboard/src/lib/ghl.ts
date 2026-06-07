@@ -307,10 +307,35 @@ export async function listLocations(userId: string): Promise<NamedItem[]> {
   return conns.map((c) => ({ id: c.location_id, name: c.location_name || c.location_id }));
 }
 
+// Resolve the agency companyId for a sub-account. Prefers the value stored on the
+// connection (captured from the OAuth token); if missing (older rows), reads it
+// off the GHL location object and backfills the connection so later calls skip
+// the extra fetch.
+async function resolveCompanyId(userId: string, locationId: string, token: string): Promise<string> {
+  const pb = await getPbAdmin();
+  const conn = pb ? await getConnectionRecord(pb, userId, locationId) : null;
+  if (conn?.company_id) return conn.company_id;
+  let companyId = '';
+  try {
+    const res = await ghlFetch<{ location?: { companyId?: string }; companyId?: string }>(
+      token, 'GET', `/locations/${locationId}`,
+    );
+    companyId = res.data?.location?.companyId || res.data?.companyId || '';
+  } catch { /* best effort */ }
+  if (companyId && pb && conn) {
+    await pb.collection('ghl_connections').update(conn.id, { company_id: companyId }).catch(() => null);
+  }
+  return companyId;
+}
+
 export async function listUsers(userId: string, locationId: string): Promise<Array<NamedItem & { email: string }>> {
   const token = await getValidLocationToken(userId, locationId);
+  // GHL's /users/search requires the agency companyId (locationId alone yields
+  // nothing). We captured companyId from the OAuth token at connect; fall back to
+  // reading it off the location object for connections saved before that.
+  const companyId = await resolveCompanyId(userId, locationId, token);
   const res = await ghlFetch<{ users?: Array<{ id: string; name?: string; firstName?: string; lastName?: string; email?: string }> }>(
-    token, 'GET', '/users/search', { query: { locationId } },
+    token, 'GET', '/users/search', { query: { companyId, locationId } },
   );
   if (!res.ok || !res.data) throw new Error(res.error || 'failed_to_list_users');
   return (res.data.users || []).map((u) => ({

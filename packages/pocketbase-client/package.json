@@ -1,6 +1,6 @@
 {
   "name": "@crm-tableturnerr/pocketbase-client",
-  "version": "1.9",
+  "version": "1.10",
   "description": "Shared PocketBase SDK wrapper for CRM-Tableturnerr",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

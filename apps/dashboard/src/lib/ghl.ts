@@ -21,6 +21,8 @@ export const GHL_VERSION = '2021-07-28';
 export const GHL_AUTHORIZE = 'https://marketplace.leadconnectorhq.com/oauth/chooselocation';
 export const GHL_SCOPES = [
   'locations.readonly',
+  'locations/tags.readonly',
+  'locations/tags.write',
   'contacts.readonly',
   'contacts.write',
   'opportunities.readonly',
@@ -338,6 +340,20 @@ export async function listTags(userId: string, locationId: string): Promise<Name
   );
   if (!res.ok || !res.data) throw new Error(res.error || 'failed_to_list_tags');
   return (res.data.tags || []).map((t) => ({ id: t.id || t.name, name: t.name }));
+}
+
+// Create a tag in the sub-account. GHL returns { tag: { id, name, locationId } };
+// we normalise to the same { id, name } shape listTags returns.
+export async function createTag(userId: string, locationId: string, name: string): Promise<NamedItem> {
+  const clean = name.trim();
+  if (!clean) throw new Error('empty_tag_name');
+  const token = await getValidLocationToken(userId, locationId);
+  const res = await ghlFetch<{ tag?: { id?: string; name?: string } }>(
+    token, 'POST', `/locations/${locationId}/tags`, { body: { name: clean } },
+  );
+  if (!res.ok || !res.data) throw new Error(res.error || 'failed_to_create_tag');
+  const t = res.data.tag || {};
+  return { id: t.id || t.name || clean, name: t.name || clean };
 }
 
 export async function listCustomFields(userId: string, locationId: string): Promise<Array<NamedItem & { fieldKey: string }>> {

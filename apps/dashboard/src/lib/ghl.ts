@@ -474,12 +474,38 @@ export interface LeadResult {
   status: 'created' | 'updated' | 'skipped';
 }
 
+// GHL /contacts/upsert rejects unknown properties (a stray `latitude` →
+// "property latitude should not exist") and validates `email` strictly (an empty
+// string fails "email must be an email"). The extension sanitises its payload,
+// but we whitelist here too so an older/un-reloaded extension build can't make a
+// whole batch fail: forward only known contact fields, drop empty optionals, and
+// omit a syntactically invalid email.
+const CONTACT_STRING_FIELDS = [
+  'name', 'firstName', 'lastName', 'companyName', 'phone',
+  'address1', 'city', 'state', 'postalCode', 'website', 'source', 'assignedTo',
+] as const;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function sanitizeContact(contact: LeadPayload['contact']): Record<string, unknown> {
+  const src = contact as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of CONTACT_STRING_FIELDS) {
+    const v = src[k];
+    if (typeof v === 'string' && v.trim()) out[k] = v;
+  }
+  const email = (contact.email || '').trim();
+  if (email && EMAIL_RE.test(email)) out.email = email;
+  if (Array.isArray(contact.tags) && contact.tags.length) out.tags = contact.tags;
+  if (Array.isArray(contact.customFields) && contact.customFields.length) out.customFields = contact.customFields;
+  return out;
+}
+
 export async function sendLead(userId: string, locationId: string, payload: LeadPayload): Promise<LeadResult> {
   const token = await getValidLocationToken(userId, locationId);
 
   // Upsert honours the sub-account "allow duplicate" setting (email-first, then
   // phone) and returns { new, contact } so we can report created vs updated.
-  const body = { locationId, ...payload.contact };
+  const body = { locationId, ...sanitizeContact(payload.contact) };
   const up = await ghlFetch<{ new?: boolean; contact?: { id: string } }>(
     token, 'POST', '/contacts/upsert', { body },
   );

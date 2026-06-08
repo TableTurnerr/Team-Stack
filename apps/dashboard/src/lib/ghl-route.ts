@@ -16,8 +16,20 @@ export async function requireUser(
   return { user };
 }
 
+// Friendly text for the codes thrown by lib/ghl. The extension shows `error`
+// to the user; `code` stays stable for any programmatic handling.
+const GHL_ERROR_MESSAGES: Record<string, string> = {
+  not_connected: 'This sub-account isn’t connected. Open the extension popup and reconnect it.',
+  reauth_required: 'The GoHighLevel session for this sub-account expired. Reconnect it from the popup.',
+  pb_unavailable: 'The backend datastore is temporarily unavailable. Please try again shortly.',
+  pb_read_failed: 'Couldn’t read the connection from the backend datastore. Please try again shortly.',
+};
+
 export function ghlError(e: unknown): NextResponse {
-  const msg = e instanceof Error ? e.message : 'ghl_error';
-  const status = msg === 'not_connected' ? 409 : msg === 'pb_unavailable' ? 503 : 502;
-  return NextResponse.json({ error: msg }, { status });
+  const code = e instanceof Error ? e.message : 'ghl_error';
+  const status =
+    code === 'not_connected' || code === 'reauth_required' ? 409 :
+    code === 'pb_unavailable' || code === 'pb_read_failed' ? 503 :
+    502;
+  return NextResponse.json({ error: GHL_ERROR_MESSAGES[code] || code, code }, { status });
 }

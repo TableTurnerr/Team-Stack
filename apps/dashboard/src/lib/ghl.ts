@@ -165,8 +165,14 @@ async function getConnectionRecord(pb: PocketBase, userId: string, locationId: s
       .collection('ghl_connections')
       .getFirstListItem(pb.filter('user = {:user} && location_id = {:loc}', { user: userId, loc: locationId }));
     return rec as unknown as GhlConnection;
-  } catch {
-    return null;
+  } catch (e) {
+    // PocketBase throws 404 when nothing matches — that is a genuine "no
+    // connection". Any other error (network, 5xx, expired admin auth) is a READ
+    // FAILURE and must NOT be reported as not_connected, or a transient blip
+    // looks like "you never connected this sub-account". Surface it distinctly.
+    const status = (e && typeof e === 'object' && 'status' in e) ? (e as { status?: number }).status : undefined;
+    if (status === 404) return null;
+    throw new Error('pb_read_failed');
   }
 }
 
@@ -230,6 +236,15 @@ export async function disconnect(userId: string, locationId?: string): Promise<v
   }
 }
 
+// In-flight refreshes, keyed by user:location. GHL refresh tokens are single-use
+// and rotate on every refresh, so two concurrent refreshes with the same stored
+// token race: the first rotates it, the rest present an already-consumed token and
+// fail (and can clobber the freshly-saved row). A burst of parallel calls — e.g.
+// the extension fetching users+pipelines+tags+duplicates at once — hits exactly
+// that. Coalescing all concurrent refreshes for one sub-account onto a single
+// promise means one refresh call, one DB write, and everyone gets the new token.
+const refreshInFlight = new Map<string, Promise<string>>();
+
 // Returns a valid (refreshed if needed) location access token for one sub-account.
 async function getValidLocationToken(userId: string, locationId: string): Promise<string> {
   const pb = await getPbAdmin();
@@ -242,15 +257,34 @@ async function getValidLocationToken(userId: string, locationId: string): Promis
     return conn.access_token;
   }
 
-  // Refresh (refresh tokens rotate — persist the new one).
-  const t = await refreshLocationToken(conn.refresh_token);
-  await pb.collection('ghl_connections').update(conn.id, {
-    access_token: t.access_token,
-    refresh_token: t.refresh_token,
-    token_expires: new Date(Date.now() + (t.expires_in || 86399) * 1000).toISOString(),
-    company_id: t.companyId || conn.company_id,
-  });
-  return t.access_token;
+  const key = `${userId}:${locationId}`;
+  let pending = refreshInFlight.get(key);
+  if (!pending) {
+    pending = (async () => {
+      let t: TokenResponse;
+      try {
+        // Refresh (refresh tokens rotate — persist the new one).
+        t = await refreshLocationToken(conn.refresh_token);
+      } catch {
+        // The stored refresh token is no longer valid (expired, or the app was
+        // uninstalled/reinstalled on the sub-account). The user must reconnect.
+        throw new Error('reauth_required');
+      }
+      await pb.collection('ghl_connections').update(conn.id, {
+        access_token: t.access_token,
+        refresh_token: t.refresh_token,
+        token_expires: new Date(Date.now() + (t.expires_in || 86399) * 1000).toISOString(),
+        company_id: t.companyId || conn.company_id,
+      });
+      return t.access_token;
+    })();
+    refreshInFlight.set(key, pending);
+    // Drop the lock once settled (success or failure) so the next expiry refreshes
+    // again. Pass the same handler for both outcomes to avoid an unhandled reject.
+    const release = () => { if (refreshInFlight.get(key) === pending) refreshInFlight.delete(key); };
+    pending.then(release, release);
+  }
+  return pending;
 }
 
 // ---- Generic data fetch ----------------------------------------------------
@@ -313,7 +347,9 @@ export async function listLocations(userId: string): Promise<NamedItem[]> {
 // the extra fetch.
 async function resolveCompanyId(userId: string, locationId: string, token: string): Promise<string> {
   const pb = await getPbAdmin();
-  const conn = pb ? await getConnectionRecord(pb, userId, locationId) : null;
+  // Best-effort backfill: a read hiccup here must not fail the whole request.
+  let conn: GhlConnection | null = null;
+  if (pb) { try { conn = await getConnectionRecord(pb, userId, locationId); } catch { conn = null; } }
   if (conn?.company_id) return conn.company_id;
   let companyId = '';
   try {
@@ -448,6 +484,9 @@ export async function sendLead(userId: string, locationId: string, payload: Lead
     token, 'POST', '/contacts/upsert', { body },
   );
   if (!up.ok || !up.data?.contact?.id) {
+    // 401/403 from GHL means the token is rejected -> tell the user to reconnect
+    // rather than surfacing an opaque upstream error.
+    if (up.status === 401 || up.status === 403) throw new Error('reauth_required');
     throw new Error(up.error || 'failed_to_upsert_contact');
   }
   const contactId = up.data.contact.id;

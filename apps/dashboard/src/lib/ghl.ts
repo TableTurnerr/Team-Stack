@@ -445,10 +445,15 @@ export interface LeadPayload {
     name?: string;
     companyName?: string;
     firstName?: string;
+    lastName?: string;
     phone?: string;
     email?: string;
     address1?: string;
     city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+    timezone?: string;
     website?: string;
     source?: string;
     tags?: string[];
@@ -482,7 +487,8 @@ export interface LeadResult {
 // omit a syntactically invalid email.
 const CONTACT_STRING_FIELDS = [
   'name', 'firstName', 'lastName', 'companyName', 'phone',
-  'address1', 'city', 'state', 'postalCode', 'website', 'source', 'assignedTo',
+  'address1', 'city', 'state', 'postalCode', 'country', 'timezone',
+  'website', 'source', 'assignedTo',
 ] as const;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

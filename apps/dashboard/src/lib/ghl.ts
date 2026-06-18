@@ -429,14 +429,43 @@ export async function listCustomFields(userId: string, locationId: string): Prom
 export async function checkDuplicate(userId: string, locationId: string, phone?: string, email?: string): Promise<{ exists: boolean; contactId: string | null }> {
   if (!phone && !email) return { exists: false, contactId: null };
   const token = await getValidLocationToken(userId, locationId);
+  return findExistingContact(token, locationId, phone, email);
+}
+
+// Resolve an existing contact in the sub-account by phone/email, using GHL's own
+// duplicate search (the same dedup upsert uses). Returns { exists, contactId }.
+// Any non-OK (incl. 404 "no duplicate") -> not found, so a flaky check never
+// blocks a send. Tolerates both { contact: { id } } and a bare { id }.
+async function findExistingContact(token: string, locationId: string, phone?: string, email?: string): Promise<{ exists: boolean; contactId: string | null }> {
+  if (!phone && !email) return { exists: false, contactId: null };
   const res = await ghlFetch<{ contact?: { id?: string } | null; id?: string }>(
     token, 'GET', '/contacts/search/duplicate', { query: { locationId, number: phone, email } },
   );
-  // Any non-OK (incl. 404 "no duplicate") -> treat as not found so a flaky check
-  // never blocks a send. Tolerate both { contact: { id } } and a bare { id }.
   if (!res.ok || !res.data) return { exists: false, contactId: null };
   const contactId = res.data.contact?.id || res.data.id || null;
   return { exists: Boolean(contactId), contactId };
+}
+
+// The current GHL contact, used to decide which fields are already populated.
+interface GhlContactRecord {
+  id: string;
+  name?: string; firstName?: string; lastName?: string; companyName?: string;
+  email?: string; phone?: string;
+  address1?: string; city?: string; state?: string; postalCode?: string; country?: string;
+  timezone?: string; website?: string; source?: string; assignedTo?: string;
+  tags?: string[];
+  customFields?: Array<{ id: string; value?: unknown }>;
+}
+
+async function getContactRecord(token: string, contactId: string): Promise<GhlContactRecord | null> {
+  const res = await ghlFetch<{ contact?: GhlContactRecord }>(token, 'GET', `/contacts/${contactId}`);
+  if (!res.ok || !res.data?.contact) return null;
+  return res.data.contact;
+}
+
+// A field counts as "not already populated" when it is missing, null, or blank.
+function isBlankValue(v: unknown): boolean {
+  return v == null || (typeof v === 'string' && v.trim() === '');
 }
 
 // ---- Composite lead send (contact upsert + note + opportunity) -------------
@@ -506,33 +535,94 @@ function sanitizeContact(contact: LeadPayload['contact']): Record<string, unknow
   return out;
 }
 
+// A lead send either creates a brand-new contact or enriches one that already
+// exists. For an EXISTING contact we never re-create it (so GHL is never given a
+// duplicate) and we only fill the fields it is currently missing — a value the
+// scraper has but GHL lacks is written; a field GHL already has is left untouched.
+// Tags merge additively, so the chosen category is added without dropping any.
 export async function sendLead(userId: string, locationId: string, payload: LeadPayload): Promise<LeadResult> {
   const token = await getValidLocationToken(userId, locationId);
+  const desired = sanitizeContact(payload.contact);
+  const phone = typeof desired.phone === 'string' ? desired.phone : undefined;
+  const email = typeof desired.email === 'string' ? desired.email : undefined;
 
-  // Upsert honours the sub-account "allow duplicate" setting (email-first, then
-  // phone) and returns { new, contact } so we can report created vs updated.
-  const body = { locationId, ...sanitizeContact(payload.contact) };
-  const up = await ghlFetch<{ new?: boolean; contact?: { id: string } }>(
-    token, 'POST', '/contacts/upsert', { body },
-  );
-  if (!up.ok || !up.data?.contact?.id) {
-    // 401/403 from GHL means the token is rejected -> tell the user to reconnect
-    // rather than surfacing an opaque upstream error.
-    if (up.status === 401 || up.status === 403) throw new Error('reauth_required');
-    throw new Error(up.error || 'failed_to_upsert_contact');
+  // Resolve an existing contact first (same dedup GHL upsert uses) so we update
+  // it by id rather than risk creating a second one.
+  const { contactId: existingId } = await findExistingContact(token, locationId, phone, email);
+
+  let contactId: string;
+  let isNew: boolean;
+  let attachNote: boolean;
+  let allowOpportunity: boolean;
+
+  if (existingId) {
+    isNew = false;
+    contactId = existingId;
+
+    // Read the current contact so we only touch blank fields. If the read fails
+    // we cannot tell what is populated, so we skip field updates entirely rather
+    // than risk overwriting existing data.
+    const existing = await getContactRecord(token, existingId);
+    const updates: Record<string, unknown> = {};
+    if (existing) {
+      const existingRec = existing as unknown as Record<string, unknown>;
+      for (const [k, v] of Object.entries(desired)) {
+        if (k === 'tags' || k === 'customFields') continue;
+        if (isBlankValue(existingRec[k])) updates[k] = v;
+      }
+      if (Array.isArray(desired.customFields) && desired.customFields.length) {
+        const have = new Map<string, unknown>();
+        for (const cf of existing.customFields || []) have.set(cf.id, cf.value);
+        const cfFill = (desired.customFields as Array<{ id: string }>).filter((f) => isBlankValue(have.get(f.id)));
+        if (cfFill.length) updates.customFields = cfFill;
+      }
+    }
+
+    const didUpdate = Object.keys(updates).length > 0;
+    if (didUpdate) {
+      const put = await ghlFetch(token, 'PUT', `/contacts/${contactId}`, { body: updates });
+      // A rejected token must surface as reauth; other PUT failures are non-fatal
+      // (the contact still exists — we just couldn't enrich it this time).
+      if (!put.ok && (put.status === 401 || put.status === 403)) throw new Error('reauth_required');
+    }
+    // Tags add cumulatively in GHL, so this never removes a tag the contact has.
+    if (Array.isArray(desired.tags) && desired.tags.length) {
+      await ghlFetch(token, 'POST', `/contacts/${contactId}/tags`, { body: { tags: desired.tags } }).catch(() => null);
+    }
+    // Only note when we actually enriched something, so repeated sends of an
+    // already-complete lead don't pile up duplicate notes. Existing contacts get
+    // no new opportunity (backfill only) to avoid duplicating pipeline entries.
+    attachNote = didUpdate;
+    allowOpportunity = false;
+  } else {
+    // New contact. Upsert honours the sub-account "allow duplicate" setting
+    // (email-first, then phone) and is idempotent on phone/email, so a retried
+    // POST won't double-create. Returns { new, contact }.
+    const body = { locationId, ...desired };
+    const up = await ghlFetch<{ new?: boolean; contact?: { id: string } }>(
+      token, 'POST', '/contacts/upsert', { body },
+    );
+    if (!up.ok || !up.data?.contact?.id) {
+      // 401/403 from GHL means the token is rejected -> tell the user to reconnect
+      // rather than surfacing an opaque upstream error.
+      if (up.status === 401 || up.status === 403) throw new Error('reauth_required');
+      throw new Error(up.error || 'failed_to_upsert_contact');
+    }
+    contactId = up.data.contact.id;
+    isNew = up.data.new !== false;
+    attachNote = true;
+    allowOpportunity = true;
   }
-  const contactId = up.data.contact.id;
-  const isNew = up.data.new !== false;
 
   // Note (best-effort — never fail the whole send because a note didn't stick).
-  if (payload.note && payload.note.trim()) {
+  if (attachNote && payload.note && payload.note.trim()) {
     await ghlFetch(token, 'POST', `/contacts/${contactId}/notes`, { body: { body: payload.note } }).catch(() => null);
   }
 
-  // Opportunity (optional).
+  // Opportunity (optional; new contacts only).
   let opportunityId: string | null = null;
   const opp = payload.opportunity;
-  if (opp?.create && opp.pipelineId && opp.stageId) {
+  if (allowOpportunity && opp?.create && opp.pipelineId && opp.stageId) {
     const oppRes = await ghlFetch<{ opportunity?: { id: string }; id?: string }>(
       token, 'POST', '/opportunities/', {
         body: {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TableTurner Lead Scraper",
-  "version": "4.2",
+  "version": "5.0",
   "description": "TableTurner Lead Scraper - Chrome extension for lead generation with GoHighLevel integration",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2qXBuC5uVswyJWsojc8GkvUK50qS88P9tBUScYrQO7iiKQIAlnOw2yp6XATPVm9psWwMzTtgVs8ZFlgFuzk8Yc5XLDAuWn4FGm0XY8BSd1PJpQ8kzbNoF/co9sgEHHTl5Sylrf2Qhs4W6MKTMlEDigdA3CEcqRLHqHqVdU6paRL3g7yaT19Om3Wn3SMNyQ7aEJmhhgyIEwHnpZDX7a631Kqno+NIQGiC1jhHsFe3kxAEPmKm6+02woXkAwUq78gvTGLvS2vG4rs3VWg0CkEkFVwj9nFh8YAOT34e0FCAa4iYYKPmk7IIpCT8rtfDeD2JXPxcjh2NvXsfI1o3j//o9QIDAQAB",
   "permissions": [

@@ -1,6 +1,6 @@
 {
   "name": "@tableturnerr/discord-bot",
-  "version": "1.3",
+  "version": "2.0",
   "description": "Discord notification bot for Tableturnerr CRM",
   "main": "dist/index.js",
   "scripts": {

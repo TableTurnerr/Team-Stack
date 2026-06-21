@@ -29,6 +29,14 @@ public class AgentConfig
     [JsonPropertyName("lastAuthTokenProtected")] public string? LastAuthTokenProtected { get; set; }
     [JsonPropertyName("lastUploaderId")] public string? LastUploaderId { get; set; }
 
+    // ── GHL worker upload config (recordings now attach to GHL via the worker) ──
+    /// <summary>Base URL of the zoomphone-bridge worker (e.g. https://zoomphone-bridge.example.workers.dev).</summary>
+    [JsonPropertyName("workerBaseUrl")] public string? WorkerBaseUrl { get; set; }
+    /// <summary>Rep identity for attribution; ideally the rep's Zoom user_id.</summary>
+    [JsonPropertyName("repUserId")] public string? RepUserId { get; set; }
+    /// <summary>DPAPI-encrypted, base64-encoded worker AGENT_SHARED_TOKEN. Scope = current user.</summary>
+    [JsonPropertyName("agentTokenProtected")] public string? AgentTokenProtected { get; set; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -104,6 +112,48 @@ public class AgentConfig
         catch (Exception ex)
         {
             FileLogger.Write($"[Config] DPAPI unprotect failed (auth lost): {ex.Message}");
+            AuthDecryptionFailed = true;
+            return null;
+        }
+    }
+
+    /// <summary>Persist the GHL worker upload config. The token is DPAPI-encrypted.</summary>
+    public void SetWorkerConfig(string? workerBaseUrl, string? rawAgentToken, string? repUserId)
+    {
+        WorkerBaseUrl = workerBaseUrl;
+        RepUserId = repUserId;
+        if (string.IsNullOrEmpty(rawAgentToken))
+        {
+            AgentTokenProtected = null;
+        }
+        else
+        {
+            try
+            {
+                var bytes = Encoding.UTF8.GetBytes(rawAgentToken);
+                var protectedBytes = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
+                AgentTokenProtected = Convert.ToBase64String(protectedBytes);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Config] DPAPI protect failed (agent token): {ex.Message}");
+                AgentTokenProtected = null;
+            }
+        }
+    }
+
+    public string? GetUnprotectedAgentToken()
+    {
+        if (string.IsNullOrEmpty(AgentTokenProtected)) return null;
+        try
+        {
+            var protectedBytes = Convert.FromBase64String(AgentTokenProtected);
+            var bytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Write($"[Config] DPAPI unprotect failed (agent token lost): {ex.Message}");
             AuthDecryptionFailed = true;
             return null;
         }

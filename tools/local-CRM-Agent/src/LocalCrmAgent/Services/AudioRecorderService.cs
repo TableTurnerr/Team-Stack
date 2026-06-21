@@ -51,6 +51,7 @@ public class AudioRecorderService : IDisposable
     private string? _currentPhoneNumber;
     private string? _currentRecordingId;
     private string? _currentClientCallId;
+    private string _currentChannel = "desktop";
     private RecordingState _state = RecordingState.Idle;
 
     // Safety: max recording duration (2 hours) — absolute ceiling.
@@ -135,7 +136,7 @@ public class AudioRecorderService : IDisposable
     /// If a previous recording is still running (stuck from a prior call),
     /// it is force-stopped first so the new recording can start cleanly.
     /// </summary>
-    public (bool success, string? error) StartRecording(string phoneNumber)
+    public (bool success, string? error) StartRecording(string phoneNumber, string channel = "desktop")
     {
         // Idempotent re-entry: a duplicate startRecording for the same phone
         // within a couple of seconds (e.g. dashboard sent it twice due to a
@@ -190,6 +191,7 @@ public class AudioRecorderService : IDisposable
             try
             {
                 _currentPhoneNumber = phoneNumber;
+                _currentChannel = string.IsNullOrEmpty(channel) ? "desktop" : channel;
                 _recordingStartTime = DateTime.UtcNow;
                 _currentRecordingId = Guid.NewGuid().ToString("N")[..12]; // short unique ID
 
@@ -495,6 +497,7 @@ public class AudioRecorderService : IDisposable
         string? recordingId;
         string? clientCallId;
         DateTime startTime;
+        string channel;
         lock (_lock)
         {
             // Guard: if state is not Stopping, this is a spurious callback
@@ -511,6 +514,7 @@ public class AudioRecorderService : IDisposable
             recordingId = _currentRecordingId;
             clientCallId = _currentClientCallId;
             startTime = _recordingStartTime;
+            channel = _currentChannel;
         }
 
         CleanupCapture();
@@ -528,7 +532,7 @@ public class AudioRecorderService : IDisposable
         // Add manifest entry immediately so "pending" count appears right away,
         // before the potentially slow WAV→MP3 conversion.
         var fileName = Path.GetFileName(targetMp3);
-        _storage.AddEntry(fileName, phoneNumber ?? "", startTime, recordingId);
+        _storage.AddEntry(fileName, phoneNumber ?? "", startTime, recordingId, channel);
         if (clientCallId != null)
             _storage.UpdateEntry(fileName, entry => entry.ClientCallId = clientCallId);
 

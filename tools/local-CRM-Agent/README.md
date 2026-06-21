@@ -157,9 +157,27 @@ The agent broadcasts JSON messages to `ws://127.0.0.1:9876`:
 }
 ```
 
+## Call Recording & GoHighLevel Upload
+
+Beyond serving call-state signals, the agent records each call's audio locally
+(one clip per call) and attaches it to the matching **GoHighLevel** contact:
+
+- **Capture** — WASAPI loopback (system / remote party) mixed with the mic into a
+  mono WAV, converted to MP3 (WAV kept as a fallback on conversion failure).
+- **Upload** — once converted, the clip is POSTed to the `zoomphone-bridge`
+  worker's `/recordings/ingest`, which matches the GHL contact by phone and
+  attaches the audio. GHL is the CRM; the agent holds no GHL credentials, only a
+  worker URL + shared agent token. See **[RECORDING-UPLOAD.md](RECORDING-UPLOAD.md)**.
+- **Web-phone calls** — a Zoom call placed from the browser is detected by the
+  Lead Scraper Chrome extension, which triggers the agent over Chrome Native
+  Messaging. See **[NATIVE-MESSAGING.md](NATIVE-MESSAGING.md)**.
+
 ## Configuration
 
-All configuration is hardcoded (no config files needed):
+Call-state detection is tuned by the constants below. Recording **upload** is
+provisioned separately (worker URL + shared token + rep id) via
+`%AppData%\CrmAgent\agent-config.json`, environment variables, or the
+`setWorkerConfig` WebSocket command — see [RECORDING-UPLOAD.md](RECORDING-UPLOAD.md).
 
 | Setting | Value | Description |
 |---------|-------|-------------|
@@ -239,6 +257,12 @@ tools/local-CRM-Agent/
     │   ├── NetworkMonitor.cs      # ICMP ping quality metrics
     │   ├── CallStateFusion.cs     # State machine (core logic)
     │   ├── WebSocketServer.cs     # Fleck WS server on :9876
+    │   ├── AudioRecorderService.cs    # Per-call WASAPI capture → WAV → MP3
+    │   ├── RecordingStorageManager.cs # Local clip manifest + upload queue
+    │   ├── RecordingUploadService.cs  # Upload clips to the GHL worker ingest
+    │   ├── NativeMessagingHost.cs     # Chrome host: web-phone START/STOP relay
+    │   ├── StartupRegistrar.cs        # Run key, crm-agent://, native host manifest
+    │   ├── AgentConfig.cs             # Persisted settings + worker upload config
     │   └── AgentService.cs        # Orchestrator, broadcast loops
     └── UI/
         └── TrayIconManager.cs     # System tray icon + context menu

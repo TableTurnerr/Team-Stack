@@ -33,9 +33,9 @@ public class RecordingUploadService : IDisposable
     private int _consecutiveFailures;
     private DateTime _circuitOpenUntil = DateTime.MinValue;
 
-    private string? _pocketbaseUrl;
-    private string? _authToken;
-    private string? _uploaderId;
+    private string? _workerBaseUrl;
+    private string? _agentToken;
+    private string? _repUserId;
 
     private CancellationTokenSource? _cts;
     private Task? _uploadTask;
@@ -62,19 +62,9 @@ public class RecordingUploadService : IDisposable
     /// </summary>
     public event Action<int, string?>? CircuitBreakerTripped;
 
-    // Cache of phone-number → (phoneRecordId, companyId) lookups. PocketBase
-    // is queried per-upload and most batches share a small set of numbers
-    // (one outbound campaign hits the same lead list); without a cache the
-    // upload loop made N serial HTTP round-trips per batch and the slowest
-    // one stalled Task.WhenAll for the rest. TTL is short enough that
-    // company reassignments still propagate within minutes.
-    private static readonly TimeSpan PhoneCacheTtl = TimeSpan.FromMinutes(5);
-    private readonly Dictionary<string, (DateTime expires, string? phoneId, string? companyId)> _phoneCache = new();
-    private readonly object _phoneCacheLock = new();
-
     public bool IsConfigured
     {
-        get { lock (_lock) return _pocketbaseUrl != null && _authToken != null; }
+        get { lock (_lock) return _workerBaseUrl != null && _agentToken != null; }
     }
 
     public string? CurrentUpload { get; private set; }
@@ -84,15 +74,20 @@ public class RecordingUploadService : IDisposable
         _storage = storage;
     }
 
-    public void SetAuth(string pocketbaseUrl, string authToken, string uploaderId)
+    /// <summary>
+    /// Configure the GHL worker upload target. Recordings are POSTed to
+    /// <c>{workerBaseUrl}/recordings/ingest</c> with the shared agent bearer
+    /// token; the worker matches the contact by phone and attaches the clip.
+    /// </summary>
+    public void SetWorkerConfig(string workerBaseUrl, string agentToken, string? repUserId)
     {
         lock (_lock)
         {
-            _pocketbaseUrl = pocketbaseUrl.TrimEnd('/');
-            _authToken = authToken;
-            _uploaderId = uploaderId;
+            _workerBaseUrl = workerBaseUrl.TrimEnd('/');
+            _agentToken = agentToken;
+            _repUserId = repUserId;
         }
-        Debug.WriteLine($"[Upload] Auth configured for {pocketbaseUrl}");
+        Debug.WriteLine($"[Upload] Worker upload configured for {workerBaseUrl}");
         Wake(); // process any pending uploads immediately
     }
 
@@ -196,15 +191,15 @@ public class RecordingUploadService : IDisposable
 
     private async Task UploadRecording(RecordingEntry entry, CancellationToken ct)
     {
-        string? pocketbaseUrl, authToken, uploaderId;
+        string? workerBaseUrl, agentToken, repUserId;
         lock (_lock)
         {
-            pocketbaseUrl = _pocketbaseUrl;
-            authToken = _authToken;
-            uploaderId = _uploaderId;
+            workerBaseUrl = _workerBaseUrl;
+            agentToken = _agentToken;
+            repUserId = _repUserId;
         }
 
-        if (pocketbaseUrl == null || authToken == null) return;
+        if (workerBaseUrl == null || agentToken == null) return;
 
         var filePath = Path.Combine(_storage.RecordingsDirectory, entry.FileName);
         if (!File.Exists(filePath))
@@ -217,66 +212,21 @@ public class RecordingUploadService : IDisposable
         // Track attempt time for non-blocking backoff
         lock (_lastAttemptTime) { _lastAttemptTime[entry.FileName] = DateTime.UtcNow; }
 
-        // Resolve call log ID and phone number in parallel
-        var callLogId = entry.CallLogId ?? RecordingStorageManager.ExtractCallLogId(entry.FileName);
+        // Derive the worker ingest metadata from the recording. The callId is
+        // minted deterministically from (channel, rep, connect time) so a retry
+        // dedups against the first attempt (the worker keys clip:{callId} in KV).
+        var channel = string.IsNullOrEmpty(entry.Channel) ? "desktop" : entry.Channel;
+        var rep = repUserId ?? "";
+        var connectTsMs = new DateTimeOffset(
+            DateTime.SpecifyKind(entry.StartTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        var endTsMs = connectTsMs + (long)entry.DurationSeconds * 1000;
+        var callId = $"{channel}:{rep}:{connectTsMs}";
+        var phoneE164 = (entry.PhoneNumber ?? "").Trim();
+        var isWav = entry.FileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase);
+        var contentType = isWav ? "audio/wav" : "audio/mpeg";
 
         try
         {
-            // Run phone resolution and call log verification in parallel
-            var resolveTask = ResolvePhoneNumber(pocketbaseUrl, authToken, entry.PhoneNumber, ct);
-            var verifyTask = callLogId != null
-                ? VerifyCallLogExists(pocketbaseUrl, authToken, callLogId, ct)
-                : Task.FromResult(true);
-
-            try { await Task.WhenAll(resolveTask, verifyTask); }
-            catch
-            {
-                // Surface either inner exception below via the awaited
-                // .Result accesses; Task.WhenAll only rethrows the first.
-            }
-
-            (string? phoneNumberRecordId, string? companyId) resolved;
-            bool callLogStillExists;
-            try
-            {
-                resolved = await resolveTask;
-                callLogStillExists = await verifyTask;
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[Upload] Pre-upload checks failed: {entry.FileName} — {ex.Message}");
-                HandleNetworkFailure(entry, ex.Message);
-                return;
-            }
-
-            var (phoneNumberRecordId, companyId) = resolved;
-
-            if (callLogId != null && !callLogStillExists)
-            {
-                // Don't delete the file if it's still in use by the converter
-                // (caller will retry on next pass once the file is released).
-                if (entry.Uploaded)
-                {
-                    Debug.WriteLine($"[Upload] Call log {callLogId} deleted, file already uploaded — clearing entry: {entry.FileName}");
-                    _storage.RemoveEntry(entry.FileName);
-                }
-                else if (IsFileInUse(filePath))
-                {
-                    Debug.WriteLine($"[Upload] Call log {callLogId} deleted but file in use — deferring discard: {entry.FileName}");
-                    return; // try again next pass when conversion finishes
-                }
-                else
-                {
-                    Debug.WriteLine($"[Upload] Call log {callLogId} deleted — discarding {entry.FileName}");
-                    _storage.RemoveEntry(entry.FileName);
-                    try { File.Delete(filePath); } catch (Exception ex) { Debug.WriteLine($"[Upload] File delete failed: {ex.Message}"); }
-                }
-                UploadCompleted?.Invoke(entry.FileName, null, callLogId, false, "Call log deleted");
-                return;
-            }
-
-            // Upload recording
             CurrentUpload = entry.FileName;
 
             using var form = new MultipartFormDataContent();
@@ -287,24 +237,19 @@ public class RecordingUploadService : IDisposable
             {
                 try { UploadProgress?.Invoke(fileNameForProgress, sent, total); } catch { }
             });
-            fileContent.Headers.ContentType = new MediaTypeHeaderValue("audio/mpeg");
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
             fileContent.Headers.ContentLength = totalBytes;
-            form.Add(fileContent, "file", entry.FileName);
+            form.Add(fileContent, "clip", entry.FileName);
 
-            form.Add(new StringContent(entry.PhoneNumber), "phone_number");
-            if (uploaderId != null) form.Add(new StringContent(uploaderId), "uploader");
-            form.Add(new StringContent(entry.FileName), "original_filename");
-            form.Add(new StringContent(entry.DurationSeconds.ToString()), "duration");
-            form.Add(new StringContent(entry.StartTime.ToString("yyyy-MM-dd HH:mm:ss.fffZ")), "recording_date");
-            form.Add(new StringContent($"Recorded by CRM Agent on {entry.StartTime:yyyy-MM-dd} at {entry.StartTime:HH:mm}"), "note");
+            form.Add(new StringContent(callId), "callId");
+            form.Add(new StringContent(rep), "repUserId");
+            form.Add(new StringContent(channel), "channel");
+            if (!string.IsNullOrEmpty(phoneE164)) form.Add(new StringContent(phoneE164), "phoneE164");
+            form.Add(new StringContent(connectTsMs.ToString()), "connectTsMs");
+            form.Add(new StringContent(endTsMs.ToString()), "endTsMs");
 
-            if (callLogId != null) form.Add(new StringContent(callLogId), "call_log");
-            if (phoneNumberRecordId != null) form.Add(new StringContent(phoneNumberRecordId), "phone_number_record");
-            if (companyId != null) form.Add(new StringContent(companyId), "company");
-
-            var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{pocketbaseUrl}/api/collections/recordings/records");
-            request.Headers.TryAddWithoutValidation("Authorization", authToken);
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{workerBaseUrl}/recordings/ingest");
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {agentToken}");
             request.Content = form;
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -318,55 +263,42 @@ public class RecordingUploadService : IDisposable
                 return;
             }
 
-            // 4xx (other than 401) → permanent failure: server rejected the request
-            // and retrying without changes won't help.
+            // 409 → the worker already ingested this callId (duplicate or a retry
+            // after a success we never recorded). The clip is attached; we're done.
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                MarkUploaded(entry, null, "duplicate (already attached)");
+                return;
+            }
+
+            // 4xx (other than 401/409) → permanent failure: retrying won't help.
             if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
             {
                 var body = await SafeReadBody(response, ct);
                 var errMsg = $"HTTP {(int)response.StatusCode}: {body}";
                 Debug.WriteLine($"[Upload] Permanent failure: {entry.FileName} — {errMsg}");
-                _storage.UpdateEntry(entry.FileName, e =>
-                {
-                    e.Error = errMsg;
-                });
-                UploadCompleted?.Invoke(entry.FileName, null, callLogId, false, errMsg);
+                _storage.UpdateEntry(entry.FileName, e => { e.Error = errMsg; });
+                UploadCompleted?.Invoke(entry.FileName, null, entry.CallLogId, false, errMsg);
                 lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
                 return;
             }
 
             response.EnsureSuccessStatusCode();
 
-            // Parse response for the created record ID
-            string? recordingId = null;
+            // 200 → { ghlMessageId }; 202 → { status: "review" } (no phone match,
+            // parked in GHL Medias for manual review). Both mean accepted.
+            string? ghlMessageId = null;
             try
             {
                 var responseJson = await response.Content.ReadAsStringAsync(ct);
                 using var doc = JsonDocument.Parse(responseJson);
-                recordingId = doc.RootElement.GetProperty("id").GetString();
+                if (doc.RootElement.TryGetProperty("ghlMessageId", out var idProp))
+                    ghlMessageId = idProp.GetString();
             }
             catch { }
 
-            _storage.UpdateEntry(entry.FileName, e =>
-            {
-                e.Uploaded = true;
-                e.UploadedAt = DateTime.UtcNow;
-                e.PocketbaseRecordingId = recordingId;
-            });
-
-            Debug.WriteLine($"[Upload] Uploaded: {entry.FileName} → {recordingId}");
-
-            // Update call_log.has_recording (fire and forget — don't block next upload)
-            if (callLogId != null)
-            {
-                _ = UpdateCallLogHasRecording(pocketbaseUrl, authToken, callLogId, ct);
-            }
-
-            // Clean up backoff tracking
-            lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
-            // Reset breaker on any successful upload — partial outages clear.
-            Interlocked.Exchange(ref _consecutiveFailures, 0);
-
-            UploadCompleted?.Invoke(entry.FileName, recordingId, callLogId, true, null);
+            MarkUploaded(entry, ghlMessageId,
+                response.StatusCode == HttpStatusCode.Accepted ? "parked for review (no phone)" : null);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -404,6 +336,23 @@ public class RecordingUploadService : IDisposable
                 UploadCompleted?.Invoke(entry.FileName, null, entry.CallLogId, false, ex.Message);
             }
         }
+    }
+
+    /// <summary>Mark an entry as successfully attached to GHL and reset breakers.</summary>
+    private void MarkUploaded(RecordingEntry entry, string? ghlMessageId, string? note)
+    {
+        _storage.UpdateEntry(entry.FileName, e =>
+        {
+            e.Uploaded = true;
+            e.UploadedAt = DateTime.UtcNow;
+            e.GhlMessageId = ghlMessageId;
+        });
+        Debug.WriteLine($"[Upload] Uploaded: {entry.FileName} → GHL msg {ghlMessageId ?? "(none)"}"
+            + (note != null ? $" [{note}]" : ""));
+        lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
+        // Reset breaker on any successful upload — partial outages clear.
+        Interlocked.Exchange(ref _consecutiveFailures, 0);
+        UploadCompleted?.Invoke(entry.FileName, ghlMessageId, entry.CallLogId, true, null);
     }
 
     /// <summary>
@@ -456,117 +405,6 @@ public class RecordingUploadService : IDisposable
             return body.Length > 500 ? body[..500] : body;
         }
         catch { return ""; }
-    }
-
-    private async Task<(string? phoneNumberRecordId, string? companyId)> ResolvePhoneNumber(
-        string pocketbaseUrl, string authToken, string phoneNumber, CancellationToken ct)
-    {
-        var cleanNumber = new string(phoneNumber.Where(c => char.IsDigit(c) || c == '+').ToArray());
-        if (string.IsNullOrEmpty(cleanNumber)) return (null, null);
-
-        // Cache hit: avoid the round-trip and unblock the parallel batch.
-        lock (_phoneCacheLock)
-        {
-            if (_phoneCache.TryGetValue(cleanNumber, out var cached) && cached.expires > DateTime.UtcNow)
-                return (cached.phoneId, cached.companyId);
-        }
-
-        try
-        {
-            var url = $"{pocketbaseUrl}/api/collections/phone_numbers/records?filter=phone_number~\"{cleanNumber}\"&expand=company&perPage=1";
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.TryAddWithoutValidation("Authorization", authToken);
-
-            var response = await _httpClient.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode) return (null, null);
-
-            var json = await response.Content.ReadAsStringAsync(ct);
-            using var doc = JsonDocument.Parse(json);
-            var items = doc.RootElement.GetProperty("items");
-            if (items.GetArrayLength() == 0)
-            {
-                // Cache the negative result too so a wave of uploads for an
-                // unknown number doesn't trigger N identical lookups.
-                lock (_phoneCacheLock)
-                {
-                    _phoneCache[cleanNumber] = (DateTime.UtcNow + PhoneCacheTtl, null, null);
-                }
-                return (null, null);
-            }
-
-            var first = items[0];
-            var phoneId = first.GetProperty("id").GetString();
-            string? companyId = null;
-
-            if (first.TryGetProperty("company", out var companyProp) && companyProp.ValueKind == JsonValueKind.String)
-                companyId = companyProp.GetString();
-
-            lock (_phoneCacheLock)
-            {
-                _phoneCache[cleanNumber] = (DateTime.UtcNow + PhoneCacheTtl, phoneId, companyId);
-                // Cap the cache to prevent unbounded growth in a long-running
-                // session that touches thousands of distinct numbers.
-                if (_phoneCache.Count > 1024)
-                {
-                    var stale = _phoneCache.Where(kv => kv.Value.expires < DateTime.UtcNow).Select(kv => kv.Key).ToList();
-                    foreach (var k in stale) _phoneCache.Remove(k);
-                }
-            }
-            return (phoneId, companyId);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Upload] Phone resolution failed: {ex.Message}");
-            return (null, null);
-        }
-    }
-
-    private static bool IsFileInUse(string path)
-    {
-        try
-        {
-            using var fs = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
-            return false;
-        }
-        catch (IOException) { return true; }
-        catch { return false; }
-    }
-
-    private async Task<bool> VerifyCallLogExists(string pocketbaseUrl, string authToken, string callLogId, CancellationToken ct)
-    {
-        try
-        {
-            var url = $"{pocketbaseUrl}/api/collections/call_logs/records/{callLogId}?fields=id";
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.TryAddWithoutValidation("Authorization", authToken);
-
-            var response = await _httpClient.SendAsync(request, ct);
-            return response.StatusCode != System.Net.HttpStatusCode.NotFound;
-        }
-        catch
-        {
-            return true; // assume exists on network error
-        }
-    }
-
-    private async Task UpdateCallLogHasRecording(string pocketbaseUrl, string authToken, string callLogId, CancellationToken ct)
-    {
-        try
-        {
-            var url = $"{pocketbaseUrl}/api/collections/call_logs/records/{callLogId}";
-            var request = new HttpRequestMessage(HttpMethod.Patch, url);
-            request.Headers.TryAddWithoutValidation("Authorization", authToken);
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(new { has_recording = true }),
-                System.Text.Encoding.UTF8,
-                "application/json");
-
-            await _httpClient.SendAsync(request, ct);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Upload] Failed to update call_log: {ex.Message}");
-        }
     }
 
     /// <summary>

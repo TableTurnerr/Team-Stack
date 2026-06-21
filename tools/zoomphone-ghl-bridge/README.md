@@ -1,8 +1,17 @@
 # zoomphone-ghl-bridge
 
 > Part of the [CRM-Tableturnerr](../../README.md) monorepo (`tools/zoomphone-ghl-bridge`).
-> The deployed Cloudflare Worker is named `zoomphone-bridge`. This was previously
-> the standalone `zoomphone-to-ghl` project; it now lives here.
+> Previously the standalone `zoomphone-to-ghl` project; it now lives here.
+
+> **Migration in progress (2026-06-21):** this is being moved off Cloudflare
+> Workers to a **self-hosted Node service** (Node 22+, Hono, SQLite) that runs on
+> the PocketBase box behind the Cloudflare Tunnel, and the agent/worker
+> responsibilities are being re-split so the bridge owns call direction. The
+> request handlers (`src/`) and the Node entry (`src/server.ts`) are live and
+> typecheck; the recording-ingest correlation and cutover are still in progress.
+> Run locally with `pnpm install && pnpm dev`. The Cloudflare/`wrangler` setup
+> below is retained for reference until cutover. See
+> [`docs/selfhost-and-responsibility-split-plan.md`](docs/selfhost-and-responsibility-split-plan.md).
 
 A Cloudflare Worker that listens to Zoom Phone webhooks and logs every call into
 GoHighLevel: direction, duration, timestamps, the recording, and (when Zoom

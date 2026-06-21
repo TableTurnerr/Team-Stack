@@ -419,6 +419,18 @@ public class AgentWebSocketServer : IDisposable
         if (_recorder == null) return;
         var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
         var channel = root.TryGetProperty("channel", out var c) ? c.GetString() ?? "desktop" : "desktop";
+
+        // Web-channel recordings are owned entirely by the agent (ChromeCallMonitor
+        // drives start/stop from Chrome's mic-capture session). The extension still
+        // relays a START at Zoom-tab init over its persistent signaling socket, but
+        // that fires once per tab and can't mark individual calls — honouring it
+        // here is exactly what produced phantom tab-load recordings. Ignore it.
+        if (string.Equals(channel, "web", StringComparison.OrdinalIgnoreCase))
+        {
+            Debug.WriteLine("[WS] startRecording channel=web ignored — web calls are agent-driven (ChromeCallMonitor)");
+            return;
+        }
+
         var (success, error) = _recorder.StartRecording(phone, channel);
         Debug.WriteLine($"[WS] startRecording: success={success} error={error} channel={channel}");
     }
@@ -434,7 +446,18 @@ public class AgentWebSocketServer : IDisposable
 
     private void HandleStopRecording()
     {
-        _recorder?.StopRecording();
+        if (_recorder == null) return;
+
+        // A web recording's stop is owned by ChromeCallMonitor (mic released).
+        // The extension's STOP only fires when ALL Zoom sockets close (tab close),
+        // which is unreliable and would cut a live web call short — ignore it.
+        if (_recorder.IsRecordingWebChannel)
+        {
+            Debug.WriteLine("[WS] stopRecording ignored — web call stop is agent-driven (ChromeCallMonitor)");
+            return;
+        }
+
+        _recorder.StopRecording();
     }
 
     private void HandleDiscardRecording()

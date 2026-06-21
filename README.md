@@ -64,10 +64,19 @@ CRM-Tableturnerr/
 │   │
 │   ├── database/                  # 🗄️ Seeding and migration scripts
 │   │
-│   └── discord-bot/               # 🤖 Discord DM notification bot
-│       ├── src/index.ts           # Entry — boots client, auths PB, starts scheduler
-│       ├── src/scheduler.ts       # Cron jobs for due/overdue follow-ups
-│       └── src/notifications/    # Follow-up and alert polling logic
+│   ├── discord-bot/               # 🤖 Discord DM notification bot
+│   │   ├── src/index.ts           # Entry — boots client, auths PB, starts scheduler
+│   │   ├── src/scheduler.ts       # Cron jobs for due/overdue follow-ups
+│   │   └── src/notifications/    # Follow-up and alert polling logic
+│   │
+│   ├── chrome-extension/          # 🧩 Lead Scraper Chrome extension (Manifest V3) + packaging
+│   │   ├── extension/             # Extension source (Google Maps scraping, GHL, Zoom web-phone)
+│   │   ├── dev-build.bat          # Stage extension into Tool Manager folder for local testing
+│   │   └── build-release.bat      # Package extension into a release zip
+│   │
+│   └── zoomphone-ghl-bridge/      # ☁️ Cloudflare Worker: Zoom Phone call activity → GoHighLevel
+│       ├── src/                   # Worker entry, Zoom webhook, GHL OAuth/API, AgentHub DO
+│       └── wrangler.toml          # Worker config (deployed as `zoomphone-bridge`)
 │
 └── [Root Config Files]
     ├── package.json               # pnpm workspace root
@@ -287,8 +296,11 @@ Node.js/TypeScript background worker:
 - **Auth**: Admin PocketBase auth with automatic token refresh on 401
 - **Entry Point**: `src/index.ts`
 
-### Lead Scraper Extension
-Now lives in its own repo at [TableTurnerr/GMaps-Scraper](https://github.com/TableTurnerr/GMaps-Scraper). Chrome extension (Manifest V3) for Google Maps restaurant scraping with direct PocketBase upload.
+### Lead Scraper Extension (`tools/chrome-extension`)
+Chrome extension (Manifest V3) for Google Maps lead scraping, GoHighLevel enrichment, and Zoom web-phone call detection. The extension source lives in `tools/chrome-extension/extension`; the wrapper scripts and `tool.json` package it as a Tool Manager tool (`lead-scraper`, released as `lead-scraper-v*`). Previously the standalone `TableTurnerr/GMaps-Scraper` repo, now merged here and deprecated.
+
+### Zoom Phone → GHL Bridge (`tools/zoomphone-ghl-bridge`)
+Cloudflare Worker (deployed as `zoomphone-bridge`) that mirrors Zoom Phone call activity into GoHighLevel: logs calls, attaches recordings and voicemail transcripts, upserts contacts by number, and drives the local-recording pipeline (a Durable Object holds one WebSocket per rep's CRM Agent and pushes START/STOP from live Zoom events). Previously the standalone `zoomphone-to-ghl` project.
 
 ---
 

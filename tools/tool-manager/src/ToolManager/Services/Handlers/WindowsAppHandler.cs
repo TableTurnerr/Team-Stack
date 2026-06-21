@@ -13,17 +13,20 @@ public class WindowsAppHandler : IToolTypeHandler
 
     public async Task Install(string stagingPath, string installPath, ToolManifest manifest)
     {
-        // 1. Kill existing process
+        // 1. Kill existing process(es) and let the OS release file handles.
+        //    A running self-contained app (e.g. the CRM agent) keeps its exe/DLLs
+        //    locked; Windows can hold those handles for a moment after the process
+        //    exits, so give it a beat before copying (see CopyFileWithRetry).
         if (!string.IsNullOrEmpty(manifest.ProcessName))
         {
             foreach (var proc in Process.GetProcessesByName(manifest.ProcessName))
             {
                 using (proc)
                 {
-                    try { proc.Kill(); proc.WaitForExit(3000); } catch { }
+                    try { proc.Kill(); proc.WaitForExit(5000); } catch { }
                 }
             }
-            await Task.Delay(1000);
+            await Task.Delay(1500);
         }
 
         // 2. Copy files to install path
@@ -116,12 +119,15 @@ public class WindowsAppHandler : IToolTypeHandler
             }
         }
 
-        // 6. Launch the executable
+        // 6. Launch the executable (with the same args it auto-starts with, e.g. --background)
         if (exePath != null && File.Exists(exePath))
         {
             try
             {
-                using var _ = Process.Start(new ProcessStartInfo { FileName = exePath, UseShellExecute = true });
+                var psi = new ProcessStartInfo { FileName = exePath, UseShellExecute = true };
+                if (!string.IsNullOrEmpty(manifest.RegistryAutoStart?.Args))
+                    psi.Arguments = manifest.RegistryAutoStart.Args;
+                using var _ = Process.Start(psi);
                 Debug.WriteLine($"[WindowsApp] Launched: {exePath}");
             }
             catch (Exception ex)
@@ -200,8 +206,31 @@ public class WindowsAppHandler : IToolTypeHandler
     {
         Directory.CreateDirectory(dest);
         foreach (var file in Directory.GetFiles(source))
-            File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), true);
+            CopyFileWithRetry(file, Path.Combine(dest, Path.GetFileName(file)));
         foreach (var dir in Directory.GetDirectories(source))
             CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
+    }
+
+    /// <summary>
+    /// Copy a file, retrying briefly if the destination is locked. When updating a
+    /// running app, Windows can keep the old exe/DLL handles open for a moment after
+    /// the process exits; a single File.Copy would throw and abort the whole update,
+    /// leaving the tool half-replaced. Mirrors the retry the agent's own updater uses.
+    /// </summary>
+    private static void CopyFileWithRetry(string source, string dest, int attempts = 6)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Copy(source, dest, true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < attempts)
+            {
+                Debug.WriteLine($"[WindowsApp] Copy locked ({Path.GetFileName(dest)}), retry {attempt}: {ex.Message}");
+                Thread.Sleep(500);
+            }
+        }
     }
 }

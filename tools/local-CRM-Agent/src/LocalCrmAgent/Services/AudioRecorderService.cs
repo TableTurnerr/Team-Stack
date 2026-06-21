@@ -26,9 +26,10 @@ public class AudioRecorderService : IDisposable
     private readonly CallStateFusion _fusion;
     private readonly MicrophoneManager? _micManager;
     private readonly DialIntentTracker? _intentTracker;
+    private readonly ZoomAudioMonitor? _audioMonitor;
     private readonly object _lock = new();
 
-    private WasapiLoopbackCapture? _loopbackCapture;
+    private IAudioInput? _loopback;
     private WasapiCapture? _micCapture;
     private WaveFileWriter? _waveWriter;
     private readonly object _writeLock = new();
@@ -122,12 +123,14 @@ public class AudioRecorderService : IDisposable
         RecordingStorageManager storage,
         CallStateFusion fusion,
         MicrophoneManager? micManager = null,
-        DialIntentTracker? intentTracker = null)
+        DialIntentTracker? intentTracker = null,
+        ZoomAudioMonitor? audioMonitor = null)
     {
         _storage = storage;
         _fusion = fusion;
         _micManager = micManager;
         _intentTracker = intentTracker;
+        _audioMonitor = audioMonitor;
         _fusion.StateChanged += OnCallStateChanged;
     }
 
@@ -209,14 +212,12 @@ public class AudioRecorderService : IDisposable
                 _tempWavPath = _storage.GenerateTempWavPath(phoneNumber, _currentRecordingId);
                 _targetMp3Path = _storage.GenerateFilePath(phoneNumber, _currentRecordingId);
 
-                // Loopback capture (system audio — remote party's voice)
-                _loopbackCapture = new WasapiLoopbackCapture();
-                var outputFormat = _loopbackCapture.WaveFormat;
-                _outputSampleRate = outputFormat.SampleRate;
-                _loopbackChannels = outputFormat.Channels;
-
-                _loopbackCapture.DataAvailable += OnLoopbackDataAvailable;
-                _loopbackCapture.RecordingStopped += OnRecordingStopped;
+                // Loopback capture — ONLY the call app's audio. For a Zoom
+                // desktop call we target the Zoom process tree; for a Zoom web
+                // call we target Chrome. This is the remote party's voice; the
+                // rep's mic is captured separately and mixed in below. Falls
+                // back to full-system loopback only if the app can't be targeted.
+                (_loopback, _outputSampleRate, _loopbackChannels) = StartLoopback(_currentChannel);
 
                 // Microphone capture — data goes into a buffer that the loopback
                 // callback pulls from and mixes before writing to WAV.
@@ -233,10 +234,14 @@ public class AudioRecorderService : IDisposable
                         DiscardOnBufferOverflow = true
                     };
 
-                    // Build a mono (+ resampled if needed) provider on top of the buffer
+                    // Build a mono (+ resampled if needed) provider on top of the
+                    // buffer. Down-mix ANY channel count (1..N) to mono — the old
+                    // StereoToMonoSampleProvider threw "Source must be stereo" for
+                    // non-2-channel mics, which silently dropped the rep's side and
+                    // produced one-sided recordings.
                     ISampleProvider micProv = _micBuffer.ToSampleProvider();
-                    if (_micChannels >= 2)
-                        micProv = new StereoToMonoSampleProvider(micProv);
+                    if (_micChannels > 1)
+                        micProv = new MonoDownMixSampleProvider(micProv);
                     if (_micCapture.WaveFormat.SampleRate != _outputSampleRate)
                         micProv = new WdlResamplingSampleProvider(micProv, _outputSampleRate);
                     _micMonoProvider = micProv;
@@ -244,7 +249,7 @@ public class AudioRecorderService : IDisposable
                     _micCapture.DataAvailable += OnMicDataAvailable;
 
                     var micName = micDevice?.FriendlyName ?? "system default";
-                    Debug.WriteLine($"[Recorder] Loopback format: {outputFormat.SampleRate}Hz, {outputFormat.Channels}ch, {outputFormat.BitsPerSample}bit");
+                    Debug.WriteLine($"[Recorder] Loopback: {_outputSampleRate}Hz, {_loopbackChannels}ch");
                     Debug.WriteLine($"[Recorder] Mic ({micName}): {_micCapture.WaveFormat.SampleRate}Hz, {_micCapture.WaveFormat.Channels}ch, {_micCapture.WaveFormat.BitsPerSample}bit");
                 }
                 catch (Exception micEx)
@@ -265,8 +270,8 @@ public class AudioRecorderService : IDisposable
                 _watchdogThread = new Thread(WatchdogLoop) { IsBackground = true, Name = "RecordWatchdog" };
                 _watchdogThread.Start();
 
-                // Start captures
-                _loopbackCapture.StartRecording();
+                // Loopback is already running (started in StartLoopback so it
+                // captures from call connect). Start the mic now.
                 _micCapture?.StartRecording();
 
                 _state = RecordingState.Recording;
@@ -311,7 +316,7 @@ public class AudioRecorderService : IDisposable
                 Debug.WriteLine($"[Recorder] Mic stop failed: {ex.Message}");
             }
 
-            try { _loopbackCapture?.StopRecording(); } catch (Exception ex)
+            try { _loopback?.StopRecording(); } catch (Exception ex)
             {
                 // If loopback stop fails, OnRecordingStopped won't fire —
                 // trigger save flow manually.
@@ -361,11 +366,11 @@ public class AudioRecorderService : IDisposable
         _isRecordingActive = false;
 
         // Detach events FIRST so stopping captures doesn't trigger OnRecordingStopped
-        if (_loopbackCapture != null)
-            _loopbackCapture.RecordingStopped -= OnRecordingStopped;
+        if (_loopback != null)
+            _loopback.RecordingStopped -= OnRecordingStopped;
 
         try { _micCapture?.StopRecording(); } catch { }
-        try { _loopbackCapture?.StopRecording(); } catch { }
+        try { _loopback?.StopRecording(); } catch { }
         CleanupCapture();
 
         // Delete temp WAV file
@@ -486,7 +491,7 @@ public class AudioRecorderService : IDisposable
                 return; // already stopping or stopped
         }
         try { _micCapture?.StopRecording(); } catch { }
-        try { _loopbackCapture?.StopRecording(); } catch { } // triggers OnRecordingStopped
+        try { _loopback?.StopRecording(); } catch { } // triggers OnRecordingStopped
     }
 
     private void OnRecordingStopped(object? sender, StoppedEventArgs e)
@@ -698,6 +703,59 @@ public class AudioRecorderService : IDisposable
         writer.Write(byteBuffer, 0, byteBuffer.Length);
     }
 
+    /// <summary>
+    /// Create and START the loopback source for this call's channel, preferring
+    /// process-scoped capture (only the Zoom desktop app, or only Chrome for a
+    /// web call) and falling back to full-system loopback if the target process
+    /// can't be found or the OS doesn't support process loopback. Returns the
+    /// started source plus its sample rate / channel count.
+    /// </summary>
+    private (IAudioInput source, int sampleRate, int channels) StartLoopback(string channel)
+    {
+        if (ProcessLoopbackCapture.IsSupported)
+        {
+            // For desktop, hint the exact process that currently owns Zoom's
+            // active render session (usually the CptHost child) so we target it
+            // precisely; INCLUDE_TREE then also covers its children.
+            int hintPid = 0;
+            if (channel != "web")
+            {
+                try { hintPid = _audioMonitor?.GetZoomAudioState()?.ProcessId ?? 0; } catch { }
+            }
+
+            var target = AudioCaptureTarget.Resolve(channel, hintPid);
+            if (target is { } t)
+            {
+                var pc = new ProcessLoopbackCapture(t.Pid, includeProcessTree: true);
+                pc.DataAvailable += OnLoopbackDataAvailable;
+                pc.RecordingStopped += OnRecordingStopped;
+                try
+                {
+                    pc.StartRecording();
+                    FileLogger.Write($"[Recorder] Capturing {(channel == "web" ? "Chrome" : "Zoom")} audio only ({t.Label} pid={t.Pid})");
+                    return (pc, pc.WaveFormat.SampleRate, pc.WaveFormat.Channels);
+                }
+                catch (Exception ex)
+                {
+                    pc.DataAvailable -= OnLoopbackDataAvailable;
+                    pc.RecordingStopped -= OnRecordingStopped;
+                    try { pc.Dispose(); } catch { }
+                    FileLogger.Write($"[Recorder] Process loopback failed ({ex.Message}); using full-system audio");
+                }
+            }
+            else
+            {
+                FileLogger.Write($"[Recorder] No {(channel == "web" ? "Chrome" : "Zoom")} process to target; using full-system audio");
+            }
+        }
+
+        var sys = new WasapiLoopbackInput();
+        sys.DataAvailable += OnLoopbackDataAvailable;
+        sys.RecordingStopped += OnRecordingStopped;
+        sys.StartRecording();
+        return (sys, sys.WaveFormat.SampleRate, sys.WaveFormat.Channels);
+    }
+
     private void CleanupCapture()
     {
         try
@@ -723,12 +781,12 @@ public class AudioRecorderService : IDisposable
 
         try
         {
-            if (_loopbackCapture != null)
+            if (_loopback != null)
             {
-                _loopbackCapture.DataAvailable -= OnLoopbackDataAvailable;
-                _loopbackCapture.RecordingStopped -= OnRecordingStopped;
-                _loopbackCapture.Dispose();
-                _loopbackCapture = null;
+                _loopback.DataAvailable -= OnLoopbackDataAvailable;
+                _loopback.RecordingStopped -= OnRecordingStopped;
+                _loopback.Dispose();
+                _loopback = null;
             }
         }
         catch { }
@@ -757,10 +815,15 @@ public class AudioRecorderService : IDisposable
                 break;
 
             case CallState.Connected:
-                if (AutoRecordEnabled && CurrentState == RecordingState.Idle && info.PhoneNumber != null)
+                if (AutoRecordEnabled && CurrentState == RecordingState.Idle)
                 {
+                    // Desktop calls on the shared Zoom account usually have no
+                    // number available locally — the worker (and the uploader's
+                    // call_history device-IP match) resolve it afterward — so do
+                    // NOT gate recording on a known phone number. Record with an
+                    // empty number; it's filled in at upload time.
                     Debug.WriteLine("[Recorder] Auto-start on connected");
-                    StartRecording(info.PhoneNumber);
+                    StartRecording(info.PhoneNumber ?? "");
                 }
                 break;
 
@@ -795,8 +858,48 @@ public class AudioRecorderService : IDisposable
         {
             _isRecordingActive = false;
             try { _micCapture?.StopRecording(); } catch { }
-            try { _loopbackCapture?.StopRecording(); } catch { }
+            try { _loopback?.StopRecording(); } catch { }
         }
         CleanupCapture();
+    }
+}
+
+/// <summary>
+/// Down-mixes any channel count (1..N) to a single mono channel by averaging.
+/// Replaces NAudio's StereoToMonoSampleProvider, which requires exactly two
+/// channels and otherwise throws "Source must be stereo" — the bug that was
+/// dropping the rep's microphone and producing one-sided recordings.
+/// </summary>
+internal sealed class MonoDownMixSampleProvider : ISampleProvider
+{
+    private readonly ISampleProvider _source;
+    private readonly int _channels;
+    private float[] _buffer = [];
+
+    public WaveFormat WaveFormat { get; }
+
+    public MonoDownMixSampleProvider(ISampleProvider source)
+    {
+        _source = source;
+        _channels = source.WaveFormat.Channels;
+        WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(source.WaveFormat.SampleRate, 1);
+    }
+
+    public int Read(float[] buffer, int offset, int count)
+    {
+        if (_channels <= 1) return _source.Read(buffer, offset, count);
+
+        int needed = count * _channels;
+        if (_buffer.Length < needed) _buffer = new float[needed];
+
+        int read = _source.Read(_buffer, 0, needed);
+        int frames = read / _channels;
+        for (int f = 0; f < frames; f++)
+        {
+            float sum = 0f;
+            for (int c = 0; c < _channels; c++) sum += _buffer[f * _channels + c];
+            buffer[offset + f] = sum / _channels;
+        }
+        return frames;
     }
 }

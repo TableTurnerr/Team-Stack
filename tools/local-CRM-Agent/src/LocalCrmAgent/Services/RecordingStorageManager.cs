@@ -598,6 +598,12 @@ public class RecordingEntry
 
     [JsonPropertyName("clientCallId")]
     public string? ClientCallId { get; set; }
+
+    /// <summary>Real Zoom call_id, resolved from call_history by matching this
+    /// machine's device IP + the recording start time. Sent to the worker for
+    /// exact correlation; null falls back to phone + time matching.</summary>
+    [JsonPropertyName("zoomCallId")]
+    public string? ZoomCallId { get; set; }
 }
 
 internal sealed class RenameSentinel

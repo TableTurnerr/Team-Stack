@@ -27,6 +27,7 @@ public class AudioRecorderService : IDisposable
     private readonly MicrophoneManager? _micManager;
     private readonly DialIntentTracker? _intentTracker;
     private readonly ZoomAudioMonitor? _audioMonitor;
+    private readonly ChromeCallMonitor _chromeMonitor;
     private readonly object _lock = new();
 
     private IAudioInput? _loopback;
@@ -57,6 +58,11 @@ public class AudioRecorderService : IDisposable
 
     // Safety: max recording duration (2 hours) — absolute ceiling.
     private const int MaxRecordingSeconds = 7200;
+
+    // Web calls now end on a reliable signal (ChromeCallMonitor sees Chrome's
+    // mic-capture session drop). This tighter cap is just a backstop in case that
+    // session somehow never reports gone (e.g. Chrome crash mid-call).
+    private const int WebMaxRecordingSeconds = 1800;
 
     // How often the mix loop checks if the call is still active (seconds).
     private const int CallStateCheckIntervalSeconds = 5;
@@ -132,6 +138,50 @@ public class AudioRecorderService : IDisposable
         _intentTracker = intentTracker;
         _audioMonitor = audioMonitor;
         _fusion.StateChanged += OnCallStateChanged;
+
+        // Zoom web-phone (Chrome) call detection. Drives web recordings entirely
+        // from the agent side via Chrome's mic-capture session lifecycle — the
+        // Chrome extension's WebSocket heuristic can't separate individual web
+        // calls (one persistent signaling socket per tab). See ChromeCallMonitor.
+        _chromeMonitor = new ChromeCallMonitor();
+        _chromeMonitor.WebCallStarted += OnWebCallStarted;
+        _chromeMonitor.WebCallEnded += OnWebCallEnded;
+        _chromeMonitor.StartWatching();
+    }
+
+    /// <summary>True while a web-channel recording is in progress.</summary>
+    public bool IsRecordingWebChannel
+    {
+        get { lock (_lock) return _state == RecordingState.Recording && IsWebChannel; }
+    }
+
+    // ── Agent-driven web-phone call lifecycle (Chrome mic session) ────
+
+    private void OnWebCallStarted()
+    {
+        // Only auto-start a web recording when nothing else is recording. A live
+        // desktop call takes precedence; we never interrupt it for a (possibly
+        // spurious) Chrome mic session.
+        if (CurrentState != RecordingState.Idle)
+        {
+            FileLogger.Write("[Recorder] Web call detected but recorder busy — ignoring");
+            return;
+        }
+        FileLogger.Write("[Recorder] Web call detected (Chrome mic) — starting recording");
+        // Phone is unknown here; the upload resolver matches the Zoom call_history
+        // by device IP + time, same as desktop calls.
+        StartRecording(string.Empty, "web");
+    }
+
+    private void OnWebCallEnded()
+    {
+        lock (_lock)
+        {
+            if (_state != RecordingState.Recording || !IsWebChannel)
+                return;
+        }
+        FileLogger.Write("[Recorder] Web call ended (Chrome mic released) — stopping recording");
+        StopRecording();
     }
 
     /// <summary>
@@ -452,6 +502,15 @@ public class AudioRecorderService : IDisposable
     }
 
     /// <summary>
+    /// True while the active recording is a Zoom WEB-phone call. Web calls are
+    /// started and stopped by the Chrome extension over native messaging; the
+    /// desktop <see cref="CallStateFusion"/> (which only tracks Zoom DESKTOP
+    /// audio sessions) never leaves Idle for them, so it must never drive a web
+    /// recording's lifecycle.
+    /// </summary>
+    private bool IsWebChannel => string.Equals(_currentChannel, "web", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Background watchdog: checks call state and enforces max duration.
     /// Stops the recording if the call ended but the event was missed.
     /// </summary>
@@ -464,15 +523,20 @@ public class AudioRecorderService : IDisposable
 
             var elapsed = (DateTime.UtcNow - _recordingStartTime).TotalSeconds;
 
-            if (elapsed > MaxRecordingSeconds)
+            var maxSeconds = IsWebChannel ? WebMaxRecordingSeconds : MaxRecordingSeconds;
+            if (elapsed > maxSeconds)
             {
-                Debug.WriteLine($"[Recorder] Max duration ({MaxRecordingSeconds}s) reached, forcing stop");
+                Debug.WriteLine($"[Recorder] Max duration ({maxSeconds}s) reached, forcing stop");
                 ForceStopFromWatchdog();
                 break;
             }
 
+            // WEB recordings end on the extension's explicit stopRecording (or
+            // the max-duration ceiling above), NEVER on the desktop fusion —
+            // which stays Idle for web calls and was cutting them off at the
+            // first 5s check.
             var callState = _fusion.CurrentState.State;
-            if (callState == CallState.Idle || callState == CallState.Ended)
+            if ((callState == CallState.Idle || callState == CallState.Ended) && !IsWebChannel)
             {
                 Debug.WriteLine($"[Recorder] Call state is {callState} — stopping recording ({(int)elapsed}s)");
                 ForceStopFromWatchdog();
@@ -832,7 +896,7 @@ public class AudioRecorderService : IDisposable
             // voicemail leave, dial-tone confirmation, or otherwise useful
             // audio. The dashboard decides whether to keep or drop the file.
             case CallState.Ended:
-                if (CurrentState == RecordingState.Recording)
+                if (CurrentState == RecordingState.Recording && !IsWebChannel)
                 {
                     Debug.WriteLine($"[Recorder] Auto-stop on ended (duration={info.DurationSeconds}s)");
                     StopRecording();
@@ -842,7 +906,7 @@ public class AudioRecorderService : IDisposable
             // Fallback: if we somehow missed the Ended event and the fusion
             // returned to Idle while we're still recording, force-stop.
             case CallState.Idle:
-                if (CurrentState == RecordingState.Recording)
+                if (CurrentState == RecordingState.Recording && !IsWebChannel)
                 {
                     Debug.WriteLine("[Recorder] Fallback stop — fusion returned to Idle while still recording");
                     StopRecording();
@@ -854,6 +918,13 @@ public class AudioRecorderService : IDisposable
     public void Dispose()
     {
         _fusion.StateChanged -= OnCallStateChanged;
+        try
+        {
+            _chromeMonitor.WebCallStarted -= OnWebCallStarted;
+            _chromeMonitor.WebCallEnded -= OnWebCallEnded;
+            _chromeMonitor.Dispose();
+        }
+        catch { }
         if (_state == RecordingState.Recording)
         {
             _isRecordingActive = false;

@@ -25,6 +25,7 @@ public class ZoomPhoneApiService : IDisposable
     private string? _clientId;
     private string? _clientSecret;
     private string? _zoomUserId; // email or Zoom user ID
+    private string? _ownPublicIp; // cached for the session; used to match web calls
 
     // Token cache
     private string? _accessToken;
@@ -353,10 +354,19 @@ public class ZoomPhoneApiService : IDisposable
     /// <summary>
     /// Resolve the real Zoom call_id and the external party's E.164 number for a
     /// call recorded on THIS machine, by matching Zoom's call_history against the
-    /// local device IP + the recording's start time. On the shared Zoom account
-    /// every machine has a distinct device_private_ip, so this is an exact
-    /// per-device match (a machine can only be on one call at a time). Retries
-    /// briefly because call_history can lag a few seconds after hangup.
+    /// recording's start time plus a device fingerprint.
+    ///
+    /// <para>Desktop calls report <c>device_private_ip</c>, which on the shared
+    /// Zoom account is a distinct per-machine fingerprint (an exact match).</para>
+    ///
+    /// <para>Web-phone (Chrome) calls do <b>not</b> report <c>device_private_ip</c>
+    /// at all — only <c>device_public_ip</c>. So for those we fall back to matching
+    /// our own public IP (derived for free from this machine's most recent desktop
+    /// call in the same history, else fetched once externally). Public IP is shared
+    /// by machines behind one NAT, so within an office it disambiguates by time;
+    /// remote reps on different connections get an exact match.</para>
+    ///
+    /// Retries briefly because call_history lags a few seconds after hangup.
     /// Returns (null, null) when there is no confident match.
     /// </summary>
     public async Task<(string? CallId, string? PhoneE164)> ResolveOwnCallAsync(
@@ -372,27 +382,99 @@ public class ZoomPhoneApiService : IDisposable
         for (int i = 0; i < attempts; i++)
         {
             var calls = await GetRecentCallHistoryAsync(30);
-            ZoomCallRecord? best = null;
-            double bestDelta = double.MaxValue;
-            foreach (var c in calls)
+
+            // Strategy 1 — desktop: exact device_private_ip match.
+            var best = MatchClosest(calls, startUtc,
+                c => !string.IsNullOrEmpty(c.DevicePrivateIp) && localIps.Contains(c.DevicePrivateIp));
+            if (best.Record != null)
             {
-                if (string.IsNullOrEmpty(c.DevicePrivateIp) || !localIps.Contains(c.DevicePrivateIp)) continue;
-                if (c.StartTime == null) continue;
-                var delta = Math.Abs((c.StartTime.Value - startUtc).TotalSeconds);
-                if (delta > 180) continue; // generous window; the IP already disambiguates
-                if (delta < bestDelta) { bestDelta = delta; best = c; }
+                LogResolved(best, "private-ip");
+                return (best.Record.CallId, PhoneOf(best.Record));
             }
-            if (best != null)
+
+            // Strategy 2 — web phone: records with NO private ip, matched by our
+            // public ip when we can determine it. The Chrome web dialer is the only
+            // path that produces these device-private-ip-less records.
+            var pubIp = _ownPublicIp ??= DerivePublicIp(calls, localIps) ?? await FetchPublicIpAsync();
+            if (!string.IsNullOrEmpty(pubIp))
             {
-                var phone = string.Equals(best.Direction, "outbound", StringComparison.OrdinalIgnoreCase)
-                    ? best.CalleeNumber : best.CallerNumber;
-                Debug.WriteLine($"[ZoomAPI] Resolved own call {best.CallId} (Δ{bestDelta:F0}s, ip {best.DevicePrivateIp}) phone={phone}");
-                return (best.CallId, phone);
+                best = MatchClosest(calls, startUtc,
+                    c => string.IsNullOrEmpty(c.DevicePrivateIp)
+                         && string.Equals(c.DevicePublicIp, pubIp, StringComparison.Ordinal));
+                if (best.Record != null)
+                {
+                    LogResolved(best, "public-ip(web)");
+                    return (best.Record.CallId, PhoneOf(best.Record));
+                }
             }
+
             if (i < attempts - 1) await Task.Delay(delayMs);
         }
         Debug.WriteLine("[ZoomAPI] ResolveOwnCall: no device-IP + time match in call_history");
         return (null, null);
+    }
+
+    private static (ZoomCallRecord? Record, double Delta) MatchClosest(
+        List<ZoomCallRecord> calls, DateTime startUtc, Func<ZoomCallRecord, bool> predicate)
+    {
+        ZoomCallRecord? best = null;
+        double bestDelta = double.MaxValue;
+        foreach (var c in calls)
+        {
+            if (!predicate(c) || c.StartTime == null) continue;
+            var delta = Math.Abs((c.StartTime.Value - startUtc).TotalSeconds);
+            if (delta > 180) continue; // generous window; the device fingerprint disambiguates
+            if (delta < bestDelta) { bestDelta = delta; best = c; }
+        }
+        return (best, bestDelta);
+    }
+
+    private static string? PhoneOf(ZoomCallRecord r) =>
+        string.Equals(r.Direction, "outbound", StringComparison.OrdinalIgnoreCase)
+            ? r.CalleeNumber : r.CallerNumber;
+
+    private static void LogResolved((ZoomCallRecord? Record, double Delta) m, string via)
+    {
+        if (m.Record == null) return;
+        var ip = m.Record.DevicePrivateIp ?? m.Record.DevicePublicIp;
+        FileLogger.Write($"[ZoomAPI] Resolved own call {m.Record.CallId} (Δ{m.Delta:F0}s, {via} {ip}) phone={PhoneOf(m.Record)}");
+    }
+
+    /// <summary>
+    /// Determine this machine's public IP from call_history itself: any record
+    /// whose device_private_ip is one of our local IPs (a desktop call from this
+    /// machine) also carries our device_public_ip. Free, no external dependency.
+    /// </summary>
+    private static string? DerivePublicIp(List<ZoomCallRecord> calls, HashSet<string> localIps)
+    {
+        foreach (var c in calls)
+        {
+            if (!string.IsNullOrEmpty(c.DevicePrivateIp)
+                && localIps.Contains(c.DevicePrivateIp)
+                && !string.IsNullOrEmpty(c.DevicePublicIp))
+                return c.DevicePublicIp;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Best-effort external public-IP lookup, used only when this machine has no
+    /// desktop call in recent history to derive it from (e.g. a web-only rep).
+    /// Short timeout; returns null on any failure so resolution degrades to parked.
+    /// </summary>
+    private async Task<string?> FetchPublicIpAsync()
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var ip = (await _http.GetStringAsync("https://api.ipify.org", cts.Token)).Trim();
+            return string.IsNullOrEmpty(ip) ? null : ip;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ZoomAPI] public IP fetch failed: {ex.Message}");
+            return null;
+        }
     }
 
     private async Task<List<ZoomCallRecord>> GetRecentCallHistoryAsync(int pageSize)
@@ -431,6 +513,7 @@ public class ZoomPhoneApiService : IDisposable
                         CalleeNumber = item.TryGetProperty("callee_did_number", out var ce) ? ce.GetString() : null,
                         CallerNumber = item.TryGetProperty("caller_did_number", out var ca) ? ca.GetString() : null,
                         DevicePrivateIp = item.TryGetProperty("device_private_ip", out var ip) ? ip.GetString() : null,
+                        DevicePublicIp = item.TryGetProperty("device_public_ip", out var pip) ? pip.GetString() : null,
                         StartTime = ParseUtc(item, "start_time"),
                     });
                 }
@@ -496,5 +579,6 @@ public class ZoomCallRecord
     public string? CalleeNumber { get; set; }
     public string? CallerNumber { get; set; }
     public string? DevicePrivateIp { get; set; }
+    public string? DevicePublicIp { get; set; }
     public DateTime? StartTime { get; set; }
 }

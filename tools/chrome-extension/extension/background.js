@@ -2362,7 +2362,15 @@ function resolveRepUserId(cb) {
     });
 }
 
-function teardownZoomBridge() {
+// Tear down the native port after a call ends. `forCallId` is the callId that was
+// active when teardown was scheduled; if a fast back-to-back call has since taken
+// over ZOOM_BRIDGE.callId, this teardown is stale and must NOT run (it would kill
+// the in-flight call's bridge). Called with no arg => unconditional teardown.
+function teardownZoomBridge(forCallId) {
+    if (forCallId != null && ZOOM_BRIDGE.callId !== forCallId) {
+        // A newer call owns the bridge now; leave it alone.
+        return;
+    }
     if (ZOOM_BRIDGE.disconnectTimer) { clearTimeout(ZOOM_BRIDGE.disconnectTimer); ZOOM_BRIDGE.disconnectTimer = null; }
     if (ZOOM_BRIDGE.port) {
         try { ZOOM_BRIDGE.port.disconnect(); } catch (e) {}
@@ -2402,6 +2410,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || !msg.type) return;
 
     if (msg.type === 'ZOOM_CALL_STARTED') {
+        // Back-to-back calls: a previous STOP may have scheduled teardownZoomBridge
+        // ~2s out. Cancel it immediately so call 2's bridge isn't torn down mid-call.
+        if (ZOOM_BRIDGE.disconnectTimer) { clearTimeout(ZOOM_BRIDGE.disconnectTimer); ZOOM_BRIDGE.disconnectTimer = null; }
         // Honor the feature toggle (default ON). Gate here as a backstop even
         // though the content script also checks it.
         chrome.storage.local.get(['gmes_zoom_record_calls'], function (d) {
@@ -2411,6 +2422,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
                 // callId = "web:" + repUserId + ":" + connectTsMs  (plan §4).
                 var callId = 'web:' + repUserId + ':' + connectTsMs;
                 ZOOM_BRIDGE.callId = callId;
+                // Identifier-only contract: the extension forwards a unique call id,
+                // the channel, and (when known) the phone number. It does NOT send
+                // call direction or enrichment (e.g. counterparty name) — the cloud
+                // bridge owns direction detection and contact matching. repUserId is
+                // kept because it is a component of callId and a routing label the
+                // agent already overrides on upload.
                 var start = {
                     type: 'START',
                     callId: callId,
@@ -2419,7 +2436,6 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
                     phoneE164: (msg.phoneE164 != null ? msg.phoneE164 : null),
                     connectTsMs: connectTsMs
                 };
-                if (msg.counterpartyName) start.counterpartyName = String(msg.counterpartyName);
                 sendToAgent(start);
             });
         });
@@ -2431,9 +2447,14 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         var callId = ZOOM_BRIDGE.callId;
         if (!callId) return; // no active call we started — nothing to stop
         sendToAgent({ type: 'STOP', callId: callId, endTsMs: endTsMs });
-        // Keep the port briefly so the STOP is delivered, then tear down.
+        // Keep the port briefly so the STOP is delivered, then tear down — but only
+        // if THIS call still owns the bridge. If call 2's START arrives in the next
+        // 2s it clears this timer (and the guard below ignores a stale fire anyway).
         if (ZOOM_BRIDGE.disconnectTimer) clearTimeout(ZOOM_BRIDGE.disconnectTimer);
-        ZOOM_BRIDGE.disconnectTimer = setTimeout(teardownZoomBridge, 2000);
+        ZOOM_BRIDGE.disconnectTimer = setTimeout(function () {
+            ZOOM_BRIDGE.disconnectTimer = null;
+            teardownZoomBridge(callId);
+        }, 2000);
         return;
     }
 });

@@ -4,8 +4,10 @@
 //
 // Runs on https://*.zoom.us/* (all_frames, document_start). It decides WHEN a
 // web-phone call starts and ends, then tells the service worker:
-//   start: chrome.runtime.sendMessage({type:'ZOOM_CALL_STARTED', phoneE164, counterpartyName, connectTsMs})
+//   start: chrome.runtime.sendMessage({type:'ZOOM_CALL_STARTED', phoneE164, connectTsMs})
 //   end:   chrome.runtime.sendMessage({type:'ZOOM_CALL_ENDED', endTsMs})
+// Identifier-only: no direction, no enrichment (counterparty name, etc.) — the
+// cloud bridge owns call-direction detection and contact matching.
 // The service worker (background.js) bridges these to the local CRM Agent over
 // Chrome Native Messaging (Workstream F).
 //
@@ -227,7 +229,12 @@
     // ========================================================================
 
     var START_CONFIRM_MS = 1200;
-    var END_CONFIRM_MS = 4000;
+    var END_CONFIRM_MS = 4000;        // soft/DOM-only disappearance grace
+    // When the MAIN-world WS layer reports the LAST call socket closed, that's a
+    // definitive end. Use a much shorter grace (just enough for a DOM re-check, in
+    // case Zoom is cycling sockets mid-call) so a fast back-to-back second call
+    // isn't swallowed by the long 4s grace.
+    var END_CONFIRM_HARD_MS = 800;
 
     var callActive = false;       // have we emitted STARTED and not yet ENDED?
     var connectTsMs = 0;          // when we believe the call connected
@@ -235,6 +242,7 @@
     // Latest evidence from each source, with timestamps.
     var wsOpen = false;           // MAIN-world WS reports a call socket open
     var wsLastActivity = 0;
+    var hardEndPending = false;   // last WS close was a definitive all-sockets-closed
     var startTimer = null;
     var endTimer = null;
 
@@ -251,12 +259,13 @@
         callActive = true;
         connectTsMs = Date.now();
         getDialedNumber(function (dialed) {
+            // Identifier-only: forward the phone number (when known) + connect time.
+            // No counterparty name / no direction — the cloud bridge owns enrichment
+            // and call-direction detection.
             var phoneE164 = (dialed && dialed.phoneE164) || scrapePageNumber() || null;
-            var counterpartyName = (dialed && dialed.counterpartyName) || '';
             sendMsg({
                 type: 'ZOOM_CALL_STARTED',
                 phoneE164: phoneE164,
-                counterpartyName: counterpartyName || undefined,
                 connectTsMs: connectTsMs
             });
         });
@@ -269,6 +278,7 @@
         // Reset per-call WS bookkeeping so the next call starts clean.
         wsOpen = false;
         wsLastActivity = 0;
+        hardEndPending = false;
     }
 
     function sendMsg(msg) {
@@ -293,6 +303,9 @@
 
         if (inCall) {
             if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+            // Evidence is back, so a prior socket close was just Zoom cycling
+            // sockets mid-call, not a real end.
+            hardEndPending = false;
             if (!callActive && !startTimer) {
                 startTimer = setTimeout(function () {
                     startTimer = null;
@@ -302,10 +315,14 @@
         } else {
             if (startTimer) { clearTimeout(startTimer); startTimer = null; }
             if (callActive && !endTimer) {
+                // Definitive WS close => short grace (DOM re-check only); soft/DOM-only
+                // disappearance => long grace. The short grace clears callActive fast so
+                // a back-to-back next call's WS 'open' starts a fresh START/STOP pair.
+                var grace = hardEndPending ? END_CONFIRM_HARD_MS : END_CONFIRM_MS;
                 endTimer = setTimeout(function () {
                     endTimer = null;
                     if (!anyEvidenceInCall()) emitEnd();
-                }, END_CONFIRM_MS);
+                }, grace);
             }
         }
     }
@@ -326,8 +343,21 @@
         var d = ev.data;
         if (!d || d.__gmesZoom !== '__GMES_ZOOM__' || d.source !== 'ws') return;
         try {
-            if (d.kind === 'open') { wsOpen = true; wsLastActivity = Date.now(); evaluate(); }
-            else if (d.kind === 'close') { wsOpen = false; evaluate(); }
+            if (d.kind === 'open') {
+                // A fresh socket opened: cancel any pending hard-end so the next call
+                // confirms via the normal start path.
+                wsOpen = true; wsLastActivity = Date.now(); hardEndPending = false; evaluate();
+            }
+            else if (d.kind === 'close') {
+                // d.hard === true => the LAST call socket dropped (definitive end).
+                // Also clear the recent-activity liveness hint: with the socket gone,
+                // stale activity must not keep anyEvidenceInCall() true through the
+                // short grace, or the fast end would never fire. DOM is the sole
+                // arbiter during the short re-check window.
+                wsOpen = false;
+                if (d.hard) { hardEndPending = true; wsLastActivity = 0; }
+                evaluate();
+            }
             else if (d.kind === 'activity') { wsLastActivity = Date.now(); if (!callActive) evaluate(); }
         } catch (e) {}
     }, false);

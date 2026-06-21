@@ -69,6 +69,12 @@
                 __gmesZoom: TAG,
                 source: SourceWS,
                 kind: kind,                 // 'open' | 'close' | 'activity'
+                // 'close' is only emitted once the LAST call socket drops (see
+                // openCallSockets below). Flag it as a definitive/hard end so the
+                // isolated side can confirm the call end on a short grace instead of
+                // the long DOM-only grace — this is what lets a fast back-to-back
+                // second call get its own START/STOP pair.
+                hard: detail && detail.hard ? true : false,
                 url: detail && detail.url ? detail.url : '',
                 ts: Date.now()
             }, '*');
@@ -104,7 +110,9 @@
                 });
                 var onGone = function () {
                     if (openCallSockets > 0) openCallSockets--;
-                    if (openCallSockets === 0) post('close', { url: url });
+                    // Last call socket gone => definitive ("hard") end. Mark it so the
+                    // isolated side ends fast, freeing the state machine for the next call.
+                    if (openCallSockets === 0) post('close', { url: url, hard: true });
                 };
                 ws.addEventListener('close', onGone);
                 ws.addEventListener('error', function () {

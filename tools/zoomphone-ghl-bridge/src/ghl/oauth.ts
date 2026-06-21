@@ -8,6 +8,10 @@ const SCOPES = [
   "contacts.write",
   "conversations/message.readonly",
   "conversations/message.write",
+  // Medias API: used to park no-phone clips for review and to attach
+  // recordings larger than the 5 MB conversations-upload cap.
+  "medias.readonly",
+  "medias.write",
 ];
 
 const STATE_KEY = "ghl:tokens";
@@ -23,14 +27,27 @@ export function buildAuthorizeUrl(env: Env, request: Request): string {
   const u = new URL(AUTHORIZE_URL);
   u.searchParams.set("response_type", "code");
   u.searchParams.set("client_id", env.GHL_MARKETPLACE_CLIENT_ID);
-  u.searchParams.set("redirect_uri", redirectUriFor(request));
+  u.searchParams.set("redirect_uri", redirectUriFor(env, request));
   u.searchParams.set("scope", SCOPES.join(" "));
   return u.toString();
 }
 
-function redirectUriFor(request: Request): string {
+// The redirect_uri must be byte-identical in the authorize call, the GHL app's
+// registered value, and the token exchange. Behind the Cloudflare Tunnel the
+// origin hop is plain HTTP, so `request.url`'s scheme is `http` even though the
+// public URL is `https` — using it directly produces an http:// URI that GHL
+// rejects. Prefer an explicit PUBLIC_BASE_URL; otherwise honor the
+// X-Forwarded-Proto/Host headers cloudflared sets.
+function redirectUriFor(env: Env, request: Request): string {
+  return `${publicOrigin(env, request)}/oauth/callback`;
+}
+
+function publicOrigin(env: Env, request: Request): string {
+  if (env.PUBLIC_BASE_URL) return env.PUBLIC_BASE_URL.replace(/\/+$/, "");
   const u = new URL(request.url);
-  return `${u.origin}/oauth/callback`;
+  const proto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const host = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ?? u.host;
+  return `${proto || u.protocol.replace(/:$/, "")}://${host}`;
 }
 
 export async function handleOAuthCallback(request: Request, env: Env): Promise<Response> {
@@ -46,7 +63,7 @@ export async function handleOAuthCallback(request: Request, env: Env): Promise<R
       code,
       client_id: env.GHL_MARKETPLACE_CLIENT_ID,
       client_secret: env.GHL_MARKETPLACE_CLIENT_SECRET,
-      redirect_uri: redirectUriFor(request),
+      redirect_uri: redirectUriFor(env, request),
       user_type: "Location",
     }),
   });

@@ -2,9 +2,15 @@ import type { Env } from "./index";
 import { toE164 } from "./phone";
 import { upsertContact, logCall, uploadAudio, addContactNote, type CallStatus } from "./ghl/api";
 import { downloadZoomAudio, fetchTextWithAuth } from "./zoom/api";
-import { pushToAgent } from "./agent/router";
-
-const STATE_TTL_SECONDS = 60 * 60 * 24 * 30;
+import {
+  readCallState,
+  writeCallState,
+  waitForCallState,
+  lookupRepUserId,
+  writeRecentCallIndex,
+  reconcilePendingClips,
+  type CallState,
+} from "./calls";
 
 type ZoomCallLog = {
   id?: string;
@@ -68,17 +74,6 @@ type ZoomLiveCall = {
   callee?: ZoomLiveLeg;
 };
 
-type CallState = {
-  ghl_contact_id: string;
-  ghl_conversation_id: string;
-  ghl_message_id: string;
-  direction: "inbound" | "outbound";
-  external_phone: string;
-  internal_phone: string;
-  rep_name: string;
-  start_iso: string;
-};
-
 type Envelope = {
   event: string;
   event_ts?: number;
@@ -130,10 +125,19 @@ export async function dispatch(envelope: Envelope, env: Env): Promise<void> {
   }
 }
 
+// Live phone events (caller_connected / callee_answered / *_ended) used to push
+// START/STOP to the rep's agent over a Durable Object WebSocket. On a SHARED
+// Zoom account that routing is impossible: every event carries the same
+// user_id, so the bridge can't tell which device should record. The agent now
+// self-detects the call locally and records; the bridge reconciles the uploaded
+// clip to this call by phone + time in /recordings/ingest. These handlers are
+// retained only to observe live timing — W4 will seed a `recent:{phone}` index
+// here to speed that correlation. For now they just log.
+//
 // Outbound (caller_connected): rep is the caller leg, external party is callee.
 // Inbound (callee_answered): rep is the callee leg, external party is caller.
 async function handleLiveStart(
-  env: Env,
+  _env: Env,
   call: ZoomLiveCall,
   direction: "inbound" | "outbound",
   eventTs: number | undefined,
@@ -143,27 +147,13 @@ async function handleLiveStart(
     console.log("live start missing call_id, skipping");
     return;
   }
-  const repLeg = direction === "outbound" ? call.caller : call.callee;
   const externalLeg = direction === "outbound" ? call.callee : call.caller;
-  const repUserId = repLeg?.user_id;
-  if (!repUserId) {
-    console.log("live start: no rep user_id, skipping", callId);
-    return;
-  }
   const phoneE164 = toE164(externalLeg?.phone_number);
-  const delivered = await pushToAgent(env, repUserId, {
-    type: "START",
-    callId,
-    repUserId,
-    channel: "desktop",
-    phoneE164,
-    connectTsMs: tsToMs(eventTs),
-  });
-  console.log("live START", callId, direction, "rep", repUserId, "phone", phoneE164, "delivered", delivered);
+  console.log("live START seen", callId, direction, "phone", phoneE164, "ts", tsToMs(eventTs));
 }
 
 async function handleLiveStop(
-  env: Env,
+  _env: Env,
   call: ZoomLiveCall,
   eventTs: number | undefined,
 ): Promise<void> {
@@ -172,18 +162,7 @@ async function handleLiveStop(
     console.log("live stop missing call_id, skipping");
     return;
   }
-  // Either leg may carry the rep; push STOP to whichever rep user_id we can find.
-  const repUserId = call.caller?.user_id ?? call.callee?.user_id;
-  if (!repUserId) {
-    console.log("live stop: no rep user_id, skipping", callId);
-    return;
-  }
-  const delivered = await pushToAgent(env, repUserId, {
-    type: "STOP",
-    callId,
-    endTsMs: tsToMs(eventTs),
-  });
-  console.log("live STOP", callId, "rep", repUserId, "delivered", delivered);
+  console.log("live STOP seen", callId, "ts", tsToMs(eventTs));
 }
 
 function tsToMs(eventTs: number | undefined): number {
@@ -257,7 +236,7 @@ async function handleCallLog(
     userId: repUserId,
   });
 
-  await writeCallState(env, callId, {
+  const state: CallState = {
     ghl_contact_id: contact.id,
     ghl_conversation_id: logged.conversationId,
     ghl_message_id: logged.messageId,
@@ -266,7 +245,13 @@ async function handleCallLog(
     internal_phone: internal ?? "",
     rep_name: repName ?? "",
     start_iso: startIso,
-  });
+  };
+  await writeCallState(env, callId, state);
+  // Index by external phone so a clip upload can correlate (webhook-first), and
+  // attach any clips that arrived before this webhook landed (clip-first), by
+  // exact Zoom call_id or by phone + time.
+  await writeRecentCallIndex(env, external, callId);
+  await reconcilePendingClips(env, callId, external, state);
   console.log("logged call", callId, direction, status, "by", repLabel, "contact", contact.id);
 }
 
@@ -400,18 +385,6 @@ async function handleVoicemailTranscript(
   console.log("attached voicemail transcript", vmId);
 }
 
-async function lookupRepUserId(env: Env, did: string | null): Promise<string | undefined> {
-  if (!did) return undefined;
-  const raw = await env.STATE.get(`rep:${did}`);
-  if (!raw) return undefined;
-  try {
-    const mapping = JSON.parse(raw) as { ghl_user_id?: string };
-    return mapping.ghl_user_id;
-  } catch {
-    return undefined;
-  }
-}
-
 function formatRepLabel(name: string | undefined, did: string | null): string {
   const trimmedName = name?.trim();
   if (trimmedName && did) return `${trimmedName} (${did})`;
@@ -432,27 +405,3 @@ function mapCallResult(result: string | undefined): CallStatus {
   return "completed";
 }
 
-async function readCallState(env: Env, key: string): Promise<CallState | null> {
-  const raw = await env.STATE.get(`call:${key}`);
-  return raw ? (JSON.parse(raw) as CallState) : null;
-}
-
-async function writeCallState(env: Env, key: string, state: CallState): Promise<void> {
-  await env.STATE.put(`call:${key}`, JSON.stringify(state), {
-    expirationTtl: STATE_TTL_SECONDS,
-  });
-}
-
-async function waitForCallState(
-  env: Env,
-  key: string,
-  attempts = 6,
-  delayMs = 5000,
-): Promise<CallState | null> {
-  for (let i = 0; i < attempts; i++) {
-    const state = await readCallState(env, key);
-    if (state) return state;
-    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
-  }
-  return null;
-}

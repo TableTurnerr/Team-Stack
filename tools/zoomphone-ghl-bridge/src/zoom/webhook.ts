@@ -1,4 +1,5 @@
 import type { Env } from "../index";
+import type { ExecCtx } from "../runtime/types";
 import { dispatch } from "../pipeline";
 
 type ZoomEnvelope = {
@@ -10,7 +11,7 @@ type ZoomEnvelope = {
 export async function handleZoomWebhook(
   request: Request,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecCtx,
 ): Promise<Response> {
   const rawBody = await request.text();
 

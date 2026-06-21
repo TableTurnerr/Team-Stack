@@ -1,16 +1,22 @@
 import type { Env } from "../index";
+import type { ExecCtx } from "../runtime/types";
 import { toE164 } from "../phone";
-import { upsertContact, logCall, uploadAudio, uploadMedia } from "../ghl/api";
+import { uploadMedia } from "../ghl/api";
+import { findCallStateByCallId, findCallStateByPhone, attachClipToCall } from "../calls";
 
-const CLIP_TTL_SECONDS = 60 * 60 * 24 * 30;
-const CONVERSATIONS_MAX_BYTES = 5 * 1024 * 1024;
+const REVIEW_TTL_SECONDS = 60 * 60 * 24 * 30;
 
-type ClipState = { ghl_message_id: string; ghl_conversation_id?: string; contact_id?: string };
-
+// Accepts a recorded call clip from a CRM agent and attaches it to the matching
+// GHL call. The team shares one Zoom account, so correlation is by PHONE +
+// CONNECT TIME (never the shared Zoom user_id — see docs §2): the clip is
+// stored, then either attached immediately to an already-logged call
+// (webhook-first) or left pending for the call-log handler to attach when the
+// webhook arrives (clip-first). Rep attribution rides on the agent's repKey; the
+// bridge owns direction via the correlated Zoom call.
 export async function handleRecordingIngest(
   request: Request,
   env: Env,
-  ctx: ExecutionContext,
+  _ctx: ExecCtx,
 ): Promise<Response> {
   const auth = request.headers.get("Authorization");
   if (auth !== `Bearer ${env.AGENT_SHARED_TOKEN}`) {
@@ -24,120 +30,110 @@ export async function handleRecordingIngest(
     return new Response("expected multipart/form-data", { status: 400 });
   }
 
-  const callId = str(form.get("callId"));
-  const repUserId = str(form.get("repUserId"));
-  const channel = str(form.get("channel"));
+  // clientCallId is the agent-minted dedup key. Accept the legacy `callId` and
+  // `repUserId` field names so the current agent build keeps working until it's
+  // updated to send repKey/clientCallId (W5).
+  const clientCallId = str(form.get("clientCallId")) || str(form.get("callId"));
+  const repKey = str(form.get("repKey")) || str(form.get("repUserId"));
+  const channel = str(form.get("channel")) || "desktop";
   const phoneE164 = toE164(str(form.get("phoneE164")));
   const connectTsMs = num(form.get("connectTsMs"));
   const endTsMs = num(form.get("endTsMs"));
-  // The Workers runtime returns a File/Blob for file parts even though the type
-  // declares get() as string | null; narrow through unknown.
+  const direction = str(form.get("direction")) || null; // advisory; correlated call wins
+  const zoomCallId = str(form.get("zoomCallId")) || null; // real Zoom call_id, agent-resolved
+  // The Workers runtime declared get() as string|null; the file part is a Blob.
   const clip = form.get("clip") as unknown;
 
-  if (!callId) return new Response("missing callId", { status: 400 });
-  if (!(clip instanceof Blob)) {
-    return new Response("missing clip file", { status: 400 });
-  }
+  if (!clientCallId) return new Response("missing clientCallId/callId", { status: 400 });
+  if (!(clip instanceof Blob)) return new Response("missing clip file", { status: 400 });
 
-  // Dedup by callId: a second upload for the same call is a no-op.
-  const existingRaw = await env.STATE.get(`clip:${callId}`);
+  // Dedup: a second upload for the same clientCallId is a no-op.
+  const existingRaw = await env.STATE.get(`clip:${clientCallId}`);
   if (existingRaw) {
-    const existing = JSON.parse(existingRaw) as ClipState;
+    const existing = JSON.parse(existingRaw) as { ghl_message_id: string };
     return Response.json({ ghlMessageId: existing.ghl_message_id }, { status: 409 });
   }
 
-  const audio = await clip.arrayBuffer();
+  const bytes = new Uint8Array(await clip.arrayBuffer());
   const contentType = clip.type || "audio/mpeg";
-  const ext = contentType.includes("wav") ? "wav" : contentType.includes("mp4") ? "m4a" : "mp3";
-  const filename = `call-${callId}.${ext}`;
-  const durationSeconds =
-    endTsMs > 0 && connectTsMs > 0 ? Math.max(0, Math.round((endTsMs - connectTsMs) / 1000)) : 0;
-  const startTimeIso = connectTsMs > 0 ? new Date(connectTsMs).toISOString() : new Date().toISOString();
 
-  // No phone number → never drop; park the clip in Medias for manual review.
-  if (!phoneE164) {
-    const mediaUrl = await uploadMedia(env, { audio, filename, contentType });
-    await env.STATE.put(
-      `review:${callId}`,
-      JSON.stringify({ media_url: mediaUrl, repUserId, channel, connectTsMs, endTsMs }),
-      { expirationTtl: CLIP_TTL_SECONDS },
-    );
-    // TODO: create a GHL task/note pointing ops at the review clip.
-    console.log("ingest: no phone, parked for review", callId, mediaUrl);
-    return Response.json({ status: "review" }, { status: 202 });
+  // With neither a phone number NOR a resolved Zoom call_id we can't correlate
+  // or contact-match; park for manual review.
+  if (!phoneE164 && !zoomCallId) {
+    console.log("ingest: no phone or call_id, parking for review", clientCallId, `(${bytes.byteLength}B)`);
+    try {
+      const ext = extFor(contentType);
+      const mediaUrl = await uploadMedia(env, {
+        audio: toArrayBuffer(bytes),
+        filename: `review-${clientCallId}.${ext}`,
+        contentType,
+      });
+      await env.STATE.put(
+        `review:${clientCallId}`,
+        JSON.stringify({ media_url: mediaUrl, repKey, channel, connectTsMs, endTsMs }),
+        { expirationTtl: REVIEW_TTL_SECONDS },
+      );
+      console.log("ingest: parked for review", clientCallId, mediaUrl);
+      return Response.json({ status: "review" }, { status: 202 });
+    } catch (err) {
+      console.error(
+        "ingest: review-park via Medias FAILED for",
+        clientCallId,
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
+      return new Response("review park failed", { status: 500 });
+    }
   }
 
-  // Local recordings are placed by the rep, so the call is outbound from GHL's
-  // perspective: rep -> lead. We have no rep DID in the payload; attribute the
-  // call to the rep via userId and label `from` with the repUserId.
-  const repFrom = repUserId ? `rep:${repUserId}` : "rep";
-  const contact = await upsertContact(env, { phone: phoneE164, source: "Local Recording" });
-  const logged = await logCall(env, {
-    direction: "outbound",
-    contactId: contact.id,
-    from: repFrom,
-    to: phoneE164,
-    status: "completed",
-    durationSeconds,
-    startTimeIso,
-    message: `Local call recording (${channel || "desktop"})`,
-    userId: repUserId || undefined,
-  });
-
-  // Attach the audio. GHL's conversation upload caps at 5 MB; larger clips go
-  // to the Medias API and are attached as a link on a follow-up message.
-  if (audio.byteLength <= CONVERSATIONS_MAX_BYTES) {
-    const ghlUrl = await uploadAudio(env, {
-      conversationId: logged.conversationId,
-      audio,
-      filename,
-      contentType,
-    });
-    await logCall(env, {
-      direction: "outbound",
-      contactId: contact.id,
-      from: repFrom,
-      to: phoneE164,
-      status: "completed",
-      durationSeconds,
-      startTimeIso,
-      attachmentUrls: [ghlUrl],
-      message: "Call recording",
-      userId: repUserId || undefined,
-    });
-  } else {
-    const mediaUrl = await uploadMedia(env, { audio, filename, contentType });
-    await logCall(env, {
-      direction: "outbound",
-      contactId: contact.id,
-      from: repFrom,
-      to: phoneE164,
-      status: "completed",
-      durationSeconds,
-      startTimeIso,
-      attachmentUrls: [mediaUrl],
-      message: `Call recording (large file): ${mediaUrl}`,
-      userId: repUserId || undefined,
-    });
-  }
-
-  const state: ClipState = {
-    ghl_message_id: logged.messageId,
-    ghl_conversation_id: logged.conversationId,
-    contact_id: contact.id,
-  };
-  ctx.waitUntil(
-    env.STATE.put(`clip:${callId}`, JSON.stringify(state), { expirationTtl: CLIP_TTL_SECONDS }),
+  // Store the clip (covers the clip-arrived-before-webhook race and gives a
+  // single attach path). Saving is idempotent on clientCallId, so an agent retry
+  // just overwrites the pending row/file.
+  const stored = await env.CLIPS.save(
+    { clientCallId, zoomCallId, phoneE164: phoneE164 ?? "", connectTsMs, endTsMs, channel, repKey, direction, contentType },
+    bytes,
   );
-  console.log("ingest: attached", callId, "contact", contact.id, "msg", logged.messageId);
-  return Response.json({ ghlMessageId: logged.messageId }, { status: 200 });
+
+  // Webhook-first: if the Zoom call is already logged, attach now — by exact
+  // Zoom call_id (agent resolved it via device-IP match), else by phone + time.
+  let match = zoomCallId ? await findCallStateByCallId(env, zoomCallId) : null;
+  if (!match && phoneE164) match = await findCallStateByPhone(env, phoneE164, connectTsMs);
+  if (match) {
+    try {
+      const { messageId } = await attachClipToCall(env, stored, match.state);
+      console.log("ingest: correlated + attached", clientCallId, "call", match.callId, "→ msg", messageId);
+      return Response.json({ ghlMessageId: messageId, correlated: true }, { status: 200 });
+    } catch (err) {
+      console.error(
+        "ingest: attach failed, leaving pending",
+        clientCallId,
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
+      // fall through — clip stays pending; the webhook handler or sweep retries.
+    }
+  }
+
+  // Clip-first: leave it pending; handleCallLog attaches it when the call logs.
+  console.log("ingest: stored pending", clientCallId, "callId", zoomCallId ?? "(none)", "phone", phoneE164 ?? "(none)");
+  return Response.json({ correlated: false, pending: true }, { status: 200 });
 }
 
-function str(v: string | null): string {
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function extFor(contentType: string): string {
+  if (contentType.includes("wav")) return "wav";
+  if (contentType.includes("mp4") || contentType.includes("m4a")) return "m4a";
+  return "mp3";
+}
+
+type FormValue = ReturnType<FormData["get"]>;
+
+function str(v: FormValue): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-function num(v: string | null): number {
+function num(v: FormValue): number {
   const n = typeof v === "string" ? Number(v) : NaN;
   return Number.isFinite(n) ? n : 0;
 }

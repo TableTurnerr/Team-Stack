@@ -36,6 +36,7 @@ public class RecordingUploadService : IDisposable
     private string? _workerBaseUrl;
     private string? _agentToken;
     private string? _repUserId;
+    private ZoomPhoneApiService? _zoomApi;
 
     private CancellationTokenSource? _cts;
     private Task? _uploadTask;
@@ -73,6 +74,10 @@ public class RecordingUploadService : IDisposable
     {
         _storage = storage;
     }
+
+    /// <summary>Wire the Zoom Phone API client so uploads can resolve the real
+    /// call_id + external number from call_history via a device-IP match.</summary>
+    public void SetZoomApi(ZoomPhoneApiService zoomApi) => _zoomApi = zoomApi;
 
     /// <summary>
     /// Configure the GHL worker upload target. Recordings are POSTed to
@@ -212,15 +217,46 @@ public class RecordingUploadService : IDisposable
         // Track attempt time for non-blocking backoff
         lock (_lastAttemptTime) { _lastAttemptTime[entry.FileName] = DateTime.UtcNow; }
 
-        // Derive the worker ingest metadata from the recording. The callId is
-        // minted deterministically from (channel, rep, connect time) so a retry
-        // dedups against the first attempt (the worker keys clip:{callId} in KV).
+        // Derive the worker ingest metadata from the recording. Prefer the
+        // dashboard-issued client call id (bound to the dial) so a retry dedups
+        // against the first attempt; otherwise mint a deterministic id from
+        // (channel, rep, connect time), which is equally retry-stable. The
+        // worker keys clip:{clientCallId} for idempotency.
         var channel = string.IsNullOrEmpty(entry.Channel) ? "desktop" : entry.Channel;
         var rep = repUserId ?? "";
         var connectTsMs = new DateTimeOffset(
             DateTime.SpecifyKind(entry.StartTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
         var endTsMs = connectTsMs + (long)entry.DurationSeconds * 1000;
-        var callId = $"{channel}:{rep}:{connectTsMs}";
+        var clientCallId = !string.IsNullOrEmpty(entry.ClientCallId)
+            ? entry.ClientCallId!
+            : $"{channel}:{rep}:{connectTsMs}";
+
+        // Resolve the real Zoom call_id + external number from call_history by
+        // matching THIS machine's device IP + the recording start time, so the
+        // worker can correlate by exact call_id. On the shared Zoom account this
+        // is how the desktop number is obtained at all (it isn't reliably visible
+        // in the desktop UI). Best-effort; falls back to phone+time on the worker.
+        if (string.IsNullOrEmpty(entry.ZoomCallId) && _zoomApi is { IsConfigured: true })
+        {
+            try
+            {
+                var startUtc = DateTime.SpecifyKind(entry.StartTime, DateTimeKind.Utc);
+                var (cid, phone) = await _zoomApi.ResolveOwnCallAsync(startUtc);
+                if (!string.IsNullOrEmpty(cid))
+                {
+                    _storage.UpdateEntry(entry.FileName, e =>
+                    {
+                        e.ZoomCallId = cid;
+                        if (!string.IsNullOrEmpty(phone)) e.PhoneNumber = phone;
+                    });
+                    entry.ZoomCallId = cid;
+                    if (!string.IsNullOrEmpty(phone)) entry.PhoneNumber = phone;
+                    FileLogger.Write($"[Upload] Resolved Zoom call {cid} for {entry.FileName} (phone={phone})");
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"[Upload] Zoom call resolve failed: {ex.Message}"); }
+        }
+
         var phoneE164 = (entry.PhoneNumber ?? "").Trim();
         var isWav = entry.FileName.EndsWith(".wav", StringComparison.OrdinalIgnoreCase);
         var contentType = isWav ? "audio/wav" : "audio/mpeg";
@@ -241,9 +277,11 @@ public class RecordingUploadService : IDisposable
             fileContent.Headers.ContentLength = totalBytes;
             form.Add(fileContent, "clip", entry.FileName);
 
-            form.Add(new StringContent(callId), "callId");
-            form.Add(new StringContent(rep), "repUserId");
+            // Identifier-only payload: the worker owns direction + contact match.
+            form.Add(new StringContent(clientCallId), "clientCallId");
+            form.Add(new StringContent(rep), "repKey");
             form.Add(new StringContent(channel), "channel");
+            if (!string.IsNullOrEmpty(entry.ZoomCallId)) form.Add(new StringContent(entry.ZoomCallId), "zoomCallId");
             if (!string.IsNullOrEmpty(phoneE164)) form.Add(new StringContent(phoneE164), "phoneE164");
             form.Add(new StringContent(connectTsMs.ToString()), "connectTsMs");
             form.Add(new StringContent(endTsMs.ToString()), "endTsMs");

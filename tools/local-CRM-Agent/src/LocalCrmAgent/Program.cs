@@ -55,12 +55,15 @@ static class Program
         var fusion = new CallStateFusion(audioMonitor, windowMonitor, uiWatcher, intentTracker);
         var micManager = new MicrophoneManager(fusion);
         var storageManager = new RecordingStorageManager();
-        var recorder = new AudioRecorderService(storageManager, fusion, micManager, intentTracker);
+        var recorder = new AudioRecorderService(storageManager, fusion, micManager, intentTracker, audioMonitor);
         var uploader = new RecordingUploadService(storageManager);
         var zoomSuppressor = new ZoomWindowSuppressor();
         var zoomApi = new ZoomPhoneApiService();
         var callController = new ZoomCallController(zoomSuppressor, windowMonitor);
         callController.SetApiService(zoomApi);
+        // Let the uploader resolve the real Zoom call_id + number from call_history
+        // (device-IP match) so recordings correlate to the right call exactly.
+        uploader.SetZoomApi(zoomApi);
         var wsServer = new AgentWebSocketServer(fusion, networkMonitor, audioMonitor);
         wsServer.SetDialIntentTracker(intentTracker);
         wsServer.SetRecordingServices(recorder, uploader, storageManager);
@@ -85,9 +88,12 @@ static class Program
             : Environment.GetEnvironmentVariable("CRM_AGENT_WORKER_URL");
         var agentToken = config.GetUnprotectedAgentToken()
             ?? Environment.GetEnvironmentVariable("CRM_AGENT_TOKEN");
+        // repKey = the rep's GoHighLevel user id (device-provisioned). Accept the
+        // new CRM_AGENT_REP_KEY name, falling back to the legacy var.
         var repUserId = !string.IsNullOrEmpty(config.RepUserId)
             ? config.RepUserId
-            : Environment.GetEnvironmentVariable("CRM_AGENT_REP_USER_ID");
+            : (Environment.GetEnvironmentVariable("CRM_AGENT_REP_KEY")
+               ?? Environment.GetEnvironmentVariable("CRM_AGENT_REP_USER_ID"));
         if (!string.IsNullOrEmpty(workerUrl) && !string.IsNullOrEmpty(agentToken))
         {
             uploader.SetWorkerConfig(workerUrl, agentToken, repUserId);

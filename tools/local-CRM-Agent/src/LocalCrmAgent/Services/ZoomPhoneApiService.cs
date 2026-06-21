@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http.Headers;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 
@@ -345,6 +348,133 @@ public class ZoomPhoneApiService : IDisposable
         return await EndCallByIdAsync(last.CallId);
     }
 
+    // ── Recording correlation: resolve THIS machine's call ───────────────
+
+    /// <summary>
+    /// Resolve the real Zoom call_id and the external party's E.164 number for a
+    /// call recorded on THIS machine, by matching Zoom's call_history against the
+    /// local device IP + the recording's start time. On the shared Zoom account
+    /// every machine has a distinct device_private_ip, so this is an exact
+    /// per-device match (a machine can only be on one call at a time). Retries
+    /// briefly because call_history can lag a few seconds after hangup.
+    /// Returns (null, null) when there is no confident match.
+    /// </summary>
+    public async Task<(string? CallId, string? PhoneE164)> ResolveOwnCallAsync(
+        DateTime startUtc, int attempts = 4, int delayMs = 2500)
+    {
+        var localIps = GetLocalIPv4Set();
+        if (localIps.Count == 0)
+        {
+            Debug.WriteLine("[ZoomAPI] ResolveOwnCall: no local IPv4 addresses");
+            return (null, null);
+        }
+
+        for (int i = 0; i < attempts; i++)
+        {
+            var calls = await GetRecentCallHistoryAsync(30);
+            ZoomCallRecord? best = null;
+            double bestDelta = double.MaxValue;
+            foreach (var c in calls)
+            {
+                if (string.IsNullOrEmpty(c.DevicePrivateIp) || !localIps.Contains(c.DevicePrivateIp)) continue;
+                if (c.StartTime == null) continue;
+                var delta = Math.Abs((c.StartTime.Value - startUtc).TotalSeconds);
+                if (delta > 180) continue; // generous window; the IP already disambiguates
+                if (delta < bestDelta) { bestDelta = delta; best = c; }
+            }
+            if (best != null)
+            {
+                var phone = string.Equals(best.Direction, "outbound", StringComparison.OrdinalIgnoreCase)
+                    ? best.CalleeNumber : best.CallerNumber;
+                Debug.WriteLine($"[ZoomAPI] Resolved own call {best.CallId} (Δ{bestDelta:F0}s, ip {best.DevicePrivateIp}) phone={phone}");
+                return (best.CallId, phone);
+            }
+            if (i < attempts - 1) await Task.Delay(delayMs);
+        }
+        Debug.WriteLine("[ZoomAPI] ResolveOwnCall: no device-IP + time match in call_history");
+        return (null, null);
+    }
+
+    private async Task<List<ZoomCallRecord>> GetRecentCallHistoryAsync(int pageSize)
+    {
+        var token = await GetAccessTokenAsync();
+        if (token == null) return [];
+
+        string? userId;
+        lock (_lock) userId = _zoomUserId;
+        if (userId == null) return [];
+
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"{_apiBase}/phone/users/{userId}/call_history?page_size={pageSize}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var response = await _http.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                Debug.WriteLine($"[ZoomAPI] call_history failed ({response.StatusCode}): {body}");
+                return [];
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var list = new List<ZoomCallRecord>();
+            if (doc.RootElement.TryGetProperty("call_logs", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in arr.EnumerateArray())
+                {
+                    list.Add(new ZoomCallRecord
+                    {
+                        CallId = item.TryGetProperty("call_id", out var id) ? id.GetString() ?? "" : "",
+                        Direction = item.TryGetProperty("direction", out var d) ? d.GetString() : null,
+                        CalleeNumber = item.TryGetProperty("callee_did_number", out var ce) ? ce.GetString() : null,
+                        CallerNumber = item.TryGetProperty("caller_did_number", out var ca) ? ca.GetString() : null,
+                        DevicePrivateIp = item.TryGetProperty("device_private_ip", out var ip) ? ip.GetString() : null,
+                        StartTime = ParseUtc(item, "start_time"),
+                    });
+                }
+            }
+            return list;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ZoomAPI] call_history error: {ex.Message}");
+            return [];
+        }
+    }
+
+    private static DateTime? ParseUtc(JsonElement obj, string prop)
+    {
+        if (!obj.TryGetProperty(prop, out var v) || v.ValueKind != JsonValueKind.String) return null;
+        return DateTime.TryParse(v.GetString(), CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var dt)
+            ? dt : null;
+    }
+
+    private static HashSet<string> GetLocalIPv4Set()
+    {
+        var set = new HashSet<string>();
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork)
+                        set.Add(ua.Address.ToString());
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ZoomAPI] local IP enumeration failed: {ex.Message}");
+        }
+        return set;
+    }
+
     public void Dispose()
     {
         _http.Dispose();
@@ -357,4 +487,14 @@ public class ZoomActiveCall
     public string? PhoneNumber { get; set; }
     public string? Direction { get; set; }
     public string? Status { get; set; }
+}
+
+public class ZoomCallRecord
+{
+    public string CallId { get; set; } = "";
+    public string? Direction { get; set; }
+    public string? CalleeNumber { get; set; }
+    public string? CallerNumber { get; set; }
+    public string? DevicePrivateIp { get; set; }
+    public DateTime? StartTime { get; set; }
 }

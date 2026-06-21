@@ -32,7 +32,10 @@ public class AgentConfig
     // ── GHL worker upload config (recordings now attach to GHL via the worker) ──
     /// <summary>Base URL of the zoomphone-bridge worker (e.g. https://zoomphone-bridge.example.workers.dev).</summary>
     [JsonPropertyName("workerBaseUrl")] public string? WorkerBaseUrl { get; set; }
-    /// <summary>Rep identity for attribution; ideally the rep's Zoom user_id.</summary>
+    /// <summary>Rep identity for attribution = the rep's GoHighLevel user id
+    /// (the "repKey"). Device-provisioned, one per machine, because the whole
+    /// team shares a single Zoom account so the Zoom user_id can't identify the
+    /// rep. Sent to the worker as <c>repKey</c>.</summary>
     [JsonPropertyName("repUserId")] public string? RepUserId { get; set; }
     /// <summary>DPAPI-encrypted, base64-encoded worker AGENT_SHARED_TOKEN. Scope = current user.</summary>
     [JsonPropertyName("agentTokenProtected")] public string? AgentTokenProtected { get; set; }

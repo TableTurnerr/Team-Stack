@@ -1,0 +1,5 @@
+{
+  "version": "5.1",
+  "releaseNotes": "Stable 5.0: the extension now lives in the TableTurnerr Team-Stack monorepo and updates are delivered through the Tool Manager (released as lead-scraper-v*). No feature changes from 4.2; this release marks the move and repoints the in-app updater to the new release feed.",
+  "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
+}

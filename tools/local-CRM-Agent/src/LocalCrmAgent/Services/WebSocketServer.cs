@@ -292,6 +292,9 @@ public class AgentWebSocketServer : IDisposable
                 case "setUploadConfig":
                     HandleSetUploadConfig(doc.RootElement);
                     break;
+                case "setWorkerConfig":
+                    HandleSetWorkerConfig(doc.RootElement);
+                    break;
                 case "getMicrophones":
                     HandleGetMicrophones(client);
                     break;
@@ -415,16 +418,18 @@ public class AgentWebSocketServer : IDisposable
     {
         if (_recorder == null) return;
         var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
-        var (success, error) = _recorder.StartRecording(phone);
-        Debug.WriteLine($"[WS] startRecording: success={success} error={error}");
+        var channel = root.TryGetProperty("channel", out var c) ? c.GetString() ?? "desktop" : "desktop";
+        var (success, error) = _recorder.StartRecording(phone, channel);
+        Debug.WriteLine($"[WS] startRecording: success={success} error={error} channel={channel}");
     }
 
     private void HandleForceStartRecording(JsonElement root)
     {
         if (_recorder == null) return;
         var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
-        var (success, error) = _recorder.StartRecording(phone);
-        Debug.WriteLine($"[WS] forceStartRecording: success={success} error={error}");
+        var channel = root.TryGetProperty("channel", out var c) ? c.GetString() ?? "desktop" : "desktop";
+        var (success, error) = _recorder.StartRecording(phone, channel);
+        Debug.WriteLine($"[WS] forceStartRecording: success={success} error={error} channel={channel}");
     }
 
     private void HandleStopRecording()
@@ -559,18 +564,30 @@ public class AgentWebSocketServer : IDisposable
         BroadcastUploadQueueStatus();
     }
 
+    // Deprecated: recordings now attach to GHL via the worker, not PocketBase.
+    // Kept as a no-op so an older dashboard that still relays setUploadConfig
+    // doesn't get an error. Use setWorkerConfig instead.
     private void HandleSetUploadConfig(JsonElement root)
     {
+        Debug.WriteLine("[WS] setUploadConfig ignored — PocketBase upload retired; use setWorkerConfig.");
+    }
+
+    /// <summary>
+    /// Provision the GHL worker upload target (worker base URL + shared agent
+    /// token + repUserId). Persisted DPAPI-encrypted so uploads survive restart.
+    /// </summary>
+    private void HandleSetWorkerConfig(JsonElement root)
+    {
         if (_uploader == null) return;
-        var url = root.TryGetProperty("pocketbaseUrl", out var u) ? u.GetString() : null;
-        var token = root.TryGetProperty("authToken", out var t) ? t.GetString() : null;
-        var uploader = root.TryGetProperty("uploaderId", out var i) ? i.GetString() : null;
-        if (url != null && token != null && uploader != null)
+        var workerUrl = root.TryGetProperty("workerBaseUrl", out var u) ? u.GetString() : null;
+        var token = root.TryGetProperty("agentToken", out var t) ? t.GetString() : null;
+        var repUserId = root.TryGetProperty("repUserId", out var r) ? r.GetString() : null;
+        if (!string.IsNullOrEmpty(workerUrl) && !string.IsNullOrEmpty(token))
         {
-            _uploader.SetAuth(url, token, uploader);
-            _config?.SetAuth(url, token, uploader);
+            _uploader.SetWorkerConfig(workerUrl, token, repUserId);
+            _config?.SetWorkerConfig(workerUrl, token, repUserId);
             _config?.Save();
-            // Re-auth from the dashboard clears any pending auth_required state.
+            // Re-provisioning clears any pending auth_required state.
             ClearAuthRequired();
         }
     }

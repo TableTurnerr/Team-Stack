@@ -1,0 +1,85 @@
+name: Build Lead Scraper Extension
+
+# The extension source lives in this repo at tools/chrome-extension/extension.
+# This workflow packages it as a `chrome-extension` Tool Manager tool and publishes
+# a `lead-scraper-v<version>` release (version from the extension's manifest.json),
+# where the Tool Manager discovers it alongside the other tools.
+#
+# Run it from the Actions tab (Run workflow), or let it fire automatically when the
+# extension source changes on the release branch (matching the other tool workflows).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [release]
+    paths:
+      - 'tools/chrome-extension/extension/**'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content 'tools/chrome-extension/extension/manifest.json' -Raw | ConvertFrom-Json).version
+          if (-not $version) { throw "No version in extension manifest.json" }
+          "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Check if release already exists
+        id: check
+        shell: bash
+        run: |
+          if gh release view "lead-scraper-v${{ steps.version.outputs.VERSION }}" &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release lead-scraper-v${{ steps.version.outputs.VERSION }} already exists, skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Package
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force publish | Out-Null
+          Copy-Item -Path 'tools/chrome-extension/extension/*' -Destination publish -Recurse -Force
+          # Drop plumbing that shouldn't ship inside the extension
+          foreach ($d in '.git', '.github', 'node_modules', 'dist', 'dist-dev') {
+            $p = Join-Path publish $d
+            if (Test-Path $p) { Remove-Item -Recurse -Force $p }
+          }
+          $gi = Join-Path publish '.gitignore'
+          if (Test-Path $gi) { Remove-Item -Force $gi }
+          @{
+            id = "lead-scraper"
+            name = "Lead Scraper Extension"
+            description = "Chrome extension for Google Maps lead scraping, GoHighLevel enrichment, and Zoom web-phone call detection."
+            type = "chrome-extension"
+            version = "${{ steps.version.outputs.VERSION }}"
+          } | ConvertTo-Json -Depth 3 | Set-Content publish/tool.json
+          Copy-Item tools/chrome-extension/install.bat publish/
+          Copy-Item tools/chrome-extension/uninstall.bat publish/
+          Compress-Archive -Path publish/* -DestinationPath "LeadScraperExtension-v${{ steps.version.outputs.VERSION }}.zip"
+
+      - name: Create release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lead-scraper-v${{ steps.version.outputs.VERSION }}
+          name: Lead Scraper Extension v${{ steps.version.outputs.VERSION }}
+          body: |
+            Automated release of the Lead Scraper Chrome extension v${{ steps.version.outputs.VERSION }}
+            (source: tools/chrome-extension/extension).
+
+            **New users:** Install via the TableTurnerr Tool Manager.
+            **Existing users:** The Tool Manager updates it automatically.
+          files: LeadScraperExtension-v${{ steps.version.outputs.VERSION }}.zip

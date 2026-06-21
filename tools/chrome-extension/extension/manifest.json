@@ -1,0 +1,106 @@
+{
+  "manifest_version": 3,
+  "name": "TableTurner Lead Scraper",
+  "version": "5.1",
+  "description": "TableTurner Lead Scraper - Chrome extension for lead generation with GoHighLevel integration",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2qXBuC5uVswyJWsojc8GkvUK50qS88P9tBUScYrQO7iiKQIAlnOw2yp6XATPVm9psWwMzTtgVs8ZFlgFuzk8Yc5XLDAuWn4FGm0XY8BSd1PJpQ8kzbNoF/co9sgEHHTl5Sylrf2Qhs4W6MKTMlEDigdA3CEcqRLHqHqVdU6paRL3g7yaT19Om3Wn3SMNyQ7aEJmhhgyIEwHnpZDX7a631Kqno+NIQGiC1jhHsFe3kxAEPmKm6+02woXkAwUq78gvTGLvS2vG4rs3VWg0CkEkFVwj9nFh8YAOT34e0FCAa4iYYKPmk7IIpCT8rtfDeD2JXPxcjh2NvXsfI1o3j//o9QIDAQAB",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "scripting",
+    "storage",
+    "unlimitedStorage",
+    "notifications",
+    "alarms",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://www.google.com/maps/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.google.com/maps/*"
+      ],
+      "js": [
+        "manual_mode_maps.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.gohighlevel.com/*",
+        "https://*.leadconnectorhq.com/*",
+        "https://ghl.tableturnerr.com/*"
+      ],
+      "js": [
+        "ghl_enhancements.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://app.zoom.us/*",
+        "https://pwa.zoom.us/*",
+        "https://*.zoom.us/*"
+      ],
+      "js": [
+        "zoom_call_detect_main.js"
+      ],
+      "world": "MAIN",
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://app.zoom.us/*",
+        "https://pwa.zoom.us/*",
+        "https://*.zoom.us/*"
+      ],
+      "js": [
+        "zoom_call_detect.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_start"
+    }
+  ],
+  "commands": {
+    "scrape": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S"
+      },
+      "description": "Scrape Google Maps from active tab"
+    },
+    "toggle_manual_overlay": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+M"
+      },
+      "description": "Toggle manual mode overlay"
+    },
+    "manual_add_to_list": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Add current item to list (Manual Mode)"
+    },
+    "open_website": {
+      "suggested_key": {
+        "default": "Alt+Shift+W"
+      },
+      "description": "Open business website (Manual Mode)"
+    }
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

@@ -1,0 +1,1427 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>TableTurner Lead Scraper</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+
+    /* ── Design tokens (light) ───────────────────────── */
+    :root {
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --surface-2: #f1f3f4;
+      --border: #e2e5eb;
+      --border-focus: #1a73e8;
+      --text: #202124;
+      --text-2: #3c4043;
+      --text-muted: #5f6368;
+      --text-faint: #80868b;
+      --primary: #1a73e8;
+      --primary-dark: #1558c0;
+      --primary-shadow: rgba(26,115,232,0.28);
+      --success: #34a853;
+      --success-bg: #e8f5e9;
+      --success-border: #a5d6a7;
+      --danger: #ea4335;
+      --danger-dark: #c5221f;
+      --danger-shadow: rgba(234,67,53,0.28);
+      --warning: #fbbc04;
+      --neutral: #3c4043;
+      --mode-bg: #e2e5eb;
+      --mode-active-bg: #ffffff;
+      --header-gradient: linear-gradient(135deg, #1557b0 0%, #1a73e8 60%, #4285f4 100%);
+      --pill-off: #bdc1c6;
+    }
+
+    /* ── Dark mode tokens ────────────────────────────── */
+    [data-theme="dark"] {
+      --bg: #16161e;
+      --surface: #1e1e2a;
+      --surface-2: #252535;
+      --border: #35354a;
+      --border-focus: #4285f4;
+      --text: #e8eaed;
+      --text-2: #bdc1c6;
+      --text-muted: #9aa0a6;
+      --text-faint: #6c7075;
+      --primary: #4285f4;
+      --primary-dark: #1a73e8;
+      --primary-shadow: rgba(66,133,244,0.3);
+      --success: #34a853;
+      --success-bg: #1a2e1e;
+      --success-border: #2d5a37;
+      --danger: #ea4335;
+      --danger-dark: #d33426;
+      --danger-shadow: rgba(234,67,53,0.3);
+      --warning: #fbbc04;
+      --neutral: #5f6368;
+      --mode-bg: #252535;
+      --mode-active-bg: #35354a;
+      --header-gradient: linear-gradient(135deg, #0f2d5c 0%, #1557b0 60%, #1a73e8 100%);
+      --pill-off: #5f6368;
+    }
+
+    body {
+      min-width: 590px;
+      padding: 0;
+      font-family: 'Poppins', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    /* ── App Header ─────────────────────────────────── */
+    .app-header {
+      background: var(--header-gradient);
+      padding: 16px 20px 14px;
+      color: white;
+    }
+    .app-header-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .app-logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+      flex-shrink: 0;
+    }
+    .app-header-titles { flex: 1; }
+    h1 {
+      font-weight: 700;
+      font-size: 19px;
+      margin: 0 0 2px 0;
+      letter-spacing: -0.3px;
+      line-height: 1.2;
+    }
+    .header-byline { font-size: 12px; opacity: 0.82; }
+    .header-byline a { color: white; text-decoration: none; }
+    .header-byline a:hover { text-decoration: underline; }
+    .app-version-badge {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      vertical-align: middle;
+      background: rgba(255,255,255,0.22);
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 999px;
+      color: white;
+    }
+    .app-version-badge:empty { display: none; }
+
+    /* Header right-side controls */
+    .header-controls { display: flex; gap: 8px; align-items: center; }
+    .icon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.22);
+      color: white;
+      cursor: pointer;
+      transition: background 0.18s;
+      flex-shrink: 0;
+    }
+    .icon-btn:hover { background: rgba(255,255,255,0.25); }
+    .icon-btn.open { background: rgba(255,255,255,0.35); }
+    .icon-btn svg { display: block; }
+
+    .shortcut-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+    .shortcut-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+    }
+    .shortcut-badge svg { flex-shrink: 0; }
+
+    /* ── Body ────────────────────────────────────────── */
+    .body-content { padding: 16px 20px 20px; }
+
+    /* ── Master Power Bar ───────────────────────────── */
+    .master-power-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 14px;
+      background: var(--success-bg);
+      border: 1.5px solid var(--success-border);
+      border-radius: 10px;
+      margin-bottom: 14px;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .master-power-bar.off {
+      background: var(--surface-2);
+      border-color: var(--border);
+    }
+    .master-power-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+    .master-power-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--success);
+      color: white;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .master-power-bar.off .master-power-icon {
+      background: var(--text-faint);
+    }
+    .master-power-text-block { min-width: 0; }
+    .master-power-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .master-power-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.3;
+      margin-top: 1px;
+    }
+    .master-power-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .leads-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--text-2);
+      min-width: 28px;
+      justify-content: center;
+    }
+    .leads-badge.has-items {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+
+    /* Disabled-extension body state */
+    #extensionContent.disabled {
+      opacity: 0.4;
+      pointer-events: none;
+      filter: grayscale(0.4);
+      transition: opacity 0.2s, filter 0.2s;
+    }
+
+    /* ── Mode Toggle ─────────────────────────────────── */
+    .mode-toggle-container {
+      display: flex;
+      gap: 5px;
+      padding: 4px;
+      background: var(--mode-bg);
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 9px 10px;
+      border: none;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-family: 'Poppins', sans-serif;
+    }
+    .mode-btn.active {
+      background: var(--mode-active-bg);
+      color: var(--primary);
+      box-shadow: 0 1px 5px rgba(0,0,0,0.13);
+    }
+    .mode-btn:hover:not(.active) { background: rgba(255,255,255,0.35); }
+
+    /* ── Status Message ──────────────────────────────── */
+    #message {
+      font-size: 13.5px;
+      padding: 11px 14px;
+      background: var(--surface);
+      border-radius: 9px;
+      border: 1.5px solid var(--border);
+      color: var(--text-2);
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+
+    /* ── Buttons ─────────────────────────────────────── */
+    .button {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 16px;
+      border: none;
+      color: white;
+      background: var(--primary);
+      cursor: pointer;
+      transition: background 0.18s, box-shadow 0.18s, transform 0.12s;
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .button:hover {
+      background: var(--primary-dark);
+      box-shadow: 0 2px 8px var(--primary-shadow);
+      transform: translateY(-1px);
+    }
+    .button:active { transform: translateY(0); box-shadow: none; }
+    .button:disabled, .button[disabled] {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+    .button.full { width: 100%; justify-content: center; padding: 11px 16px; }
+
+    .button.red-btn { background: var(--danger); }
+    .button.red-btn:hover { background: var(--danger-dark); box-shadow: 0 2px 8px var(--danger-shadow); }
+
+    .button.black-btn { background: var(--neutral); }
+    .button.black-btn:hover { background: #202124; box-shadow: 0 2px 8px rgba(60,64,67,0.3); }
+
+    .button.green-btn { background: var(--success); }
+    .button.green-btn:hover { background: #2b8c46; box-shadow: 0 2px 8px rgba(52,168,83,0.3); }
+
+    .input {
+      padding: 9px 13px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      background: var(--surface);
+      color: var(--text);
+      transition: border-color 0.18s;
+    }
+    .input:focus { border-color: var(--border-focus); outline: none; }
+
+    /* ── Scraping Mode ───────────────────────────────── */
+    #scrapingModeSection .button { width: 100%; justify-content: center; }
+
+    /* Pause | Stop split row (overrides the 100%-width rule above) */
+    .run-controls { display: flex; gap: 8px; margin-top: 4px; }
+    #scrapingModeSection .run-controls .button { width: auto; flex: 1; }
+
+    /* Saved sessions list */
+    .sessions-panel {
+      margin-top: 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 10px 12px;
+    }
+    .sessions-header {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 11px; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .04em;
+      margin-bottom: 8px;
+    }
+    .session-card {
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+      padding: 9px 11px;
+      margin-bottom: 8px;
+    }
+    .session-card:last-child { margin-bottom: 0; }
+    .session-name { font-size: 13px; font-weight: 600; color: var(--text); word-break: break-word; }
+    .session-meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
+    .session-actions { display: flex; gap: 7px; margin-top: 9px; }
+    #scrapingModeSection .session-actions .button { width: auto; flex: 1; padding: 7px 10px; font-size: 12px; }
+    .sessions-empty { font-size: 12px; color: var(--text-muted); }
+
+    /* Stop-session modal */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; padding: 18px;
+    }
+    .modal-card {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      width: 100%; max-width: 440px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    }
+    .modal-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 11px; }
+    .modal-stats {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px 13px;
+      font-size: 12.5px; color: var(--text-2); line-height: 1.8;
+      margin-bottom: 14px;
+    }
+    .modal-stats strong { color: var(--text); font-weight: 700; }
+    .modal-actions { display: flex; gap: 8px; }
+    .modal-actions .button { width: auto; flex: 1; justify-content: center; }
+    .modal-cancel {
+      display: block; width: 100%; margin-top: 10px;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-family: 'Poppins', sans-serif;
+      font-size: 12.5px; font-weight: 600; padding: 6px;
+    }
+    .modal-cancel:hover { color: var(--text); }
+
+    .scrape-form {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      margin-bottom: 10px;
+    }
+    .scrape-field { display: flex; flex-direction: column; gap: 3px; }
+    .scrape-field label {
+      font-weight: 700;
+      color: var(--text-muted);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .scrape-row { display: flex; gap: 9px; }
+    .scrape-row .scrape-field { flex: 1; }
+    .scrape-field.radius-field { max-width: 160px; }
+
+    /* Conditions builder (Rating / Reviews operator + value) */
+    .cond-grid { display: flex; flex-direction: column; gap: 7px; }
+    .cond-row { display: flex; align-items: center; gap: 8px; }
+    .cond-name {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex: 0 0 86px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .cond-name svg { color: var(--text-muted); flex-shrink: 0; }
+    .cond-op {
+      flex: 0 0 64px;
+      padding: 8px 6px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.18s;
+    }
+    .cond-op:focus { border-color: var(--border-focus); outline: none; }
+    .cond-val {
+      flex: 1;
+      padding: 8px 11px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      background: var(--surface);
+      color: var(--text);
+      transition: border-color 0.18s, opacity 0.18s;
+    }
+    .cond-val:focus { border-color: var(--border-focus); outline: none; }
+    .cond-val:disabled { opacity: 0.45; cursor: not-allowed; }
+    #scrapeStatus {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin: 4px 0 8px;
+      min-height: 15px;
+      line-height: 1.4;
+    }
+    #scrapeStatus.active { color: var(--success); font-weight: 600; }
+
+    /* ── Manual Mode ─────────────────────────────────── */
+    .manual-mode-info {
+      padding: 14px 16px;
+      background: var(--success-bg);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      border: 1.5px solid var(--success-border);
+    }
+    .manual-mode-info h3 {
+      margin: 0 0 8px 0;
+      color: var(--success);
+      font-size: 14.5px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .manual-mode-info p { margin: 5px 0; color: var(--text-2); font-size: 12.5px; line-height: 1.4; }
+    .manual-mode-info ul { margin: 5px 0; padding-left: 16px; font-size: 12.5px; color: var(--text-2); }
+    .manual-mode-info li { margin: 2px 0; }
+    .manual-mode-info small { color: var(--text-muted); }
+
+    /* Auto-popup row */
+    .auto-popup-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 13px;
+      background: var(--surface);
+      border-radius: 9px;
+      border: 1.5px solid var(--border);
+      margin-bottom: 10px;
+    }
+    .auto-popup-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Pill Toggle */
+    .pill-toggle {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      width: 52px;
+      height: 26px;
+      background: var(--pill-off);
+      border-radius: 13px;
+      cursor: pointer;
+      border: none;
+      padding: 0;
+      transition: background 0.25s;
+      flex-shrink: 0;
+    }
+    .pill-toggle.on { background: var(--success); }
+    .pill-toggle .pill-knob {
+      position: absolute;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      transition: left 0.25s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    }
+    .pill-toggle.on .pill-knob { left: 29px; }
+    .pill-toggle .pill-text {
+      position: absolute;
+      font-size: 9px;
+      font-weight: 700;
+      color: white;
+      user-select: none;
+      pointer-events: none;
+      letter-spacing: 0.4px;
+    }
+    .pill-toggle.on .pill-text { left: 6px; }
+    .pill-toggle:not(.on) .pill-text { right: 5px; }
+
+    /* ── Panel (shared card style) ───────────────────── */
+    .panel {
+      margin-top: 12px;
+      padding: 14px;
+      background: var(--surface);
+      border-radius: 10px;
+      border: 1.5px solid var(--border);
+    }
+    .panel-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 11px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Controls */
+    .controls-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .controls-row + .controls-row { margin-top: 8px; }
+
+    /* ── CRM Panel ───────────────────────────────────── */
+    .crm-input, #crmAdvancedPanel .crm-input {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      margin-bottom: 10px;
+      box-sizing: border-box;
+      transition: border-color 0.18s;
+      background: var(--surface);
+      color: var(--text);
+    }
+    .crm-input:focus { border-color: var(--border-focus); outline: none; }
+    .crm-settings-panel label, #crmAdvancedPanel label {
+      display: block;
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--text-faint);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-chip.connected { background: var(--success-bg); color: var(--success); }
+    .status-chip-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    /* Legacy dot classes used dynamically by popup.js */
+    .crm-status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .crm-status-dot.connected { background: #34a853; }
+    .crm-status-dot.connecting { background: #fbbc04; animation: crmPulse 1s infinite; }
+    @keyframes crmPulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+    .advanced-toggle-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text-faint);
+      font-family: 'Poppins', sans-serif;
+      padding: 4px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 8px;
+      transition: color 0.15s;
+    }
+    .advanced-toggle-btn:hover { color: var(--primary); }
+    .advanced-toggle-chevron { transition: transform 0.2s; }
+    .advanced-toggle-btn.open .advanced-toggle-chevron { transform: rotate(90deg); }
+
+    /* ── Settings Panel ──────────────────────────────── */
+    .settings-section {
+      margin-top: 12px;
+    }
+    .settings-content {
+      display: none;
+      padding: 14px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+    }
+    .settings-content.open { display: block; }
+
+    /* When Settings is open, show only the settings panel in the popup */
+    body.settings-open #masterPowerBar,
+    body.settings-open #extensionContent > *:not(.settings-section) {
+      display: none !important;
+    }
+    body.settings-open .settings-section { margin-top: 0; }
+
+    /* Settings stay fully usable even when the extension is powered off.
+       The .disabled state greys out and blocks pointer events on the whole
+       #extensionContent (settings panel included). With Settings open the only
+       visible child is .settings-section, so re-enabling the container is safe. */
+    body.settings-open #extensionContent.disabled {
+      opacity: 1;
+      pointer-events: auto;
+      filter: none;
+    }
+    .settings-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      padding-bottom: 10px;
+      margin-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-row-label {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .settings-row-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 400;
+      display: block;
+      margin-top: 1px;
+    }
+
+    /* Exceptions list */
+    .exceptions-list {
+      margin-top: 10px;
+    }
+    .exceptions-sub-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .exception-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      background: var(--surface-2);
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      margin-bottom: 5px;
+    }
+    .exception-hostname {
+      flex: 1;
+      font-size: 12.5px;
+      color: var(--text-2);
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .exception-remove-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--danger);
+      padding: 3px;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .exception-remove-btn:hover { background: rgba(234,67,53,0.12); }
+    .exceptions-empty {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 6px 0;
+    }
+    .exceptions-actions { margin-top: 8px; }
+
+    /* ── Table ───────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1.5px solid var(--border);
+    }
+    th, td { border: 1px solid var(--border); padding: 9px 10px; font-size: 12.5px; }
+    th {
+      padding-top: 11px;
+      padding-bottom: 11px;
+      text-align: left;
+      background: var(--surface-2);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    td { background: var(--surface); color: var(--text-2); }
+    tbody tr:hover td { background: var(--surface-2); }
+  </style>
+</head>
+
+<body>
+  <!-- Header -->
+  <div class="app-header">
+    <div class="app-header-top">
+      <img src="icon.png" class="app-logo" alt="TableTurner">
+      <div class="app-header-titles">
+        <h1>TableTurner Lead Scraper <span id="appVersionBadge" class="app-version-badge"></span></h1>
+        <div class="header-byline">
+          <a href="https://www.youtube.com/@itsmikepowers" target="_blank">By Mike</a>
+          &nbsp;·&nbsp;
+          <a href="https://github.com/Hashaam101/" target="_blank">Improved by Hashaam101</a>
+        </div>
+      </div>
+      <div class="header-controls">
+        <!-- Dark/Light mode toggle -->
+        <button class="icon-btn" id="themeToggleBtn" title="Toggle dark/light mode">
+          <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg id="themeIconMoon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <!-- Settings (gear) / Back arrow when open -->
+        <button class="icon-btn" id="settingsToggleBtn" title="Settings">
+          <svg id="settingsIconGear" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <svg id="settingsIconBack" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="display:none"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="shortcut-badges">
+      <span class="shortcut-badge">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        Ctrl+Shift+Y &mdash; Open Popup
+      </span>
+      <span id="scraping-shortcuts" class="shortcut-badge">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        Ctrl+Shift+S &mdash; Scrape Maps Tab
+      </span>
+    </div>
+  </div>
+
+  <div class="body-content">
+    <!-- Master Power Bar (global on/off + leads count) -->
+    <div class="master-power-bar" id="masterPowerBar">
+      <div class="master-power-info">
+        <span class="master-power-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+            <line x1="12" y1="2" x2="12" y2="12"/>
+          </svg>
+        </span>
+        <div class="master-power-text-block">
+          <div class="master-power-title" id="masterPowerTitle">Extension Active</div>
+          <div class="master-power-sub" id="masterPowerSub">Scraping, overlays &amp; shortcuts enabled</div>
+        </div>
+      </div>
+      <div class="master-power-right">
+        <span class="leads-badge" id="leadsBadge" title="Leads in current list">0</span>
+        <button class="pill-toggle on" id="masterPowerToggle" title="Toggle the entire extension">
+          <div class="pill-knob"></div>
+          <span class="pill-text">ON</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="extensionContent">
+    <!-- Mode Toggle -->
+    <div class="mode-toggle-container">
+      <button id="scrapingModeBtn" class="mode-btn active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        Scraping Mode
+      </button>
+      <button id="manualModeBtn" class="mode-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Manual Mode
+      </button>
+    </div>
+
+    <!-- Scraping Mode Section -->
+    <div id="scrapingModeSection">
+      <div class="scrape-form">
+        <div class="scrape-field">
+          <label>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Business Category
+          </label>
+          <input type="text" id="scrapeCategory" class="input" list="catPresets" placeholder="e.g. Restaurants" autocomplete="off" />
+          <datalist id="catPresets">
+            <option value="Restaurants"></option>
+            <option value="Cafes"></option>
+            <option value="Coffee Shops"></option>
+            <option value="Bars"></option>
+            <option value="Dentists"></option>
+            <option value="Doctors"></option>
+            <option value="Chiropractors"></option>
+            <option value="Gyms"></option>
+            <option value="Hair Salons"></option>
+            <option value="Nail Salons"></option>
+            <option value="Spas"></option>
+            <option value="Barbers"></option>
+            <option value="Auto Repair"></option>
+            <option value="Car Dealers"></option>
+            <option value="Plumbers"></option>
+            <option value="Electricians"></option>
+            <option value="HVAC"></option>
+            <option value="Roofing Contractors"></option>
+            <option value="Landscaping"></option>
+            <option value="Real Estate Agents"></option>
+            <option value="Lawyers"></option>
+            <option value="Accountants"></option>
+            <option value="Insurance Agencies"></option>
+            <option value="Pet Grooming"></option>
+            <option value="Veterinarians"></option>
+            <option value="Florists"></option>
+            <option value="Bakeries"></option>
+            <option value="Hotels"></option>
+          </datalist>
+        </div>
+        <div class="scrape-row">
+          <div class="scrape-field">
+            <label>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              Location
+            </label>
+            <input type="text" id="scrapeLocation" class="input" placeholder="City, State or ZIP" autocomplete="off" />
+          </div>
+          <div class="scrape-field radius-field">
+            <label>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="12" x2="12" y2="2"/></svg>
+              Radius (mi)
+            </label>
+            <select id="scrapeRadius" class="input">
+              <option value="0">Any — full location</option>
+              <option value="5">5 mi</option>
+              <option value="10">10 mi</option>
+              <option value="25">25 mi</option>
+              <option value="50">50 mi — city wide</option>
+              <option value="100">100 mi — regional</option>
+              <option value="200">200 mi</option>
+            </select>
+          </div>
+        </div>
+        <div class="scrape-field">
+          <label>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            Exclude Keywords
+          </label>
+          <input type="text" id="scrapeExclude" class="input" placeholder="e.g. Chinese, Desi, Buffet" autocomplete="off" />
+        </div>
+        <div class="scrape-field">
+          <label>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            Conditions
+            <span style="font-weight:500; color:var(--text-muted); font-size:11px;">only keep places that match</span>
+          </label>
+          <div class="cond-grid">
+            <div class="cond-row">
+              <span class="cond-name">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                Rating
+              </span>
+              <select id="condRatingOp" class="cond-op">
+                <option value="">Any</option>
+                <option value="&gt;=">&#8805; greater than or equal</option>
+                <option value="&gt;">&gt; greater than</option>
+                <option value="&lt;=">&#8804; less than or equal</option>
+                <option value="&lt;">&lt; less than</option>
+                <option value="=">=  equal to</option>
+              </select>
+              <input type="number" id="condRatingVal" class="cond-val" min="0" max="5" step="0.1" placeholder="4.5" />
+            </div>
+            <div class="cond-row">
+              <span class="cond-name">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Reviews
+              </span>
+              <select id="condReviewsOp" class="cond-op">
+                <option value="">Any</option>
+                <option value="&gt;=">&#8805; greater than or equal</option>
+                <option value="&gt;">&gt; greater than</option>
+                <option value="&lt;=">&#8804; less than or equal</option>
+                <option value="&lt;">&lt; less than</option>
+                <option value="=">=  equal to</option>
+              </select>
+              <input type="number" id="condReviewsVal" class="cond-val" min="0" step="10" placeholder="200" />
+            </div>
+          </div>
+        </div>
+        <div class="auto-popup-row" style="margin-top:10px;">
+          <span class="auto-popup-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Turbo Mode
+            <span style="font-weight:500; color:var(--text-muted); font-size:11px;">faster, less detail (not recommended)</span>
+          </span>
+          <button id="turboToggle" class="pill-toggle" type="button" title="Turbo: fast list-only scraping. Off: opens each place for full website, address, city & phone.">
+            <div class="pill-knob"></div>
+            <span class="pill-text">OFF</span>
+          </button>
+        </div>
+        <div class="auto-popup-row">
+          <span class="auto-popup-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Skip Temporarily Closed
+            <span style="font-weight:500; color:var(--text-muted); font-size:11px;">don't add closed places</span>
+          </span>
+          <button id="skipClosedToggle" class="pill-toggle" type="button" title="On: skip businesses marked Temporarily Closed. (Permanently closed are always skipped.)">
+            <div class="pill-knob"></div>
+            <span class="pill-text">ON</span>
+          </button>
+        </div>
+        <div class="auto-popup-row">
+          <span class="auto-popup-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Scrape Websites
+            <span style="font-weight:500; color:var(--text-muted); font-size:11px;">open each site for emails &amp; extra phones</span>
+          </span>
+          <button id="websiteScrapeToggle" class="pill-toggle on" type="button" title="On: visit each lead's website to pull contact emails and any extra phone numbers.">
+            <div class="pill-knob"></div>
+            <span class="pill-text">ON</span>
+          </button>
+        </div>
+        <div class="scrape-field" style="margin-top:10px;">
+          <label>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14.5 13.5"/></svg>
+            Scraping Speed
+            <span style="font-weight:500; color:var(--text-muted); font-size:11px;">slower avoids Google "Server error" rate limits</span>
+          </label>
+          <select id="scrapeSpeed" class="input" title="How fast to click through Google Maps. Slower is gentler and avoids 'Server error' rate limiting.">
+            <option value="fast">Fast — quickest, may hit rate limits</option>
+            <option value="balanced">Balanced — recommended</option>
+            <option value="slow">Slow — safest, avoids errors</option>
+          </select>
+        </div>
+      </div>
+      <div id="scrapeStatus"></div>
+      <!-- Start / Resume (shown when idle). Becomes the Pause|Stop pair while running. -->
+      <button id="actionButton" class="button full">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        Start Scraping
+      </button>
+      <div id="scrapeRunControls" class="run-controls" style="display:none;">
+        <button id="pauseButton" class="button black-btn" title="Pause — keep progress so you can resume from where it stopped">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+          Pause
+        </button>
+        <button id="stopButton" class="button red-btn" title="Stop — choose to save the session for later or delete it">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+          Stop
+        </button>
+      </div>
+
+      <!-- Saved scraping sessions (populated by popup.js; hidden when empty) -->
+      <div id="savedSessionsPanel" class="sessions-panel" style="display:none;">
+        <div class="sessions-header">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="17 3 21 3 21 7"/><path d="M9 12l2.5 2.5L21 5"/></svg>
+          Saved Sessions
+        </div>
+        <div id="savedSessionsList"></div>
+      </div>
+    </div>
+
+    <!-- Manual Mode Section -->
+    <div id="manualModeSection" style="display: none;">
+      <div class="manual-mode-info">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          Manual Mode Active
+        </h3>
+        <p>Visit any Google Maps place or business website to see the info overlay.</p>
+        <ul>
+          <li><strong>Google Maps:</strong> View place details and add with one click</li>
+          <li><strong>Websites:</strong> Auto-scan for contact info, emails &amp; addresses</li>
+        </ul>
+        <p><small>Use <strong>Ctrl+Shift+M</strong> to toggle the overlay on any page.</small></p>
+      </div>
+      <div class="auto-popup-row">
+        <span class="auto-popup-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
+          Auto-Popup Overlay
+        </span>
+        <button id="autoPopupToggle" class="pill-toggle on">
+          <div class="pill-knob"></div>
+          <span class="pill-text">ON</span>
+        </button>
+      </div>
+      <button id="manualAddBtn" class="button green-btn full">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Show Quick Add
+      </button>
+    </div>
+
+    <!-- Shared Controls -->
+    <div class="panel">
+      <div class="panel-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Actions
+      </div>
+      <div class="controls-row">
+        <button id="clearListButton" class="button red-btn" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          Clear List
+        </button>
+        <button id="openTabButton" class="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Open Results Tab
+        </button>
+      </div>
+      <div class="controls-row" style="margin-top: 8px;">
+        <button id="sendAllGhlButton" class="button green-btn full" title="Open the results tab and review every un-synced lead before sending to GoHighLevel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          Send All to GHL
+        </button>
+      </div>
+      <div class="controls-row" style="margin-top: 8px;">
+        <button id="downloadCsvButton" class="button black-btn" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download CSV
+        </button>
+        <input type="text" id="filenameInput" class="input" placeholder="File name..." style="flex: 1; min-width: 120px;" />
+      </div>
+    </div>
+
+    <!-- CRM Connect Panel -->
+    <div class="panel" id="crmConnectPanel">
+      <div class="panel-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        GoHighLevel
+      </div>
+
+      <!-- Disconnected state -->
+      <div id="crmStateDisconnected">
+        <button id="crmConnectBtn" class="button" style="font-size:13px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Connect GoHighLevel
+        </button>
+        <span id="crmConnectStatus" style="margin-left:10px; font-size:12px; color:var(--text-muted);"></span>
+      </div>
+
+      <!-- Connected state -->
+      <div id="crmStateConnected" style="display:none;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span class="status-chip connected">
+            <span class="status-chip-dot"></span>
+            Connected
+          </span>
+          <span id="crmUserEmail" style="font-size:13px; font-weight:600; color:var(--success); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+          <button id="crmDisconnectBtn" class="button red-btn" style="font-size:12px; padding:6px 12px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+            Disconnect
+          </button>
+        </div>
+
+        <!-- Default Sub-Account -->
+        <div style="margin-top:12px; padding-top:11px; border-top:1px dashed var(--border);">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>
+            Default Sub-Account
+          </label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="defaultLocationSelect" class="crm-input" style="flex:1; margin-bottom:0; padding:8px 10px; font-size:12.5px;">
+              <option value="">— Select sub-account —</option>
+            </select>
+            <button id="refreshLocationsBtn" class="icon-btn" title="Refresh sub-accounts" style="width:32px; height:32px; background:var(--surface-2); border:1.5px solid var(--border); color:var(--text-muted);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+            <button id="addSubAccountBtn" class="icon-btn" title="Connect another sub-account" style="width:32px; height:32px; background:var(--surface-2); border:1.5px solid var(--border); color:var(--text-muted);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:5px; line-height:1.4;">Where leads are sent. Connect more sub-accounts with <strong>+</strong>. Override per batch in the results tab.</div>
+          <div id="defaultLocationStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+        </div>
+
+        <!-- Create Opportunity -->
+        <div style="margin-top:12px; padding-top:11px; border-top:1px dashed var(--border);">
+          <label style="display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; color:var(--text-2); cursor:pointer;">
+            <input type="checkbox" id="createOppToggle" style="width:15px; height:15px; cursor:pointer;" />
+            Also create an Opportunity
+          </label>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:5px; line-height:1.4;">When on, each lead also opens an Opportunity in the pipeline/stage below.</div>
+          <div id="createOppStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+
+          <!-- Pipeline + Stage (shown when Create Opportunity is on) -->
+          <div id="pipelineStageWrap" style="display:none; margin-top:10px;">
+            <label style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              Default Pipeline
+            </label>
+            <select id="defaultPipelineSelect" class="crm-input" style="width:100%; margin-bottom:0; padding:8px 10px; font-size:12.5px;">
+              <option value="">— Select pipeline —</option>
+            </select>
+            <div id="defaultPipelineStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+
+            <label style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin:10px 0 6px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              Default Stage
+            </label>
+            <select id="defaultStageSelect" class="crm-input" style="width:100%; margin-bottom:0; padding:8px 10px; font-size:12.5px;">
+              <option value="">— Select stage —</option>
+            </select>
+            <div id="defaultStageStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+          </div>
+        </div>
+
+        <!-- Default Tag -->
+        <div style="margin-top:12px; padding-top:11px; border-top:1px dashed var(--border);">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            Default Tag
+          </label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="defaultTagSelect" class="crm-input" style="flex:1; margin-bottom:0; padding:8px 10px; font-size:12.5px;">
+              <option value="">— None —</option>
+            </select>
+            <button id="refreshTagsBtn" class="icon-btn" title="Refresh tags" style="width:32px; height:32px; background:var(--surface-2); border:1.5px solid var(--border); color:var(--text-muted);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:5px; line-height:1.4;">Maps to a GoHighLevel contact tag. Editable per-lead in the confirm dialog.</div>
+          <div id="defaultTagStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+        </div>
+
+        <!-- Default Assignee -->
+        <div style="margin-top:12px; padding-top:11px; border-top:1px dashed var(--border);">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6M19 8v6"/></svg>
+            Default Assignee
+          </label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="defaultAssigneeSelect" class="crm-input" style="flex:1; margin-bottom:0; padding:8px 10px; font-size:12.5px;">
+              <option value="">— Unassigned (default) —</option>
+            </select>
+            <button id="refreshAssigneesBtn" class="icon-btn" title="Refresh users" style="width:32px; height:32px; background:var(--surface-2); border:1.5px solid var(--border); color:var(--text-muted);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:5px; line-height:1.4;">Picking a user assigns new leads straight to them in GoHighLevel.</div>
+          <div id="defaultAssigneeStatus" style="font-size:11px; color:var(--success); margin-top:5px; display:none; font-weight:600;">✓ Saved</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Panel (dark mode + exceptions) — toggled by the gear icon in the header -->
+    <div class="settings-section">
+      <div class="settings-content" id="settingsContent">
+        <div class="settings-panel-header">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </div>
+        <!-- Dark Mode row -->
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            Dark Mode
+            <span class="settings-row-desc">Switch popup to dark theme</span>
+          </div>
+          <button id="darkModeToggle" class="pill-toggle">
+            <div class="pill-knob"></div>
+            <span class="pill-text">OFF</span>
+          </button>
+        </div>
+
+        <!-- Exceptions -->
+        <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 0;">
+          <div style="display:flex; align-items:center; gap:8px; padding: 4px 0 10px;">
+            <div class="settings-row-label" style="flex:1;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Overlay Exceptions
+              <span class="settings-row-desc">Sites where auto-popup is disabled</span>
+            </div>
+          </div>
+          <div class="exceptions-list" id="exceptionsList">
+            <div class="exceptions-empty">No exceptions added yet.</div>
+          </div>
+          <div class="exceptions-actions" id="exceptionsActions" style="display:none;">
+            <button class="button red-btn" id="clearExceptionsBtn" style="font-size:12px; padding:6px 12px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              Clear All Exceptions
+            </button>
+          </div>
+        </div>
+
+        <!-- Zoom Phone (GoHighLevel) section -->
+        <div class="settings-row" style="padding: 10px 0 6px; border-bottom: none;">
+          <div class="settings-row-label" style="font-size:11px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.58 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.62-.62a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            Zoom Phone (GoHighLevel)
+          </div>
+        </div>
+
+        <!-- Replace GHL dialer with Zoom -->
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.58 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.62-.62a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            Replace GHL dialer with Zoom
+            <span class="settings-row-desc">Route GHL calls to Zoom Phone</span>
+          </div>
+          <button id="zoomEnabledToggle" class="pill-toggle on">
+            <div class="pill-knob"></div>
+            <span class="pill-text">ON</span>
+          </button>
+        </div>
+
+        <!-- Click numbers to call -->
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            Click numbers to call (Zoom)
+            <span class="settings-row-desc">Click any phone number to dial in Zoom</span>
+          </div>
+          <button id="zoomClickToCallToggle" class="pill-toggle on">
+            <div class="pill-knob"></div>
+            <span class="pill-text">ON</span>
+          </button>
+        </div>
+
+        <!-- Hide LeadConnector dialer -->
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 5a10.94 10.94 0 0 0-1.956 2.518m15.892 2.42A5 5 0 0 1 17 20H7a5 5 0 0 1-4.93-4.14"/><path d="M9 9a3 3 0 0 1 5.12 2.12"/></svg>
+            Hide LeadConnector dialer
+            <span class="settings-row-desc">Hide GHL's built-in phone widget</span>
+          </div>
+          <button id="zoomHideLcToggle" class="pill-toggle on">
+            <div class="pill-knob"></div>
+            <span class="pill-text">ON</span>
+          </button>
+        </div>
+
+        <!-- Pre-launch Zoom -->
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Pre-launch Zoom on GHL pages
+            <span class="settings-row-desc">Warm up Zoom so cold-start calls connect</span>
+          </div>
+          <button id="zoomPrewarmToggle" class="pill-toggle">
+            <div class="pill-knob"></div>
+            <span class="pill-text">OFF</span>
+          </button>
+        </div>
+
+        <!-- Record Zoom calls -->
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+            Record Zoom calls
+            <span class="settings-row-desc">Auto-record web phone calls (requires CRM Agent app)</span>
+          </div>
+          <button id="zoomRecordCallsToggle" class="pill-toggle on">
+            <div class="pill-knob"></div>
+            <span class="pill-text">ON</span>
+          </button>
+        </div>
+
+        <!-- Zoom Caller ID input -->
+        <div class="settings-row" style="flex-direction:column; align-items:stretch; gap:6px;">
+          <div class="settings-row-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            Zoom Caller ID (optional)
+            <span class="settings-row-desc">Your outbound number in E.164 format</span>
+          </div>
+          <input type="text" id="zoomCallerIdInput" class="input" placeholder="+15551234567" style="width:100%;">
+        </div>
+
+        <!-- Custom GHL Domains -->
+        <div class="settings-row" style="flex-direction:column; align-items:stretch; gap:0; border-bottom:none;">
+          <div style="display:flex; align-items:center; gap:8px; padding: 4px 0 10px;">
+            <div class="settings-row-label" style="flex:1;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+              Custom GHL Domains
+              <span class="settings-row-desc">Extra white-label GoHighLevel domains to enable on</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <input type="text" id="ghlDomainInput" class="input" placeholder="crm.youragency.com" style="flex:1;">
+            <button id="ghlDomainAddBtn" class="button" style="padding:9px 14px; font-size:13px;">Add</button>
+          </div>
+          <div class="exceptions-list" id="ghlDomainsList"></div>
+        </div>
+      </div>
+    </div>
+
+    <table id="resultsTable">
+      <thead>
+        <tr></tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+    </div><!-- /#extensionContent -->
+  </div>
+
+  <!-- Stop-session confirmation: save for later or delete permanently -->
+  <div id="stopSessionModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-title">Stop this scraping session?</div>
+      <div class="modal-stats" id="stopModalStats"></div>
+      <div class="modal-actions">
+        <button id="stopSaveBtn" class="button green-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save to resume later
+        </button>
+        <button id="stopDeleteBtn" class="button red-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+          Delete permanently
+        </button>
+      </div>
+      <button id="stopCancelBtn" class="modal-cancel">Cancel — keep scraping</button>
+    </div>
+  </div>
+
+  <script src="ghl_client.js"></script>
+  <script src="popup.js"></script>
+
+  <!-- Dark mode + exceptions management (external, CSP-compliant) -->
+  <script src="theme-settings.js"></script>
+  <!-- Zoom Phone / GHL settings (external, CSP-compliant) -->
+  <script src="zoom_phone_settings.js"></script>
+</body>
+
+</html>

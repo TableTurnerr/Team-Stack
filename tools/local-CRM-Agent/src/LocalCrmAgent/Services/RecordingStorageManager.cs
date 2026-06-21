@@ -165,7 +165,7 @@ public class RecordingStorageManager
         return match.Success ? match.Groups[1].Value : null;
     }
 
-    public RecordingEntry AddEntry(string fileName, string phoneNumber, DateTime startTime, string? recordingId = null)
+    public RecordingEntry AddEntry(string fileName, string phoneNumber, DateTime startTime, string? recordingId = null, string channel = "desktop")
     {
         var entry = new RecordingEntry
         {
@@ -173,6 +173,7 @@ public class RecordingStorageManager
             PhoneNumber = phoneNumber,
             StartTime = startTime,
             RecordingId = recordingId,
+            Channel = channel,
         };
 
         lock (_lock)
@@ -217,15 +218,16 @@ public class RecordingStorageManager
 
     /// <summary>
     /// Get recordings that need uploading.
-    /// Only recordings linked to a CRM call log (has CallLogId) are eligible.
-    /// Un-linked recordings remain on disk but won't be uploaded.
+    /// Recordings upload to GHL (via the worker) as soon as WAV→MP3 conversion
+    /// finishes — the worker matches the contact by phone number, so no CRM
+    /// call-log link is required. (The old PocketBase flow gated on CallLogId.)
     /// </summary>
     public List<RecordingEntry> GetPendingUploads()
     {
         lock (_lock)
         {
             return _entries
-                .Where(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null && e.ConversionComplete)
+                .Where(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.ConversionComplete)
                 .ToList();
         }
     }
@@ -351,11 +353,9 @@ public class RecordingStorageManager
         {
             lock (_lock)
             {
-                // Only count recordings that are actually eligible for upload.
-                // Unlinked recordings (no CallLogId) are filtered out by
-                // GetPendingUploads and would never upload — counting them
-                // here would mislead users into thinking uploads are stuck.
-                return _entries.Count(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.CallLogId != null && e.ConversionComplete);
+                // Mirror GetPendingUploads eligibility: anything converted and
+                // not yet uploaded is queued for the GHL worker.
+                return _entries.Count(e => !e.Uploaded && e.Error == null && e.RetryCount < 10 && e.ConversionComplete);
             }
         }
     }
@@ -577,6 +577,16 @@ public class RecordingEntry
     [JsonPropertyName("pocketbaseRecordingId")]
     public string? PocketbaseRecordingId { get; set; }
 
+    /// <summary>Call surface this recording came from: "desktop" or "web".
+    /// Sent to the worker as the channel label and folded into the minted callId.</summary>
+    [JsonPropertyName("channel")]
+    public string Channel { get; set; } = "desktop";
+
+    /// <summary>GHL conversation message id returned by the worker ingest on a
+    /// successful attach. Null until uploaded.</summary>
+    [JsonPropertyName("ghlMessageId")]
+    public string? GhlMessageId { get; set; }
+
     [JsonPropertyName("callLogId")]
     public string? CallLogId { get; set; }
 
@@ -588,6 +598,12 @@ public class RecordingEntry
 
     [JsonPropertyName("clientCallId")]
     public string? ClientCallId { get; set; }
+
+    /// <summary>Real Zoom call_id, resolved from call_history by matching this
+    /// machine's device IP + the recording start time. Sent to the worker for
+    /// exact correlation; null falls back to phone + time matching.</summary>
+    [JsonPropertyName("zoomCallId")]
+    public string? ZoomCallId { get; set; }
 }
 
 internal sealed class RenameSentinel

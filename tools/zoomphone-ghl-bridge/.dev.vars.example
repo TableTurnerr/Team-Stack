@@ -1,0 +1,15 @@
+# Copy to `.dev.vars` for local `wrangler dev`. Never commit `.dev.vars`.
+
+ZOOM_SECRET_TOKEN=
+ZOOM_VERIFICATION_TOKEN=
+ZOOM_CLIENT_ID=
+ZOOM_CLIENT_SECRET=
+ZOOM_ACCOUNT_ID=
+
+GHL_MARKETPLACE_CLIENT_ID=
+GHL_MARKETPLACE_CLIENT_SECRET=
+GHL_MARKETPLACE_CONVERSATION_PROVIDER_ID=
+GHL_LOCATION_ID=
+
+# Shared bearer/WS token for CRM agents (/agent/connect + /recordings/ingest).
+AGENT_SHARED_TOKEN=

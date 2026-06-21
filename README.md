@@ -74,9 +74,10 @@ CRM-Tableturnerr/
 │   │   ├── dev-build.bat          # Stage extension into Tool Manager folder for local testing
 │   │   └── build-release.bat      # Package extension into a release zip
 │   │
-│   └── zoomphone-ghl-bridge/      # ☁️ Cloudflare Worker: Zoom Phone call activity → GoHighLevel
-│       ├── src/                   # Worker entry, Zoom webhook, GHL OAuth/API, AgentHub DO
-│       └── wrangler.toml          # Worker config (deployed as `zoomphone-bridge`)
+│   └── zoomphone-ghl-bridge/      # 🌐 Node service (self-hosted): Zoom Phone webhooks → GoHighLevel
+│       ├── src/                   # Hono server, Zoom webhook, GHL OAuth/API, recording ingest
+│       ├── docs/                  # Deployment, cutover, and self-host plan docs
+│       └── scripts/               # Git-based deploy script
 │
 └── [Root Config Files]
     ├── package.json               # pnpm workspace root
@@ -300,7 +301,7 @@ Node.js/TypeScript background worker:
 Chrome extension (Manifest V3) for Google Maps lead scraping, GoHighLevel enrichment, and Zoom web-phone call detection. The extension source lives in `tools/chrome-extension/extension`; the wrapper scripts and `tool.json` package it as a Tool Manager tool (`lead-scraper`, released as `lead-scraper-v*`). Previously the standalone `TableTurnerr/GMaps-Scraper` repo, now merged here and deprecated.
 
 ### Zoom Phone → GHL Bridge (`tools/zoomphone-ghl-bridge`)
-Cloudflare Worker (deployed as `zoomphone-bridge`) that mirrors Zoom Phone call activity into GoHighLevel: logs calls, attaches recordings and voicemail transcripts, upserts contacts by number, and drives the local-recording pipeline (a Durable Object holds one WebSocket per rep's CRM Agent and pushes START/STOP from live Zoom events). Previously the standalone `zoomphone-to-ghl` project.
+Self-hosted Node service (Node 22+, Hono, SQLite) running on the PocketBase box behind the Cloudflare Tunnel at `zoomphone.tableturnerr.com`. Listens to Zoom Phone webhooks and mirrors every call into GoHighLevel: logs calls with direction, duration, and timestamps; attaches local recordings and voicemail transcripts; upserts contacts by phone number. The Local CRM Agent records each call, resolves the Zoom `call_id` via device-IP match against `call_history`, and uploads the clip to `/recordings/ingest`. Previously a Cloudflare Worker (`zoomphone-to-ghl`); migrated to self-hosted Node as of 2026-06-21. Cloudflare Worker decommissioning pending final validation — see [`docs/decommission-cloudflare-worker.md`](tools/zoomphone-ghl-bridge/docs/decommission-cloudflare-worker.md).
 
 ---
 

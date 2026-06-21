@@ -1,0 +1,37 @@
+name = "zoomphone-bridge"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# KV namespace for OAuth token cache + call_id -> GHL message_id dedupe map
+# (also holds clip:{callId} and review:{callId} for local recordings).
+# Create with:
+#   wrangler kv namespace create STATE
+#   wrangler kv namespace create STATE --preview
+# Then paste the returned IDs below.
+[[kv_namespaces]]
+binding = "STATE"
+id = "e734b5fc930d46d191406cd39dc6ce39"
+preview_id = "21decfcd2acc4af081d60ef2284f358e"
+
+# Durable Object holding one live WebSocket per rep agent (hibernatable).
+# Pushes START/STOP record commands from Zoom live phone events to the agent.
+[[durable_objects.bindings]]
+name = "AGENT_HUB"
+class_name = "AgentHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AgentHub"]
+
+# Secrets are set with `wrangler secret put <NAME>` (do NOT commit them):
+#   ZOOM_SECRET_TOKEN                          - Zoom app, Feature -> Event Subscriptions
+#   ZOOM_VERIFICATION_TOKEN                    - same screen (kept for completeness)
+#   ZOOM_CLIENT_ID                             - Zoom app, App Credentials
+#   ZOOM_CLIENT_SECRET                         - Zoom app, App Credentials
+#   ZOOM_ACCOUNT_ID                            - Zoom app, App Credentials
+#   GHL_MARKETPLACE_CLIENT_ID                  - GHL Marketplace app credentials
+#   GHL_MARKETPLACE_CLIENT_SECRET              - GHL Marketplace app credentials
+#   GHL_MARKETPLACE_CONVERSATION_PROVIDER_ID   - Conversation Provider module ID
+#   GHL_LOCATION_ID                            - sub-account where calls are logged
+#   AGENT_SHARED_TOKEN                         - shared bearer/WS token for CRM agents
+#                                                (GET /agent/connect?token=, POST /recordings/ingest)

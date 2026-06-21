@@ -1,0 +1,6 @@
+{
+  "id": "lead-scraper",
+  "name": "Lead Scraper Extension",
+  "description": "Chrome extension for Google Maps lead scraping, GoHighLevel enrichment, and Zoom web-phone call detection.",
+  "type": "chrome-extension"
+}

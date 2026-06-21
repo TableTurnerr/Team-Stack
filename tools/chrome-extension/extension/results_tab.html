@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>TableTurner Lead Scraper - Live Results</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      padding: 0;
+      font-family: 'Poppins', sans-serif;
+      background: #f0f2f5;
+      color: #202124;
+      margin: 0;
+    }
+
+    .page-header {
+      background: linear-gradient(135deg, #1557b0 0%, #1a73e8 60%, #4285f4 100%);
+      padding: 18px 28px 16px;
+      color: white;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .page-header-logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+      flex-shrink: 0;
+    }
+    .page-header-title { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.3px; }
+    .page-header-sub { font-size: 13px; opacity: 0.82; margin-top: 2px; }
+    .page-version-badge {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      vertical-align: middle;
+      background: rgba(255,255,255,0.22);
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 999px;
+    }
+    .page-version-badge:empty { display: none; }
+
+    .page-body { padding: 22px 28px; }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      padding: 14px 18px;
+      background: white;
+      border-radius: 10px;
+      border: 1.5px solid #e2e5eb;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 18px;
+      border: none;
+      color: white;
+      background: #1a73e8;
+      cursor: pointer;
+      transition: background 0.18s, box-shadow 0.18s, transform 0.12s;
+      border-radius: 8px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .button:hover {
+      background: #1558c0;
+      box-shadow: 0 2px 8px rgba(26,115,232,0.28);
+      transform: translateY(-1px);
+    }
+    .button:active { transform: translateY(0); box-shadow: none; }
+
+    .button.red-btn { background: #ea4335; }
+    .button.red-btn:hover { background: #c5221f; box-shadow: 0 2px 8px rgba(234,67,53,0.28); }
+
+    .button.green-btn { background: #34a853; }
+    .button.green-btn:hover { background: #1e8e3e; box-shadow: 0 2px 8px rgba(52,168,83,0.28); }
+    .button:disabled { background: #e8eaed; color: #80868b; cursor: not-allowed; box-shadow: none; transform: none; }
+    .button:disabled:hover { background: #e8eaed; box-shadow: none; transform: none; }
+
+    .stats {
+      color: #5f6368;
+      font-size: 13px;
+      font-weight: 500;
+      margin-left: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1.5px solid #e2e5eb;
+      background: white;
+    }
+    th, td {
+      border: 1px solid #e2e5eb;
+      padding: 10px 12px;
+      font-size: 12.5px;
+    }
+    th {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      text-align: left;
+      background: #f1f3f4;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      font-size: 11px;
+      font-weight: 700;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    td { color: #3c4043; }
+    tbody tr:hover td { background: #f8f9fa; }
+    tbody tr:nth-child(even) td { background: #fafafa; }
+    tbody tr:nth-child(even):hover td { background: #f1f3f4; }
+
+    td a { color: #1a73e8; text-decoration: none; }
+    td a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <img src="icon.png" class="page-header-logo" alt="TableTurner">
+    <div>
+      <div class="page-header-title">TableTurner &mdash; Live Results <span id="pageVersionBadge" class="page-version-badge"></span></div>
+      <div class="page-header-sub">Scraped leads, updated in real time</div>
+    </div>
+  </div>
+
+  <div class="page-body">
+    <div class="controls">
+      <button id="exportBtn" class="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download CSV
+      </button>
+      <button id="sendAllBtn" class="button green-btn" disabled title="Review and send every un-synced lead to GoHighLevel at once">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        Send All to GoHighLevel
+        <span id="sendAllCount" style="font-size:11px;font-weight:700;background:rgba(255,255,255,0.25);padding:2px 7px;border-radius:10px;margin-left:2px;">0</span>
+      </button>
+      <button id="backfillEmailsBtn" class="button" title="Visit the website of every lead that hasn't been scraped yet and pull contact emails &amp; extra phone numbers">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        Backfill Emails
+      </button>
+      <button id="rescanNoEmailBtn" class="button" title="Re-scrape websites of all leads that have a website but no email found yet, including leads that were previously scraped with no result">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+        Rescan for Emails
+      </button>
+      <span id="stats" class="stats">Loading...</span>
+      <span id="enrichStatus" class="stats" style="display:none;color:#1a73e8;font-weight:600;"></span>
+    </div>
+
+    <div class="controls" id="ghlLocationBar" style="margin-top:-8px;">
+      <label for="ghlLocationPicker" style="font-weight:700;font-size:12px;color:#5f6368;">Send to sub-account:</label>
+      <select id="ghlLocationPicker" style="padding:8px 12px;border:1.5px solid #e2e5eb;border-radius:8px;font-family:'Poppins',sans-serif;font-size:12.5px;background:#fff;color:#202124;min-width:220px;">
+        <option value="">— Select sub-account —</option>
+      </select>
+      <a id="ghlConnectLink" href="#" style="display:none;font-size:12px;color:#1a73e8;text-decoration:underline;font-weight:600;">Login to GoHighLevel</a>
+    </div>
+
+    <table id="resultsTable">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Note</th>
+          <th>Business Timings</th>
+          <th>Rating</th>
+          <th>Reviews</th>
+          <th>Phone</th>
+          <th>Industry</th>
+          <th>City</th>
+          <th>Address</th>
+          <th>Email</th>
+          <th>Website</th>
+          <th>Insta Search</th>
+          <th>Google Maps Link</th>
+          <th>Latitude</th>
+          <th>Longitude</th>
+          <th>GHL Status</th>
+        </tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+  </div>
+
+  <script src="ghl_client.js"></script>
+  <script src="results_tab.js"></script>
+</body>
+</html>

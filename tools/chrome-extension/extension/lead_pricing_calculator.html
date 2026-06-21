@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lead Extraction — Cost Calculator</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14181d;
+    --panel-2: #1a1f26;
+    --border: #262c34;
+    --text: #e6e9ee;
+    --muted: #8a929d;
+    --accent: #7cc4ff;
+    --good: #6fe39a;
+    --warn: #ffb86b;
+    --bad: #ff7b7b;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.5;
+    padding: 32px 20px 80px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: 380px 1fr; gap: 24px; }
+  @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .panel h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 16px; font-weight: 600;
+  }
+  .panel h2:not(:first-child) { margin-top: 24px; }
+
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; margin-bottom: 6px;
+  }
+  .field label .val { font-family: var(--mono); color: var(--accent); font-size: 13px; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  input[type="number"], select {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-family: var(--mono); font-size: 13px;
+  }
+  input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .seg { display: flex; gap: 4px; background: var(--panel-2); padding: 3px; border-radius: 6px; border: 1px solid var(--border); }
+  .seg button {
+    flex: 1; background: transparent; color: var(--muted); border: none;
+    padding: 6px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;
+    font-family: inherit;
+  }
+  .seg button.active { background: var(--border); color: var(--text); }
+
+  .results { display: grid; gap: 16px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px;
+  }
+  .card.winner { border-color: var(--good); box-shadow: 0 0 0 1px var(--good) inset; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; gap: 12px; }
+  .card-title { font-size: 16px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .badge {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    padding: 3px 8px; border-radius: 999px; background: var(--panel-2);
+    color: var(--muted); border: 1px solid var(--border); white-space: nowrap;
+  }
+  .badge.good { color: var(--good); border-color: rgba(111, 227, 154, 0.3); }
+  .badge.warn { color: var(--warn); border-color: rgba(255, 184, 107, 0.3); }
+  .badge.bad { color: var(--bad); border-color: rgba(255, 123, 123, 0.3); }
+
+  .price-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 14px 0 8px; }
+  .price-cell .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+  .price-cell .num { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+  .price-cell .num.big { font-size: 24px; }
+  .price-cell.qualified .num { color: var(--accent); }
+
+  .breakdown { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.7; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+  .breakdown .line { display: flex; justify-content: space-between; gap: 12px; }
+  .breakdown .line.total { color: var(--text); font-weight: 600; padding-top: 6px; border-top: 1px dashed var(--border); margin-top: 6px; }
+
+  .footnote {
+    font-size: 12px; color: var(--muted); margin-top: 24px;
+    padding: 16px; border: 1px dashed var(--border); border-radius: 8px;
+  }
+  .footnote strong { color: var(--text); }
+  .footnote ul { margin: 8px 0 0; padding-left: 18px; }
+  .footnote li { margin-bottom: 4px; }
+  .footnote a { color: var(--accent); }
+
+  .winner-banner {
+    margin-bottom: 16px; padding: 12px 16px;
+    background: rgba(111, 227, 154, 0.08); border: 1px solid rgba(111, 227, 154, 0.3);
+    border-radius: 8px; font-size: 13px;
+  }
+  .winner-banner strong { color: var(--good); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Lead Extraction — Cost Calculator</h1>
+  <p class="sub">Live pricing fetched 2026-04 from apify.com & developers.google.com. No volume discount applied.</p>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Volume & Qualification</h2>
+
+      <div class="field">
+        <label>Total leads to fetch (monthly) <span class="val" id="vol-val">2,000</span></label>
+        <input type="range" id="volume" min="100" max="20000" step="100" value="2000" />
+        <div class="hint">Raw places fetched before qualification</div>
+      </div>
+
+      <div class="field">
+        <label>Qualification pass rate <span class="val" id="qual-val">25%</span></label>
+        <input type="range" id="qualRate" min="5" max="100" step="5" value="25" />
+        <div class="hint">% surviving your filters</div>
+      </div>
+
+      <div class="field">
+        <label>Pre-filterable on source? <span class="val" id="pre-val">40%</span></label>
+        <input type="range" id="preFilter" min="0" max="100" step="5" value="40" />
+        <div class="hint">% of disqualifications doable via search params (free)</div>
+      </div>
+
+      <h2>Apify Plan</h2>
+      <div class="field">
+        <div class="seg" id="apify-plan">
+          <button data-plan="free" class="active">Free ($0/mo)</button>
+          <button data-plan="starter">Starter ($29/mo)</button>
+        </div>
+        <div class="hint" id="apify-plan-hint">Free: $4/1k places, $0 monthly. No discount.</div>
+      </div>
+
+      <h2>Apify Add-ons (per qualified lead)</h2>
+      <div class="field">
+        <label><input type="checkbox" id="addon-details" checked /> Additional place details ($2/1k)</label>
+        <label><input type="checkbox" id="addon-contacts" checked /> Company contacts enrichment ($2/1k)</label>
+        <label><input type="checkbox" id="addon-email" /> Email verification ($100/1k free, $2/1k paid)</label>
+        <label><input type="checkbox" id="addon-social" /> Social profile enrichment ($100/1k free, $6/1k paid)</label>
+      </div>
+
+      <h2>Places API SKU</h2>
+      <div class="field">
+        <label>Place Details tier</label>
+        <select id="placesTier">
+          <option value="essentials">Essentials — $5/1k (10k free/mo)</option>
+          <option value="pro" selected>Pro — $17/1k (5k free/mo)</option>
+          <option value="enterprise">Enterprise — $20/1k (1k free/mo)</option>
+        </select>
+        <div class="hint">Nearby Search: $32/1k (5k free/mo) used for filtering</div>
+      </div>
+
+      <h2>Custom Script</h2>
+      <div class="field">
+        <label>Proxy $/1k scrapes</label>
+        <input type="number" id="proxyRate" value="2" step="0.5" min="0" />
+      </div>
+      <div class="field">
+        <label>Maintenance hrs/month</label>
+        <input type="number" id="maintHrs" value="3" step="0.5" min="0" />
+      </div>
+      <div class="field">
+        <label>Your hourly rate ($)</label>
+        <input type="number" id="hourlyRate" value="50" step="5" min="0" />
+      </div>
+    </div>
+
+    <div class="results">
+      <div id="winner-banner" class="winner-banner" style="display:none;"></div>
+
+      <div class="card" id="card-apify">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Apify — Google Maps Scraper</div>
+            <div class="card-sub" id="apify-tier-label">Free tier · $4.00/1k places</div>
+          </div>
+          <span class="badge warn">Pay per result</span>
+        </div>
+        <div class="price-row">
+          <div class="price-cell"><div class="lbl">Total / month</div><div class="num big" id="apify-total">$0</div></div>
+          <div class="price-cell qualified"><div class="lbl">Per qualified lead</div><div class="num" id="apify-perqual">$0</div></div>
+          <div class="price-cell"><div class="lbl">Effective waste</div><div class="num" id="apify-waste">0%</div></div>
+        </div>
+        <div class="breakdown" id="apify-breakdown"></div>
+      </div>
+
+      <div class="card" id="card-places">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Google Places API (New)</div>
+            <div class="card-sub" id="places-tier-label">Nearby Search filter → Place Details on candidates</div>
+          </div>
+          <span class="badge good">Pre-filter friendly</span>
+        </div>
+        <div class="price-row">
+          <div class="price-cell"><div class="lbl">Total / month</div><div class="num big" id="places-total">$0</div></div>
+          <div class="price-cell qualified"><div class="lbl">Per qualified lead</div><div class="num" id="places-perqual">$0</div></div>
+          <div class="price-cell"><div class="lbl">Effective waste</div><div class="num" id="places-waste">0%</div></div>
+        </div>
+        <div class="breakdown" id="places-breakdown"></div>
+      </div>
+
+      <div class="card" id="card-script">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Custom Playwright + Extension Script</div>
+            <div class="card-sub">DIY scraper, your maintenance burden</div>
+          </div>
+          <span class="badge">DIY</span>
+        </div>
+        <div class="price-row">
+          <div class="price-cell"><div class="lbl">Total / month</div><div class="num big" id="script-total">$0</div></div>
+          <div class="price-cell qualified"><div class="lbl">Per qualified lead</div><div class="num" id="script-perqual">$0</div></div>
+          <div class="price-cell"><div class="lbl">Effective waste</div><div class="num" id="script-waste">0%</div></div>
+        </div>
+        <div class="breakdown" id="script-breakdown"></div>
+      </div>
+
+      <div class="card" id="card-hybrid">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Hybrid — Places (filter) → Script (deep enrich)</div>
+            <div class="card-sub">Free Nearby Search + Details only on survivors + script for fields APIs hide</div>
+          </div>
+          <span class="badge good">Recommended</span>
+        </div>
+        <div class="price-row">
+          <div class="price-cell"><div class="lbl">Total / month</div><div class="num big" id="hybrid-total">$0</div></div>
+          <div class="price-cell qualified"><div class="lbl">Per qualified lead</div><div class="num" id="hybrid-perqual">$0</div></div>
+          <div class="price-cell"><div class="lbl">Effective waste</div><div class="num" id="hybrid-waste">0%</div></div>
+        </div>
+        <div class="breakdown" id="hybrid-breakdown"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footnote">
+    <strong>Pricing sources (verified 2026-04)</strong>
+    <ul>
+      <li><strong>Apify Google Maps Scraper:</strong> Scraped place — Free $4.00/1k, Starter $4.00/1k, Scale $3.00/1k, Business $2.10/1k. Add-ons (paid tier): additional details $1.05/1k, company contacts $1.05/1k, email verify $2/1k, social $6/1k. Free-tier add-ons: email/social $100/1k (huge gotcha).</li>
+      <li><strong>Apify subscription:</strong> Starter $29/mo with $29 platform credit included — credit covers Actor compute but you still pay add-on results. Free plan has $5 credit.</li>
+      <li><strong>Google Places API (New):</strong> Nearby Search $32/1k (5k free/mo). Place Details: Essentials $5/1k (10k free), Pro $17/1k (5k free), Enterprise $20/1k (1k free).</li>
+      <li><strong>Free tiers stack:</strong> The free monthly Places quota is applied first in calculations — small volumes can be effectively free.</li>
+      <li><strong>Hybrid logic:</strong> Nearby Search returns name/rating/types/place_id cheaply → filter on those fields free → call Place Details only on candidates passing pre-filter → use the script/extension for fields Google won't expose (emails, deep socials, menu signals).</li>
+      <li><strong>Not modeled:</strong> Claude API tokens (assumed $0, no Claude in production loop), one-time dev cost, anti-bot incidents.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const APIFY_PLANS = {
+  free:    { name: 'Free',    monthly: 0,   credit: 5,  place: 4.00, details: 2.00, contacts: 2.00, email: 100, social: 100 },
+  starter: { name: 'Starter', monthly: 29,  credit: 29, place: 4.00, details: 1.05, contacts: 1.05, email: 2,   social: 6   }
+};
+
+const PLACES_TIERS = {
+  essentials: { name: 'Essentials', detailsPer1k: 5,  detailsFree: 10000 },
+  pro:        { name: 'Pro',        detailsPer1k: 17, detailsFree: 5000 },
+  enterprise: { name: 'Enterprise', detailsPer1k: 20, detailsFree: 1000 }
+};
+const NEARBY_PER_1K = 32;
+const NEARBY_FREE = 5000;
+
+const state = {
+  volume: 2000, qualRate: 0.25, preFilter: 0.4,
+  apifyPlan: 'free',
+  addonDetails: true, addonContacts: true, addonEmail: false, addonSocial: false,
+  placesTier: 'pro',
+  proxyRate: 2, maintHrs: 3, hourlyRate: 50
+};
+
+function fmt(n) {
+  if (n === 0) return '$0';
+  if (n >= 1000) return '$' + n.toLocaleString(undefined, {maximumFractionDigits: 0});
+  if (n >= 100) return '$' + n.toFixed(0);
+  if (n >= 10) return '$' + n.toFixed(1);
+  return '$' + n.toFixed(2);
+}
+function pct(n) { return (n * 100).toFixed(0) + '%'; }
+function billed(units, per1k, freeUnits) {
+  const billable = Math.max(0, units - (freeUnits || 0));
+  return (billable / 1000) * per1k;
+}
+
+function calc() {
+  const V = state.volume;
+  const Q = state.qualRate;
+  const P = state.preFilter;
+  const qualified = V * Q;
+  const disqualified = V * (1 - Q);
+  const preFiltered = disqualified * P;
+  const paidDisqualified = disqualified * (1 - P);
+
+  // ===== APIFY =====
+  const plan = APIFY_PLANS[state.apifyPlan];
+  const apifyResults = qualified + paidDisqualified;
+  const placesCost = (apifyResults / 1000) * plan.place;
+
+  let addonsCost = 0;
+  const addonLines = [];
+  if (state.addonDetails) {
+    const c = (qualified / 1000) * plan.details;
+    addonsCost += c;
+    addonLines.push(['Additional details (' + qualified.toFixed(0) + ' × $' + plan.details + '/1k)', fmt(c)]);
+  }
+  if (state.addonContacts) {
+    const c = (qualified / 1000) * plan.contacts;
+    addonsCost += c;
+    addonLines.push(['Company contacts (' + qualified.toFixed(0) + ' × $' + plan.contacts + '/1k)', fmt(c)]);
+  }
+  if (state.addonEmail) {
+    const c = (qualified / 1000) * plan.email;
+    addonsCost += c;
+    addonLines.push(['Email verify (' + qualified.toFixed(0) + ' × $' + plan.email + '/1k)', fmt(c)]);
+  }
+  if (state.addonSocial) {
+    const c = (qualified / 1000) * plan.social;
+    addonsCost += c;
+    addonLines.push(['Social enrich (' + qualified.toFixed(0) + ' × $' + plan.social + '/1k)', fmt(c)]);
+  }
+
+  const usageCost = placesCost + addonsCost;
+  const creditApplied = Math.min(plan.credit, usageCost);
+  const usageAfterCredit = Math.max(0, usageCost - plan.credit);
+  const apifyTotal = plan.monthly + usageAfterCredit;
+  const apifyWaste = apifyResults > 0 ? paidDisqualified / apifyResults : 0;
+
+  const apifyLines = [
+    ['Plan subscription', fmt(plan.monthly)],
+    ['Scraped places (' + apifyResults.toFixed(0) + ' × $' + plan.place + '/1k)', fmt(placesCost)],
+    ...addonLines,
+    ['Usage subtotal', fmt(usageCost)],
+    ['Platform credit applied', '−' + fmt(creditApplied)]
+  ];
+
+  // ===== PLACES API =====
+  const tier = PLACES_TIERS[state.placesTier];
+  // Nearby Search to discover all V leads, free-pre-filter on returned fields
+  const nearbyCost = billed(V, NEARBY_PER_1K, NEARBY_FREE);
+  // Place Details on qualified + paid-disqualified (those needing detail to disqualify)
+  const detailsCalls = qualified + paidDisqualified;
+  const detailsCost = billed(detailsCalls, tier.detailsPer1k, tier.detailsFree);
+  const placesTotal = nearbyCost + detailsCost;
+  const placesWaste = detailsCalls > 0 ? paidDisqualified / detailsCalls : 0;
+
+  const placesLines = [
+    ['Nearby Search (' + V.toLocaleString() + ', ' + NEARBY_FREE.toLocaleString() + ' free)', fmt(nearbyCost)],
+    ['Place Details ' + tier.name + ' (' + detailsCalls.toFixed(0) + ', ' + tier.detailsFree.toLocaleString() + ' free)', fmt(detailsCost)]
+  ];
+
+  // ===== CUSTOM SCRIPT =====
+  const scriptScrapes = qualified + paidDisqualified;
+  const scriptProxyCost = (scriptScrapes / 1000) * state.proxyRate;
+  const scriptMaintCost = state.maintHrs * state.hourlyRate;
+  const scriptTotal = scriptProxyCost + scriptMaintCost;
+  const scriptWaste = scriptScrapes > 0 ? paidDisqualified / scriptScrapes : 0;
+  const scriptLines = [
+    ['Scrapes (' + scriptScrapes.toFixed(0) + ')', ''],
+    ['Proxy (' + scriptScrapes.toFixed(0) + ' × $' + state.proxyRate + '/1k)', fmt(scriptProxyCost)],
+    ['Maintenance (' + state.maintHrs + 'h × $' + state.hourlyRate + ')', fmt(scriptMaintCost)]
+  ];
+
+  // ===== HYBRID =====
+  // Nearby for full V, free pre-filter, Details on qualified only, script enrich on qualified
+  const hybridNearby = billed(V, NEARBY_PER_1K, NEARBY_FREE);
+  const hybridDetails = billed(qualified, tier.detailsPer1k, tier.detailsFree);
+  const hybridScript = (qualified / 1000) * state.proxyRate + (state.maintHrs * 0.5 * state.hourlyRate);
+  const hybridTotal = hybridNearby + hybridDetails + hybridScript;
+  const hybridLines = [
+    ['Nearby Search (' + V.toLocaleString() + ')', fmt(hybridNearby)],
+    ['Place Details on qualified only (' + qualified.toFixed(0) + ')', fmt(hybridDetails)],
+    ['Script enrich on qualified', fmt(hybridScript)]
+  ];
+
+  return {
+    qualified,
+    apify:  { total: apifyTotal,  perQual: qualified ? apifyTotal / qualified : 0,  waste: apifyWaste,  lines: apifyLines  },
+    places: { total: placesTotal, perQual: qualified ? placesTotal / qualified : 0, waste: placesWaste, lines: placesLines },
+    script: { total: scriptTotal, perQual: qualified ? scriptTotal / qualified : 0, waste: scriptWaste, lines: scriptLines },
+    hybrid: { total: hybridTotal, perQual: qualified ? hybridTotal / qualified : 0, waste: 0,           lines: hybridLines }
+  };
+}
+
+function renderBreakdown(el, lines, total) {
+  el.innerHTML = lines.map(([k, v]) =>
+    `<div class="line"><span>${k}</span><span>${v}</span></div>`
+  ).join('') + `<div class="line total"><span>Total</span><span>${fmt(total)}</span></div>`;
+}
+
+function render() {
+  const r = calc();
+
+  $('apify-total').textContent = fmt(r.apify.total);
+  $('apify-perqual').textContent = fmt(r.apify.perQual);
+  $('apify-waste').textContent = pct(r.apify.waste);
+  renderBreakdown($('apify-breakdown'), r.apify.lines, r.apify.total);
+
+  $('places-total').textContent = fmt(r.places.total);
+  $('places-perqual').textContent = fmt(r.places.perQual);
+  $('places-waste').textContent = pct(r.places.waste);
+  renderBreakdown($('places-breakdown'), r.places.lines, r.places.total);
+
+  $('script-total').textContent = fmt(r.script.total);
+  $('script-perqual').textContent = fmt(r.script.perQual);
+  $('script-waste').textContent = pct(r.script.waste);
+  renderBreakdown($('script-breakdown'), r.script.lines, r.script.total);
+
+  $('hybrid-total').textContent = fmt(r.hybrid.total);
+  $('hybrid-perqual').textContent = fmt(r.hybrid.perQual);
+  $('hybrid-waste').textContent = pct(r.hybrid.waste);
+  renderBreakdown($('hybrid-breakdown'), r.hybrid.lines, r.hybrid.total);
+
+  // Tier labels
+  const plan = APIFY_PLANS[state.apifyPlan];
+  $('apify-tier-label').textContent =
+    plan.name + ' tier · $' + plan.monthly + '/mo · $' + plan.place + '/1k places · $' + plan.credit + ' credit';
+  $('apify-plan-hint').textContent =
+    state.apifyPlan === 'free'
+      ? 'Free: $0/mo, $5 platform credit. Add-on emails/socials $100/1k (avoid).'
+      : 'Starter: $29/mo, $29 credit included. Add-on prices drop dramatically.';
+  const tier = PLACES_TIERS[state.placesTier];
+  $('places-tier-label').textContent =
+    'Place Details ' + tier.name + ' $' + tier.detailsPer1k + '/1k · ' + tier.detailsFree.toLocaleString() + ' free/mo + Nearby $32/1k (5k free)';
+
+  // Winner
+  const opts = [
+    { id: 'apify',  total: r.apify.total,  name: 'Apify (' + plan.name + ')' },
+    { id: 'places', total: r.places.total, name: 'Places API' },
+    { id: 'script', total: r.script.total, name: 'Custom Script' },
+    { id: 'hybrid', total: r.hybrid.total, name: 'Hybrid' }
+  ];
+  opts.sort((a, b) => a.total - b.total);
+  ['apify','places','script','hybrid'].forEach(k => $('card-' + k).classList.remove('winner'));
+  $('card-' + opts[0].id).classList.add('winner');
+
+  const banner = $('winner-banner');
+  banner.style.display = 'block';
+  const savings = opts[1].total - opts[0].total;
+  banner.innerHTML =
+    `<strong>${opts[0].name}</strong> is cheapest at ${fmt(opts[0].total)}/mo for ` +
+    `${r.qualified.toFixed(0)} qualified leads (${fmt(opts[0].total / (r.qualified || 1))}/lead). ` +
+    `Saves ${fmt(savings)} vs ${opts[1].name}.`;
+}
+
+// Wire up inputs
+$('volume').addEventListener('input', e => {
+  state.volume = +e.target.value;
+  $('vol-val').textContent = state.volume.toLocaleString();
+  render();
+});
+$('qualRate').addEventListener('input', e => {
+  state.qualRate = +e.target.value / 100;
+  $('qual-val').textContent = e.target.value + '%';
+  render();
+});
+$('preFilter').addEventListener('input', e => {
+  state.preFilter = +e.target.value / 100;
+  $('pre-val').textContent = e.target.value + '%';
+  render();
+});
+
+document.querySelectorAll('#apify-plan button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#apify-plan button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.apifyPlan = btn.dataset.plan;
+    render();
+  });
+});
+
+['details','contacts','email','social'].forEach(k => {
+  $('addon-' + k).addEventListener('change', e => {
+    state['addon' + k.charAt(0).toUpperCase() + k.slice(1)] = e.target.checked;
+    render();
+  });
+});
+
+$('placesTier').addEventListener('change', e => { state.placesTier = e.target.value; render(); });
+['proxyRate','maintHrs','hourlyRate'].forEach(id =>
+  $(id).addEventListener('input', () => { state[id] = +$(id).value || 0; render(); }));
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "version": "4.2",
+  "releaseNotes": "Website enrichment: the extension now visits each lead's website to find contact emails and extra phone numbers, with a new Email column in the table and export. A Backfill Emails button lets you scrape websites retroactively. Existing GHL contacts are now backfilled instead of skipped: empty fields get filled and the chosen tag is added without creating a duplicate. Update button added next to the In GHL badge.",
+  "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
+}

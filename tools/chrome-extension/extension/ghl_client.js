@@ -334,6 +334,52 @@
         return { city: city, state: state, postalCode: postalCode, country: country, timezone: timezone };
     }
 
+    // Condense a scraped weekly schedule for the note, matching the table display:
+    // "Monday: 9 AM–5 PM; …" -> "Mon-Wed: 9AM-5PM, Thu: 10AM-4PM, Fri-Sun: Closed".
+    // Non-breakdown values ("Open 24 hours", a one-line status) pass through lightly
+    // normalized. Kept in sync with formatBusinessTimings() in popup.js/results_tab.js.
+    function formatBusinessTimings(raw) {
+        if (!raw) return '';
+        var DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+        var SHORT = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+        function normHours(h) {
+            return String(h)
+                .replace(/\s+/g, ' ')
+                .replace(/(\d)\s*(?::(\d{2}))?\s*([AP])\.?\s*M\.?/gi, function (_, hh, mm, ap) {
+                    return hh + (mm ? ':' + mm : '') + ap.toUpperCase() + 'M';
+                })
+                .replace(/\s*(?:–|—|-|\bto\b)\s*/g, '-')
+                .trim();
+        }
+        var segments = String(raw).split(';');
+        var schedule = [];
+        for (var i = 0; i < segments.length; i++) {
+            var seg = segments[i].trim();
+            if (!seg) continue;
+            var ci = seg.indexOf(':');
+            if (ci === -1) continue;
+            var dm = seg.slice(0, ci).match(/(mon|tue|wed|thu|fri|sat|sun)/i);
+            if (!dm) continue;
+            schedule.push({ day: dm[1].slice(0, 3).toLowerCase(), hours: normHours(seg.slice(ci + 1)) });
+        }
+        if (!schedule.length) return normHours(raw);
+        schedule.sort(function (a, b) { return DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day); });
+        var groups = [];
+        for (var j = 0; j < schedule.length; j++) {
+            var cur = schedule[j];
+            var last = groups[groups.length - 1];
+            if (last && last.hours === cur.hours && DAY_ORDER.indexOf(cur.day) === DAY_ORDER.indexOf(last.end) + 1) {
+                last.end = cur.day;
+            } else {
+                groups.push({ start: cur.day, end: cur.day, hours: cur.hours });
+            }
+        }
+        return groups.map(function (g) {
+            var label = g.start === g.end ? SHORT[g.start] : SHORT[g.start] + '-' + SHORT[g.end];
+            return label + ': ' + g.hours;
+        }).join(', ');
+    }
+
     // ---- Build lead payload (Google Maps item -> GHL) -------------------------
     // opts: { tag, assignedTo, note, createOpp, pipelineId, stageId }
     function buildLeadPayload(item, opts) {
@@ -363,7 +409,7 @@
             meta.push('Coordinates: ' + item.lat + ', ' + item.lng);
             meta.push('Map pin: https://www.google.com/maps?q=' + item.lat + ',' + item.lng);
         }
-        if (item.businessTimings) meta.push('Business timings: ' + item.businessTimings);
+        if (item.businessTimings) meta.push('Business timings: ' + formatBusinessTimings(item.businessTimings));
         if (extraPhones.length) meta.push('Additional phones: ' + extraPhones.join(', '));
         if (meta.length) noteLines.push(meta.join('\n'));
         var note = noteLines.join('\n\n');

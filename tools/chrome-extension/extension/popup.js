@@ -92,6 +92,68 @@ function formatPhoneDisplay(normalized) {
     return normalized;
 }
 
+// Condenses a scraped weekly schedule into a compact, readable form for display.
+// The raw value looks like "Monday: 9 AM–5 PM; Tuesday: 9 AM–5 PM; …"; we sort by
+// the calendar week, merge runs of adjacent days that share the same hours, and use
+// short day names, e.g. "Mon-Wed: 9AM-5PM, Thu: 10AM-4PM, Fri-Sun: Closed".
+// Anything that isn't a per-day breakdown ("Open 24 hours", "Temporarily closed",
+// a one-line status) is returned lightly normalized, unchanged in meaning.
+function formatBusinessTimings(raw) {
+    if (!raw) return '';
+    var DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+    var SHORT = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+
+    // Tidy one hours value: drop the space before AM/PM and normalise the dash so
+    // "9 AM – 5 PM" / "9 AM to 5 PM" both become "9AM-5PM". Leaves "Closed",
+    // "Open 24 hours" and the like untouched.
+    function normHours(h) {
+        return String(h)
+            .replace(/\s+/g, ' ')
+            .replace(/(\d)\s*(?::(\d{2}))?\s*([AP])\.?\s*M\.?/gi, function (_, hh, mm, ap) {
+                return hh + (mm ? ':' + mm : '') + ap.toUpperCase() + 'M';
+            })
+            .replace(/\s*(?:–|—|-|\bto\b)\s*/g, '-')
+            .trim();
+    }
+
+    // Split into "Day: hours" segments. The hours run from the first colon to the
+    // segment end (so "9:30" times survive); the day is the first weekday token in
+    // the label, ignoring any holiday note Google appends.
+    var segments = String(raw).split(';');
+    var schedule = [];
+    for (var i = 0; i < segments.length; i++) {
+        var seg = segments[i].trim();
+        if (!seg) continue;
+        var ci = seg.indexOf(':');
+        if (ci === -1) continue;
+        var dm = seg.slice(0, ci).match(/(mon|tue|wed|thu|fri|sat|sun)/i);
+        if (!dm) continue;
+        schedule.push({ day: dm[1].slice(0, 3).toLowerCase(), hours: normHours(seg.slice(ci + 1)) });
+    }
+
+    if (!schedule.length) return normHours(raw);
+
+    schedule.sort(function (a, b) { return DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day); });
+
+    // Merge calendar-adjacent days with identical hours into ranges. A missing day
+    // (e.g. a closed day Google didn't list) breaks the run automatically.
+    var groups = [];
+    for (var j = 0; j < schedule.length; j++) {
+        var cur = schedule[j];
+        var last = groups[groups.length - 1];
+        if (last && last.hours === cur.hours && DAY_ORDER.indexOf(cur.day) === DAY_ORDER.indexOf(last.end) + 1) {
+            last.end = cur.day;
+        } else {
+            groups.push({ start: cur.day, end: cur.day, hours: cur.hours });
+        }
+    }
+
+    return groups.map(function (g) {
+        var label = g.start === g.end ? SHORT[g.start] : SHORT[g.start] + '-' + SHORT[g.end];
+        return label + ': ' + g.hours;
+    }).join(', ');
+}
+
 // ============================================================================
 
 // ============================================================================
@@ -834,17 +896,25 @@ document.addEventListener('DOMContentLoaded', function () {
                         }
                         var a = document.createElement('a');
                         a.href = finalUrl;
-                        a.textContent = finalUrl;
+                        // Display a cleaned, shortened URL: drop the http(s):// and
+                        // www. prefix and truncate long URLs with an ellipsis. The
+                        // link target (and export) keep the full URL.
+                        var display = finalUrl.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+                        if (display.length > 40) display = display.slice(0, 40) + '...';
+                        a.textContent = display;
+                        a.title = finalUrl;
                         a.target = '_blank';
                         a.rel = 'noopener noreferrer';
                         cell.appendChild(a);
                     } else {
-                        // href (maps link) column
+                        // href (maps link) column — show short hypertext; full URL
+                        // stays the link target and is exported in full.
                         var mapsUrl = url || '';
                         if (mapsUrl) {
                             var a = document.createElement('a');
                             a.href = mapsUrl;
-                            a.textContent = mapsUrl;
+                            a.textContent = 'Maps: ' + (item.title || '');
+                            a.title = mapsUrl;
                             a.target = '_blank';
                             a.rel = 'noopener noreferrer';
                             cell.appendChild(a);
@@ -855,7 +925,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (url) {
                         var a = document.createElement('a');
                         a.href = url;
-                        a.textContent = url;
+                        a.textContent = 'Insta: ' + (item.title || '');
+                        a.title = url;
                         a.target = '_blank';
                         a.rel = 'noopener noreferrer';
                         cell.appendChild(a);
@@ -883,6 +954,11 @@ document.addEventListener('DOMContentLoaded', function () {
                         var norm = normalizePhone(item.phone || '');
                         cell.textContent = norm ? formatPhoneDisplay(norm) : (item.phone || '');
                     }
+                } else if (colKey === 'businessTimings') {
+                    // Compact "Mon-Wed: 9AM-5PM" view; full per-day schedule on hover.
+                    var rawTimings = item[colKey] || '';
+                    cell.textContent = formatBusinessTimings(rawTimings);
+                    if (rawTimings) cell.title = rawTimings;
                 } else {
                     var text = item[colKey] || '';
                     if (colKey === 'reviewCount' && text) {
@@ -2131,7 +2207,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     filename = filename.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.xls';
                 }
 
-                var headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Location Name', 'Location Address', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'CRM Status'];
+                var headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'CRM Status'];
 
                 var html = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
                 html += '<table border="1" style="border-collapse:collapse;">';
@@ -2161,13 +2237,11 @@ document.addEventListener('DOMContentLoaded', function () {
                         html += '<tr>';
                         html += '<td>' + escapeHtmlModal(item.title || '') + '</td>';
                         html += '<td>' + escapeHtmlModal(item.note || '') + '</td>';
-                        html += '<td>' + escapeHtmlModal(item.businessTimings || '') + '</td>';
+                        html += '<td>' + escapeHtmlModal(formatBusinessTimings(item.businessTimings || '')) + '</td>';
                         html += '<td>' + escapeHtmlModal(item.rating || '') + '</td>';
                         html += '<td>' + escapeHtmlModal((item.reviewCount || '').replace(/[()]/g, '')) + '</td>';
                         html += '<td>' + escapeHtmlModal(p.number ? formatPhoneDisplay(p.number) : '') + '</td>';
                         html += '<td>' + escapeHtmlModal(p.label || '') + '</td>';
-                        html += '<td>' + escapeHtmlModal(p.location_name || '') + '</td>';
-                        html += '<td>' + escapeHtmlModal(p.location_address || '') + '</td>';
                         html += '<td>' + escapeHtmlModal(item.industry || '') + '</td>';
                         html += '<td>' + escapeHtmlModal(item.city || '') + '</td>';
                         html += '<td>' + escapeHtmlModal(item.address || '') + '</td>';

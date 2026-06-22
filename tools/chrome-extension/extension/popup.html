@@ -803,6 +803,9 @@
     }
     td { background: var(--surface); color: var(--text-2); }
     tbody tr:hover td { background: var(--surface-2); }
+    /* Make table-cell links (Website, Insta, Maps, Email) white in dark mode
+       so they stay readable against the dark surface. */
+    [data-theme="dark"] td a { color: #ffffff; }
   </style>
 </head>
 

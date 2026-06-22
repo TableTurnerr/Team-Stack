@@ -2,6 +2,10 @@
 <html>
 <head>
   <meta charset="UTF-8" />
+  <!-- Declare that this page supplies its own light + dark styling. This stops
+       Chrome (under Windows dark mode) from force-darkening the page, which was
+       overriding our link colour and leaving links an unreadable dark blue. -->
+  <meta name="color-scheme" content="light dark" />
   <title>TableTurner Lead Scraper - Live Results</title>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -13,6 +17,7 @@
       background: #f0f2f5;
       color: #202124;
       margin: 0;
+      color-scheme: light dark;
     }
 
     .page-header {
@@ -132,6 +137,28 @@
 
     td a { color: #1a73e8; text-decoration: none; }
     td a:hover { text-decoration: underline; }
+
+    /* Explicit dark theme. With `color-scheme: light dark` declared, Chrome no
+       longer auto-darkens this page, so these colours are used verbatim — the
+       table links are now a clearly lighter blue (#8ab4f8) instead of the dark
+       blue the auto-dark pass produced. */
+    @media (prefers-color-scheme: dark) {
+      body { background: #16181d; color: #e3e3e6; }
+      .controls { background: #1e2128; border-color: #2c2f38; }
+      .stats { color: #9aa0a6; }
+      .button:disabled { background: #2a2d35; color: #6b7079; }
+      .button:disabled:hover { background: #2a2d35; }
+      table { background: #1e2128; border-color: #2c2f38; }
+      th, td { border-color: #2c2f38; }
+      th { background: #23262e; color: #9aa0a6; }
+      td { color: #d6d8dc; }
+      tbody tr:nth-child(even) td { background: #1a1d23; }
+      tbody tr:hover td,
+      tbody tr:nth-child(even):hover td { background: #262a33; }
+      td a { color: #ffffff; }
+      /* Toolbar select carries inline light styles, so override with !important. */
+      select { background: #1e2128 !important; color: #e3e3e6 !important; border-color: #2c2f38 !important; }
+    }
   </style>
 </head>
 <body>

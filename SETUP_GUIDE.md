@@ -322,7 +322,7 @@ Handled automatically by the Tool Manager. For manual updates: bump the version 
 
 The dashboard ships with a full E2E test suite — **127 tests across 12 files**. Run these whenever you make significant changes to verify nothing is broken.
 
-### 11.1 First-Time Setup
+### 10.1 First-Time Setup
 
 ```bash
 cd apps/dashboard
@@ -344,7 +344,7 @@ Required values in `.env.test`:
 | `TEST_PB_ADMIN_PASSWORD` | PocketBase superadmin password |
 | `TEST_LIVE_CALLS` | Set `true` to enable real call tests (default: `false`) |
 
-### 11.2 Running Tests
+### 10.2 Running Tests
 
 #### Interactive CLI Menu (recommended)
 
@@ -381,7 +381,7 @@ pnpm test:headed      # Run with visible browser
 pnpm test:report      # View last HTML report
 ```
 
-### 11.3 Test Coverage
+### 10.3 Test Coverage
 
 | Suite | What's verified |
 |-------|----------------|
@@ -398,7 +398,7 @@ pnpm test:report      # View last HTML report
 | **Integration** | Session→CallLog, CallLog→Recording, Company→CallHistory, Follow-Up linkage |
 | **Live Calls** | Real Zoom Phone calls to public test lines (disabled by default) |
 
-### 11.4 Live Call Testing
+### 10.4 Live Call Testing
 
 When `TEST_LIVE_CALLS=true`, the suite dials public telecom test lines to verify the full Zoom Phone → recording → call log pipeline.
 
@@ -427,7 +427,7 @@ pnpm test:headed tests/12-live-call-flow.spec.ts
 
 > **Full test documentation**: `apps/dashboard/tests/README.md`
 
-### 11.5 Manual Checklist (supplement to automated tests)
+### 10.5 Manual Checklist (supplement to automated tests)
 
 - [ ] **Power Dialer**: Paste phone numbers → start → verify sequential dialing → test pause/resume/stop → try negative delay mode
 - [ ] **Transcriber**: Place an `.mp3` in `tools/audio-recorder/recordings/` → run `python tools/transcriber/transcribe_calls.py` → verify transcript appears in Dashboard
@@ -489,4 +489,4 @@ Recommended architecture:
 - **Fix**: Ensure the Local CRM Agent is running. The agent uses WASAPI audio monitoring (OS-level, network-independent) to confirm calls are still active and suppress false disconnects.
 
 ---
-*Last updated: April 2026*
+*Last updated: June 2026*

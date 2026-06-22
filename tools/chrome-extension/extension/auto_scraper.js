@@ -460,15 +460,87 @@
     return m ? m[0].replace(/\s+/g, ' ').trim() : '';
   }
 
+  // Pull the entire weekly schedule from the open detail pane. Google's hours
+  // widget renders a day-by-day table; we prefer that over the one-line status
+  // so the lead keeps the full open times. Class names drift, so we validate by
+  // content (a string must actually contain a time / AM-PM / "24 hours") instead
+  // of trusting any single selector — an aria-label of just "Hours" is rejected.
   function extractTimingsFromPane(panel) {
+    if (!panel) return '';
+
+    function looksLikeHours(s) {
+      if (!s) return false;
+      if (/open\s*24\s*hours/i.test(s)) return true;
+      if (/temporarily closed|permanently closed/i.test(s)) return true;
+      if (/\d\s*(?::\d{2})?\s*[AP]M/i.test(s)) return true;                  // 9 AM, 5:30 PM
+      if (/\b\d{1,2}([:.]\d{2})?\s*(?:–|—|-|to)\s*\d/i.test(s)) return true; // 9–5, 9 to 5
+      return false;
+    }
+
+    function cellHours(cell) {
+      if (!cell) return '';
+      var lis = cell.querySelectorAll('li');
+      if (lis.length) {
+        return Array.prototype.map.call(lis, function (li) {
+          return (li.textContent || '').replace(/\s+/g, ' ').trim();
+        }).filter(Boolean).join(', ');
+      }
+      return (cell.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    // A 24-hour business needn't list every day — collapse the schedule to a
+    // single "Open 24 hours" when it's open round the clock and no specific
+    // clock times are present (a genuinely mixed week keeps its breakdown).
+    function collapse24(s) {
+      if (s && /\b24\s*hours/i.test(s) && !/\d\s*(?::\d{2})?\s*[AP]M/i.test(s)) {
+        return 'Open 24 hours';
+      }
+      return s;
+    }
+
     try {
-      var ohEl = (panel && panel.querySelector('.t39EBf[aria-label]')) ||
-        (panel && panel.querySelector('[jsaction*="openhours"] [aria-label]'));
-      if (ohEl && ohEl.getAttribute('aria-label')) {
-        return ohEl.getAttribute('aria-label').replace(/\s+/g, ' ').trim();
+      // 1) Full weekly table -> "Monday: 9 AM–5 PM; Tuesday: …".
+      var table = panel.querySelector('table.eK4R0e') ||
+        panel.querySelector('.t39EBf table') ||
+        panel.querySelector('[jsaction*="openhours"] table');
+      if (!table) {
+        var tables = panel.querySelectorAll('table');
+        for (var ti = 0; ti < tables.length; ti++) {
+          if (/\b(sun|mon|tue|wed|thu|fri|sat)/i.test(tables[ti].textContent || '')) {
+            table = tables[ti];
+            break;
+          }
+        }
+      }
+      if (table) {
+        var rows = table.querySelectorAll('tr');
+        var parts = [];
+        for (var i = 0; i < rows.length; i++) {
+          var cells = rows[i].querySelectorAll('th, td');
+          if (cells.length < 2) continue;
+          var day = (cells[0].textContent || '').replace(/\s+/g, ' ').trim();
+          var hrs = cellHours(cells[1]);
+          if (day && hrs) parts.push(day + ': ' + hrs);
+        }
+        if (parts.length) return collapse24(parts.join('; '));
+      }
+
+      // 2) An aria-label on the hours widget — only when it carries real times,
+      //    not a bare "Hours" or the "Show/Hide open hours for the week" toggle.
+      var labeled = panel.querySelectorAll(
+        '.t39EBf[aria-label], [jsaction*="openhours"] [aria-label], [aria-label*="hours" i]'
+      );
+      for (var k = 0; k < labeled.length; k++) {
+        var lbl = (labeled[k].getAttribute('aria-label') || '')
+          .replace(/\s+/g, ' ')
+          .replace(/\.?\s*(?:Show|Hide) open hours for the week\.?/i, '')
+          .trim();
+        if (looksLikeHours(lbl)) return collapse24(lbl);
       }
     } catch (e) {}
-    return extractTimingsFromText(panel ? (panel.textContent || '') : '');
+
+    // 3) Fall back to the summary status line (e.g. "Open ⋅ Closes 5 PM").
+    return extractTimingsFromText(panel.textContent || '');
   }
 
   // ---- Card scraping (turbo / fallback) --------------------------------------

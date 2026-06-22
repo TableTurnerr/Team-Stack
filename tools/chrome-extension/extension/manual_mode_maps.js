@@ -616,13 +616,72 @@ function showCrmConfirmation_maps(item, onConfirm) {
             item.industry = raw.replace(/[^a-zA-Z\s]/g, '').trim();
         }
 
-        // 7b. Business Timings (best effort from the detail pane)
+        // 7b. Business Timings — capture the entire weekly schedule from the
+        // detail pane. Google's hours widget renders a day-by-day table; we
+        // prefer that over the one-line status so the full open times are kept.
+        // Class names drift, so an aria-label is only trusted when it actually
+        // contains a time (a bare "Hours" or the show/hide toggle is rejected).
         try {
-            const ohEl = container.querySelector('.t39EBf[aria-label]') ||
-                container.querySelector('[jsaction*="openhours"] [aria-label]');
-            if (ohEl && ohEl.getAttribute('aria-label')) {
-                item.businessTimings = ohEl.getAttribute('aria-label').replace(/\s+/g, ' ').trim();
+            const looksLikeHours = (s) => !!s && (
+                /open\s*24\s*hours/i.test(s) ||
+                /temporarily closed|permanently closed/i.test(s) ||
+                /\d\s*(?::\d{2})?\s*[AP]M/i.test(s) ||
+                /\b\d{1,2}([:.]\d{2})?\s*(?:–|—|-|to)\s*\d/i.test(s)
+            );
+            const cellHours = (cell) => {
+                if (!cell) return '';
+                const lis = cell.querySelectorAll('li');
+                if (lis.length) {
+                    return Array.from(lis)
+                        .map((li) => (li.textContent || '').replace(/\s+/g, ' ').trim())
+                        .filter(Boolean)
+                        .join(', ');
+                }
+                return (cell.textContent || '').replace(/\s+/g, ' ').trim();
+            };
+            // Open round the clock -> just "Open 24 hours" (no per-day list),
+            // unless the week mixes 24-hour days with specific clock times.
+            const collapse24 = (s) =>
+                (s && /\b24\s*hours/i.test(s) && !/\d\s*(?::\d{2})?\s*[AP]M/i.test(s))
+                    ? 'Open 24 hours'
+                    : s;
+
+            // 1) Full weekly table -> "Monday: 9 AM–5 PM; Tuesday: …".
+            let table = container.querySelector('table.eK4R0e') ||
+                container.querySelector('.t39EBf table') ||
+                container.querySelector('[jsaction*="openhours"] table');
+            if (!table) {
+                for (const tbl of container.querySelectorAll('table')) {
+                    if (/\b(sun|mon|tue|wed|thu|fri|sat)/i.test(tbl.textContent || '')) { table = tbl; break; }
+                }
             }
+            if (table) {
+                const parts = [];
+                for (const row of table.querySelectorAll('tr')) {
+                    const cells = row.querySelectorAll('th, td');
+                    if (cells.length < 2) continue;
+                    const day = (cells[0].textContent || '').replace(/\s+/g, ' ').trim();
+                    const hrs = cellHours(cells[1]);
+                    if (day && hrs) parts.push(`${day}: ${hrs}`);
+                }
+                if (parts.length) item.businessTimings = collapse24(parts.join('; '));
+            }
+
+            // 2) An aria-label that actually carries times (not a bare "Hours").
+            if (!item.businessTimings) {
+                const labeled = container.querySelectorAll(
+                    '.t39EBf[aria-label], [jsaction*="openhours"] [aria-label], [aria-label*="hours" i]'
+                );
+                for (const el of labeled) {
+                    const lbl = (el.getAttribute('aria-label') || '')
+                        .replace(/\s+/g, ' ')
+                        .replace(/\.?\s*(?:Show|Hide) open hours for the week\.?/i, '')
+                        .trim();
+                    if (looksLikeHours(lbl)) { item.businessTimings = collapse24(lbl); break; }
+                }
+            }
+
+            // 3) Fall back to the summary status line (e.g. "Open ⋅ Closes 5 PM").
             if (!item.businessTimings) {
                 const t = (container.textContent || '').replace(/[  ]/g, ' ');
                 const m = t.match(/Open 24 hours/i)

@@ -92,6 +92,17 @@ function formatPhoneDisplay(normalized) {
     return normalized;
 }
 
+// Resolve a business's IANA timezone (e.g. "America/Chicago") from its scraped
+// latitude/longitude using the bundled tz_lookup.js (global tzlookup). Returns ''
+// when coordinates are missing/unparseable or the lookup is unavailable. This zone
+// name is what the Google Sheet uses to render the live local time per location.
+function tzFromLatLng(lat, lng) {
+    var la = parseFloat(lat), ln = parseFloat(lng);
+    if (!isFinite(la) || !isFinite(ln)) return '';
+    if (typeof tzlookup !== 'function') return '';
+    try { return tzlookup(la, ln) || ''; } catch (e) { return ''; }
+}
+
 // Condenses a scraped weekly schedule into a compact, readable form for display.
 // The raw value looks like "Monday: 9 AM–5 PM; Tuesday: 9 AM–5 PM; …"; we sort by
 // the calendar week, merge runs of adjacent days that share the same hours, and use
@@ -864,7 +875,7 @@ document.addEventListener('DOMContentLoaded', function () {
         function createRowFromItem(item) {
             var row = document.createElement('tr');
             // column order: title, note, businessTimings, rating, reviewCount, phone, industry, city, address, website, instaSearch, maps link, lat, lng, crmStatus
-            ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'crmStatus'].forEach(function (colKey) {
+            ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'timeZone', 'crmStatus'].forEach(function (colKey) {
                 var cell = document.createElement('td');
 
                 // Special rendering for links
@@ -959,6 +970,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     var rawTimings = item[colKey] || '';
                     cell.textContent = formatBusinessTimings(rawTimings);
                     if (rawTimings) cell.title = rawTimings;
+                } else if (colKey === 'timeZone') {
+                    // Derived from lat/lng (not stored on the item); the Sheet uses it
+                    // to render the live local time for each location.
+                    cell.textContent = tzFromLatLng(item.lat, item.lng);
                 } else {
                     var text = item[colKey] || '';
                     if (colKey === 'reviewCount' && text) {
@@ -1065,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Render table header once (so it isn't re-rendered/cleared on each scrape)
         (function renderHeader() {
-            const headers = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'CRM Status'];
+            const headers = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'TimeZone', 'CRM Status'];
             // clear existing header row contents
             resultsTheadRow.innerHTML = '';
             headers.forEach(function (headerText) {
@@ -2207,7 +2222,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     filename = filename.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.xls';
                 }
 
-                var headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'CRM Status'];
+                var headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'TimeZone', 'CRM Status'];
 
                 var html = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
                 html += '<table border="1" style="border-collapse:collapse;">';
@@ -2251,6 +2266,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         html += '<td>' + escapeHtmlModal(item.href || '') + '</td>';
                         html += '<td>' + escapeHtmlModal(item.lat || '') + '</td>';
                         html += '<td>' + escapeHtmlModal(item.lng || '') + '</td>';
+                        html += '<td>' + escapeHtmlModal(tzFromLatLng(item.lat, item.lng)) + '</td>';
                         html += '<td>' + escapeHtmlModal(crmStatus) + '</td>';
                         html += '</tr>';
                     });

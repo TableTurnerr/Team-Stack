@@ -219,6 +219,7 @@
           <th>Google Maps Link</th>
           <th>Latitude</th>
           <th>Longitude</th>
+          <th>TimeZone</th>
           <th>GHL Status</th>
         </tr>
       </thead>
@@ -228,6 +229,8 @@
   </div>
 
   <script src="ghl_client.js"></script>
+  <!-- Offline lat/lng -> IANA timezone lookup (provides global tzlookup); load before results_tab.js -->
+  <script src="tz_lookup.js"></script>
   <script src="results_tab.js"></script>
 </body>
 </html>

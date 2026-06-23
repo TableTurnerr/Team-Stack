@@ -1,5 +1,5 @@
 {
-  "version": "5.2",
-  "releaseNotes": "Stable 5.0: the extension now lives in the TableTurnerr Team-Stack monorepo and updates are delivered through the Tool Manager (released as lead-scraper-v*). No feature changes from 4.2; this release marks the move and repoints the in-app updater to the new release feed.",
+  "version": "5.3",
+  "releaseNotes": "Adds a TimeZone column to the results table and the exported sheet. The zone (e.g. America/Chicago) is resolved offline from each business's latitude/longitude, so the Google Sheet can show the current local time per location. Pairs with the Apps Script that maintains a 'Time Right now' column.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

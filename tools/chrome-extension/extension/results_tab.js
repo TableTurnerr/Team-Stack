@@ -96,6 +96,17 @@ function formatPhoneDisplay(normalized) {
 // End of Phone Normalization Helpers
 // ============================================================================
 
+// Resolve a business's IANA timezone (e.g. "America/Chicago") from its scraped
+// latitude/longitude using the bundled tz_lookup.js (global tzlookup). Returns ''
+// when coordinates are missing/unparseable or the lookup is unavailable. This zone
+// name is what the Google Sheet uses to render the live local time per location.
+function tzFromLatLng(lat, lng) {
+    var la = parseFloat(lat), ln = parseFloat(lng);
+    if (!isFinite(la) || !isFinite(ln)) return '';
+    if (typeof tzlookup !== 'function') return '';
+    try { return tzlookup(la, ln) || ''; } catch (e) { return ''; }
+}
+
 // Condenses a scraped weekly schedule into a compact, readable form for display.
 // The raw value looks like "Monday: 9 AM–5 PM; Tuesday: 9 AM–5 PM; …"; we sort by
 // the calendar week, merge runs of adjacent days that share the same hours, and use
@@ -756,7 +767,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const tr = document.createElement('tr');
             
             // Columns matching popup.js order
-            const cols = ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'crmStatus'];
+            const cols = ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'timeZone', 'crmStatus'];
 
             cols.forEach(colKey => {
                 const td = document.createElement('td');
@@ -803,6 +814,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Compact "Mon-Wed: 9AM-5PM" view; full per-day schedule on hover.
                     td.textContent = formatBusinessTimings(val);
                     if (val) td.title = val;
+                } else if (colKey === 'timeZone') {
+                    // Derived from lat/lng (not stored on the item); the Sheet uses it
+                    // to render the live local time for each location.
+                    td.textContent = tzFromLatLng(item.lat, item.lng);
                 } else {
                     td.textContent = val;
                 }
@@ -911,7 +926,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // repeating the company name so each phone/location has its own row.
     exportBtn.addEventListener('click', () => {
         try {
-            const headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'GHL Status'];
+            const headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'TimeZone', 'GHL Status'];
 
             let html = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
             html += '<table border="1" style="border-collapse:collapse;">';
@@ -955,6 +970,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     html += '<td>' + escapeHtmlModal(item.href || '') + '</td>';
                     html += '<td>' + escapeHtmlModal(item.lat || '') + '</td>';
                     html += '<td>' + escapeHtmlModal(item.lng || '') + '</td>';
+                    html += '<td>' + escapeHtmlModal(tzFromLatLng(item.lat, item.lng)) + '</td>';
                     html += '<td>' + escapeHtmlModal(crmStatus) + '</td>';
                     html += '</tr>';
                 });

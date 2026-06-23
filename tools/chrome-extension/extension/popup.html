@@ -1419,6 +1419,8 @@
   </div>
 
   <script src="ghl_client.js"></script>
+  <!-- Offline lat/lng -> IANA timezone lookup (provides global tzlookup); load before popup.js -->
+  <script src="tz_lookup.js"></script>
   <script src="popup.js"></script>
 
   <!-- Dark mode + exceptions management (external, CSP-compliant) -->

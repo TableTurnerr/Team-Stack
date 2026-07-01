@@ -1,6 +1,6 @@
 {
   "name": "zoomphone-ghl-bridge",
-  "version": "2.1.0",
+  "version": "2.2",
   "private": true,
   "type": "module",
   "description": "Self-hosted Node service that mirrors Zoom Phone call activity into GoHighLevel and ingests local call recordings.",

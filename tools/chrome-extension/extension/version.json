@@ -1,5 +1,5 @@
 {
-  "version": "5.4",
-  "releaseNotes": "The popup now shows the installed version and a clear ON/OFF scraper state, so it is obvious whether scraping is active. Updates surface as a persistent badge and banner comparing your version to the latest release, making it easy to tell when a reinstall is needed.",
+  "version": "5.5",
+  "releaseNotes": "Restaurant Mode: qualify leads by the delivery platform behind their Order Now flow (DoorDash, Uber Eats, Postmates, Grubhub/Seamless, Toast, ChowNow, Slice), with include/exclude platform selection and skip-or-tag handling. Scrape multiple business categories in one run. Notes now capture the delivery platform and the site builder credit (footer 'Powered by …'). Paused scrapes get a Stop & Save button alongside Resume.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

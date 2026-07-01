@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, Message } from 'discord.js';
+import { telemetryFromEnv } from '@crm-tableturnerr/telemetry-client';
 import { authAdmin } from './pb';
 import { startScheduler } from './scheduler';
 import { handleClear } from './commands/clear';
@@ -13,6 +14,10 @@ if (!DISCORD_BOT_TOKEN) {
   throw new Error('DISCORD_BOT_TOKEN is not set in environment variables.');
 }
 
+// Central telemetry: heartbeat (so this push-type service shows "up" on the
+// admin Status dashboard) + structured logs. No-op if TELEMETRY_URL/TOKEN unset.
+const telemetry = telemetryFromEnv(process.env, 'discord-bot');
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -25,10 +30,23 @@ const client = new Client({
 client.once('ready', async (readyClient) => {
   console.log(`[Discord] Logged in as ${readyClient.user.tag}`);
 
+  // Heartbeat every 60s (registry expects one within 600s) + batched log flush.
+  telemetry.startHeartbeat(60_000, { version: '2.0', status: 'ok' });
+  telemetry.startAutoFlush();
+  telemetry.info('Discord bot connected', {
+    event: 'discord.ready',
+    context: { tag: readyClient.user.tag },
+  });
+
   try {
     await authAdmin();
   } catch (err) {
+    telemetry.error('PocketBase admin auth failed on startup', {
+      event: 'pocketbase.auth.failed',
+      context: { error: err instanceof Error ? err.message : String(err) },
+    });
     console.error('[PocketBase] Failed to authenticate admin on startup:', err);
+    await telemetry.close();
     process.exit(1);
   }
 
@@ -65,11 +83,16 @@ client.on('messageCreate', async (message: Message) => {
 
 client.on('error', (err) => {
   console.error('[Discord] Client error:', err);
+  telemetry.error('Discord client error', {
+    event: 'discord.error',
+    context: { error: err instanceof Error ? err.message : String(err) },
+  });
 });
 
 // Graceful shutdown
-function shutdown(signal: string) {
+async function shutdown(signal: string) {
   console.log(`\n[Bot] Received ${signal} — shutting down...`);
+  await telemetry.close();
   client.destroy();
   process.exit(0);
 }

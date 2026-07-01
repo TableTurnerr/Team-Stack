@@ -96,6 +96,33 @@ function formatPhoneDisplay(normalized) {
 // End of Phone Normalization Helpers
 // ============================================================================
 
+// ============================================================================
+// Delivery Platform Helpers (Restaurant Mode)
+// ============================================================================
+// Maps the platform keys written by background.js into human display labels.
+var DELIVERY_LABELS = {
+    doordash: 'DoorDash',
+    ubereats: 'Uber Eats',
+    postmates: 'Postmates',
+    grubhub: 'Grubhub/Seamless',
+    toast: 'Toast',
+    chownow: 'ChowNow',
+    slice: 'Slice',
+    other: 'Other platform'
+};
+
+function deliveryLabel(key) {
+    return DELIVERY_LABELS[key] || String(key || '');
+}
+
+function deliveryLabels(item) {
+    var platforms = item && Array.isArray(item.deliveryPlatforms) ? item.deliveryPlatforms : [];
+    return platforms.map(deliveryLabel);
+}
+// ============================================================================
+// End of Delivery Platform Helpers
+// ============================================================================
+
 // Resolve a business's IANA timezone (e.g. "America/Chicago") from its scraped
 // latitude/longitude using the bundled tz_lookup.js (global tzlookup). Returns ''
 // when coordinates are missing/unparseable or the lookup is unavailable. This zone
@@ -767,7 +794,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const tr = document.createElement('tr');
             
             // Columns matching popup.js order
-            const cols = ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'timeZone', 'crmStatus'];
+            const cols = ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'deliveryPlatforms', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'timeZone', 'crmStatus'];
 
             cols.forEach(colKey => {
                 const td = document.createElement('td');
@@ -792,6 +819,15 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (val) td.innerHTML = `<a href="${val}" target="_blank" title="${val}">Maps: ${escapeHtmlModal(item.title || '')}</a>`;
                 } else if (colKey === 'instaSearch') {
                     if (val) td.innerHTML = `<a href="${val}" target="_blank" title="${val}">Insta: ${escapeHtmlModal(item.title || '')}</a>`;
+                } else if (colKey === 'deliveryPlatforms') {
+                    // Restaurant Mode: small pills per matched delivery platform, or
+                    // a muted dash when none were found (or the lead wasn't checked).
+                    const labels = deliveryLabels(item);
+                    if (labels.length) {
+                        td.innerHTML = labels.map(l => `<span class="delivery-badge">${escapeHtmlModal(l)}</span>`).join('');
+                    } else {
+                        td.innerHTML = '<span class="delivery-empty">—</span>';
+                    }
                 } else if (colKey === 'reviewCount') {
                     td.textContent = val.replace(/[()]/g, '');
                 } else if (colKey === 'phone') {
@@ -926,7 +962,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // repeating the company name so each phone/location has its own row.
     exportBtn.addEventListener('click', () => {
         try {
-            const headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'TimeZone', 'GHL Status'];
+            const headerLabels = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Phone Label', 'Industry', 'City', 'Address', 'Email', 'Website', 'Delivery Platforms', 'Delivery Source', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'TimeZone', 'GHL Status'];
 
             let html = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
             html += '<table border="1" style="border-collapse:collapse;">';
@@ -951,6 +987,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 const websiteUrl = item.companyUrl && !item.companyUrl.startsWith('https://www.google.com/maps')
                     ? item.companyUrl
                     : 'https://www.google.com/search?q=' + encodeURIComponent((item.title || '') + ' ' + (item.city || '') + ' Website');
+                const deliveryPlatformsDisplay = deliveryLabels(item).join(', ');
+                const deliverySource = item.deliverySource || '';
 
                 phones.forEach(p => {
                     html += '<tr>';
@@ -966,6 +1004,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     html += '<td>' + escapeHtmlModal(item.address || '') + '</td>';
                     html += '<td>' + escapeHtmlModal(emailDisplay) + '</td>';
                     html += '<td>' + escapeHtmlModal(websiteUrl) + '</td>';
+                    html += '<td>' + escapeHtmlModal(deliveryPlatformsDisplay) + '</td>';
+                    html += '<td>' + escapeHtmlModal(deliverySource) + '</td>';
                     html += '<td>' + escapeHtmlModal(item.instaSearch || '') + '</td>';
                     html += '<td>' + escapeHtmlModal(item.href || '') + '</td>';
                     html += '<td>' + escapeHtmlModal(item.lat || '') + '</td>';

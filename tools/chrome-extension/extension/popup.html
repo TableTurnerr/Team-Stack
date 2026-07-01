@@ -290,8 +290,12 @@
       color: white;
     }
 
-    /* Disabled-extension body state */
-    #extensionContent.disabled {
+    /* Disabled-extension body state. Grey out and block the scraping UI when the
+       scraper is powered off, but keep the GoHighLevel connect panel fully usable
+       so you can still connect/disconnect while off. Applied per-child (not on the
+       #extensionContent container) because a container opacity would dim the
+       connect panel too via group compositing. */
+    #extensionContent.disabled > *:not(#crmConnectPanel) {
       opacity: 0.4;
       pointer-events: none;
       filter: grayscale(0.4);
@@ -615,6 +619,146 @@
     .pill-toggle.on .pill-text { left: 6px; }
     .pill-toggle:not(.on) .pill-text { right: 5px; }
 
+    /* ── Restaurant Mode panel ───────────────────────── */
+    #restaurantPanel {
+      margin-bottom: 10px;
+      padding: 12px 13px;
+      background: var(--surface-2);
+      border: 1.5px solid var(--border);
+      border-radius: 9px;
+    }
+    #restaurantPanel .auto-popup-row:last-of-type { margin-bottom: 0; }
+    .plat-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin-top: 10px;
+    }
+    .plat-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .plat-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 11px;
+      border: 1.5px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text-2);
+      font-family: 'Poppins', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .plat-chip::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--pill-off);
+      transition: background 0.15s;
+    }
+    .plat-chip.include {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success);
+    }
+    .plat-chip.include::before { background: var(--success); }
+    .plat-chip.exclude {
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
+      color: var(--danger-dark);
+      text-decoration: line-through;
+    }
+    .plat-chip.exclude::before { background: var(--danger); }
+
+    /* Multi-category chips */
+    .cat-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .cat-chip-row:empty { display: none; }
+    .cat-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 6px 3px 10px;
+      border-radius: 14px;
+      background: var(--primary-bg, rgba(26,115,232,0.1));
+      border: 1.5px solid var(--primary);
+      color: var(--primary);
+      font-size: 11.5px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .cat-chip .cat-chip-x {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      opacity: 0.7;
+    }
+    .cat-chip .cat-chip-x:hover { opacity: 1; background: rgba(0,0,0,0.08); }
+    .scrape-hint {
+      margin-top: 5px;
+      font-size: 10.5px;
+      color: var(--text-muted, #5f6368);
+    }
+
+    /* Segmented control (When no platform matches) */
+    .seg-control {
+      display: inline-flex;
+      gap: 4px;
+      padding: 3px;
+      background: var(--mode-bg);
+      border-radius: 8px;
+      align-self: flex-start;
+    }
+    .seg-btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: 'Poppins', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .seg-btn.active {
+      background: var(--mode-active-bg);
+      color: var(--primary);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.13);
+    }
+
+    /* Delivery-platform badges in the results table */
+    .delivery-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      margin: 1px 2px 1px 0;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text-2);
+      white-space: nowrap;
+    }
+    .delivery-empty { color: var(--text-faint); }
+
     /* ── Panel (shared card style) ───────────────────── */
     .panel {
       margin-top: 12px;
@@ -736,14 +880,14 @@
     }
     body.settings-open .settings-section { margin-top: 0; }
 
-    /* Settings stay fully usable even when the extension is powered off.
-       The .disabled state greys out and blocks pointer events on the whole
-       #extensionContent (settings panel included). With Settings open the only
-       visible child is .settings-section, so re-enabling the container is safe. */
-    body.settings-open #extensionContent.disabled {
-      opacity: 1;
-      pointer-events: auto;
-      filter: none;
+    /* Settings stay fully usable even when the extension is powered off. The
+       .disabled state greys out and blocks pointer events on #extensionContent's
+       children; with Settings open the only visible child is .settings-section, so
+       re-enable it. */
+    body.settings-open #extensionContent.disabled > .settings-section {
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      filter: none !important;
     }
     .settings-panel-header {
       display: flex;
@@ -863,10 +1007,18 @@
     /* Make table-cell links (Website, Insta, Maps, Email) white in dark mode
        so they stay readable against the dark surface. */
     [data-theme="dark"] td a { color: #ffffff; }
+    /* Compulsory GHL login gate: until connected, hide the whole app except the
+       GoHighLevel connect panel (which shows the "Connect GoHighLevel" prompt), so
+       the extension can't be used logged out. The connect panel is a direct child
+       of #extensionContent, so we hide that wrapper's other children (plus the
+       master power bar). !important overrides each panel's own inline display;
+       removing the class lets every panel revert to its normal display logic. */
+    body.tt-locked #extensionContent > *:not(#crmConnectPanel),
+    body.tt-locked #masterPowerBar { display: none !important; }
   </style>
 </head>
 
-<body>
+<body class="tt-locked">
   <!-- Header -->
   <div class="app-header">
     <div class="app-header-top">
@@ -964,7 +1116,9 @@
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             Business Category
           </label>
-          <input type="text" id="scrapeCategory" class="input" list="catPresets" placeholder="e.g. Restaurants" autocomplete="off" />
+          <input type="text" id="scrapeCategory" class="input" list="catPresets" placeholder="e.g. Restaurants — press Enter to add another" autocomplete="off" />
+          <div id="categoryChips" class="cat-chip-row"></div>
+          <div class="scrape-hint">Add several categories to scan each one in turn (same location).</div>
           <datalist id="catPresets">
             <option value="Restaurants"></option>
             <option value="Cafes"></option>
@@ -1099,6 +1253,57 @@
             <span class="pill-text">ON</span>
           </button>
         </div>
+        <div class="auto-popup-row">
+          <span class="auto-popup-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 2v7c0 1.1.9 2 2 2h1v11h2V2H3z"/><path d="M13 2v9h3c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2h-3zM13 13v9h2v-9z"/></svg>
+            Restaurant Mode
+            <span style="font-weight:500; color:var(--text-muted); font-size:11px;">qualify leads by delivery platform</span>
+          </span>
+          <button id="restaurantModeToggle" class="pill-toggle" type="button" title="On: qualify each lead by the 3rd-party delivery platforms it uses (DoorDash, Uber Eats, etc.).">
+            <div class="pill-knob"></div>
+            <span class="pill-text">OFF</span>
+          </button>
+        </div>
+        <div id="restaurantPanel" style="display:none;">
+          <div class="auto-popup-row">
+            <span class="auto-popup-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+              Any 3rd-party platform
+              <span style="font-weight:500; color:var(--text-muted); font-size:11px;">match any known platform not excluded</span>
+            </span>
+            <button id="platformAnyToggle" class="pill-toggle" type="button" title="On: keep a lead if it uses any known delivery platform that you haven't excluded.">
+              <div class="pill-knob"></div>
+              <span class="pill-text">OFF</span>
+            </button>
+          </div>
+          <div class="scrape-field" style="margin-top:10px;">
+            <label>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              Delivery Platforms
+              <span style="font-weight:500; color:var(--text-muted); font-size:11px;">click to cycle: neutral &rarr; include &rarr; exclude</span>
+            </label>
+            <div class="plat-chip-row">
+              <button type="button" class="plat-chip" data-key="doordash" data-state="neutral">DoorDash</button>
+              <button type="button" class="plat-chip" data-key="ubereats" data-state="neutral">Uber Eats</button>
+              <button type="button" class="plat-chip" data-key="postmates" data-state="neutral">Postmates</button>
+              <button type="button" class="plat-chip" data-key="grubhub" data-state="neutral">Grubhub/Seamless</button>
+              <button type="button" class="plat-chip" data-key="toast" data-state="neutral">Toast</button>
+              <button type="button" class="plat-chip" data-key="chownow" data-state="neutral">ChowNow</button>
+              <button type="button" class="plat-chip" data-key="slice" data-state="neutral">Slice</button>
+            </div>
+          </div>
+          <div class="scrape-field" style="margin-top:10px;">
+            <label>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              When no platform matches
+            </label>
+            <div id="platformUnmatched" class="seg-control" data-value="tag">
+              <button type="button" class="seg-btn" data-value="skip">Skip lead</button>
+              <button type="button" class="seg-btn active" data-value="tag">Keep + tag in notes</button>
+            </div>
+          </div>
+          <div class="plat-hint">Exclude always wins. &ldquo;Any&rdquo; means any known platform that isn&rsquo;t excluded.</div>
+        </div>
         <div class="scrape-field" style="margin-top:10px;">
           <label>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14.5 13.5"/></svg>
@@ -1118,6 +1323,17 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         Start Scraping
       </button>
+      <!-- Paused: resume from the saved cursor, or stop and save the session for later. -->
+      <div id="pausedControls" class="run-controls" style="display:none;">
+        <button id="resumeButton" class="button" title="Resume from where the scan paused">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          Resume
+        </button>
+        <button id="stopSaveButton" class="button black-btn" title="Stop and save this session so you can resume it later from Saved Sessions">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Stop &amp; Save
+        </button>
+      </div>
       <div id="scrapeRunControls" class="run-controls" style="display:none;">
         <button id="pauseButton" class="button black-btn" title="Pause — keep progress so you can resume from where it stopped">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>

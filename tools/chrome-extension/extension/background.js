@@ -390,6 +390,12 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
                         chrome.alarms.clear(GHL_POLL_ALARM);
                         chrome.storage.local.set({ gmes_ghl_waiting: false });
                         closeConnectTab();
+                        // Capture the rep's GHL user id and push it to the local
+                        // agent so recorded calls are attributed to this rep.
+                        if (st.ghlUserId) {
+                            chrome.storage.local.set({ gmes_ghl_user_id: st.ghlUserId });
+                            pushIdentityToAgent(st.ghlUserId);
+                        }
                     }
                 });
             });
@@ -682,7 +688,42 @@ function newSessionId() {
     return 's_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-function startGridScan(tabId, category, location, center, radiusMiles, turbo, filters) {
+// Parse the category list from a START_AUTO_SCRAPE message. Prefers msg.categories
+// (array, sent by newer popups) and falls back to splitting msg.category on
+// newlines/commas for backward compatibility. Trims, drops blanks, and de-dupes
+// case-insensitively while preserving order.
+function parseCategoriesMsg(msg) {
+    var raw = [];
+    if (msg && Array.isArray(msg.categories)) raw = msg.categories.slice();
+    else if (msg && msg.category != null) raw = String(msg.category).split(/[\n,]+/);
+    var out = [], seen = {};
+    raw.forEach(function (c) {
+        var v = String(c || '').trim();
+        if (!v) return;
+        var k = v.toLowerCase();
+        if (seen[k]) return;
+        seen[k] = 1; out.push(v);
+    });
+    return out;
+}
+
+// Persist the multi-category queue plus the shared (category-independent) scrape
+// params so finishGridScan can run each remaining category on the SAME geocoded
+// center without re-geocoding. gmes_cat_queue holds the categories still to run
+// AFTER the current one; gmes_cat_total/gmes_cat_index drive the popup's "X/Y".
+function setCategoryQueue(categories, location, center, radiusMiles, turbo, filters) {
+    chrome.storage.local.set({
+        gmes_cat_queue: categories.slice(1),
+        gmes_cat_shared: { location: location, center: center, radius: radiusMiles, turbo: turbo, filters: filters },
+        gmes_cat_total: categories.length,
+        gmes_cat_index: 1
+    });
+}
+
+// keepSession=true chains a subsequent category onto an in-progress multi-category
+// run: it keeps the existing session id (so all categories snapshot together)
+// instead of minting a fresh one.
+function startGridScan(tabId, category, location, center, radiusMiles, turbo, filters, keepSession) {
     var points = generateGridPoints(center, radiusMiles);
     var step = calcGridStep(radiusMiles);
     var state = {
@@ -699,16 +740,19 @@ function startGridScan(tabId, category, location, center, radiusMiles, turbo, fi
     };
     gridScan = state;
     ensureGridWatchdog();
-    chrome.storage.local.set({
+    var store = {
         gmes_grid_state: state,
         gmes_grid_total: points.length,
         gmes_grid_current: 0,
-        gmes_grid_autoresume: true,
+        gmes_grid_autoresume: true
+    };
+    if (!keepSession) {
         // Fresh run => fresh session. Leads merged from now on get tagged with this
         // id (see mergeScrapedItems) so Pause/Stop can report and snapshot them.
-        gmes_active_session_id: newSessionId(),
-        gmes_active_session_started: Date.now()
-    }, function () {
+        store.gmes_active_session_id = newSessionId();
+        store.gmes_active_session_started = Date.now();
+    }
+    chrome.storage.local.set(store, function () {
         _doAdvanceGrid(state);
     });
 }
@@ -799,15 +843,36 @@ function _doAdvanceGrid(state) {
 }
 
 function finishGridScan() {
-    gridScan = null;
-    clearGridWatchdog();
-    chrome.storage.local.remove(GRID_STATE_KEY);
-    chrome.storage.local.set({
-        gmes_background_scraping: false,
-        gmes_scrape_heartbeat: 0,
-        gmes_grid_total: 0,
-        gmes_grid_current: 0,
-        gmes_grid_autoresume: false
+    // Multi-category chaining: if more categories are queued, start the next one on
+    // the same geocoded center + session instead of ending the run. The tab id is
+    // taken from the just-finished grid state (in memory, falling back to storage).
+    var finishingTabId = (gridScan && gridScan.tabId != null) ? gridScan.tabId : null;
+    chrome.storage.local.get([GRID_STATE_KEY, 'gmes_cat_queue', 'gmes_cat_shared', 'gmes_cat_total'], function (d) {
+        var queue = Array.isArray(d.gmes_cat_queue) ? d.gmes_cat_queue.slice() : [];
+        var shared = d.gmes_cat_shared;
+        var tabId = (finishingTabId != null) ? finishingTabId : (d[GRID_STATE_KEY] && d[GRID_STATE_KEY].tabId);
+        if (queue.length && shared && shared.center && tabId != null) {
+            var nextCat = queue.shift();
+            var total = Number(d.gmes_cat_total) || (queue.length + 1);
+            // 1-based index of the category we're about to start (for the popup's "X/Y").
+            chrome.storage.local.set({ gmes_cat_queue: queue, gmes_cat_index: total - queue.length }, function () {
+                startGridScan(tabId, nextCat, shared.location, shared.center, shared.radius, shared.turbo, shared.filters, true);
+            });
+            return;
+        }
+        // Real finish: no more categories queued.
+        gridScan = null;
+        clearGridWatchdog();
+        chrome.storage.local.remove([GRID_STATE_KEY, 'gmes_cat_queue', 'gmes_cat_shared']);
+        chrome.storage.local.set({
+            gmes_background_scraping: false,
+            gmes_scrape_heartbeat: 0,
+            gmes_grid_total: 0,
+            gmes_grid_current: 0,
+            gmes_grid_autoresume: false,
+            gmes_cat_total: 0,
+            gmes_cat_index: 0
+        });
     });
 }
 
@@ -926,7 +991,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
     if (msg.type === 'START_AUTO_SCRAPE') {
         if (!EXTENSION_ENABLED) { sendResponse({ started: false, error: 'Extension is off.' }); return; }
-        var category = (msg.category || '').trim();
+        var categories = parseCategoriesMsg(msg);
+        var category = categories[0] || '';
         var location = (msg.location || '').trim();
         var radiusMiles = Number(msg.radiusMiles) || 0;
         var turbo = Boolean(msg.turbo);
@@ -936,7 +1002,21 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
             skipTempClosed: msg.skipTempClosed !== false,
             speed: speedFactor(msg.speed)
         };
-        if (!category || !location) { sendResponse({ started: false, error: 'Category and location are required.' }); return; }
+        if (!categories.length || !location) { sendResponse({ started: false, error: 'Category and location are required.' }); return; }
+
+        // Restaurant Mode config (shared contract with popup.js). Persist the five
+        // platform keys so mergeScrapedItems and the delivery detector — which read
+        // config from storage, the same way the food filter is threaded — pick them
+        // up as leads flow in. Unmatched defaults to 'tag' (non-destructive) if absent.
+        var restaurantMode = msg.restaurantMode === true;
+        var platformUnmatched = (msg.platformUnmatched === 'skip') ? 'skip' : 'tag';
+        chrome.storage.local.set({
+            gmes_restaurant_mode: restaurantMode,
+            gmes_platform_any: msg.platformAny === true,
+            gmes_platform_include: Array.isArray(msg.platformInclude) ? msg.platformInclude : [],
+            gmes_platform_exclude: Array.isArray(msg.platformExclude) ? msg.platformExclude : [],
+            gmes_platform_unmatched: platformUnmatched
+        });
 
         resolveScrapeTab(function (tabId) {
             if (!tabId) { return; }
@@ -946,7 +1026,10 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
                 // Step 2: wait for the map center to resolve.
                 waitForMapsCenter(tabId, function (center) {
                     if (!center) {
-                        // Fall back to a plain "category in location" search with no center.
+                        // Geocode failed: fall back to a plain "category in location"
+                        // search with no center. Category chaining needs a grid center,
+                        // so only the first category runs on this rare fallback path.
+                        chrome.storage.local.remove(['gmes_cat_queue', 'gmes_cat_shared', 'gmes_cat_total', 'gmes_cat_index']);
                         chrome.tabs.update(tabId, { url: buildMapsSearchUrl(category + ' in ' + location) }, function () {
                             setTimeout(function () { injectAutoScraper(tabId, { lat: '', lng: '' }, radiusMiles, turbo, filters); }, 3500);
                         });
@@ -956,6 +1039,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
                     var effectiveRadius = radiusMiles;
                     if (!effectiveRadius && center.zoom) effectiveRadius = zoomToRadius(center.zoom);
                     if (!effectiveRadius) effectiveRadius = 25; // last-resort fallback
+                    // Queue any remaining categories to run after this one finishes,
+                    // reusing this same geocoded center (see finishGridScan chaining).
+                    setCategoryQueue(categories, location, center, effectiveRadius, turbo, filters);
                     startGridScan(tabId, category, location, center, effectiveRadius, turbo, filters);
                 });
             });
@@ -963,6 +1049,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         // Enrich any leads carrying a website that haven't been scraped yet (backlog
         // from earlier runs/manual adds); fresh leads enqueue as they're merged.
         sweepExistingForEnrichment();
+        // Restaurant Mode: run delivery-platform detection over the existing backlog
+        // too (fresh leads resolve/enqueue as they're merged in mergeScrapedItems).
+        if (restaurantMode) sweepExistingForDelivery();
         sendResponse({ started: true });
         return;
     }
@@ -988,8 +1077,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (msg.type === 'STOP_AUTO_SCRAPE') {
         gridScan = null;
         clearGridWatchdog();
-        chrome.storage.local.remove(GRID_STATE_KEY);
-        chrome.storage.local.set({ gmes_background_scraping: false, gmes_scrape_heartbeat: 0, gmes_grid_total: 0, gmes_grid_current: 0, gmes_grid_autoresume: false, gmes_active_session_id: '', gmes_active_session_started: 0 });
+        chrome.storage.local.remove([GRID_STATE_KEY, 'gmes_cat_queue', 'gmes_cat_shared']);
+        chrome.storage.local.set({ gmes_background_scraping: false, gmes_scrape_heartbeat: 0, gmes_grid_total: 0, gmes_grid_current: 0, gmes_grid_autoresume: false, gmes_active_session_id: '', gmes_active_session_started: 0, gmes_cat_total: 0, gmes_cat_index: 0 });
         stopMapsContentScripts(function () { sendResponse({ stopped: true }); });
         return true;
     }
@@ -1130,7 +1219,7 @@ function dedupeStoredResults() {
 function mergeScrapedItems(newItems, source, cb) {
     if (!Array.isArray(newItems) || !newItems.length) { if (cb) cb(0); return; }
     withResultsLock(function (release) {
-        chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled', 'gmes_active_session_id'], function (data) {
+        chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled', 'gmes_active_session_id', 'gmes_restaurant_mode', 'gmes_platform_any', 'gmes_platform_include', 'gmes_platform_exclude', 'gmes_platform_unmatched'], function (data) {
             var existingRaw = Array.isArray(data.gmes_results) ? data.gmes_results : [];
             // Collapse any duplicates left by older runs before merging in new items.
             var existing = dedupeItemList(existingRaw);
@@ -1150,6 +1239,16 @@ function mergeScrapedItems(newItems, source, cb) {
             existing.forEach(function (it) { var k = placeIdentity(it); if (k) byKey.set(k, it); });
             var addedCount = 0;
             var addedItems = [];   // newly stored leads (candidates for website enrichment)
+            // Restaurant Mode: maps-direct + no-website leads resolve synchronously
+            // below; real-website leads go here for the async platform detector.
+            var deliveryDeferred = [];
+            var restaurantMode = data.gmes_restaurant_mode === true;
+            var deliveryCfg = restaurantMode ? {
+                platformAny: data.gmes_platform_any === true,
+                platformInclude: Array.isArray(data.gmes_platform_include) ? data.gmes_platform_include : [],
+                platformExclude: Array.isArray(data.gmes_platform_exclude) ? data.gmes_platform_exclude : [],
+                platformUnmatched: data.gmes_platform_unmatched === 'skip' ? 'skip' : 'tag'
+            } : null;
 
             newItems.forEach(function (item) {
                 var key = placeIdentity(item);
@@ -1178,6 +1277,22 @@ function mergeScrapedItems(newItems, source, cb) {
                     if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) return;
                 } catch (e) { }
 
+                // Restaurant Mode fast path: resolve delivery platforms the moment a
+                // lead is merged. A maps-direct hit (the Maps "website" link is itself
+                // an ordering platform) or a lead with no real site to visit is fully
+                // qualified here — skip mode filters it out (return), tag mode keeps it
+                // with a [Delivery: ...] note. Real-website leads defer to the detector.
+                if (restaurantMode) {
+                    var directKeys = matchPlatformHosts(item.companyUrl);
+                    if (directKeys.length) {
+                        if (!applyDeliveryToLead(item, directKeys, 'maps-direct', deliveryCfg)) return;
+                    } else if (!isRealWebsite(item.companyUrl)) {
+                        if (!applyDeliveryToLead(item, [], '', deliveryCfg)) return;
+                    } else {
+                        deliveryDeferred.push(item);
+                    }
+                }
+
                 if (activeSessionId && !item.sessionId) item.sessionId = activeSessionId;
                 byKey.set(key, item);
                 existing.push(item);
@@ -1191,6 +1306,9 @@ function mergeScrapedItems(newItems, source, cb) {
                 // Kick off website enrichment for the leads we just added (gated by
                 // the gmes_scrape_websites toggle inside enqueueItemsForEnrichment).
                 if (addedItems.length) enqueueItemsForEnrichment(addedItems);
+                // Restaurant Mode: detect ordering platforms for real-website leads
+                // (maps-direct + no-site leads were already resolved above).
+                if (restaurantMode && deliveryDeferred.length) enqueueItemsForDelivery(deliveryDeferred, deliveryCfg);
             }
 
             if (addedCount || changed) chrome.storage.local.set({ gmes_results: existing }, finish);
@@ -1332,6 +1450,146 @@ function isFoodRelatedIndustry(industry) {
 
 // ============================================================================
 // End of Food/Restaurant Filter
+// ============================================================================
+
+// ============================================================================
+// Restaurant Mode — 3rd-party ordering/delivery platform registry + matcher
+// ----------------------------------------------------------------------------
+// "Restaurant Mode" qualifies leads by which online-ordering / delivery platform
+// they use. Detection runs in three passes (cheapest first): a maps-direct check
+// on the Maps "website" link (mergeScrapedItems), a fetch() of the site's HTML,
+// then an inactive-tab DOM scan with an optional single hybrid click. The keys
+// and lead fields below are a SHARED CONTRACT with popup.js and the results UI —
+// do not rename them.
+// ============================================================================
+
+// Platform key -> host substrings that identify that platform (matched against a
+// URL's hostname, so "order.doordash.com" still matches "doordash.com").
+var PLATFORM_DOMAINS = {
+    doordash: ['doordash.com', 'order.online', 'trycaviar.com', 'caviar.com'],
+    ubereats: ['ubereats.com', 'eats.uber.com'],
+    postmates: ['postmates.com'],
+    grubhub: ['grubhub.com', 'seamless.com'],
+    toast:   ['toasttab.com'],
+    chownow: ['chownow.com'],
+    slice:   ['slicelife.com']
+};
+
+// Generic online-ordering hosts. These are folded into the synthetic key 'other'
+// and ONLY qualify a lead when platformAny is true (see computeMatched) — a user
+// asking specifically for DoorDash must not match a menufy/olo site.
+var GENERIC_PLATFORM_DOMAINS = ['menufy.com', 'olo.com', 'beyondmenu.com', 'square.site'];
+
+// Display labels used in the [Delivery: ...] note token and the results UI.
+var PLATFORM_LABELS = {
+    doordash: 'DoorDash',
+    ubereats: 'Uber Eats',
+    postmates: 'Postmates',
+    grubhub:  'Grubhub/Seamless',
+    toast:    'Toast',
+    chownow:  'ChowNow',
+    slice:    'Slice',
+    other:    'Other'
+};
+
+// The user-selectable platform keys. The "Any" rule expands to exactly these
+// (plus the synthetic 'other'); 'other' is intentionally NOT listed so it can
+// never satisfy a specific include list.
+var ALL_KNOWN_KEYS = ['doordash', 'ubereats', 'postmates', 'grubhub', 'toast', 'chownow', 'slice'];
+
+// Flat list of every platform host substring (specific + generic), passed to the
+// injected DOM scanner so it stays self-contained/serializable.
+function allPlatformSubstrings() {
+    var subs = [];
+    ALL_KNOWN_KEYS.forEach(function (k) { subs = subs.concat(PLATFORM_DOMAINS[k]); });
+    return subs.concat(GENERIC_PLATFORM_DOMAINS);
+}
+
+// Parse a URL's host and return the platform keys it matches. Reuses the
+// isGoogleHostBg guard so Google/empty/invalid URLs return []. Generic hosts map
+// to the synthetic key 'other'.
+function matchPlatformHosts(url) {
+    if (!url) return [];
+    var host;
+    try { host = new URL(url).hostname.toLowerCase(); } catch (e) { return []; }
+    if (!host || isGoogleHostBg(url)) return [];
+    var found = {};
+    var keys = Object.keys(PLATFORM_DOMAINS);
+    for (var i = 0; i < keys.length; i++) {
+        var subs = PLATFORM_DOMAINS[keys[i]];
+        for (var j = 0; j < subs.length; j++) {
+            if (host === subs[j] || host.indexOf(subs[j]) !== -1) { found[keys[i]] = 1; break; }
+        }
+    }
+    for (var g = 0; g < GENERIC_PLATFORM_DOMAINS.length; g++) {
+        if (host === GENERIC_PLATFORM_DOMAINS[g] || host.indexOf(GENERIC_PLATFORM_DOMAINS[g]) !== -1) { found.other = 1; break; }
+    }
+    return Object.keys(found);
+}
+
+// Qualification rule (shared contract):
+//   excluded  = platformExclude
+//   candidate = platformAny ? ALL_KNOWN_KEYS(+other) : platformInclude
+//   matched   = (detected ∩ candidate) − excluded
+function computeMatched(detectedKeys, cfg) {
+    detectedKeys = detectedKeys || [];
+    cfg = cfg || {};
+    var candidate = cfg.platformAny ? ALL_KNOWN_KEYS.concat(['other']) : (cfg.platformInclude || []);
+    var candSet = {}; candidate.forEach(function (k) { candSet[k] = 1; });
+    var exclSet = {}; (cfg.platformExclude || []).forEach(function (k) { exclSet[k] = 1; });
+    var matched = [], seen = {};
+    detectedKeys.forEach(function (k) {
+        if (!candSet[k] || exclSet[k] || seen[k]) return;   // excluded wins over include/any
+        seen[k] = 1; matched.push(k);
+    });
+    return matched;
+}
+
+// Append a [Delivery: DoorDash, Grubhub] (or [Delivery: none]) token to a lead's
+// note. Never overwrites an existing note and never double-appends its own token.
+function appendDeliveryNote(lead, matched) {
+    if (!lead) return;
+    var note = (lead.note != null) ? String(lead.note) : '';
+    if (/\[Delivery:[^\]]*\]/i.test(note)) return;   // already tagged — don't duplicate
+    var labels = (matched && matched.length)
+        ? matched.map(function (k) { return PLATFORM_LABELS[k] || k; }).join(', ')
+        : 'none';
+    var token = '[Delivery: ' + labels + ']';
+    lead.note = note ? (note + ' ' + token) : token;
+}
+
+// Set the delivery fields on a lead from a detected platform set + source, apply
+// the qualification rule, and return whether the lead should be KEPT (true) or
+// PRUNED (false — only possible in skip mode when nothing qualified).
+function applyDeliveryToLead(lead, detectedKeys, source, cfg) {
+    if (!lead) return true;
+    cfg = cfg || {};
+    var matched = computeMatched(detectedKeys, cfg);
+    lead.deliveryPlatforms = matched;
+    lead.deliverySource = source || '';
+    lead.deliveryChecked = true;
+    var qualified = matched.length > 0;
+    if (cfg.platformUnmatched === 'skip' && !qualified) return false;   // filter out
+    appendDeliveryNote(lead, matched);                                  // qualified OR tag mode
+    return true;
+}
+
+// Read the persisted Restaurant Mode config. Unmatched defaults to 'tag'
+// (non-destructive) when unset so a missing key can never silently prune leads.
+function getRestaurantConfig(cb) {
+    chrome.storage.local.get(['gmes_restaurant_mode', 'gmes_platform_any', 'gmes_platform_include', 'gmes_platform_exclude', 'gmes_platform_unmatched'], function (d) {
+        cb({
+            restaurantMode: d.gmes_restaurant_mode === true,
+            platformAny: d.gmes_platform_any === true,
+            platformInclude: Array.isArray(d.gmes_platform_include) ? d.gmes_platform_include : [],
+            platformExclude: Array.isArray(d.gmes_platform_exclude) ? d.gmes_platform_exclude : [],
+            platformUnmatched: d.gmes_platform_unmatched === 'skip' ? 'skip' : 'tag'
+        });
+    });
+}
+
+// ============================================================================
+// End of Restaurant Mode registry
 // ============================================================================
 
 // ============================================================================
@@ -1589,7 +1847,50 @@ function extractContactsFromHtml(html) {
     emails = emails.concat(textEmails);
     var textPhones = (tels.join(' ') + ' ' + text).match(ENRICH_PHONE_RE) || [];
 
-    return { emails: cleanEmails(emails), phones: dedupNormalizedPhones(textPhones) };
+    return { emails: cleanEmails(emails), phones: dedupNormalizedPhones(textPhones), siteCredit: extractSiteCreditFromHtml(html) };
+}
+
+// --- Site-builder credit ("Powered by X" / "Website by X") ------------------
+// Many small-business sites carry a footer credit for whoever built the site
+// (e.g. "Powered by TableTurnerr", "Website by Acme Studio"). We surface that in
+// the lead note + lead.siteBuilder so reps can see who made the site.
+var SITE_CREDIT_RE = /(?:powered|designed|developed|built|created|website|web\s*design|site)\s+by\b[:\s]*([^<>\n\r|·•]{2,60})/i;
+
+// Trim a captured credit phrase down to a short builder name (or '' if it looks
+// like a sentence fragment rather than a name/brand).
+function cleanSiteCredit(s) {
+    s = String(s || '').replace(/&amp;/g, '&').replace(/&nbsp;/gi, ' ');
+    s = s.split(/[|·•\n\r]| [-–—] |\.\s|\s{2,}|©/)[0];              // stop at first delimiter/sentence break
+    s = s.replace(/^["'“”\s.,;:&\-]+/, '').replace(/["'“”\s.,;:&\-]+$/, '').trim();
+    if (s.length < 2 || s.length > 45) return '';
+    if (s.split(/\s+/).length > 5) return '';                        // too long to be a name
+    if (/\b(us|you|your|our|the team)\b/i.test(s) && s.indexOf('.') === -1) return '';
+    return s;
+}
+
+function extractSiteCreditFromHtml(html) {
+    if (!html) return '';
+    var text = String(html)
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ');
+    var m = text.match(SITE_CREDIT_RE);
+    if (m) { var c = cleanSiteCredit(m[1]); if (c) return c; }
+    return '';
+}
+
+// Append a [Site by: X] token to a lead's note (and set lead.siteBuilder). Never
+// overwrites an existing note and never double-appends its own token.
+function appendSiteCreditNote(lead, name) {
+    if (!lead) return;
+    name = cleanSiteCredit(name);
+    if (!name) return;
+    lead.siteBuilder = name;
+    var note = (lead.note != null) ? String(lead.note) : '';
+    if (/\[Site by:[^\]]*\]/i.test(note)) return;
+    var token = '[Site by: ' + name + ']';
+    lead.note = note ? (note + ' ' + token) : token;
 }
 
 // Heuristic: does this HTML look like a JS-rendered shell with little real text?
@@ -1656,9 +1957,10 @@ function fetchWebsiteHtml(url, timeoutMs, cb) {
 // Try to enrich a site via fetch only. cb({ok, emails, phones, jsRendered}).
 function enrichViaFetch(url, cb) {
     fetchWebsiteHtml(url, 8000, function (res) {
-        if (!res.ok) { cb({ ok: false, emails: [], phones: [], jsRendered: true }); return; }
+        if (!res.ok) { cb({ ok: false, emails: [], phones: [], jsRendered: true, siteCredit: '' }); return; }
         var c = extractContactsFromHtml(res.html);
         var js = looksJsRendered(res.html);
+        var credit = c.siteCredit || '';
         if (!c.emails.length) {
             var contactUrl = findContactUrl(res.html, res.finalUrl || url);
             if (contactUrl && contactUrl !== url && contactUrl !== (res.finalUrl || url)) {
@@ -1667,13 +1969,14 @@ function enrichViaFetch(url, cb) {
                         var c2 = extractContactsFromHtml(res2.html);
                         c.emails = cleanEmails(c.emails.concat(c2.emails));
                         c.phones = dedupNormalizedPhones(c.phones.concat(c2.phones));
+                        if (!credit) credit = c2.siteCredit || '';
                     }
-                    cb({ ok: true, emails: c.emails, phones: c.phones, jsRendered: js });
+                    cb({ ok: true, emails: c.emails, phones: c.phones, jsRendered: js, siteCredit: credit });
                 });
                 return;
             }
         }
-        cb({ ok: true, emails: c.emails, phones: c.phones, jsRendered: js });
+        cb({ ok: true, emails: c.emails, phones: c.phones, jsRendered: js, siteCredit: credit });
     });
 }
 
@@ -1723,9 +2026,23 @@ function scanWebsiteForContacts() {
         var phoneRe = /(?:\+?1[\s.\-]?)?(?:\(\s*[2-9]\d{2}\s*\)|[2-9]\d{2})[\s.\-]?[2-9]\d{2}[\s.\-]?\d{4}/g;
         (bodyText.match(phoneRe) || []).forEach(addPhone);
 
-        return { emails: emails.slice(0, 5), phones: phones.slice(0, 10) };
+        // Site-builder credit — prefer the footer, then fall back to full page text.
+        var siteCredit = '';
+        try {
+            var creditRe = /(?:powered|designed|developed|built|created|website|web\s*design|site)\s+by\b[:\s]*([^\n\r|·•]{2,60})/i;
+            var foot = document.querySelector('footer');
+            var scope = (foot && foot.innerText) ? foot.innerText : bodyText;
+            var cm = scope.match(creditRe) || bodyText.match(creditRe);
+            if (cm && cm[1]) {
+                var cc = cm[1].split(/[|·•\n\r]| [-–—] |\.\s|\s{2,}|©/)[0]
+                    .replace(/^["'“”\s.,;:&\-]+/, '').replace(/["'“”\s.,;:&\-]+$/, '').trim();
+                if (cc.length >= 2 && cc.length <= 45 && cc.split(/\s+/).length <= 5) siteCredit = cc;
+            }
+        } catch (e) {}
+
+        return { emails: emails.slice(0, 5), phones: phones.slice(0, 10), siteCredit: siteCredit };
     } catch (e) {
-        return { emails: [], phones: [] };
+        return { emails: [], phones: [], siteCredit: '' };
     }
 }
 
@@ -1795,6 +2112,8 @@ function mergeContactsIntoLead(lead, contacts) {
         lead.phones = phones;
         if (!lead.phone) lead.phone = phones[0].number;
     }
+    // Record who built the site (footer "Powered by …") in the note column.
+    if (contacts.siteCredit) appendSiteCreditNote(lead, contacts.siteCredit);
     return true;
 }
 
@@ -1841,20 +2160,21 @@ function updateEnrichStatus() {
 }
 
 function enrichOne(job, done) {
-    function finalize(emails, phones, method) {
+    function finalize(emails, phones, method, siteCredit) {
         recordEnrichLog(job, { emails: emails, phones: phones, method: method });
-        applyEnrichmentToLead(job.identity, { emails: emails, phones: phones }, done);
+        applyEnrichmentToLead(job.identity, { emails: emails, phones: phones, siteCredit: siteCredit || '' }, done);
     }
     enrichViaFetch(job.url, function (fres) {
         var needTab = (!fres.ok) || (!fres.emails.length && fres.jsRendered);
         if (!needTab) {
-            finalize(fres.emails, fres.phones, 'fetch');
+            finalize(fres.emails, fres.phones, 'fetch', fres.siteCredit);
             return;
         }
         tabScrapeContacts(job.url, function (tres) {
             var emails = cleanEmails((fres.emails || []).concat((tres && tres.emails) || []));
             var phones = dedupNormalizedPhones((fres.phones || []).concat((tres && tres.phones) || []));
-            finalize(emails, phones, 'tab');
+            var credit = (fres && fres.siteCredit) || (tres && tres.siteCredit) || '';
+            finalize(emails, phones, 'tab', credit);
         });
     });
 }
@@ -1948,6 +2268,340 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
 // ============================================================================
 // End of Website Enrichment
+// ============================================================================
+
+// ============================================================================
+// Restaurant Mode — ordering-platform detection (hybrid: fetch → tab → click)
+// ----------------------------------------------------------------------------
+// detectOrderPlatforms(url, cb) resolves which delivery/ordering platforms a
+// restaurant's website uses. Modeled on enrichViaFetch/tabScrapeContacts:
+//   1. Fetch the HTML (cheap, invisible) and scan href/src/iframe/script plus the
+//      final redirect URL for platform hosts. Any hit resolves immediately.
+//   2. If the fetch found nothing, open the site in an inactive tab, DOM-scan for
+//      platform links + order/menu buttons, and — only when no platform host is
+//      present but a pure-JS order button exists — click it ONCE and watch for a
+//      cross-domain navigation to a platform. The tab is always removed.
+// cb({ platforms: [keys], source: 'redirect'|'embed'|'click'|'' }).
+// ============================================================================
+
+function hostOfUrl(url) {
+    try { return new URL(url).hostname.toLowerCase(); } catch (e) { return ''; }
+}
+function absUrl(href, base) {
+    try { return new URL(href, base).href; } catch (e) { return String(href || ''); }
+}
+
+// Scan fetched HTML for platform hosts in attributes + the final (redirect) URL.
+// source is 'redirect' when the final URL landed on a platform host different
+// from the site's own host, otherwise 'embed'.
+function scanHtmlForPlatforms(html, finalUrl, originalUrl) {
+    html = String(html || '');
+    var found = {}, redirected = false;
+    var finalKeys = matchPlatformHosts(finalUrl);
+    if (finalKeys.length) {
+        var fh = hostOfUrl(finalUrl), oh = hostOfUrl(originalUrl);
+        if (fh && fh !== oh) redirected = true;
+        finalKeys.forEach(function (k) { found[k] = 1; });
+    }
+    var attrRe = /(?:href|src)\s*=\s*["']([^"']+)["']/gi, m;
+    while ((m = attrRe.exec(html))) {
+        matchPlatformHosts(absUrl(m[1], finalUrl || originalUrl)).forEach(function (k) { found[k] = 1; });
+    }
+    var platforms = Object.keys(found);
+    return { platforms: platforms, source: platforms.length ? (redirected ? 'redirect' : 'embed') : '' };
+}
+
+// Injected into the site tab. Self-contained (no external refs) so executeScript
+// can serialize it. platformSubs is the flat host-substring list. Returns
+// { platformHostsFound: [urls], orderCandidates: [{href, isJsButton}] }.
+function scanOrderLinks(platformSubs) {
+    try {
+        platformSubs = platformSubs || [];
+        function absOf(u) { try { return new URL(u, location.href).href; } catch (e) { return ''; } }
+        function hostMatches(u) {
+            var h; try { h = new URL(u, location.href).hostname.toLowerCase(); } catch (e) { return false; }
+            for (var i = 0; i < platformSubs.length; i++) {
+                if (h === platformSubs[i] || h.indexOf(platformSubs[i]) !== -1) return true;
+            }
+            return false;
+        }
+        var hostsFound = [], seenH = {};
+        function addHost(u) {
+            var a = absOf(u); if (!a || !hostMatches(a) || seenH[a]) return;
+            seenH[a] = 1; hostsFound.push(a);
+        }
+        document.querySelectorAll('a[href]').forEach(function (a) { addHost(a.getAttribute('href')); });
+        document.querySelectorAll('iframe[src]').forEach(function (f) { addHost(f.getAttribute('src')); });
+        document.querySelectorAll('script[src]').forEach(function (s) { addHost(s.getAttribute('src')); });
+
+        var orderRe = /order|menu|delivery|pickup/i;
+        var candidates = [], seenC = {};
+        function considerEl(el) {
+            if (!el) return;
+            var txt = (el.textContent || '').trim();
+            if (!txt || !orderRe.test(txt)) return;
+            var tag = (el.tagName || '').toLowerCase();
+            var rawHref = el.getAttribute ? (el.getAttribute('href') || '') : '';
+            var abs = rawHref ? absOf(rawHref) : '';
+            var usableHttp = /^https?:\/\//i.test(abs);
+            // A button, or an anchor with no usable http href, is a JS-driven button.
+            var isJsButton = (tag === 'button') || !usableHttp;
+            var key = (abs || '') + '|' + txt.slice(0, 40) + '|' + tag;
+            if (seenC[key]) return; seenC[key] = 1;
+            candidates.push({ href: usableHttp ? abs : '', isJsButton: isJsButton });
+        }
+        document.querySelectorAll('a, button, [role="button"]').forEach(considerEl);
+
+        // Site-builder credit — prefer the footer.
+        var credit = '';
+        try {
+            var creditRe = /(?:powered|designed|developed|built|created|website|web\s*design|site)\s+by\b[:\s]*([^\n\r|·•]{2,60})/i;
+            var foot = document.querySelector('footer');
+            var scope = (foot && foot.innerText) ? foot.innerText : ((document.body && document.body.innerText) || '');
+            var cm = scope.match(creditRe);
+            if (cm && cm[1]) {
+                var cc = cm[1].split(/[|·•\n\r]| [-–—] |\.\s|\s{2,}|©/)[0]
+                    .replace(/^["'“”\s.,;:&\-]+/, '').replace(/["'“”\s.,;:&\-]+$/, '').trim();
+                if (cc.length >= 2 && cc.length <= 45 && cc.split(/\s+/).length <= 5) credit = cc;
+            }
+        } catch (e) {}
+
+        return { platformHostsFound: hostsFound.slice(0, 50), orderCandidates: candidates.slice(0, 40), credit: credit };
+    } catch (e) {
+        return { platformHostsFound: [], orderCandidates: [], credit: '' };
+    }
+}
+
+// Injected to fire the ONE hybrid click: re-find the first order-ish pure-JS
+// button/anchor and click it. Self-contained. Returns true if it clicked.
+function clickOrderButton() {
+    try {
+        var orderRe = /order|menu|delivery|pickup/i;
+        var els = document.querySelectorAll('a, button, [role="button"]');
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            var txt = (el.textContent || '').trim();
+            if (!txt || !orderRe.test(txt)) continue;
+            var tag = (el.tagName || '').toLowerCase();
+            var href = el.getAttribute ? (el.getAttribute('href') || '') : '';
+            var usableHttp = /^https?:\/\//i.test(href);
+            if (!((tag === 'button') || !usableHttp)) continue;   // only pure-JS buttons
+            try { el.click(); return true; } catch (e) {}
+        }
+        return false;
+    } catch (e) { return false; }
+}
+
+// Tab-pass fallback for detectOrderPlatforms. Mirrors tabScrapeContacts: opens an
+// inactive tab with a finish() guard + killTimer, and ALWAYS removes the tab.
+function detectOrderPlatformsViaTab(url, cb) {
+    var finished = false, createdTabId = null, loadListener = null, navListener = null;
+    var originalHost = hostOfUrl(url);
+    var platformSubs = allPlatformSubstrings();
+    var scanCredit = '';   // site-builder credit picked up from the DOM scan
+    function finish(result) {
+        if (finished) return; finished = true;
+        clearTimeout(killTimer);
+        if (loadListener) { try { chrome.tabs.onUpdated.removeListener(loadListener); } catch (e) {} }
+        if (navListener) { try { chrome.tabs.onUpdated.removeListener(navListener); } catch (e) {} }
+        if (createdTabId != null) { try { chrome.tabs.remove(createdTabId, function () { void chrome.runtime.lastError; }); } catch (e) {} }
+        var out = result || { platforms: [], source: '' };
+        if (!out.credit && scanCredit) out.credit = scanCredit;
+        cb(out);
+    }
+    var killTimer = setTimeout(function () { finish(null); }, 30000);
+
+    function handleScan(out) {
+        out = out || { platformHostsFound: [], orderCandidates: [] };
+        if (out.credit) scanCredit = out.credit;
+        var hostsFound = out.platformHostsFound || [];
+        var candidates = out.orderCandidates || [];
+        var union = {}, hasPlatformOrderLink = false;
+        hostsFound.forEach(function (u) { matchPlatformHosts(u).forEach(function (k) { union[k] = 1; }); });
+        candidates.forEach(function (c) {
+            if (!c || !c.href) return;
+            var ks = matchPlatformHosts(c.href);
+            if (ks.length) { hasPlatformOrderLink = true; ks.forEach(function (k) { union[k] = 1; }); }
+        });
+        var keys = Object.keys(union);
+        if (keys.length) {
+            // An order button pointing straight at a platform is a redirect; a bare
+            // embedded link/iframe/script is an embed.
+            finish({ platforms: keys, source: hasPlatformOrderLink ? 'redirect' : 'embed' });
+            return;
+        }
+        // Hybrid click: only when NO platform host is present anywhere AND a pure-JS
+        // order button exists (the link is built/opened by JS on click).
+        var hasJsButton = candidates.some(function (c) { return c && c.isJsButton; });
+        if (hostsFound.length === 0 && hasJsButton) { doHybridClick(); return; }
+        finish({ platforms: [], source: '' });
+    }
+
+    function doHybridClick() {
+        // Watch for a cross-domain navigation triggered by the single click.
+        navListener = function (tabId, info, tab) {
+            if (tabId !== createdTabId) return;
+            var u = (tab && tab.url) || info.url || '';
+            var h = hostOfUrl(u);
+            if (!h || h === originalHost) return;   // still on the restaurant's own site
+            var keys = matchPlatformHosts(u);
+            if (keys.length) finish({ platforms: keys, source: 'click' });
+        };
+        chrome.tabs.onUpdated.addListener(navListener);
+        chrome.scripting.executeScript({ target: { tabId: createdTabId }, func: clickOrderButton }, function () {
+            void chrome.runtime.lastError;
+        });
+        // Bound the click wait to ~8s; give up (no platform) if no cross-domain nav.
+        setTimeout(function () { if (!finished) finish({ platforms: [], source: '' }); }, 8000);
+    }
+
+    try {
+        chrome.tabs.create({ url: url, active: false }, function (tab) {
+            if (chrome.runtime.lastError || !tab) { finish(null); return; }
+            createdTabId = tab.id;
+            loadListener = function (tabId, info) {
+                if (tabId !== createdTabId || info.status !== 'complete') return;
+                chrome.tabs.onUpdated.removeListener(loadListener); loadListener = null;
+                // Settle briefly so late-injected order widgets render.
+                setTimeout(function () {
+                    if (finished) return;
+                    chrome.scripting.executeScript({ target: { tabId: createdTabId }, func: scanOrderLinks, args: [platformSubs] }, function (results) {
+                        handleScan(results && results[0] && results[0].result);
+                    });
+                }, 900);
+            };
+            chrome.tabs.onUpdated.addListener(loadListener);
+        });
+    } catch (e) { finish(null); }
+}
+
+// Hybrid entry point: fetch pass first, tab pass only if the fetch found nothing.
+function detectOrderPlatforms(url, cb) {
+    if (!url) { cb({ platforms: [], source: '', credit: '' }); return; }
+    fetchWebsiteHtml(url, 8000, function (res) {
+        var credit = (res && res.ok) ? extractSiteCreditFromHtml(res.html) : '';
+        if (res && res.ok) {
+            var scan = scanHtmlForPlatforms(res.html, res.finalUrl || url, url);
+            if (scan.platforms.length) { cb({ platforms: scan.platforms, source: scan.source, credit: credit }); return; }
+        }
+        // No platform from the fetch pass: fall through to the tab pass, but keep the
+        // fetch-derived credit as a fallback if the DOM scan doesn't find one.
+        detectOrderPlatformsViaTab(url, function (r) {
+            r = r || { platforms: [], source: '' };
+            if (!r.credit) r.credit = credit;
+            cb(r);
+        });
+    });
+}
+
+// --- Delivery-detection queue (parallel to the contact-enrichment queue) -----
+// TRADEOFF: this runs as a SEPARATE pass from the contact-scan enrichment queue
+// rather than sharing one tab visit. Both are fetch-first, so the common case
+// opens no tab for either; a tab only opens on each one's fallback. Cleanly
+// folding order-link scanning into scanWebsiteForContacts (and threading the
+// click/redirect follow-up back through tabScrapeContacts) was judged too
+// invasive for the shared enrichment path, so they stay independent. This queue
+// is gated ONLY by restaurant mode (NOT the gmes_scrape_websites toggle), since
+// delivery detection is its own feature.
+var DELIVERY_DETECT = {
+    queue: [],
+    seen: new Set(),   // identities queued this SW lifetime (pre-persist guard)
+    inFlight: 0,
+    MAX: 2
+};
+
+function enqueueItemsForDelivery(items, cfg) {
+    if (!items || !items.length || !EXTENSION_ENABLED) return;
+    items.forEach(function (it) {
+        // Only real-website leads that aren't already resolved reach the detector;
+        // maps-direct + no-site leads were qualified at merge time.
+        if (!it || it.deliveryChecked) return;
+        if (!isRealWebsite(it.companyUrl)) return;
+        var id = placeIdentity(it);
+        if (!id || DELIVERY_DETECT.seen.has(id)) return;
+        DELIVERY_DETECT.seen.add(id);
+        DELIVERY_DETECT.queue.push({ identity: id, url: it.companyUrl, cfg: cfg });
+    });
+    pumpDelivery();
+}
+
+function detectDeliveryOne(job, done) {
+    detectOrderPlatforms(job.url, function (res) {
+        applyDeliveryResultToLead(job.identity, (res && res.platforms) || [], (res && res.source) || '', job.cfg, (res && res.credit) || '', done);
+    });
+}
+
+function pumpDelivery() {
+    while (DELIVERY_DETECT.inFlight < DELIVERY_DETECT.MAX && DELIVERY_DETECT.queue.length) {
+        var job = DELIVERY_DETECT.queue.shift();
+        DELIVERY_DETECT.inFlight++;
+        detectDeliveryOne(job, function () {
+            DELIVERY_DETECT.inFlight--;
+            pumpDelivery();
+        });
+    }
+}
+
+// Write a detection result back to the matching stored lead (by identity), then
+// keep or prune it per the qualification rule. Skip-mode pruning splices the lead
+// out of gmes_results under the shared write lock so it can't race a scrape merge.
+function applyDeliveryResultToLead(identity, platforms, source, cfg, credit, done) {
+    withResultsLock(function (release) {
+        chrome.storage.local.get(['gmes_results'], function (data) {
+            var list = Array.isArray(data.gmes_results) ? data.gmes_results : [];
+            var changed = false;
+            for (var i = 0; i < list.length; i++) {
+                if (placeIdentity(list[i]) !== identity) continue;
+                var keep = applyDeliveryToLead(list[i], platforms, source, cfg);
+                if (!keep) list.splice(i, 1);   // skip mode + not qualified -> filter out
+                else if (credit) appendSiteCreditNote(list[i], credit);   // footer "Powered by …"
+                changed = true;
+                break;
+            }
+            if (changed) chrome.storage.local.set({ gmes_results: list }, function () { release(); if (done) done(); });
+            else { release(); if (done) done(); }
+        });
+    });
+}
+
+// Sweep the stored backlog when Restaurant Mode starts: resolve maps-direct +
+// no-website leads synchronously (under the write lock) and enqueue real-website
+// leads for async detection. Only touches leads not yet deliveryChecked.
+function sweepExistingForDelivery() {
+    getRestaurantConfig(function (cfg) {
+        if (!cfg.restaurantMode) return;
+        withResultsLock(function (release) {
+            chrome.storage.local.get(['gmes_results'], function (d) {
+                var list = Array.isArray(d.gmes_results) ? d.gmes_results : [];
+                var kept = [], deferred = [], changed = false;
+                for (var i = 0; i < list.length; i++) {
+                    var it = list[i];
+                    if (!it || it.deliveryChecked) { if (it) kept.push(it); continue; }
+                    var directKeys = matchPlatformHosts(it.companyUrl);
+                    if (directKeys.length) {
+                        if (applyDeliveryToLead(it, directKeys, 'maps-direct', cfg)) kept.push(it);
+                        changed = true;
+                    } else if (!isRealWebsite(it.companyUrl)) {
+                        if (applyDeliveryToLead(it, [], '', cfg)) kept.push(it);
+                        changed = true;
+                    } else {
+                        kept.push(it);
+                        deferred.push(it);
+                    }
+                }
+                function after() {
+                    release();
+                    if (deferred.length) enqueueItemsForDelivery(deferred, cfg);
+                }
+                if (changed) chrome.storage.local.set({ gmes_results: kept }, after);
+                else after();
+            });
+        });
+    });
+}
+
+// ============================================================================
+// End of Restaurant Mode detection
 // ============================================================================
 
 chrome.commands.onCommand.addListener(function (command) {
@@ -2368,13 +3022,16 @@ var ZOOM_BRIDGE = {
 };
 
 // Best-effort rep identity. Priority:
-//   1. explicit setting gmes_zoom_rep_user_id (ideally == the rep's Zoom user_id)
-//   2. the connected CRM email (gmes_ghl_email), a stable per-rep label
-//   3. a persisted random fallback id so callIds stay consistent on this machine
-// The local agent overrides repUserId with its own config on upload, so this is
-// only a label/routing hint — but we still send the best value we have.
+//   1. the rep's real GoHighLevel user id (gmes_ghl_user_id), resolved from the
+//      compulsory GHL login — this is what the agent stamps calls with (repKey),
+//      so GHL attributes the call log to the right user
+//   2. explicit override gmes_zoom_rep_user_id
+//   3. the connected CRM email (gmes_ghl_email), a stable per-rep label
+//   4. a persisted random fallback id so callIds stay consistent on this machine
 function resolveRepUserId(cb) {
-    chrome.storage.local.get(['gmes_zoom_rep_user_id', 'gmes_ghl_email', 'gmes_rep_fallback_id'], function (d) {
+    chrome.storage.local.get(['gmes_ghl_user_id', 'gmes_zoom_rep_user_id', 'gmes_ghl_email', 'gmes_rep_fallback_id'], function (d) {
+        var ghlUserId = (d.gmes_ghl_user_id || '').toString().trim();
+        if (ghlUserId) { cb(ghlUserId); return; }
         var explicit = (d.gmes_zoom_rep_user_id || '').toString().trim();
         if (explicit) { cb(explicit); return; }
         var email = (d.gmes_ghl_email || '').toString().trim();
@@ -2383,6 +3040,42 @@ function resolveRepUserId(cb) {
         var fallback = 'rep_' + Math.random().toString(36).slice(2, 10);
         chrome.storage.local.set({ gmes_rep_fallback_id: fallback }, function () { cb(fallback); });
     });
+}
+
+// Push the rep's resolved GHL user id to the local agent so it attributes both
+// web AND desktop recordings without any per-machine setup. Uses a short-lived
+// native port separate from the call bridge so it never disturbs a live call.
+function pushIdentityToAgent(repUserId) {
+    if (!repUserId) return;
+    try {
+        var port = chrome.runtime.connectNative(CRM_AGENT_HOST);
+        port.onDisconnect.addListener(function () {
+            var err = chrome.runtime.lastError; // host not installed / closed pipe
+            if (err) console.debug('[GMES][Zoom] identity port closed:', err.message);
+        });
+        port.onMessage.addListener(function () { /* ack — nothing required */ });
+        port.postMessage({ type: 'IDENTITY', repUserId: repUserId });
+        // Close shortly after so we don't hold the port open outside a call.
+        setTimeout(function () { try { port.disconnect(); } catch (e) {} }, 1500);
+    } catch (e) {
+        console.debug('[GMES][Zoom] identity push failed:', e && e.message);
+    }
+}
+
+// Resolve the rep's GHL user id from the CRM session and hand it to the agent.
+// Called on service-worker startup and after a GHL login completes so the agent
+// always knows who is on this machine.
+function syncRepIdentity() {
+    try {
+        GHL.status(function (st) {
+            if (st && st.connected && st.ghlUserId) {
+                chrome.storage.local.set({ gmes_ghl_user_id: st.ghlUserId });
+                pushIdentityToAgent(st.ghlUserId);
+            }
+        });
+    } catch (e) {
+        console.debug('[GMES][Zoom] syncRepIdentity failed:', e && e.message);
+    }
 }
 
 // Tear down the native port after a call ends. `forCallId` is the callId that was
@@ -2481,6 +3174,16 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         return;
     }
 });
+
+// Resolve the rep's GHL user id and hand it to the agent on browser start and on
+// install/update — NOT on every service-worker wake (MV3 respawns the worker
+// constantly, which would spam status fetches and agent launches). This covers
+// desktop-only reps who never trigger a web-call START; their calls are detected
+// by the agent itself, so attribution still needs the identity pushed once.
+try {
+    chrome.runtime.onStartup.addListener(function () { setTimeout(syncRepIdentity, 3000); });
+    chrome.runtime.onInstalled.addListener(function () { setTimeout(syncRepIdentity, 3000); });
+} catch (e) { /* listeners already registered */ }
 
 function scrapeData() {
     var links = Array.from(document.querySelectorAll('a[href^="https://www.google.com/maps/place"]'));

@@ -138,6 +138,22 @@
     td a { color: #1a73e8; text-decoration: none; }
     td a:hover { text-decoration: underline; }
 
+    /* Delivery platform pills shown in the Delivery column. */
+    .delivery-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      margin: 1px 3px 1px 0;
+      font-size: 10.5px;
+      font-weight: 600;
+      line-height: 1.55;
+      white-space: nowrap;
+      border-radius: 999px;
+      background: #e8f0fe;
+      color: #1557b0;
+      border: 1px solid #d2e3fc;
+    }
+    .delivery-empty { color: #9aa0a6; }
+
     /* Explicit dark theme. With `color-scheme: light dark` declared, Chrome no
        longer auto-darkens this page, so these colours are used verbatim — the
        table links are now a clearly lighter blue (#8ab4f8) instead of the dark
@@ -156,6 +172,8 @@
       tbody tr:hover td,
       tbody tr:nth-child(even):hover td { background: #262a33; }
       td a { color: #ffffff; }
+      .delivery-badge { background: #22324c; color: #8ab4f8; border-color: #2e4468; }
+      .delivery-empty { color: #6b7079; }
       /* Toolbar select carries inline light styles, so override with !important. */
       select { background: #1e2128 !important; color: #e3e3e6 !important; border-color: #2c2f38 !important; }
     }
@@ -211,6 +229,7 @@
           <th>Reviews</th>
           <th>Phone</th>
           <th>Industry</th>
+          <th>Delivery</th>
           <th>City</th>
           <th>Address</th>
           <th>Email</th>

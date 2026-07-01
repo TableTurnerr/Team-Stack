@@ -44,7 +44,13 @@ jobs:
 
       - name: Build
         if: steps.check.outputs.exists == 'false'
-        run: dotnet publish tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release -o publish
+        shell: pwsh
+        # Bake the shared agent token into the binary from a repo secret so reps
+        # never enter it. If the secret is unset the property is empty and the
+        # agent falls back to its setup dialog / CRM_AGENT_TOKEN env var.
+        run: dotnet publish tools/local-CRM-Agent/src/LocalCrmAgent/LocalCrmAgent.csproj -c Release -o publish -p:AgentDefaultToken="$env:AGENT_DEFAULT_TOKEN"
+        env:
+          AGENT_DEFAULT_TOKEN: ${{ secrets.AGENT_SHARED_TOKEN }}
 
       - name: Create tool.json
         if: steps.check.outputs.exists == 'false'

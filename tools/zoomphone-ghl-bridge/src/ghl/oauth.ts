@@ -100,6 +100,20 @@ export async function handleOAuthCallback(request: Request, env: Env): Promise<R
 // self-hosted bridge is a single Node process, so an in-process lock suffices.)
 let inflightRefresh: Promise<string> | null = null;
 
+// The location the OAuth grant is actually scoped to. GHL rejects API calls
+// whose locationId doesn't match the authorized token, so the stored value (set
+// from the install/refresh response) is authoritative; env.GHL_LOCATION_ID is
+// only a fallback for the window before the first install. Using the env var
+// unconditionally silently breaks every call whenever the two diverge.
+export async function getGhlLocationId(env: Env): Promise<string> {
+  const raw = await env.STATE.get(STATE_KEY);
+  if (raw) {
+    const tokens = JSON.parse(raw) as StoredTokens;
+    if (tokens.location_id) return tokens.location_id;
+  }
+  return env.GHL_LOCATION_ID;
+}
+
 export async function getGhlAccessToken(env: Env): Promise<string> {
   const raw = await env.STATE.get(STATE_KEY);
   if (!raw) throw new Error("GHL not installed: visit /ghl/install once to authorize");

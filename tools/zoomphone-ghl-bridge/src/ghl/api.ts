@@ -1,5 +1,5 @@
 import type { Env } from "../index";
-import { getGhlAccessToken } from "./oauth";
+import { getGhlAccessToken, getGhlLocationId } from "./oauth";
 
 const BASE = "https://services.leadconnectorhq.com";
 
@@ -13,6 +13,7 @@ export async function upsertContact(
   params: { phone: string; firstName?: string; source?: string },
 ): Promise<UpsertedContact> {
   const token = await getGhlAccessToken(env);
+  const locationId = await getGhlLocationId(env);
   const res = await fetch(`${BASE}/contacts/upsert`, {
     method: "POST",
     headers: {
@@ -22,7 +23,7 @@ export async function upsertContact(
       Accept: "application/json",
     },
     body: JSON.stringify({
-      locationId: env.GHL_LOCATION_ID,
+      locationId,
       phone: params.phone,
       ...(params.firstName ? { firstName: params.firstName } : {}),
       ...(params.source ? { source: params.source } : {}),
@@ -113,9 +114,10 @@ export async function uploadAudio(
   params: { conversationId: string; audio: ArrayBuffer; filename: string; contentType: string },
 ): Promise<string> {
   const token = await getGhlAccessToken(env);
+  const locationId = await getGhlLocationId(env);
   const form = new FormData();
   form.append("conversationId", params.conversationId);
-  form.append("locationId", env.GHL_LOCATION_ID);
+  form.append("locationId", locationId);
   form.append(
     "fileAttachment",
     new Blob([params.audio], { type: params.contentType }),

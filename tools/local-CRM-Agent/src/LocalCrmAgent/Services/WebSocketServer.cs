@@ -295,6 +295,9 @@ public class AgentWebSocketServer : IDisposable
                 case "setWorkerConfig":
                     HandleSetWorkerConfig(doc.RootElement);
                     break;
+                case "setRepIdentity":
+                    HandleSetRepIdentity(doc.RootElement);
+                    break;
                 case "getMicrophones":
                     HandleGetMicrophones(client);
                     break;
@@ -420,14 +423,18 @@ public class AgentWebSocketServer : IDisposable
         var phone = root.TryGetProperty("phoneNumber", out var p) ? p.GetString() ?? "" : "";
         var channel = root.TryGetProperty("channel", out var c) ? c.GetString() ?? "desktop" : "desktop";
 
-        // Web-channel recordings are owned entirely by the agent (ChromeCallMonitor
-        // drives start/stop from Chrome's mic-capture session). The extension still
-        // relays a START at Zoom-tab init over its persistent signaling socket, but
-        // that fires once per tab and can't mark individual calls — honouring it
-        // here is exactly what produced phantom tab-load recordings. Ignore it.
+        // Web-channel recording *lifecycle* is owned by the agent (ChromeCallMonitor
+        // drives start/stop from Chrome's mic-capture session) — the extension's
+        // START fires once per tab and can't mark individual calls, so we must not
+        // start a recording from it (that produced phantom tab-load recordings).
+        // But the START does carry the reliable dialed number (GHL click-to-call),
+        // which is the only trustworthy external number for web calls. Hand it to
+        // the recorder so it binds to the matching web recording; the bridge then
+        // contact-matches and correlates by phone+time instead of parking the clip.
         if (string.Equals(channel, "web", StringComparison.OrdinalIgnoreCase))
         {
-            Debug.WriteLine("[WS] startRecording channel=web ignored — web calls are agent-driven (ChromeCallMonitor)");
+            _recorder.NoteWebDialPhone(phone);
+            Debug.WriteLine($"[WS] startRecording channel=web — noted dial phone '{phone}'; lifecycle stays agent-driven (ChromeCallMonitor)");
             return;
         }
 
@@ -613,6 +620,32 @@ public class AgentWebSocketServer : IDisposable
             // Re-provisioning clears any pending auth_required state.
             ClearAuthRequired();
         }
+    }
+
+    /// <summary>
+    /// Adopt the rep identity the Chrome extension resolved from its GoHighLevel
+    /// session (the rep's GHL user id). This is what makes call attribution
+    /// zero-touch: the rep logs into the extension once and the agent stamps every
+    /// upload's repKey with their GHL user id, for both web and desktop calls.
+    /// Persisted so it survives restarts without the extension being open.
+    /// </summary>
+    private void HandleSetRepIdentity(JsonElement root)
+    {
+        if (_uploader == null) return;
+        var repUserId = root.TryGetProperty("repUserId", out var r) ? r.GetString() : null;
+        if (string.IsNullOrWhiteSpace(repUserId)) return;
+        repUserId = repUserId.Trim();
+
+        // Ignore a no-op repeat so we don't rewrite config on every call START.
+        if (string.Equals(_config?.RepUserId, repUserId, StringComparison.Ordinal)) return;
+
+        _uploader.SetRepUserId(repUserId);
+        if (_config != null)
+        {
+            _config.RepUserId = repUserId;
+            _config.Save();
+        }
+        Debug.WriteLine($"[WS] setRepIdentity: repKey set to {repUserId}");
     }
 
     // ─── Microphone command handlers ────────────────────────────────────────

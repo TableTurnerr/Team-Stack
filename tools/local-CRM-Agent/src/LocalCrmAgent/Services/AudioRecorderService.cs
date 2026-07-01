@@ -56,6 +56,20 @@ public class AudioRecorderService : IDisposable
     private string _currentChannel = "desktop";
     private RecordingState _state = RecordingState.Idle;
 
+    // Web-phone dial hint. ChromeCallMonitor owns the web recording lifecycle but
+    // has no phone number (it only sees Chrome's mic session go active). The
+    // Chrome extension, however, relays the exact dialed E.164 (from GHL
+    // click-to-call) over native messaging as a channel=web START. We stash it
+    // here and bind it to the web recording so the bridge can contact-match and
+    // correlate by phone+time — without it, web clips land with no phone and,
+    // when the Zoom call_history public-IP resolve also misses, get parked in
+    // GHL "review" instead of attached to the call. Guarded by its own lock so
+    // it never nests with _lock.
+    private readonly object _webHintLock = new();
+    private string? _webDialHintPhone;
+    private DateTime _webDialHintAt = DateTime.MinValue;
+    private static readonly TimeSpan WebDialHintTtl = TimeSpan.FromSeconds(120);
+
     // Safety: max recording duration (2 hours) — absolute ceiling.
     private const int MaxRecordingSeconds = 7200;
 
@@ -157,6 +171,53 @@ public class AudioRecorderService : IDisposable
 
     // ── Agent-driven web-phone call lifecycle (Chrome mic session) ────
 
+    /// <summary>
+    /// Record the dialed number the Chrome extension relayed for a web-phone
+    /// call (channel=web START). ChromeCallMonitor drives the recording, but this
+    /// is the only reliable source of the external number for web calls. START
+    /// and the Chrome-mic signal can arrive in either order, so we both stash the
+    /// number for an imminent recording and bind it to one already in progress.
+    /// </summary>
+    public void NoteWebDialPhone(string? phoneE164)
+    {
+        if (string.IsNullOrWhiteSpace(phoneE164)) return;
+        var phone = phoneE164.Trim();
+
+        lock (_webHintLock)
+        {
+            _webDialHintPhone = phone;
+            _webDialHintAt = DateTime.UtcNow;
+        }
+
+        // Mic session already opened the recording with no number (extension's
+        // START lost the race) — attach the number to it now.
+        lock (_lock)
+        {
+            if (_state == RecordingState.Recording && IsWebChannel &&
+                string.IsNullOrWhiteSpace(_currentPhoneNumber))
+            {
+                _currentPhoneNumber = phone;
+                FileLogger.Write($"[Recorder] Bound web dial phone {phone} to in-progress web recording");
+            }
+        }
+    }
+
+    /// <summary>Consume a fresh web dial hint (single-use so it can't leak into a later call).</summary>
+    private string? TakeFreshWebDialPhone()
+    {
+        lock (_webHintLock)
+        {
+            if (_webDialHintPhone != null && DateTime.UtcNow - _webDialHintAt <= WebDialHintTtl)
+            {
+                var phone = _webDialHintPhone;
+                _webDialHintPhone = null;
+                return phone;
+            }
+            _webDialHintPhone = null; // drop stale hint
+            return null;
+        }
+    }
+
     private void OnWebCallStarted()
     {
         // Only auto-start a web recording when nothing else is recording. A live
@@ -167,10 +228,13 @@ public class AudioRecorderService : IDisposable
             FileLogger.Write("[Recorder] Web call detected but recorder busy — ignoring");
             return;
         }
-        FileLogger.Write("[Recorder] Web call detected (Chrome mic) — starting recording");
-        // Phone is unknown here; the upload resolver matches the Zoom call_history
-        // by device IP + time, same as desktop calls.
-        StartRecording(string.Empty, "web");
+        // Prefer the extension-relayed dialed number when it arrived first.
+        // Otherwise the number binds via NoteWebDialPhone if START lands after
+        // the mic signal, and failing both the upload resolver still tries the
+        // Zoom call_history device/public-IP + time match.
+        var phone = TakeFreshWebDialPhone() ?? string.Empty;
+        FileLogger.Write($"[Recorder] Web call detected (Chrome mic) — starting recording (phone={(phone.Length == 0 ? "(pending)" : phone)})");
+        StartRecording(phone, "web");
     }
 
     private void OnWebCallEnded()

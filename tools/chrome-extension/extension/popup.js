@@ -583,6 +583,124 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // ── Restaurant Mode: qualify leads by 3rd-party delivery platform ───────
+    // Contract shared with background.js: restaurantMode (bool), platformAny (bool),
+    // platformInclude/platformExclude (platform-key arrays), platformUnmatched
+    // ('skip'|'tag'). Chip tri-state lives in data-state ('neutral'|'include'|'exclude')
+    // plus the matching .include/.exclude class; exclude always wins over include/any.
+    var PLATFORM_KEYS = ['doordash', 'ubereats', 'postmates', 'grubhub', 'toast', 'chownow', 'slice'];
+    var PLATFORM_LABELS = {
+        doordash: 'DoorDash', ubereats: 'Uber Eats', postmates: 'Postmates', grubhub: 'Grubhub/Seamless',
+        toast: 'Toast', chownow: 'ChowNow', slice: 'Slice', other: 'Other platform'
+    };
+    var restaurantModeToggle = document.getElementById('restaurantModeToggle');
+    var restaurantPanel = document.getElementById('restaurantPanel');
+    var platformAnyToggle = document.getElementById('platformAnyToggle');
+    var platformChips = Array.prototype.slice.call(document.querySelectorAll('.plat-chip'));
+    var platformUnmatchedSeg = document.getElementById('platformUnmatched');
+
+    function setChipState(chip, state) {
+        chip.dataset.state = state;
+        chip.classList.remove('include', 'exclude');
+        if (state === 'include' || state === 'exclude') chip.classList.add(state);
+    }
+    function collectPlatformInclude() {
+        return platformChips.filter(function (c) { return c.dataset.state === 'include'; })
+            .map(function (c) { return c.dataset.key; });
+    }
+    function collectPlatformExclude() {
+        return platformChips.filter(function (c) { return c.dataset.state === 'exclude'; })
+            .map(function (c) { return c.dataset.key; });
+    }
+    function getPlatformUnmatched() {
+        return (platformUnmatchedSeg && platformUnmatchedSeg.dataset.value === 'skip') ? 'skip' : 'tag';
+    }
+    function setPlatformUnmatched(val) {
+        if (!platformUnmatchedSeg) return;
+        var v = (val === 'skip') ? 'skip' : 'tag';
+        platformUnmatchedSeg.dataset.value = v;
+        platformUnmatchedSeg.querySelectorAll('.seg-btn').forEach(function (b) {
+            b.classList.toggle('active', b.dataset.value === v);
+        });
+    }
+    function isRestaurantModeOn() {
+        return Boolean(restaurantModeToggle && restaurantModeToggle.classList.contains('on'));
+    }
+    function isPlatformAnyOn() {
+        return Boolean(platformAnyToggle && platformAnyToggle.classList.contains('on'));
+    }
+    function showRestaurantPanel(on) {
+        if (restaurantPanel) restaurantPanel.style.display = on ? 'block' : 'none';
+    }
+    function persistRestaurantSettings() {
+        chrome.storage.local.set({
+            gmes_restaurant_mode: isRestaurantModeOn(),
+            gmes_platform_any: isPlatformAnyOn(),
+            gmes_platform_include: collectPlatformInclude(),
+            gmes_platform_exclude: collectPlatformExclude(),
+            gmes_platform_unmatched: getPlatformUnmatched()
+        });
+    }
+
+    if (restaurantModeToggle) {
+        chrome.storage.local.get(
+            ['gmes_restaurant_mode', 'gmes_platform_any', 'gmes_platform_include', 'gmes_platform_exclude', 'gmes_platform_unmatched'],
+            function (r) {
+                var on = r.gmes_restaurant_mode === true;
+                updatePillToggle(restaurantModeToggle, on);
+                showRestaurantPanel(on);
+                if (platformAnyToggle) updatePillToggle(platformAnyToggle, r.gmes_platform_any === true);
+                var inc = Array.isArray(r.gmes_platform_include) ? r.gmes_platform_include : [];
+                var exc = Array.isArray(r.gmes_platform_exclude) ? r.gmes_platform_exclude : [];
+                platformChips.forEach(function (chip) {
+                    var k = chip.dataset.key;
+                    if (exc.indexOf(k) !== -1) setChipState(chip, 'exclude');
+                    else if (inc.indexOf(k) !== -1) setChipState(chip, 'include');
+                    else setChipState(chip, 'neutral');
+                });
+                setPlatformUnmatched(r.gmes_platform_unmatched === 'skip' ? 'skip' : 'tag');
+            }
+        );
+
+        restaurantModeToggle.addEventListener('click', function () {
+            var on = !restaurantModeToggle.classList.contains('on');
+            updatePillToggle(restaurantModeToggle, on);
+            showRestaurantPanel(on);
+            // Convenience: default the category to Restaurants when enabling the mode,
+            // but never clobber a value the user already typed.
+            if (on) {
+                var catEl = document.getElementById('scrapeCategory');
+                if (catEl && !catEl.value.trim()) {
+                    catEl.value = 'Restaurants';
+                    chrome.storage.local.set({ gmes_last_category: 'Restaurants' });
+                }
+            }
+            persistRestaurantSettings();
+        });
+    }
+    if (platformAnyToggle) {
+        platformAnyToggle.addEventListener('click', function () {
+            updatePillToggle(platformAnyToggle, !platformAnyToggle.classList.contains('on'));
+            persistRestaurantSettings();
+        });
+    }
+    platformChips.forEach(function (chip) {
+        chip.addEventListener('click', function () {
+            var s = chip.dataset.state || 'neutral';
+            var next = (s === 'neutral') ? 'include' : (s === 'include' ? 'exclude' : 'neutral');
+            setChipState(chip, next);
+            persistRestaurantSettings();
+        });
+    });
+    if (platformUnmatchedSeg) {
+        platformUnmatchedSeg.querySelectorAll('.seg-btn').forEach(function (b) {
+            b.addEventListener('click', function () {
+                setPlatformUnmatched(b.dataset.value);
+                persistRestaurantSettings();
+            });
+        });
+    }
+
     document.getElementById('manualAddBtn').addEventListener('click', function () {
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             if (tabs[0]) {
@@ -918,8 +1036,8 @@ document.addEventListener('DOMContentLoaded', function () {
         // Helper: create a table row element from an item object
         function createRowFromItem(item) {
             var row = document.createElement('tr');
-            // column order: title, note, businessTimings, rating, reviewCount, phone, industry, city, address, website, instaSearch, maps link, lat, lng, crmStatus
-            ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'timeZone', 'crmStatus'].forEach(function (colKey) {
+            // column order: title, note, businessTimings, rating, reviewCount, phone, industry, deliveryPlatforms, city, address, website, instaSearch, maps link, lat, lng, crmStatus
+            ['title', 'note', 'businessTimings', 'rating', 'reviewCount', 'phone', 'industry', 'deliveryPlatforms', 'city', 'address', 'email', 'companyUrl', 'instaSearch', 'href', 'lat', 'lng', 'timeZone', 'crmStatus'].forEach(function (colKey) {
                 var cell = document.createElement('td');
 
                 // Special rendering for links
@@ -985,6 +1103,23 @@ document.addEventListener('DOMContentLoaded', function () {
                         a.target = '_blank';
                         a.rel = 'noopener noreferrer';
                         cell.appendChild(a);
+                    }
+                } else if (colKey === 'deliveryPlatforms') {
+                    // Delivery platforms matched for this lead (Restaurant Mode). Render
+                    // each key as a small badge; show a muted dash when none matched.
+                    var plats = Array.isArray(item.deliveryPlatforms) ? item.deliveryPlatforms : [];
+                    if (plats.length) {
+                        plats.forEach(function (k) {
+                            var badge = document.createElement('span');
+                            badge.className = 'delivery-badge';
+                            badge.textContent = PLATFORM_LABELS[k] || k;
+                            cell.appendChild(badge);
+                        });
+                    } else {
+                        var dash = document.createElement('span');
+                        dash.className = 'delivery-empty';
+                        dash.textContent = '—';
+                        cell.appendChild(dash);
                     }
                 } else if (colKey === 'crmStatus') {
                     renderCrmCellPopup(item, cell);
@@ -1124,7 +1259,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Render table header once (so it isn't re-rendered/cleared on each scrape)
         (function renderHeader() {
-            const headers = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Industry', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'TimeZone', 'CRM Status'];
+            const headers = ['Title', 'Note', 'Business Timings', 'Rating', 'Reviews', 'Phone', 'Industry', 'Delivery', 'City', 'Address', 'Email', 'Website', 'Insta Search', 'Google Maps Link', 'Latitude', 'Longitude', 'TimeZone', 'CRM Status'];
             // clear existing header row contents
             resultsTheadRow.innerHTML = '';
             headers.forEach(function (headerText) {
@@ -1159,11 +1294,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (st) { st.style.display = 'block'; setTimeout(function () { st.style.display = 'none'; }, 1500); }
             }
 
+            // Compulsory GHL login: the whole popup is gated until connected. When
+            // locked, CSS (body.tt-locked) hides every panel except the connect card.
+            function applyLoginGate(connected) {
+                document.body.classList.toggle('tt-locked', !connected);
+            }
+
             function setUiConnected(email) {
                 _waiting = false;
                 stateDisconnected.style.display = 'none';
                 stateConnected.style.display = 'block';
                 userEmailEl.innerHTML = '<span class="crm-status-dot connected"></span>' + (email || 'Connected');
+                applyLoginGate(true);
                 refreshLocationDropdown();
             }
 
@@ -1369,6 +1511,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 _waiting = false;
                 stateConnected.style.display = 'none';
                 stateDisconnected.style.display = 'block';
+                applyLoginGate(false);
                 if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = 'Connect GoHighLevel'; }
                 if (connectStatus) connectStatus.textContent = msg || '';
             }
@@ -1382,6 +1525,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 _waiting = false;
                 stateConnected.style.display = 'none';
                 stateDisconnected.style.display = 'block';
+                applyLoginGate(false);
                 if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = 'Retry connection'; }
                 if (connectStatus) connectStatus.textContent = msg || 'Login failed. Please try again.';
             }
@@ -1392,6 +1536,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 _waiting = true;
                 stateConnected.style.display = 'none';
                 stateDisconnected.style.display = 'block';
+                applyLoginGate(false);
                 if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = 'Cancel'; }
                 if (connectStatus) connectStatus.textContent = msg || 'Waiting for login…';
             }
@@ -1699,6 +1844,9 @@ document.addEventListener('DOMContentLoaded', function () {
         var scrapeRunControls = document.getElementById('scrapeRunControls');
         var pauseButton = document.getElementById('pauseButton');
         var stopButton = document.getElementById('stopButton');
+        var pausedControls = document.getElementById('pausedControls');
+        var resumeButton = document.getElementById('resumeButton');
+        var stopSaveButton = document.getElementById('stopSaveButton');
         var savedSessionsPanel = document.getElementById('savedSessionsPanel');
         var savedSessionsList = document.getElementById('savedSessionsList');
         var stopSessionModal = document.getElementById('stopSessionModal');
@@ -1724,6 +1872,67 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         wireCondRow(condRatingOp, condRatingVal);
         wireCondRow(condReviewsOp, condReviewsVal);
+
+        // ---- Multiple business categories (chip input) ------------------------
+        // Committed categories render as removable chips; the text box stays free
+        // for typing/suggestions. Enter or comma commits the typed value.
+        var categoryChipsEl = document.getElementById('categoryChips');
+        var categoryList = []; // ordered, de-duped case-insensitively
+
+        function renderCategoryChips() {
+            if (!categoryChipsEl) return;
+            categoryChipsEl.innerHTML = '';
+            categoryList.forEach(function (cat) {
+                var chip = document.createElement('span');
+                chip.className = 'cat-chip';
+                chip.appendChild(document.createTextNode(cat));
+                var x = document.createElement('span');
+                x.className = 'cat-chip-x';
+                x.textContent = '×';
+                x.title = 'Remove';
+                x.addEventListener('click', function () { removeCategoryChip(cat); });
+                chip.appendChild(x);
+                categoryChipsEl.appendChild(chip);
+            });
+        }
+        function persistCategories() {
+            chrome.storage.local.set({ gmes_scrape_categories: categoryList.slice() });
+        }
+        function addCategoryChip(val) {
+            var v = String(val || '').trim();
+            if (!v) return false;
+            var exists = categoryList.some(function (c) { return c.toLowerCase() === v.toLowerCase(); });
+            if (exists) return false;
+            categoryList.push(v);
+            renderCategoryChips();
+            persistCategories();
+            userEditedForm = true;
+            return true;
+        }
+        function removeCategoryChip(val) {
+            categoryList = categoryList.filter(function (c) { return c.toLowerCase() !== String(val).toLowerCase(); });
+            renderCategoryChips();
+            persistCategories();
+            userEditedForm = true;
+        }
+        // Categories to scrape = committed chips + any uncommitted text still in the
+        // box (so typing a single category without pressing Enter still works).
+        function collectCategories() {
+            var out = categoryList.slice();
+            var pending = (categoryInput && categoryInput.value || '').trim();
+            if (pending && !out.some(function (c) { return c.toLowerCase() === pending.toLowerCase(); })) out.push(pending);
+            return out;
+        }
+        if (categoryInput) {
+            categoryInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ',') {
+                    var v = categoryInput.value.replace(/,+$/, '').trim();
+                    if (v) { e.preventDefault(); if (addCategoryChip(v)) categoryInput.value = ''; }
+                } else if (e.key === 'Backspace' && !categoryInput.value && categoryList.length) {
+                    removeCategoryChip(categoryList[categoryList.length - 1]);
+                }
+            });
+        }
 
         // Assemble the conditions string (e.g. "Rating>=4.5, Reviews>200") that the
         // scraper parses. Only rows with both an operator and a value contribute.
@@ -1797,14 +2006,24 @@ document.addEventListener('DOMContentLoaded', function () {
         // reverse and label the single button Resume (parked scan, form untouched)
         // or Start.
         function applyActionButtonLabel() {
+            var paused = (!scraping && resumeInfo && !userEditedForm);
             if (scraping) {
+                // Running: Pause | Stop pair.
                 if (actionButton) actionButton.style.display = 'none';
+                if (pausedControls) pausedControls.style.display = 'none';
                 if (scrapeRunControls) scrapeRunControls.style.display = 'flex';
-            } else {
+            } else if (paused) {
+                // Paused: Resume | Stop & Save pair.
+                if (actionButton) actionButton.style.display = 'none';
                 if (scrapeRunControls) scrapeRunControls.style.display = 'none';
+                if (pausedControls) pausedControls.style.display = 'flex';
+            } else {
+                // Idle: single Start button.
+                if (scrapeRunControls) scrapeRunControls.style.display = 'none';
+                if (pausedControls) pausedControls.style.display = 'none';
                 if (actionButton) {
                     actionButton.style.display = '';
-                    actionButton.textContent = (resumeInfo && !userEditedForm) ? 'Resume Scraping' : 'Start Scraping';
+                    actionButton.textContent = 'Start Scraping';
                 }
             }
         }
@@ -1844,8 +2063,14 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         // Restore last-used inputs.
-        chrome.storage.local.get(['gmes_last_category', 'gmes_last_location', 'gmes_last_radius', 'gmes_scrape_speed', 'gmes_last_exclude', 'gmes_last_conditions', 'gmes_last_filename', 'gmes_background_scraping'], function (data) {
-            if (categoryInput && data.gmes_last_category) categoryInput.value = data.gmes_last_category;
+        chrome.storage.local.get(['gmes_last_category', 'gmes_scrape_categories', 'gmes_last_location', 'gmes_last_radius', 'gmes_scrape_speed', 'gmes_last_exclude', 'gmes_last_conditions', 'gmes_last_filename', 'gmes_background_scraping'], function (data) {
+            // Prefer the saved multi-category list; fall back to the legacy single value.
+            if (Array.isArray(data.gmes_scrape_categories) && data.gmes_scrape_categories.length) {
+                categoryList = data.gmes_scrape_categories.slice();
+                renderCategoryChips();
+            } else if (categoryInput && data.gmes_last_category) {
+                categoryInput.value = data.gmes_last_category;
+            }
             if (locationInput && data.gmes_last_location) locationInput.value = data.gmes_last_location;
             if (radiusInput && data.gmes_last_radius) radiusInput.value = data.gmes_last_radius;
             if (speedInput) speedInput.value = data.gmes_scrape_speed || 'balanced';
@@ -1866,7 +2091,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (area !== 'local') return;
             if (changes.gmes_background_scraping) scraping = changes.gmes_background_scraping.newValue === true;
             if (changes.gmes_background_scraping || changes.gmes_results || changes.gmes_grid_current || changes.gmes_grid_state) refreshScrapeStatus();
-            if (changes.gmes_sessions) renderSavedSessions();
+            // Note: saved sessions live in GHL (source of truth) and are re-rendered
+            // explicitly after each action; we intentionally don't re-render on the
+            // gmes_sessions cache write to avoid a load->cache->render race.
         });
 
         // Self-heal a stuck run. The flag is normally reset by the injected
@@ -1908,10 +2135,24 @@ document.addEventListener('DOMContentLoaded', function () {
                         });
                         return;
                     }
-                    var category = (categoryInput && categoryInput.value || '').trim();
+                    // Commit any text still in the box so the chips reflect what's
+                    // about to scrape, then gather the full category list.
+                    if (categoryInput && categoryInput.value.trim()) {
+                        addCategoryChip(categoryInput.value.trim());
+                        categoryInput.value = '';
+                    }
+                    var categories = collectCategories();
                     var location = (locationInput && locationInput.value || '').trim();
                     var radius = radiusInput ? parseFloat(radiusInput.value) : 5;
-                    if (!category) { setScrapeStatus('Enter a business category.', false); if (categoryInput) categoryInput.focus(); return; }
+                    // Restaurant Mode with no categories defaults to "Restaurants"
+                    // (never overwrites user-entered categories).
+                    var restaurantMode = isRestaurantModeOn();
+                    if (restaurantMode && !categories.length) {
+                        addCategoryChip('Restaurants');
+                        categories = ['Restaurants'];
+                    }
+                    if (!categories.length) { setScrapeStatus('Enter a business category.', false); if (categoryInput) categoryInput.focus(); return; }
+                    var category = categories[0];
                     if (!location) { setScrapeStatus('Enter a location.', false); if (locationInput) locationInput.focus(); return; }
                     if (isNaN(radius) || radius < 0) { radius = 5; if (radiusInput) radiusInput.value = '5'; }
                     // radius === 0 means "Any — full location"; background derives the effective radius from Maps zoom
@@ -1923,8 +2164,15 @@ document.addEventListener('DOMContentLoaded', function () {
                     var scrapeWebsites = websiteScrapeToggle ? websiteScrapeToggle.classList.contains('on') : true;
                     var speedLabel = speedInput ? speedInput.value : 'balanced';
 
+                    // Restaurant-Mode delivery-platform qualification (see shared contract).
+                    var platformAny = isPlatformAnyOn();
+                    var platformInclude = collectPlatformInclude();
+                    var platformExclude = collectPlatformExclude();
+                    var platformUnmatched = getPlatformUnmatched();
+
                     chrome.storage.local.set({
-                        gmes_last_category: category,
+                        gmes_last_category: categories.join(', '),
+                        gmes_scrape_categories: categories,
                         gmes_last_location: location,
                         gmes_last_radius: radius,
                         gmes_scrape_speed: speedLabel,
@@ -1932,7 +2180,12 @@ document.addEventListener('DOMContentLoaded', function () {
                         gmes_last_conditions: conditions,
                         gmes_turbo_mode: turboOn,
                         gmes_skip_temp_closed: skipTempClosed,
-                        gmes_scrape_websites: scrapeWebsites
+                        gmes_scrape_websites: scrapeWebsites,
+                        gmes_restaurant_mode: restaurantMode,
+                        gmes_platform_any: platformAny,
+                        gmes_platform_include: platformInclude,
+                        gmes_platform_exclude: platformExclude,
+                        gmes_platform_unmatched: platformUnmatched
                     });
 
                     // Fresh start: discard any parked resume cursor and reset the edit flag.
@@ -1947,13 +2200,19 @@ document.addEventListener('DOMContentLoaded', function () {
                     chrome.runtime.sendMessage({
                         type: 'START_AUTO_SCRAPE',
                         category: category,
+                        categories: categories,
                         location: location,
                         radiusMiles: radius,
                         turbo: turboOn,
                         speed: speedMultiplier(speedLabel),
                         excludeKeywords: excludeKeywords,
                         conditions: conditions,
-                        skipTempClosed: skipTempClosed
+                        skipTempClosed: skipTempClosed,
+                        restaurantMode: restaurantMode,
+                        platformAny: platformAny,
+                        platformInclude: platformInclude,
+                        platformExclude: platformExclude,
+                        platformUnmatched: platformUnmatched
                     }, function (resp) {
                         if (chrome.runtime.lastError || !resp || resp.started === false) {
                             scraping = false;
@@ -1992,6 +2251,19 @@ document.addEventListener('DOMContentLoaded', function () {
         // Stop: ask whether to save the session for later or delete it permanently.
         if (stopButton) {
             stopButton.addEventListener('click', function () { openStopModal(); });
+        }
+
+        // Paused controls. Resume reuses the action button's resume path; Stop & Save
+        // saves the parked session (leads + grid cursor) and clears the run so it can
+        // be resumed later from Saved Sessions.
+        if (resumeButton) {
+            resumeButton.addEventListener('click', function () { if (actionButton) actionButton.click(); });
+        }
+        if (stopSaveButton) {
+            stopSaveButton.addEventListener('click', function () {
+                setScrapeStatus('Saving session…', false);
+                saveCurrentSession(function () { finalizeStop('Session saved. Resume it anytime from Saved Sessions.'); });
+            });
         }
 
         function closeStopModal() { if (stopSessionModal) stopSessionModal.style.display = 'none'; }
@@ -2062,14 +2334,117 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         }
 
+        // Saved scraping sessions/campaigns are stored server-side in GoHighLevel as
+        // custom object records, scoped to the logged-in user (see ghl_client.js and
+        // the dashboard /scraping-sessions API). So the same user sees them on every
+        // machine and in both extension builds. A local chrome.storage cache
+        // (gmes_sessions) mirrors them for snappy display and offline VIEWING, and
+        // holds the full resumable snapshot for any session whose payload was too
+        // large to keep in GHL.
+
+        // GHL custom objects are per-sub-account: resolve which location to use.
+        function sessionLocationId(cb) {
+            var el = document.getElementById('defaultLocationSelect');
+            if (el && el.value) { cb(el.value); return; }
+            chrome.storage.local.get(['gmes_ghl_default_location'], function (d) {
+                cb(d.gmes_ghl_default_location || '');
+            });
+        }
+
+        function readSessionCache(cb) {
+            chrome.storage.local.get(['gmes_sessions'], function (d) {
+                cb(Array.isArray(d.gmes_sessions) ? d.gmes_sessions : []);
+            });
+        }
+
+        // Load sessions from GHL (source of truth), splicing the local snapshot back
+        // in for any record whose heavy payload was omitted server-side. Falls back
+        // to the local cache (read-only) when there's no location or GHL is offline.
+        function loadSessions(cb) {
+            sessionLocationId(function (locId) {
+                if (!locId || !window.GHL || !GHL.listScrapingSessions) {
+                    readSessionCache(function (cache) { cb(cache, 'local'); });
+                    return;
+                }
+                GHL.listScrapingSessions(locId, function (res) {
+                    if (!res.ok || !Array.isArray(res.sessions)) {
+                        readSessionCache(function (cache) { cb(cache, 'local'); });
+                        return;
+                    }
+                    readSessionCache(function (cache) {
+                        var localById = {};
+                        cache.forEach(function (s) { if (s && s.id) localById[s.id] = s; });
+                        var mapped = res.sessions.map(function (r) {
+                            var rec = Object.assign({}, r.session || {});
+                            delete rec.__meta;
+                            rec.id = r.clientId || rec.id;
+                            rec.name = r.name || rec.name;
+                            rec.recordId = r.recordId;
+                            if (r.payloadOmitted) {
+                                var loc = localById[rec.id];
+                                if (loc) { rec.leads = loc.leads; rec.gridState = loc.gridState; }
+                            }
+                            return rec;
+                        });
+                        // Refresh the cache only when it changed (avoid a redundant write).
+                        if (JSON.stringify(cache) !== JSON.stringify(mapped)) {
+                            chrome.storage.local.set({ gmes_sessions: mapped });
+                        }
+                        cb(mapped, 'ghl');
+                    });
+                });
+            });
+        }
+
+        // Upsert one session: mirror into the local cache immediately (optimistic),
+        // then persist to GHL and stamp the returned record id back into the cache.
+        // cb receives { ok, error?, noLocation? }.
+        function saveOneSession(rec, cb) {
+            readSessionCache(function (cache) {
+                var idx = -1;
+                for (var i = 0; i < cache.length; i++) { if (cache[i] && cache[i].id === rec.id) { idx = i; break; } }
+                if (idx >= 0) cache[idx] = rec; else cache.unshift(rec);
+                chrome.storage.local.set({ gmes_sessions: cache }, function () {
+                    sessionLocationId(function (locId) {
+                        if (!locId) { if (cb) cb({ ok: false, noLocation: true }); return; }
+                        if (!window.GHL || !GHL.saveScrapingSession) { if (cb) cb({ ok: false }); return; }
+                        GHL.saveScrapingSession(locId, rec, function (res) {
+                            if (res.ok && res.session && res.session.recordId) {
+                                readSessionCache(function (c2) {
+                                    for (var j = 0; j < c2.length; j++) { if (c2[j] && c2[j].id === rec.id) { c2[j].recordId = res.session.recordId; break; } }
+                                    chrome.storage.local.set({ gmes_sessions: c2 }, function () { if (cb) cb(res); });
+                                });
+                            } else { if (cb) cb(res); }
+                        });
+                    });
+                });
+            });
+        }
+
+        // Delete one session from GHL (by record id) then from the local cache.
+        function removeOneSession(sess, cb) {
+            function dropCache() {
+                readSessionCache(function (cache) {
+                    var rest = cache.filter(function (s) { return !(s && s.id === sess.id); });
+                    chrome.storage.local.set({ gmes_sessions: rest }, function () { if (cb) cb(); });
+                });
+            }
+            sessionLocationId(function (locId) {
+                if (sess.recordId && locId && window.GHL && GHL.deleteScrapingSession) {
+                    GHL.deleteScrapingSession(locId, sess.recordId, function () { dropCache(); });
+                } else { dropCache(); }
+            });
+        }
+
         function saveCurrentSession(cb) {
             buildSessionRecord(function (rec) {
-                chrome.storage.local.get(['gmes_sessions'], function (d) {
-                    var sessions = Array.isArray(d.gmes_sessions) ? d.gmes_sessions : [];
-                    var idx = -1;
-                    for (var i = 0; i < sessions.length; i++) { if (sessions[i] && sessions[i].id === rec.id) { idx = i; break; } }
-                    if (idx >= 0) sessions[idx] = rec; else sessions.unshift(rec);
-                    chrome.storage.local.set({ gmes_sessions: sessions }, function () { if (cb) cb(rec); });
+                saveOneSession(rec, function (res) {
+                    if (res && res.ok === false) {
+                        setScrapeStatus(res.noLocation
+                            ? 'Pick a GoHighLevel sub-account to save this session.'
+                            : (res.error || 'Saved locally; couldn’t reach GoHighLevel.'), false);
+                    }
+                    if (cb) cb(rec);
                 });
             });
         }
@@ -2120,8 +2495,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Render the list of saved sessions (hidden when there are none).
         function renderSavedSessions() {
             if (!savedSessionsList || !savedSessionsPanel) return;
-            chrome.storage.local.get(['gmes_sessions'], function (d) {
-                var sessions = Array.isArray(d.gmes_sessions) ? d.gmes_sessions : [];
+            loadSessions(function (sessions) {
                 savedSessionsList.innerHTML = '';
                 if (!sessions.length) { savedSessionsPanel.style.display = 'none'; return; }
                 savedSessionsPanel.style.display = '';
@@ -2151,14 +2525,14 @@ document.addEventListener('DOMContentLoaded', function () {
                     var resumeBtn = document.createElement('button');
                     resumeBtn.className = 'button';
                     resumeBtn.textContent = 'Resume';
-                    resumeBtn.addEventListener('click', function () { resumeSavedSession(s.id); });
+                    resumeBtn.addEventListener('click', function () { resumeSavedSession(s); });
 
                     var delBtn = document.createElement('button');
                     delBtn.className = 'button red-btn';
                     delBtn.textContent = 'Delete';
                     delBtn.addEventListener('click', function () {
                         if (!confirm('Delete saved session "' + (s.name || '') + '"? You won\'t be able to resume it.')) return;
-                        deleteSavedSession(s.id);
+                        deleteSavedSession(s);
                     });
 
                     actions.appendChild(resumeBtn);
@@ -2171,27 +2545,20 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         }
 
-        function deleteSavedSession(id) {
-            chrome.storage.local.get(['gmes_sessions'], function (d) {
-                var sessions = Array.isArray(d.gmes_sessions) ? d.gmes_sessions : [];
-                var rest = sessions.filter(function (s) { return !(s && s.id === id); });
-                chrome.storage.local.set({ gmes_sessions: rest }, function () { renderSavedSessions(); });
-            });
+        function deleteSavedSession(sess) {
+            removeOneSession(sess, function () { renderSavedSessions(); });
         }
 
         // Load a saved session back into the working state and continue scraping.
-        function resumeSavedSession(id) {
+        function resumeSavedSession(sess) {
             if (scraping) { setScrapeStatus('Pause or stop the current scrape first.', false); return; }
-            chrome.storage.local.get(['gmes_sessions', 'gmes_results'], function (d) {
-                var sessions = Array.isArray(d.gmes_sessions) ? d.gmes_sessions : [];
-                var sess = null, rest = [];
-                sessions.forEach(function (s) { if (s && s.id === id) sess = s; else rest.push(s); });
-                if (!sess) { setScrapeStatus('Saved session not found.', false); return; }
-                if (!sess.gridState || !Array.isArray(sess.gridState.points)) {
-                    setScrapeStatus('This session has no resumable progress.', false);
-                    return;
-                }
+            if (!sess) { setScrapeStatus('Saved session not found.', false); return; }
+            if (!sess.gridState || !Array.isArray(sess.gridState.points)) {
+                setScrapeStatus('This session has no resumable progress here — it may have been saved on another device.', false);
+                return;
+            }
 
+            chrome.storage.local.get(['gmes_results'], function (d) {
                 // Merge the snapshot leads back into the table (deduped by identity).
                 var existing = Array.isArray(d.gmes_results) ? d.gmes_results : [];
                 var seen = {};
@@ -2210,9 +2577,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (radiusInput && sess.radius != null) radiusInput.value = sess.radius;
                 if (speedInput && sess.speed) speedInput.value = sess.speed;
 
+                // Drop the resumed session from GHL (and the local cache), then load
+                // its snapshot into the working state (kept local — it's per-run).
+                removeOneSession(sess, function () {
                 chrome.storage.local.set({
                     gmes_results: merged,
-                    gmes_sessions: rest,
                     gmes_grid_state: sess.gridState,
                     gmes_grid_total: sess.gridState.points.length,
                     gmes_grid_current: sess.gridState.current || 0,
@@ -2233,7 +2602,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     });
                     renderSavedSessions();
                 });
-            });
+                });
+                });
         }
 
         renderSavedSessions();

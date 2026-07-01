@@ -90,11 +90,31 @@ public static class NativeMessagingHost
                             && p.ValueKind == JsonValueKind.String
                                 ? p.GetString() ?? "" : "";
                         var callId = root.TryGetProperty("callId", out var c) ? c.GetString() : null;
-                        Log($"START callId={callId} phone={phone}");
+                        var startRep = root.TryGetProperty("repUserId", out var sr)
+                            && sr.ValueKind == JsonValueKind.String ? sr.GetString() : null;
+                        Log($"START callId={callId} phone={phone} rep={startRep}");
+                        // Ride the rep's resolved GHL user id in on START so uploads are
+                        // attributed even if the standalone IDENTITY push was missed.
+                        if (!string.IsNullOrEmpty(startRep))
+                            ForwardToAgent(ref ws, new { type = "setRepIdentity", repUserId = startRep });
                         if (ForwardToAgent(ref ws, new { type = "startRecording", phoneNumber = phone, channel = "web" }))
                             WriteMessage(stdout, new { type = "ack", of = "START", ok = true, callId });
                         else
                             WriteMessage(stdout, new { type = "ack", of = "START", ok = false, callId });
+                        break;
+                    }
+                    case "IDENTITY":
+                    {
+                        // The extension pushes the logged-in rep's GoHighLevel user id
+                        // (resolved from its GHL session) so the agent attributes calls
+                        // with no manual rep setup. Covers desktop calls too, which
+                        // never go through START.
+                        var repUserId = root.TryGetProperty("repUserId", out var ir)
+                            && ir.ValueKind == JsonValueKind.String ? ir.GetString() : null;
+                        Log($"IDENTITY rep={repUserId}");
+                        var ok = !string.IsNullOrEmpty(repUserId)
+                                 && ForwardToAgent(ref ws, new { type = "setRepIdentity", repUserId });
+                        WriteMessage(stdout, new { type = "ack", of = "IDENTITY", ok });
                         break;
                     }
                     case "STOP":

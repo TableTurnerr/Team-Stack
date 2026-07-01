@@ -63,12 +63,27 @@ Run-key and `crm-agent://` protocol registration) and is idempotent:
 
 Both default values point at the manifest file.
 
-## Extension ID
+## Extension IDs
 
-Pinned to `jmedgkieldhfccjpjeafmgenaidchbmg` (derived from the `key` in the
-extension's `manifest.json`). It is the only origin in `allowed_origins`. If the
-Chrome Web Store ever assigns a different published ID, update
-`StartupRegistrar.ExtensionId`.
+Two origins are whitelisted in `allowed_origins`:
+
+- **Release** `jmedgkieldhfccjpjeafmgenaidchbmg` — derived from the release key
+  (`tools/chrome-extension/release.key`, injected into the manifest at release build
+  time). `StartupRegistrar.ExtensionId`.
+- **Dev** `lgacebajcimhkmcgihcjcdnndkbdggak` — derived from the dev key committed in
+  `tools/chrome-extension/extension/manifest.json` (the in-repo dev build).
+  `StartupRegistrar.DevExtensionId`.
+
+The dev build ships a distinct key so it gets a stable id and runs alongside the
+release. Both are whitelisted so the **Zoom recording bridge** works from either
+build. If a published ID ever changes, update the matching constant in
+`StartupRegistrar`.
+
+> Saved scraping sessions are **not** stored by the agent. They live in GoHighLevel
+> as custom object records, scoped to the logged-in user (see the dashboard
+> `/api/ghl/locations/[loc]/scraping-sessions` routes and `apps/dashboard/src/lib/ghl.ts`),
+> so they're shared across machines and both extension builds by GHL login — no
+> native-messaging session store is involved.
 
 ## Testing it
 

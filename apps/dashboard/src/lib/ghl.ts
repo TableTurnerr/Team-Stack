@@ -28,6 +28,14 @@ export const GHL_SCOPES = [
   'opportunities.readonly',
   'opportunities.write',
   'users.readonly',
+  // Custom objects — the Lead Scraper's saved scraping sessions live on a custom
+  // object (see the "Scraping sessions" section below). Users connected before
+  // these scopes were added must reconnect for sessions to work. The Marketplace
+  // app must also have these scopes enabled.
+  'objects/schema.readonly',
+  'objects/schema.write',
+  'objects/record.readonly',
+  'objects/record.write',
 ].join(' ');
 
 const CLIENT_ID = process.env.GHL_CLIENT_ID || '';
@@ -327,11 +335,18 @@ async function ghlFetch<T = unknown>(
 // ---- High-level operations used by the routes -----------------------------
 export interface NamedItem { id: string; name: string }
 
-export async function getStatus(userId: string): Promise<{ connected: boolean; agencyName: string; email: string }> {
+export async function getStatus(
+  userId: string,
+): Promise<{ connected: boolean; agencyName: string; email: string; ghlUserId: string }> {
   const conns = await listConnections(userId);
   const names = conns.map((c) => c.location_name || c.location_id).filter(Boolean);
   const summary = names.length > 1 ? `${names.length} sub-accounts` : (names[0] || '');
-  return { connected: conns.length > 0, agencyName: summary, email: conns[0]?.ghl_user_id || '' };
+  // ghlUserId is the rep's GoHighLevel user id, captured from the OAuth token at
+  // connect time. The Lead Scraper extension reads it to attribute recorded calls
+  // to this rep (repKey) without any per-machine setup. `email` is kept as-is for
+  // backward compatibility with older extension builds.
+  const ghlUserId = conns[0]?.ghl_user_id || '';
+  return { connected: conns.length > 0, agencyName: summary, email: ghlUserId, ghlUserId };
 }
 
 // The "sub-accounts" the extension can target are exactly the ones the user has
@@ -646,4 +661,214 @@ export async function sendLead(userId: string, locationId: string, payload: Lead
     duplicate: !isNew,
     status: isNew ? 'created' : 'updated',
   };
+}
+
+// ---- Scraping sessions (GHL custom object) ---------------------------------
+// The Lead Scraper extension stores each saved scraping session/campaign as a
+// record on a per-sub-account custom object. This is a database of scraping
+// ACTIVITY (campaigns), explicitly separate from the contacts/opportunities the
+// extension pushes as leads.
+//
+// Storage shape: two properties are used — the primary display field ("name")
+// and a large-text "payload" field holding the full session JSON (metadata +,
+// when small enough, the resumable snapshot). Everything else (owner, client id,
+// stats) also lives inside that JSON, so we only depend on those two fields and
+// don't have to provision a wide schema.
+//
+// Property-key discovery: rather than hardcode GHL's field-key format, we fetch
+// the schema with fetchProperties=true and read the real keys, then use them for
+// record writes. Provisioning (creating the object + payload field) is best
+// effort; if it can't complete, callers get `scraping_object_setup_required` and
+// an admin can create the object + a "Payload" large-text field once by hand.
+
+const SCRAPING_OBJECT_KEY = 'custom_objects.tt_scraping_session';
+const SCRAPING_OBJECT_SHORT = 'tt_scraping_session';
+/** Cap on the JSON stored in GHL; larger sessions store metadata only (snapshot stays client-side). */
+export const SCRAPING_PAYLOAD_MAX = 90_000;
+
+export interface ScrapingSession {
+  recordId: string;
+  clientId: string;
+  name: string;
+  ownerUserId: string;
+  updatedAt: number;
+  payloadOmitted: boolean;
+  session: Record<string, unknown>;
+}
+
+interface GhlObjectField { key?: string; dataType?: string; name?: string }
+interface GhlRecord { id: string; properties?: Record<string, unknown>; dateUpdated?: string }
+interface ScrapingSchemaKeys { nameKey: string; payloadKey: string }
+
+// Per-location cache of the discovered field keys (best effort; resets on cold start).
+const scrapingSchemaCache = new Map<string, ScrapingSchemaKeys>();
+
+function shortFieldKey(fieldKey: string): string {
+  const i = fieldKey.lastIndexOf('.');
+  return i >= 0 ? fieldKey.slice(i + 1) : fieldKey;
+}
+
+// Read a property value tolerant of GHL returning either the full field key
+// (custom_objects.tt_scraping_session.payload) or the short key (payload).
+function readProp(props: Record<string, unknown> | undefined, shortKey: string): unknown {
+  if (!props) return undefined;
+  if (shortKey in props) return props[shortKey];
+  for (const [k, v] of Object.entries(props)) if (shortFieldKey(k) === shortKey) return v;
+  return undefined;
+}
+
+async function fetchScrapingSchemaKeys(token: string, locationId: string): Promise<ScrapingSchemaKeys | null> {
+  const res = await ghlFetch<{ object?: { fields?: GhlObjectField[]; primaryDisplayProperty?: string }; fields?: GhlObjectField[] }>(
+    token, 'GET', `/objects/${SCRAPING_OBJECT_KEY}`, { query: { locationId, fetchProperties: 'true' } },
+  );
+  if (!res.ok || !res.data) return null;
+  const fields = res.data.fields || res.data.object?.fields || [];
+  let nameKey = '';
+  let payloadKey = '';
+  for (const f of fields) {
+    const sk = shortFieldKey(f.key || '');
+    if (sk === 'payload') payloadKey = f.key || '';
+    if (sk === 'name') nameKey = f.key || '';
+  }
+  if (!nameKey) nameKey = res.data.object?.primaryDisplayProperty || `${SCRAPING_OBJECT_KEY}.name`;
+  if (!payloadKey) return null; // object exists but the payload field isn't there yet
+  return { nameKey, payloadKey };
+}
+
+// Create the custom object (primary "name" field) and the large-text "payload"
+// field. One-time per sub-account. Best effort — throws scraping_object_setup_required
+// on failure so the caller can tell the user to create it manually.
+async function provisionScrapingObject(token: string, locationId: string): Promise<void> {
+  // Create the object schema (idempotent-ish: a duplicate create returns 4xx, which
+  // we tolerate because the follow-up field create / schema fetch is what matters).
+  await ghlFetch(token, 'POST', '/objects/', {
+    body: {
+      labels: { singular: 'TT Scraping Session', plural: 'TT Scraping Sessions' },
+      key: SCRAPING_OBJECT_SHORT,
+      description: 'Saved Lead Scraper campaigns (managed by TableTurnerr). Separate from contacts.',
+      locationId,
+      primaryDisplayPropertyDetails: { key: `${SCRAPING_OBJECT_SHORT}.name`, name: 'Name', dataType: 'TEXT' },
+    },
+  });
+  // Create the payload field via Custom Fields V2 (scoped to the object).
+  await ghlFetch(token, 'POST', '/custom-fields/', {
+    body: {
+      locationId,
+      name: 'Payload',
+      dataType: 'LARGE_TEXT',
+      objectKey: SCRAPING_OBJECT_KEY,
+      fieldKey: 'payload',
+    },
+  });
+}
+
+async function ensureScrapingSchema(token: string, locationId: string): Promise<ScrapingSchemaKeys> {
+  const cached = scrapingSchemaCache.get(locationId);
+  if (cached) return cached;
+  let keys = await fetchScrapingSchemaKeys(token, locationId);
+  if (!keys) {
+    await provisionScrapingObject(token, locationId);
+    keys = await fetchScrapingSchemaKeys(token, locationId);
+  }
+  if (!keys) throw new Error('scraping_object_setup_required');
+  scrapingSchemaCache.set(locationId, keys);
+  return keys;
+}
+
+// Turn a GHL record into our ScrapingSession, parsing the payload JSON.
+function recordToSession(rec: GhlRecord): ScrapingSession | null {
+  const raw = readProp(rec.properties, 'payload');
+  let session: Record<string, unknown> = {};
+  if (typeof raw === 'string' && raw) {
+    try { session = JSON.parse(raw) as Record<string, unknown>; } catch { session = {}; }
+  } else if (raw && typeof raw === 'object') {
+    session = raw as Record<string, unknown>;
+  }
+  const meta = (session.__meta as Record<string, unknown>) || {};
+  return {
+    recordId: rec.id,
+    clientId: String(meta.clientId || session.id || rec.id),
+    name: String(readProp(rec.properties, 'name') || meta.name || session.name || 'Saved session'),
+    ownerUserId: String(meta.ownerUserId || ''),
+    updatedAt: Number(meta.updatedAt || session.updatedAt || 0) || 0,
+    payloadOmitted: Boolean(meta.payloadOmitted),
+    session,
+  };
+}
+
+// List the current user's scraping sessions in a sub-account. GHL record search
+// only matches the primary field reliably, so we page through and filter by owner.
+export async function listScrapingSessions(userId: string, locationId: string): Promise<ScrapingSession[]> {
+  const token = await getValidLocationToken(userId, locationId);
+  await ensureScrapingSchema(token, locationId);
+  const res = await ghlFetch<{ records?: GhlRecord[] }>(
+    token, 'POST', `/objects/${SCRAPING_OBJECT_KEY}/records/search`,
+    { body: { locationId, page: 1, pageLimit: 100 } },
+  );
+  if (!res.ok || !res.data) throw new Error(res.error || 'failed_to_list_sessions');
+  return (res.data.records || [])
+    .map(recordToSession)
+    .filter((s): s is ScrapingSession => !!s && s.ownerUserId === userId)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+// Create or update the current user's record for one session (idempotent by the
+// extension's client session id). `session` is the full session object from the
+// extension; we stamp owner/meta and enforce the payload size cap.
+export async function upsertScrapingSession(
+  userId: string, locationId: string, session: Record<string, unknown>,
+): Promise<ScrapingSession> {
+  const token = await getValidLocationToken(userId, locationId);
+  const keys = await ensureScrapingSchema(token, locationId);
+  const clientId = String(session.id || '');
+  if (!clientId) throw new Error('missing_session_id');
+  const name = String(session.name || 'Saved session');
+
+  // Decide whether the full snapshot fits; if not, drop the heavy parts (leads +
+  // grid points) and mark it omitted so the client keeps those locally for resume.
+  let payloadObj: Record<string, unknown> = { ...session };
+  let payloadOmitted = false;
+  if (JSON.stringify(payloadObj).length > SCRAPING_PAYLOAD_MAX) {
+    payloadOmitted = true;
+    const { leads: _leads, gridState: _grid, ...light } = payloadObj;
+    void _leads; void _grid;
+    payloadObj = light;
+  }
+  payloadObj.__meta = { clientId, ownerUserId: userId, name, updatedAt: Date.now(), payloadOmitted };
+  const payloadStr = JSON.stringify(payloadObj);
+
+  const properties: Record<string, unknown> = {};
+  properties[keys.nameKey] = name;
+  properties[keys.payloadKey] = payloadStr;
+
+  // Find an existing record for this client id owned by this user.
+  const existing = (await listScrapingSessions(userId, locationId)).find((s) => s.clientId === clientId);
+  if (existing) {
+    const res = await ghlFetch<{ record?: GhlRecord } & GhlRecord>(
+      token, 'PUT', `/objects/${SCRAPING_OBJECT_KEY}/records/${existing.recordId}`,
+      { query: { locationId }, body: { properties } },
+    );
+    if (!res.ok) throw new Error(res.error || 'failed_to_update_session');
+  } else {
+    const res = await ghlFetch<{ record?: GhlRecord } & GhlRecord>(
+      token, 'POST', `/objects/${SCRAPING_OBJECT_KEY}/records`,
+      { body: { locationId, properties } },
+    );
+    if (!res.ok) throw new Error(res.error || 'failed_to_create_session');
+  }
+  return {
+    recordId: existing?.recordId || '',
+    clientId, name, ownerUserId: userId, updatedAt: Date.now(), payloadOmitted, session: payloadObj,
+  };
+}
+
+// Delete one session record. Ownership is re-checked before deleting.
+export async function deleteScrapingSession(userId: string, locationId: string, recordId: string): Promise<void> {
+  const token = await getValidLocationToken(userId, locationId);
+  const owned = (await listScrapingSessions(userId, locationId)).some((s) => s.recordId === recordId);
+  if (!owned) throw new Error('session_not_found');
+  const res = await ghlFetch(
+    token, 'DELETE', `/objects/${SCRAPING_OBJECT_KEY}/records/${recordId}`, { query: { locationId } },
+  );
+  if (!res.ok) throw new Error(res.error || 'failed_to_delete_session');
 }

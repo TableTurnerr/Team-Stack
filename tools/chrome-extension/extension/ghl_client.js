@@ -493,6 +493,38 @@
         });
     }
 
+    // ---- Saved scraping sessions (stored in GHL as custom object records) -----
+    // A user's saved scraping campaigns live server-side in GoHighLevel, scoped to
+    // the logged-in user, so they show up on every machine and in both extension
+    // builds. Separate from the leads/contacts the extension pushes.
+    //   cb receives { ok, sessions?, session?, error }.
+    function listScrapingSessions(locationId, cb) {
+        if (!locationId) { cb({ ok: false, error: 'No sub-account selected.' }); return; }
+        request('GET', '/ghl/locations/' + locationId + '/scraping-sessions', null, function (res) {
+            if (!res.ok) { cb({ ok: false, error: res.error || 'Failed to load sessions', status: res.status }); return; }
+            cb({ ok: true, sessions: (res.data && res.data.sessions) || [] });
+        });
+    }
+
+    function saveScrapingSession(locationId, session, cb) {
+        if (!locationId) { cb({ ok: false, error: 'No sub-account selected.' }); return; }
+        if (!session || !session.id) { cb({ ok: false, error: 'Session is missing an id.' }); return; }
+        request('POST', '/ghl/locations/' + locationId + '/scraping-sessions', { session: session }, function (res) {
+            if (!res.ok) { cb({ ok: false, error: res.error || 'Failed to save session', status: res.status }); return; }
+            cb({ ok: true, session: (res.data && res.data.session) || null });
+        });
+    }
+
+    function deleteScrapingSession(locationId, recordId, cb) {
+        if (!locationId) { cb({ ok: false, error: 'No sub-account selected.' }); return; }
+        if (!recordId) { cb({ ok: false, error: 'No session id to remove.' }); return; }
+        var path = '/ghl/locations/' + locationId + '/scraping-sessions/' + encodeURIComponent(recordId);
+        request('DELETE', path, null, function (res) {
+            if (!res.ok) { cb({ ok: false, error: res.error || 'Failed to delete session', status: res.status }); return; }
+            cb({ ok: true });
+        });
+    }
+
     // Attach to globalThis so this works in both extension pages (window) and the
     // background service worker (self), where it is loaded via importScripts.
     var root = (typeof self !== 'undefined') ? self : (typeof window !== 'undefined' ? window : this);
@@ -513,6 +545,9 @@
         sendLead: sendLead,
         deleteLead: deleteLead,
         buildLeadPayload: buildLeadPayload,
-        toE164: toE164
+        toE164: toE164,
+        listScrapingSessions: listScrapingSessions,
+        saveScrapingSession: saveScrapingSession,
+        deleteScrapingSession: deleteScrapingSession
     };
 })();

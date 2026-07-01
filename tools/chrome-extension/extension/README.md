@@ -40,10 +40,13 @@ A Chrome extension for scraping Google Maps leads and syncing them directly to G
 Most team members install via the **Tool Manager** (it auto-updates the extension). For local
 development from source:
 
-1. From `tools/chrome-extension`, run `dev-build.bat` (it stages this `extension/` folder into the
-   managed tools directory), or just point Chrome at this `extension/` folder directly.
-2. Open `chrome://extensions` and enable **Developer mode**.
-3. Click **"Load unpacked"** and select this `extension/` folder (the one containing `manifest.json`).
+1. Open `chrome://extensions` and enable **Developer mode**.
+2. Click **"Load unpacked"** and select this `tools\chrome-extension\extension` folder. It loads as
+   **TableTurner Lead Scraper (dev)** — the committed manifest already carries the dev key, so it
+   gets its own extension id and coexists with the Tool Manager release. `dev-build.bat` just prints
+   these steps. See [`../README.md`](../README.md#running-dev--release-side-by-side) for details,
+   including how Saved Sessions stay shared across the dev and release builds.
+3. Edit files in place and click the card's reload icon to pick up changes.
 4. Required permissions: `activeTab`, `tabs`, `scripting`, `storage`, `notifications`, `alarms`.
 
 ---

@@ -43,6 +43,17 @@ if %ERRORLEVEL% GEQ 8 (
     exit /b 1
 )
 
+:: The committed source manifest is the DEV build (name carries " (dev)", no "key").
+:: Turn this STAGED copy into the release manifest: strip the " (dev)" marker and
+:: inject the signing key. Shared with CI via apply-release-manifest.ps1 so the local
+:: and GitHub release builds can't drift.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0apply-release-manifest.ps1" -ManifestPath "%STAGE%\manifest.json"
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Failed to build the release manifest from the dev source.
+    pause
+    exit /b 1
+)
+
 :: Inject the release tool.json (with the version filled in) + installers
 powershell -NoProfile -Command "$m = Get-Content '%~dp0tool.json' -Raw | ConvertFrom-Json; $m | Add-Member -NotePropertyName version -NotePropertyValue '%VERSION%' -Force; $m | ConvertTo-Json -Depth 5 | Set-Content '%STAGE%\tool.json' -Encoding UTF8"
 copy /Y "%~dp0install.bat" "%STAGE%\install.bat" >nul

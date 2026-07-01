@@ -94,6 +94,11 @@ jobs:
           }
           $gi = Join-Path publish '.gitignore'
           if (Test-Path $gi) { Remove-Item -Force $gi }
+          # The committed source manifest IS the dev build (name/description carry a
+          # " (dev)" marker and it carries the DEV key). Turn the STAGED copy back into
+          # the release manifest: strip the marker and swap in the release signing key.
+          # Shared with build-release.bat so the CI and local paths can't drift.
+          & tools/chrome-extension/apply-release-manifest.ps1 -ManifestPath (Join-Path publish 'manifest.json')
           @{
             id = "lead-scraper"
             name = "Lead Scraper Extension"
@@ -104,6 +109,26 @@ jobs:
           Copy-Item tools/chrome-extension/install.bat publish/
           Copy-Item tools/chrome-extension/uninstall.bat publish/
           Compress-Archive -Path publish/* -DestinationPath "LeadScraperExtension-v${{ steps.version.outputs.VERSION }}.zip"
+
+      - name: Verify release manifest (no dev marker, key injected)
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          # The committed source is dev-flavoured; the Package step above strips " (dev)"
+          # and injects the signing key. Confirm that actually happened before we ship:
+          # a leftover marker or a missing key would break the release (unstable id ->
+          # native messaging stops working).
+          $m = Get-Content publish/manifest.json -Raw | ConvertFrom-Json
+          Write-Host "Packaged name: $($m.name)"
+          if ($m.name -match '\(dev\)' -or $m.description -match '\(dev\)') {
+            Write-Error "Packaged manifest still contains a (dev) marker - refusing to publish."
+            exit 1
+          }
+          if (-not $m.key) {
+            Write-Error "Packaged manifest has no signing key - the release would get an unstable id and break native messaging."
+            exit 1
+          }
+          Write-Host "OK: release manifest is clean and keyed."
 
       - name: Create release
         if: steps.check.outputs.exists == 'false'

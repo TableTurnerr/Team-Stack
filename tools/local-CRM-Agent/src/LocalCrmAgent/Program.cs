@@ -85,14 +85,17 @@ static class Program
         recorder.AutoRecordEnabled = config.AutoRecordEnabled;
         recorder.RecordOnRinging = config.RecordOnRinging;
 
-        // Restore the GHL worker upload target. Prefer persisted config; fall
-        // back to environment variables so a fresh install can be provisioned
-        // without the dashboard (no secrets are hardcoded in the binary).
+        // Restore the GHL worker upload target. Precedence: persisted config →
+        // environment variable → value baked into the release binary at build
+        // time (BuildConfig). The token is never committed to source; the release
+        // CI injects it from a secret so reps don't provision anything by hand.
         var workerUrl = !string.IsNullOrEmpty(config.WorkerBaseUrl)
             ? config.WorkerBaseUrl
-            : Environment.GetEnvironmentVariable("CRM_AGENT_WORKER_URL");
+            : (Environment.GetEnvironmentVariable("CRM_AGENT_WORKER_URL")
+               ?? BuildConfig.EmbeddedWorkerUrl);
         var agentToken = config.GetUnprotectedAgentToken()
-            ?? Environment.GetEnvironmentVariable("CRM_AGENT_TOKEN");
+            ?? Environment.GetEnvironmentVariable("CRM_AGENT_TOKEN")
+            ?? BuildConfig.EmbeddedAgentToken;
         // repKey = the rep's GoHighLevel user id (device-provisioned). Accept the
         // new CRM_AGENT_REP_KEY name, falling back to the legacy var.
         var repUserId = !string.IsNullOrEmpty(config.RepUserId)

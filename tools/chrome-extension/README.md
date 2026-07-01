@@ -12,10 +12,12 @@ Tool Manager can install and auto-update.
 
 | Path | What it is |
 |------|------------|
-| `extension/` | The Manifest V3 extension source (`manifest.json`, content scripts, popup, docs). |
+| `extension/` | The Manifest V3 extension source. This is the **dev build**: its `name` is `(dev)`-marked and its `key` is the dev key. |
 | `tool.json` | Tool Manager manifest (id, name, type). The release pipeline injects `version`. |
-| `dev-build.bat` | Stage `extension/` into the managed tools folder for local Chrome testing. |
-| `build-release.bat` | Package `extension/` + `tool.json` + installers into a release zip. |
+| `release.key` | The release signing key (public, not a secret). Injected at release time to pin the release extension id. |
+| `apply-release-manifest.ps1` | Turns a staged manifest into the release manifest: strips `(dev)`, swaps the dev key for `release.key`. Shared by CI and `build-release.bat`. |
+| `dev-build.bat` | Helper that points you at `extension/` to load unpacked. There's nothing to build — the source already *is* the dev build. |
+| `build-release.bat` | Package `extension/` + `tool.json` + installers into a release zip (runs the release manifest transform). |
 | `install.bat` / `uninstall.bat` | Shipped inside the release zip for standalone installs. |
 
 | Field | Value |
@@ -33,14 +35,31 @@ unpacked extension in Chrome.
 
 ## Local dev
 
-```bat
-dev-build.bat
-```
+The committed `extension/` folder **is** the dev build, so there's nothing to build — just load it:
 
-Stages the extension into the managed tools folder (`...\ToolManager\tools\lead-scraper`) so you can
-load/reload it at `chrome://extensions`. It reads from `extension/` by default; set
-`GMAPS_SCRAPER_DIR` to override the source path. It does not modify the Tool Manager registry —
-that's reserved for real installs from a release, so a dev build can never corrupt `installed.json`.
+1. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select
+   `tools\chrome-extension\extension`.
+2. It appears as **TableTurner Lead Scraper (dev)**.
+
+Edit files in place and click the card's reload icon to pick up changes. `dev-build.bat` just
+prints these steps and sanity-checks the manifest.
+
+The source `manifest.json` carries the **dev key** (id `lgacebajcimhkmcgihcjcdnndkbdggak`), distinct
+from the release key (id `jmedgkieldhfccjpjeafmgenaidchbmg`). Two different ids means the dev build
+and the Tool Manager release install coexist in one Chrome instead of colliding.
+
+## Running dev + release side by side
+
+Because the dev and release builds have different extension ids, both load at once: the dev build
+from `extension/` (above) and the release from the Tool Manager
+(`%LocalAppData%\TableTurnerr\ToolManager\tools\lead-scraper`).
+
+**Saved Sessions are shared across both** (and across machines) because they live in **GoHighLevel**,
+not in `chrome.storage`. Each saved scraping session/campaign is a GHL custom object record scoped to
+the logged-in user (see `extension/ghl_client.js` and the dashboard
+`/api/ghl/locations/[loc]/scraping-sessions` routes), so signing into the same GHL account from either
+build shows the same sessions. A local `chrome.storage` cache mirrors them for offline viewing. The
+extension requires GHL login before any use.
 
 ## Release
 

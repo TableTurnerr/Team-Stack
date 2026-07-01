@@ -1,5 +1,5 @@
 {
-  "version": "5.5",
+  "version": "5.6",
   "releaseNotes": "Restaurant Mode: qualify leads by the delivery platform behind their Order Now flow (DoorDash, Uber Eats, Postmates, Grubhub/Seamless, Toast, ChowNow, Slice), with include/exclude platform selection and skip-or-tag handling. Scrape multiple business categories in one run. Notes now capture the delivery platform and the site builder credit (footer 'Powered by …'). Paused scrapes get a Stop & Save button alongside Resume.",
   "downloadUrl": "https://github.com/TableTurnerr/Team-Stack/releases"
 }

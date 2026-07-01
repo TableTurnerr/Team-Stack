@@ -1,0 +1,7 @@
+# Normalize line endings for the Chrome extension sources so the dev build (this
+# repo) and the packaged release build produce byte-identical files and stop
+# showing spurious CRLF/LF churn in diffs. Scoped to tools/chrome-extension/.
+*.js   text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css  text eol=lf

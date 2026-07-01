@@ -33,6 +33,41 @@ jobs:
           if (-not $version) { throw "No version in extension manifest.json" }
           "VERSION=$version" >> $env:GITHUB_OUTPUT
 
+      - name: Guard against missing version bump
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # The extension publishes as lead-scraper-v<manifest version>, and the
+          # "Check if release already exists" step below SKIPS publishing when that tag
+          # already exists. So if extension/** changed (this workflow's push trigger) but
+          # the manifest version wasn't bumped past the latest published release, the
+          # change would never reach users. This step catches that. It is robust to the
+          # first-ever release (no prior tag) and compares versions numerically.
+          LATEST=$(gh release list --limit 200 --json tagName,isDraft \
+            --jq '[.[] | select(.isDraft==false) | .tagName | select(startswith("lead-scraper-v")) | ltrimstr("lead-scraper-v")] | .[]' \
+            2>/dev/null | sort -V | tail -n1 || true)
+          if [ -z "$LATEST" ]; then
+            echo "No prior lead-scraper-v* release found — treating as first release. Skipping bump guard."
+            exit 0
+          fi
+          echo "Manifest version:        $VERSION"
+          echo "Latest published version: $LATEST"
+          HIGHEST=$(printf '%s\n%s\n' "$VERSION" "$LATEST" | sort -V | tail -n1)
+          if [ "$VERSION" != "$LATEST" ] && [ "$HIGHEST" = "$VERSION" ]; then
+            echo "Version was bumped ($LATEST -> $VERSION). OK."
+            exit 0
+          fi
+          MSG="extension/** changed but manifest.json version ($VERSION) is not greater than the latest published release ($LATEST). Bump \"version\" in tools/chrome-extension/extension/manifest.json so the release publishes and users actually receive the update."
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "::error::$MSG"
+            exit 1
+          else
+            echo "::warning::$MSG"
+          fi
+
       - name: Check if release already exists
         id: check
         shell: bash

@@ -49,12 +49,21 @@ function disableExtension(cb) {
 
 function updateToolbarBadge() {
     if (!chrome.action || !chrome.action.setBadgeText) return;
-    if (!EXTENSION_ENABLED) {
-        chrome.action.setBadgeText({ text: 'OFF' });
-        chrome.action.setBadgeBackgroundColor({ color: '#5f6368' });
-        return;
-    }
-    chrome.storage.local.get(['gmes_results'], function (data) {
+    // An available update is the highest-priority signal: a stale install is the most
+    // common "not scraping" cause, so it wins the (single) toolbar badge over the
+    // OFF / lead-count states. The popup still shows OFF unmistakably (red power bar),
+    // so nothing is lost by letting the orange "UPD" badge take precedence here.
+    chrome.storage.local.get(['updateAvailable', 'gmes_results'], function (data) {
+        if (data.updateAvailable === true) {
+            chrome.action.setBadgeText({ text: 'UPD' });
+            chrome.action.setBadgeBackgroundColor({ color: '#f29900' });
+            return;
+        }
+        if (!EXTENSION_ENABLED) {
+            chrome.action.setBadgeText({ text: 'OFF' });
+            chrome.action.setBadgeBackgroundColor({ color: '#5f6368' });
+            return;
+        }
         var n = Array.isArray(data.gmes_results) ? data.gmes_results.length : 0;
         if (n > 0) {
             chrome.action.setBadgeText({ text: n > 999 ? '999+' : String(n) });
@@ -87,6 +96,11 @@ chrome.storage.onChanged.addListener(function (changes, area) {
         }
     }
     if (changes.gmes_results) {
+        updateToolbarBadge();
+    }
+    // Reflect the update flag on the toolbar badge the moment a check flips it, so
+    // the persistent "UPD" badge appears/clears without waiting for the next event.
+    if (changes.updateAvailable) {
         updateToolbarBadge();
     }
 });
@@ -232,10 +246,19 @@ function checkForUpdates() {
     });
 }
 
-// Show Chrome notification for new version
+// Show Chrome notification for new version.
+//
+// NOTE on "update" vs "notify": an unpacked / Tool-Manager-loaded MV3 extension
+// CANNOT self-install a new CRX — Chrome disallows programmatic install for dev /
+// unpacked loads. So the most this extension can do is make the stale state
+// impossible to miss: this notification (with installed-vs-available versions), the
+// persistent toolbar badge (see updateToolbarBadge), the stored `updateAvailable`
+// flag, and the popup's update banner. Actually swapping the files in place is the
+// Tool Manager's job — see build-chrome-extension.yml / the install.bat flow.
 function showUpdateNotification(version, downloadUrl, releaseNotes) {
     var notificationId = 'update-available-' + Date.now();
-    var message = 'Version ' + version + ' is now available!';
+    var installed = getCurrentVersion();
+    var message = 'You are on v' + installed + '. Version ' + version + ' is available — please update.';
     if (releaseNotes) {
         message += '\n' + releaseNotes;
     }
@@ -243,10 +266,10 @@ function showUpdateNotification(version, downloadUrl, releaseNotes) {
     chrome.notifications.create(notificationId, {
         type: 'basic',
         iconUrl: chrome.runtime.getURL('icon.png'),
-        title: 'TableTurner Lead Scraper - Update Available',
+        title: 'TableTurner Lead Scraper - Update Required',
         message: message,
         buttons: [
-            { title: 'Download Update' },
+            { title: 'Update now' },
             { title: "Don't remind me" }
         ],
         priority: 2

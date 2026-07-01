@@ -90,12 +90,36 @@ export async function handleOAuthCallback(request: Request, env: Env): Promise<R
   );
 }
 
+// Single-flight guard for the refresh exchange. GHL rotates the refresh_token on
+// every refresh and revokes the whole grant if a rotated token is replayed. The
+// call-log and recording webhooks for the same call arrive near-simultaneously,
+// so without serialization two handlers read the same stale token and both POST
+// the same refresh_token — GHL's reuse-detection then kills the grant and every
+// subsequent call silently fails. This in-process promise ensures only one
+// refresh runs at a time; concurrent callers await the same result. (The
+// self-hosted bridge is a single Node process, so an in-process lock suffices.)
+let inflightRefresh: Promise<string> | null = null;
+
 export async function getGhlAccessToken(env: Env): Promise<string> {
   const raw = await env.STATE.get(STATE_KEY);
   if (!raw) throw new Error("GHL not installed: visit /ghl/install once to authorize");
   const tokens = JSON.parse(raw) as StoredTokens;
   if (Date.now() < tokens.expires_at_ms) return tokens.access_token;
-  return refreshGhlToken(env, tokens);
+
+  // Token expired: refresh under the single-flight lock.
+  if (inflightRefresh) return inflightRefresh;
+  inflightRefresh = (async () => {
+    try {
+      // Re-read in case another caller refreshed while we were queued.
+      const fresh = await env.STATE.get(STATE_KEY);
+      const current = fresh ? (JSON.parse(fresh) as StoredTokens) : tokens;
+      if (Date.now() < current.expires_at_ms) return current.access_token;
+      return await refreshGhlToken(env, current);
+    } finally {
+      inflightRefresh = null;
+    }
+  })();
+  return inflightRefresh;
 }
 
 async function refreshGhlToken(env: Env, prev: StoredTokens): Promise<string> {

@@ -11,6 +11,13 @@ import {
   reconcilePendingClips,
   type CallState,
 } from "./calls";
+import {
+  recordDeadLetter,
+  listDeadLetters,
+  removeDeadLetter,
+  rescheduleDeadLetter,
+} from "./runtime/deadletter";
+import { telemetryLog } from "./runtime/telemetry";
 
 type ZoomCallLog = {
   id?: string;
@@ -80,7 +87,11 @@ type Envelope = {
   payload?: { object?: unknown } | undefined;
 };
 
-export async function dispatch(envelope: Envelope, env: Env): Promise<void> {
+export async function dispatch(
+  envelope: Envelope,
+  env: Env,
+  opts?: { isRetry?: boolean },
+): Promise<void> {
   console.log(`EVENT ${envelope.event} PAYLOAD:`, JSON.stringify(envelope.payload));
   const obj = envelope.payload?.object;
   if (!obj || typeof obj !== "object") {
@@ -122,7 +133,48 @@ export async function dispatch(envelope: Envelope, env: Env): Promise<void> {
   } catch (err) {
     const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
     console.error(`dispatch error [${envelope.event}]:`, msg);
+    // On the live webhook path, persist the failed event so the periodic sweep
+    // can replay it (Zoom already got its 204 and will never retry). On a retry
+    // attempt, rethrow so the retry loop owns the attempt count / backoff.
+    if (opts?.isRetry) throw err;
+    try {
+      await recordDeadLetter(env, envelope, msg);
+      console.error(`dispatch: dead-lettered [${envelope.event}] for replay`);
+    } catch (dlqErr) {
+      console.error("dispatch: failed to dead-letter event:", dlqErr);
+    }
+    telemetryLog("error", `Zoom event failed to reach GHL: ${envelope.event}`, {
+      event: "zoom.dispatch.failed",
+      context: { zoomEvent: envelope.event, error: msg.split("\n")[0] },
+    });
   }
+}
+
+// Replay dead-lettered events whose backoff has elapsed. Called on an interval
+// by the server. Each entry is removed before replay; a failed replay is
+// rescheduled with incremented attempts (or retired after MAX_DLQ_ATTEMPTS).
+export async function retryDeadLetters(
+  env: Env,
+): Promise<{ retried: number; succeeded: number; failed: number }> {
+  const now = Date.now();
+  const due = (await listDeadLetters(env)).filter((e) => e.record.next_attempt_ms <= now);
+  let succeeded = 0;
+  let failed = 0;
+  for (const entry of due) {
+    await removeDeadLetter(env, entry.key);
+    try {
+      await dispatch(entry.record.envelope as Envelope, env, { isRetry: true });
+      succeeded++;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await rescheduleDeadLetter(env, entry, msg);
+      failed++;
+    }
+  }
+  if (due.length > 0) {
+    console.log(`[dlq] replayed ${due.length}: ${succeeded} ok, ${failed} re-queued`);
+  }
+  return { retried: due.length, succeeded, failed };
 }
 
 // Live phone events (caller_connected / callee_answered / *_ended) used to push
@@ -253,6 +305,10 @@ async function handleCallLog(
   await writeRecentCallIndex(env, external, callId);
   await reconcilePendingClips(env, callId, external, state);
   console.log("logged call", callId, direction, status, "by", repLabel, "contact", contact.id);
+  telemetryLog("info", `Logged ${direction} call to GHL`, {
+    event: "ghl.call.logged",
+    context: { callId, direction, status, contactId: contact.id },
+  });
 }
 
 async function handleRecording(env: Env, rec: ZoomRecording): Promise<void> {

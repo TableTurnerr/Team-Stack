@@ -1,3 +1,12 @@
+# ============================================================================
+# DEPRECATED — DO NOT DEPLOY. The bridge is now a self-hosted Node service
+# (Node 22+, Hono, SQLite) run via `src/server.ts` behind the Cloudflare Tunnel
+# at https://zoomphone.tableturnerr.com. The Cloudflare Worker path is
+# decommissioned: `src/index.ts` no longer exports a Worker `fetch` handler and
+# the `AgentHub` Durable Object below has been removed from the code, so
+# `wrangler deploy` WILL FAIL. This file is retained only for the historical KV
+# namespace IDs. See docs/decommission-cloudflare-worker.md.
+# ============================================================================
 name = "zoomphone-bridge"
 main = "src/index.ts"
 compatibility_date = "2026-06-01"

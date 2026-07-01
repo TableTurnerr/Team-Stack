@@ -1616,6 +1616,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // ---- Try to grab the session from any open TableTurnerr tab ----
             function attemptConnect() {
+                // Start the alarm and set the waiting flag BEFORE any async tab
+                // operations. The popup closes the instant a new tab is created, so
+                // anything inside chrome.tabs.create's callback is unreliable. By
+                // calling beginWaiting() here, the background service worker alarm
+                // starts regardless of whether the popup survives.
+                beginWaiting();
                 chrome.tabs.query({ url: TT_APP_URL + '/*' }, function (tabs) {
                     if (tabs && tabs.length > 0) {
                         chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, func: readTtSession }, function (results) {
@@ -1626,13 +1632,11 @@ document.addEventListener('DOMContentLoaded', function () {
                                 // Tab open but not connected — send it to the connect page
                                 chrome.tabs.update(tabs[0].id, { url: TT_CONNECT_URL, active: true });
                                 chrome.storage.local.set({ gmes_ghl_connect_tab: tabs[0].id });
-                                beginWaiting();
                             }
                         });
                     } else {
                         chrome.tabs.create({ url: TT_CONNECT_URL }, function (tab) {
                             if (tab && tab.id != null) chrome.storage.local.set({ gmes_ghl_connect_tab: tab.id });
-                            beginWaiting();
                         });
                     }
                 });

@@ -48,6 +48,7 @@ export function makeRig(): TestRig {
     ZOOM_CLIENT_ID: "zoom-client",
     ZOOM_CLIENT_SECRET: "zoom-client-secret",
     ZOOM_ACCOUNT_ID: "zoom-account",
+    ZOOM_USER_ID: "rep@test.example.com",
     GHL_MARKETPLACE_CLIENT_ID: "ghl-client",
     GHL_MARKETPLACE_CLIENT_SECRET: "ghl-client-secret",
     GHL_MARKETPLACE_CONVERSATION_PROVIDER_ID: "ghl-provider",

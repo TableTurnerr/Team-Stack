@@ -26,6 +26,9 @@ public class TrayIconManager : IDisposable
     private readonly RecordingStorageManager? _storage;
     private readonly MicrophoneManager? _micManager;
     private readonly ZoomWindowSuppressor? _zoomSuppressor;
+    private readonly RecordingUploadService? _uploader;
+    private readonly ZoomPhoneApiService? _zoomApi;
+    private readonly AgentConfig? _config;
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _connectionsItem;
     private readonly ToolStripMenuItem _zoomItem;
@@ -41,7 +44,8 @@ public class TrayIconManager : IDisposable
 
     public TrayIconManager(AgentService agent, CallStateFusion fusion, ZoomAudioMonitor audioMonitor, AutoUpdateService autoUpdater,
         AudioRecorderService? recorder = null, RecordingStorageManager? storage = null, MicrophoneManager? micManager = null,
-        ZoomWindowSuppressor? zoomSuppressor = null)
+        ZoomWindowSuppressor? zoomSuppressor = null, RecordingUploadService? uploader = null,
+        ZoomPhoneApiService? zoomApi = null, AgentConfig? config = null)
     {
         _agent = agent;
         _fusion = fusion;
@@ -51,6 +55,9 @@ public class TrayIconManager : IDisposable
         _storage = storage;
         _micManager = micManager;
         _zoomSuppressor = zoomSuppressor;
+        _uploader = uploader;
+        _zoomApi = zoomApi;
+        _config = config;
 
         _statusItem = new ToolStripMenuItem("Call: Idle") { Enabled = false };
         _connectionsItem = new ToolStripMenuItem("CRM Clients: 0") { Enabled = false };
@@ -95,6 +102,10 @@ public class TrayIconManager : IDisposable
             {
                 try { System.Diagnostics.Process.Start("explorer.exe", _storage.RecordingsDirectory); } catch { }
             }));
+        }
+        if (_config != null)
+        {
+            contextMenu.Items.Add(new ToolStripMenuItem("Setup (agent token)…", null, OnSetupClick));
         }
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(_updateItem);
@@ -236,6 +247,35 @@ public class TrayIconManager : IDisposable
                     ? $"Uploads: {pending} pending, {failed} failed"
                     : "Uploads: None pending";
             }
+        }
+        catch { }
+    }
+
+    // Re-open the first-run setup dialog so the agent token (and rep id) can be
+    // entered or changed without reinstalling. Applies the new config live.
+    private void OnSetupClick(object? sender, EventArgs e)
+    {
+        if (_config == null) return;
+        try
+        {
+            var defaultUrl = !string.IsNullOrEmpty(_config.WorkerBaseUrl)
+                ? _config.WorkerBaseUrl!
+                : Program.DefaultWorkerBaseUrl;
+            var existingRep = _config.RepUserId;
+
+            var result = SetupForm.Prompt(defaultUrl, existingRep);
+            if (result is not { } s) return;
+
+            var url = string.IsNullOrWhiteSpace(s.workerUrl) ? defaultUrl : s.workerUrl;
+            var rep = s.repUserId ?? existingRep;
+            _config.SetWorkerConfig(url, s.token, rep);
+            _config.Save();
+            _uploader?.SetWorkerConfig(url, s.token, rep);
+            if (_zoomApi is { IsConfigured: false })
+                _ = Task.Run(() => _zoomApi.TryBootstrapFromWorkerAsync(url, s.token));
+
+            _notifyIcon.ShowBalloonTip(3000, "CRM Agent",
+                "Setup saved — recording uploads enabled.", ToolTipIcon.Info);
         }
         catch { }
     }

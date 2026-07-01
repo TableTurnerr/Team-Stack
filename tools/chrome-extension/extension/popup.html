@@ -28,7 +28,13 @@
       --danger: #ea4335;
       --danger-dark: #c5221f;
       --danger-shadow: rgba(234,67,53,0.28);
+      --danger-bg: #fdecea;
+      --danger-border: #f3b4ae;
       --warning: #fbbc04;
+      --update: #f29900;
+      --update-dark: #d98300;
+      --update-bg: #fff4e0;
+      --update-border: #f3c97a;
       --neutral: #3c4043;
       --mode-bg: #e2e5eb;
       --mode-active-bg: #ffffff;
@@ -56,7 +62,13 @@
       --danger: #ea4335;
       --danger-dark: #d33426;
       --danger-shadow: rgba(234,67,53,0.3);
+      --danger-bg: #3a1d1b;
+      --danger-border: #6e2b25;
       --warning: #fbbc04;
+      --update: #f29900;
+      --update-dark: #f4b740;
+      --update-bg: #3a2e16;
+      --update-border: #7a5e1f;
       --neutral: #5f6368;
       --mode-bg: #252535;
       --mode-active-bg: #35354a;
@@ -170,8 +182,8 @@
       transition: background 0.2s, border-color 0.2s;
     }
     .master-power-bar.off {
-      background: var(--surface-2);
-      border-color: var(--border);
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
     }
     .master-power-info {
       display: flex;
@@ -193,7 +205,7 @@
       transition: background 0.2s;
     }
     .master-power-bar.off .master-power-icon {
-      background: var(--text-faint);
+      background: var(--danger);
     }
     .master-power-text-block { min-width: 0; }
     .master-power-title {
@@ -202,6 +214,50 @@
       color: var(--text);
       line-height: 1.2;
     }
+    /* OFF: paint the title red so the disabled state is unmistakable at a glance. */
+    .master-power-bar.off .master-power-title { color: var(--danger-dark); }
+
+    /* ── Update banner (stale-version warning) ───────── */
+    .update-banner {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 11px 14px;
+      background: var(--update-bg);
+      border: 1.5px solid var(--update-border);
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+    .update-banner-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--update);
+      color: white;
+      flex-shrink: 0;
+    }
+    .update-banner-text { flex: 1; min-width: 0; }
+    .update-banner-title { font-size: 13.5px; font-weight: 700; color: var(--text); line-height: 1.2; }
+    .update-banner-sub { font-size: 11.5px; color: var(--text-muted); line-height: 1.3; margin-top: 1px; }
+    .update-banner-btn {
+      flex-shrink: 0;
+      padding: 8px 14px;
+      border: none;
+      border-radius: 8px;
+      background: var(--update);
+      color: white;
+      font-family: 'Poppins', sans-serif;
+      font-size: 12.5px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.18s, transform 0.12s;
+    }
+    .update-banner-btn:hover { background: var(--update-dark); transform: translateY(-1px); }
+    .update-banner-btn:active { transform: translateY(0); }
     .master-power-sub {
       font-size: 11.5px;
       color: var(--text-muted);
@@ -674,6 +730,7 @@
 
     /* When Settings is open, show only the settings panel in the popup */
     body.settings-open #masterPowerBar,
+    body.settings-open #updateBanner,
     body.settings-open #extensionContent > *:not(.settings-section) {
       display: none !important;
     }
@@ -848,6 +905,21 @@
   </div>
 
   <div class="body-content">
+    <!-- Update banner: shown by popup.js when background.js's update check finds a
+         newer release. A Tool-Manager / unpacked MV3 build can't self-install a new
+         CRX, so this loud in-popup signal (installed vs available version + a button
+         to the release) is how a stale tester can never miss that they're out of date. -->
+    <div class="update-banner" id="updateBanner" style="display:none;">
+      <span class="update-banner-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+      </span>
+      <div class="update-banner-text">
+        <div class="update-banner-title">Update available</div>
+        <div class="update-banner-sub" id="updateBannerSub">A newer version is available.</div>
+      </div>
+      <button class="update-banner-btn" id="updateBannerBtn" type="button">Update</button>
+    </div>
+
     <!-- Master Power Bar (global on/off + leads count) -->
     <div class="master-power-bar" id="masterPowerBar">
       <div class="master-power-info">

@@ -412,6 +412,50 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     } catch (e) {}
 
+    // ── Update banner: surface a stale-version warning the tester can't miss ──
+    // background.js's checkForUpdates() stores updateAvailable/updateVersion/updateUrl
+    // in chrome.storage.local. A Tool-Manager / unpacked MV3 build can't self-install a
+    // new CRX (Chrome forbids it for dev loads), so the loudest we can do here is show
+    // the installed-vs-available versions and a button to the release download. Actually
+    // swapping the files in place is the Tool Manager's job.
+    (function () {
+        var banner = document.getElementById('updateBanner');
+        var sub = document.getElementById('updateBannerSub');
+        var btn = document.getElementById('updateBannerBtn');
+        if (!banner || !btn) return;
+        var RELEASES_URL = 'https://github.com/TableTurnerr/Team-Stack/releases';
+
+        function installedVersion() {
+            try { return chrome.runtime.getManifest().version; } catch (e) { return '?'; }
+        }
+
+        function renderUpdateBanner(data) {
+            var version = data && data.updateVersion;
+            if (!data || data.updateAvailable !== true || !version) {
+                banner.style.display = 'none';
+                return;
+            }
+            sub.textContent = 'You have v' + installedVersion() + ' — v' + version + ' is available.';
+            btn.textContent = 'Update — get v' + version;
+            banner.dataset.updateUrl = data.updateUrl || RELEASES_URL;
+            banner.style.display = 'flex';
+        }
+
+        chrome.storage.local.get(['updateAvailable', 'updateVersion', 'updateUrl'], renderUpdateBanner);
+
+        // Live-refresh if a background update check flips the flag while the popup is open.
+        chrome.storage.onChanged.addListener(function (changes, area) {
+            if (area !== 'local') return;
+            if (changes.updateAvailable || changes.updateVersion || changes.updateUrl) {
+                chrome.storage.local.get(['updateAvailable', 'updateVersion', 'updateUrl'], renderUpdateBanner);
+            }
+        });
+
+        btn.addEventListener('click', function () {
+            chrome.tabs.create({ url: banner.dataset.updateUrl || RELEASES_URL });
+        });
+    })();
+
     // Mode handling
     chrome.storage.local.get(['gmes_mode'], function (result) {
         var mode = result.gmes_mode || 'scraping';

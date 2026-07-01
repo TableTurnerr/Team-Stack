@@ -6,6 +6,11 @@ namespace LocalCrmAgent;
 
 static class Program
 {
+    // Public bridge worker the agents talk to. Baked as a default so only the
+    // shared agent token needs provisioning per machine; a persisted config
+    // value or CRM_AGENT_WORKER_URL still overrides it.
+    internal const string DefaultWorkerBaseUrl = "https://zoomphone.tableturnerr.com";
+
     [STAThread]
     static void Main(string[] args)
     {
@@ -94,6 +99,29 @@ static class Program
             ? config.RepUserId
             : (Environment.GetEnvironmentVariable("CRM_AGENT_REP_KEY")
                ?? Environment.GetEnvironmentVariable("CRM_AGENT_REP_USER_ID"));
+
+        // The worker URL is public, so default it — the only secret that must be
+        // provisioned per machine is the shared agent token.
+        if (string.IsNullOrEmpty(workerUrl)) workerUrl = DefaultWorkerBaseUrl;
+
+        // First-run provisioning: with no token configured (and none in env),
+        // prompt once for it. This is the only thing the user has to enter; the
+        // Zoom creds are pulled from the worker below. The prompt also appears
+        // when the installer launches the agent with --background (the missing
+        // token is the trigger, not the flag), and the tray "Setup…" item
+        // re-opens it. Once saved it never shows again.
+        if (string.IsNullOrEmpty(agentToken))
+        {
+            FileLogger.Write("[Main] No agent token configured — showing first-run setup dialog");
+            var setup = SetupForm.Prompt(workerUrl, repUserId);
+            if (setup is { } s)
+            {
+                if (!string.IsNullOrWhiteSpace(s.workerUrl)) workerUrl = s.workerUrl;
+                agentToken = s.token;
+                repUserId = s.repUserId ?? repUserId;
+            }
+        }
+
         if (!string.IsNullOrEmpty(workerUrl) && !string.IsNullOrEmpty(agentToken))
         {
             uploader.SetWorkerConfig(workerUrl, agentToken, repUserId);
@@ -104,6 +132,22 @@ static class Program
                 config.SetWorkerConfig(workerUrl, agentToken, repUserId);
                 config.Save();
             }
+
+            // Self-provision the shared Zoom S2S creds from the worker so the
+            // agent can resolve a desktop call's real call_id + number from
+            // call_history. Without this every clip uploads but parks in GHL
+            // "review" instead of attaching to the contact. Background +
+            // best-effort; retried on the next launch if the worker is down.
+            if (!zoomApi.IsConfigured)
+            {
+                var wu = workerUrl;
+                var tok = agentToken;
+                _ = Task.Run(() => zoomApi.TryBootstrapFromWorkerAsync(wu, tok));
+            }
+        }
+        else
+        {
+            FileLogger.Write("[Main] Agent not provisioned (no token) — uploads disabled until setup is completed");
         }
         wsServer.SetAgentConfig(config);
         // If a token existed but DPAPI couldn't decrypt it (e.g. profile
@@ -123,7 +167,7 @@ static class Program
         Debug.WriteLine("[Main] Agent started, entering message loop...");
 
         // ── Create tray icon (must be on STA/UI thread) ────────────
-        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater, recorder, storageManager, micManager, zoomSuppressor);
+        using var trayManager = new TrayIconManager(agent, fusion, audioMonitor, autoUpdater, recorder, storageManager, micManager, zoomSuppressor, uploader, zoomApi, config);
 
         // ── Run WinForms message loop (blocks until Exit) ──────────
         Application.Run();

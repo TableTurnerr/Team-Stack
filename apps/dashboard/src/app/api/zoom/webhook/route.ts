@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import PocketBase from 'pocketbase';
+import { telemetryLog, flushTelemetry } from '@/lib/telemetry';
 
 /**
  * Zoom Phone Webhook Endpoint
@@ -98,6 +99,14 @@ export async function POST(request: Request) {
 
     if (ZOOM_WEBHOOK_SECRET && !verifySignature(rawBody, timestamp, signature)) {
         console.warn('[ZoomWebhook] Invalid signature');
+        await flushTelemetry(
+            telemetryLog({
+                level: 'warn',
+                message: 'Zoom webhook signature verification failed',
+                event: 'zoom.webhook.bad_signature',
+                context: { hasTimestamp: Boolean(timestamp), hasSignature: Boolean(signature) },
+            })
+        );
         return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
 
@@ -106,8 +115,17 @@ export async function POST(request: Request) {
     const eventPayload = payload.payload as Record<string, unknown> | undefined;
 
     console.log(`[ZoomWebhook] Event: ${event}`);
+    // Decisive diagnostic: proves Zoom is reaching the *dashboard* webhook.
+    // (GHL call logging is a separate path in the zoomphone-ghl-bridge.)
+    const eventReceived = telemetryLog({
+        level: 'info',
+        message: `Zoom webhook event received: ${event}`,
+        event: 'zoom.webhook.received',
+        context: { zoomEvent: event },
+    });
 
     if (!eventPayload) {
+        await flushTelemetry(eventReceived);
         return NextResponse.json({ status: 'ok' });
     }
 
@@ -143,6 +161,7 @@ export async function POST(request: Request) {
     const phoneE164 = toE164Loose(externalPhoneRaw);
 
     // Store the raw event using the canonical schema field names.
+    let storeError: Promise<void> | undefined;
     const pb = await getPbAdmin();
     if (pb) {
         try {
@@ -157,6 +176,12 @@ export async function POST(request: Request) {
             });
         } catch (err) {
             console.warn('[ZoomWebhook] Failed to store event:', err);
+            storeError = telemetryLog({
+                level: 'error',
+                message: 'Failed to store Zoom event in PocketBase',
+                event: 'zoom.webhook.store_failed',
+                context: { zoomEvent: event, callId, error: err instanceof Error ? err.message : String(err) },
+            });
         }
 
         // Inbound ringing: create an unassigned pending claim so every
@@ -206,5 +231,6 @@ export async function POST(request: Request) {
 
     console.log(`[ZoomWebhook] Call ${callId}: ${event} | ${callerNumber} → ${calleeNumber} | ${status}`);
 
+    await flushTelemetry(eventReceived, storeError);
     return NextResponse.json({ status: 'ok' });
 }

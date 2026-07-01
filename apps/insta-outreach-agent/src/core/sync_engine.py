@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 from .local_db import LocalDB
 from .pocketbase_sync import PocketBaseSync
+from .telemetry import configure_telemetry
 
 class SyncEngine:
     def __init__(self, db_path: str = "local_data.db"):
@@ -12,11 +13,15 @@ class SyncEngine:
         self.logger = logging.getLogger(__name__)
         self.running = False
         self.thread: Optional[threading.Thread] = None
+        # Central telemetry: mirrors logs + sends an uptime heartbeat so this
+        # agent appears on the admin Status/Logs dashboard. No-op if unconfigured.
+        self.telemetry = configure_telemetry("insta-outreach-agent")
 
     def start(self):
         self.running = True
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
+        self.telemetry.heartbeat(status="ok")
         self.logger.info("Sync engine started")
 
     def stop(self):
@@ -24,16 +29,20 @@ class SyncEngine:
         if self.thread:
             self.thread.join()
         self.logger.info("Sync engine stopped")
+        self.telemetry.heartbeat(status="down")
+        self.telemetry.close()
 
     def _run_loop(self):
         while self.running:
+            # Heartbeat first so a sync exception can't starve the uptime signal.
+            self.telemetry.heartbeat(status="ok")
             try:
                 self.sync_events()
             except Exception as e:
                 self.logger.error(f"Sync error: {e}")
-            
+
             # Sleep in intervals to allow quick stop
-            for _ in range(60): 
+            for _ in range(60):
                 if not self.running:
                     break
                 time.sleep(1)

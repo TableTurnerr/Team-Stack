@@ -3,25 +3,34 @@
 > Part of the [CRM-Tableturnerr](../../README.md) monorepo (`tools/zoomphone-ghl-bridge`).
 > Previously the standalone `zoomphone-to-ghl` project; it now lives here.
 
-> **Migration in progress (2026-06-21):** this is being moved off Cloudflare
-> Workers to a **self-hosted Node service** (Node 22+, Hono, SQLite) that runs on
-> the PocketBase box behind the Cloudflare Tunnel, and the agent/worker
-> responsibilities are being re-split so the bridge owns call direction. The
-> request handlers (`src/`) and the Node entry (`src/server.ts`) are live and
-> typecheck; the recording-ingest correlation and cutover are still in progress.
-> Run locally with `pnpm install && pnpm dev`. The Cloudflare/`wrangler` setup
-> below is retained for reference until cutover. See
-> [`docs/selfhost-and-responsibility-split-plan.md`](docs/selfhost-and-responsibility-split-plan.md).
+> **Deployment (self-hosted, post-cutover):** this runs as a **self-hosted Node
+> service** (Node 22+, Hono, SQLite) started via `src/server.ts`, bound to
+> `127.0.0.1:8787` on the PocketBase box behind the Cloudflare Tunnel at
+> `https://zoomphone.tableturnerr.com`. The Cloudflare Worker path is
+> **decommissioned** — `src/index.ts` exports `handleRequest` (no Worker `fetch`
+> default) and the `AgentHub` Durable Object is gone, so `wrangler deploy` will
+> fail. The `wrangler.toml` and the Cloudflare-specific setup steps below are
+> kept for historical reference only. Run locally with `pnpm install && pnpm dev`;
+> deploy/operate per
+> [`docs/git-based-deploy.md`](docs/git-based-deploy.md) and
+> [`docs/decommission-cloudflare-worker.md`](docs/decommission-cloudflare-worker.md).
+>
+> Operational health: `GET /health` (liveness → `ok`) and `GET /status` (JSON
+> with GHL-install state + dead-letter backlog of events that failed to reach GHL).
 
-A Cloudflare Worker that listens to Zoom Phone webhooks and logs every call into
-GoHighLevel: direction, duration, timestamps, the recording, and (when Zoom
-provides it) the voicemail transcript. New phone numbers get auto-upserted as
-GHL contacts so nothing falls through the cracks.
+A self-hosted Node service (formerly a Cloudflare Worker) that listens to Zoom
+Phone webhooks and logs every call into GoHighLevel: direction, duration,
+timestamps, the recording, and (when Zoom provides it) the voicemail transcript.
+New phone numbers get auto-upserted as GHL contacts so nothing falls through the
+cracks. Webhook processing is fire-and-forget after a 204 ack; events that fail
+to reach GHL are dead-lettered to the SQLite store and replayed by a periodic
+sweep (and counted on `/status`).
 
-It also drives the **local-recording pipeline**: a Durable Object (`AgentHub`)
-holds one live WebSocket per rep's CRM Agent, and the Worker pushes START/STOP
-from Zoom's live phone events. The agent records the call locally and uploads
-the clip to `/recordings/ingest`, which attaches it to the matching GHL contact.
+It also drives the **local-recording pipeline**: the rep's CRM Agent self-detects
+the call locally (live worker→agent push was removed with `AgentHub`, since a
+shared Zoom account can't be routed per-device), records it, and uploads the clip
+to `/recordings/ingest`, which correlates it by Zoom `call_id` or phone+time and
+attaches it to the matching GHL contact.
 
 ## How it works
 

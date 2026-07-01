@@ -656,13 +656,18 @@ public class AudioRecorderService : IDisposable
                     e.ConversionComplete = true;
                 });
 
-                Debug.WriteLine($"[Recorder] Completed: {fileName} ({duration}s, {fileInfo.Length} bytes)");
+                // Logged via FileLogger (not Debug.WriteLine) so it survives
+                // into Release builds — a missing "Converted" line for a call
+                // is the signal that conversion silently failed below.
+                FileLogger.Write($"[Recorder] Converted: {fileName} ({duration}s, {fileInfo.Length} bytes) — queued for upload");
 
                 RecordingConverted?.Invoke(recordingId ?? "", fileName, duration, fileInfo.Length);
             }
             catch (TimeoutException)
             {
-                Debug.WriteLine($"[Recorder] MP3 conversion timed out after 30s for {fileName} — keeping WAV fallback");
+                // ConversionComplete stays false → GetPendingUploads skips this
+                // entry forever, so the clip never uploads. Make that visible.
+                FileLogger.Write($"[Recorder] MP3 conversion TIMED OUT (30s) for {fileName} — clip will NOT upload (WAV kept as fallback)");
                 _storage.UpdateEntry(fileName, e =>
                 {
                     e.Error = "conversion timeout";
@@ -671,7 +676,10 @@ public class AudioRecorderService : IDisposable
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[Recorder] MP3 conversion failed: {ex.Message}");
+                // Same as above: a failed conversion means the clip never
+                // becomes a pending upload. This used to log via Debug.WriteLine
+                // (a no-op in Release), which is why such failures were silent.
+                FileLogger.Write($"[Recorder] MP3 conversion FAILED for {fileName}: {ex.GetType().Name}: {ex.Message} — clip will NOT upload (WAV kept as fallback)");
                 // Keep the WAV file as fallback — do not delete tempWav here.
                 _storage.UpdateEntry(fileName, e =>
                 {

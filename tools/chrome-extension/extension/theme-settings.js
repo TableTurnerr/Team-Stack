@@ -132,15 +132,17 @@
       masterPowerBar.classList.remove('off');
       extensionContent.classList.remove('disabled');
       if (pillText) pillText.textContent = 'ON';
-      masterPowerTitle.textContent = 'Extension Active';
+      masterPowerTitle.textContent = 'Scraper ON';
       masterPowerSub.textContent = 'Scraping, overlays & shortcuts enabled';
     } else {
       masterPowerToggle.classList.remove('on');
       masterPowerBar.classList.add('off');
       extensionContent.classList.add('disabled');
       if (pillText) pillText.textContent = 'OFF';
-      masterPowerTitle.textContent = 'Extension Disabled';
-      masterPowerSub.textContent = 'All scraping, overlays & shortcuts paused';
+      masterPowerTitle.textContent = 'Scraper OFF';
+      // Call out the reset-on-launch behaviour so a tester isn't confused when it
+      // comes back disabled after restarting Chrome — turn it on to start scraping.
+      masterPowerSub.textContent = 'Turn on to scrape — resets to OFF when Chrome restarts';
     }
   }
 

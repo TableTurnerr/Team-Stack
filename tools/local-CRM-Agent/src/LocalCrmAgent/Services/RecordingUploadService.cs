@@ -296,7 +296,7 @@ public class RecordingUploadService : IDisposable
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                Debug.WriteLine("[Upload] Auth expired (401)");
+                FileLogger.Write($"[Upload] Rejected 401 (agent token invalid/missing): {entry.FileName}");
                 UploadAuthExpired?.Invoke();
                 return;
             }
@@ -314,7 +314,7 @@ public class RecordingUploadService : IDisposable
             {
                 var body = await SafeReadBody(response, ct);
                 var errMsg = $"HTTP {(int)response.StatusCode}: {body}";
-                Debug.WriteLine($"[Upload] Permanent failure: {entry.FileName} — {errMsg}");
+                FileLogger.Write($"[Upload] Permanent failure (won't retry): {entry.FileName} — {errMsg}");
                 _storage.UpdateEntry(entry.FileName, e => { e.Error = errMsg; });
                 UploadCompleted?.Invoke(entry.FileName, null, entry.CallLogId, false, errMsg);
                 lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
@@ -385,8 +385,16 @@ public class RecordingUploadService : IDisposable
             e.UploadedAt = DateTime.UtcNow;
             e.GhlMessageId = ghlMessageId;
         });
-        Debug.WriteLine($"[Upload] Uploaded: {entry.FileName} → GHL msg {ghlMessageId ?? "(none)"}"
-            + (note != null ? $" [{note}]" : ""));
+        // Distinguish "attached to a GHL contact" from "uploaded but parked in
+        // GHL Medias review (no phone/call_id match)". Both set Uploaded=true so
+        // we stop retrying, but a review-parked clip is NOT on the contact, so
+        // surface it loudly via FileLogger (Debug.WriteLine was a no-op in
+        // Release, which is why ~unattached uploads looked like clean successes).
+        if (!string.IsNullOrEmpty(ghlMessageId))
+            FileLogger.Write($"[Upload] Attached to GHL: {entry.FileName} → msg {ghlMessageId}");
+        else
+            FileLogger.Write($"[Upload] Uploaded but NOT attached: {entry.FileName} [{note ?? "no GHL message id"}] "
+                + "— check Zoom S2S creds (zoom-api.json / setZoomApiConfig) so the call number resolves");
         lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
         // Reset breaker on any successful upload — partial outages clear.
         Interlocked.Exchange(ref _consecutiveFailures, 0);

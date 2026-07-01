@@ -32,7 +32,9 @@ LAN IP of the machine that placed the call). The agent matches the record whose
 is near the recording start — an exact per-device match, since a machine is only
 on one call at a time. From that record it takes the real `call_id` and the
 external `*_did_number`. The worker then correlates by exact `call_id`. This needs
-the agent's `zoom-api.json` (S2S creds + the shared `zoomUserId`/email) configured.
+the agent's Zoom S2S creds (`zoom-api.json`); the agent **auto-pulls them from the
+worker** on startup (`GET /agent/bootstrap`), so nothing has to be placed on disk
+by hand. If they're missing, the clip still uploads but parks in GHL review.
 
 ### Two call surfaces
 
@@ -70,26 +72,32 @@ review path rather than being dropped.
 
 ## Provisioning (no hardcoded secrets)
 
-The agent needs three values. Resolved at startup as **persisted config first,
-then environment variable**:
+**The only thing a rep must enter is the shared agent token.** On first run with
+no token configured the agent shows a one-time setup dialog (also re-openable
+from the tray, "Setup (agent token)…"). Everything else is automatic:
 
-| Value | Config (`%AppData%\CrmAgent\agent-config.json`) | Env var | WS command |
-|-------|----------------------------------|---------|------------|
-| Worker base URL | `workerBaseUrl` | `CRM_AGENT_WORKER_URL` | `setWorkerConfig` |
-| Shared agent token | `agentTokenProtected` (DPAPI) | `CRM_AGENT_TOKEN` | `setWorkerConfig` |
-| Rep id | `repUserId` | `CRM_AGENT_REP_USER_ID` | `setWorkerConfig` |
+| Value | Source |
+|-------|--------|
+| Worker base URL | defaults to `https://zoomphone.tableturnerr.com` (override via config `workerBaseUrl` or `CRM_AGENT_WORKER_URL`) |
+| Shared agent token | first-run dialog → `agentTokenProtected` (DPAPI). Also accepts `CRM_AGENT_TOKEN` / WS `setWorkerConfig` |
+| Rep id (optional, attribution) | first-run dialog → `repUserId`. Also `CRM_AGENT_REP_KEY` / WS `setWorkerConfig` |
+| **Zoom S2S creds** | **pulled from the worker** at startup via `GET /agent/bootstrap` (Bearer agent token) → persisted to `zoom-api.json`. Never shipped in the installer/extension. |
 
-The token is the worker's `AGENT_SHARED_TOKEN` (one shared value for all agents).
-It is DPAPI-encrypted to the current Windows user on disk. Env-provisioned values
-are persisted on first run so later launches don't depend on the environment.
+The token is the worker's `AGENT_SHARED_TOKEN` (one shared value for all agents),
+DPAPI-encrypted to the current Windows user on disk. Persisted on first run so
+later launches don't depend on the environment.
 
-To provision at runtime, send over the localhost WebSocket:
+Because the **worker owns the Zoom secret** and hands it to authenticated agents,
+rotating the Zoom S2S app only needs a worker env change (`ZOOM_*`); each agent
+re-pulls on its next launch. No dashboard or open GHL tab is involved.
+
+To (re)provision at runtime over the localhost WebSocket:
 
 ```json
 { "type": "setWorkerConfig",
   "workerBaseUrl": "https://<worker-host>",
   "agentToken": "<AGENT_SHARED_TOKEN>",
-  "repUserId": "<rep zoom user_id>" }
+  "repUserId": "<rep GHL user id>" }
 ```
 
 ## Correlation (worker side)

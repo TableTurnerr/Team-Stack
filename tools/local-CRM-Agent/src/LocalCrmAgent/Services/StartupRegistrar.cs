@@ -19,9 +19,15 @@ public static class StartupRegistrar
     // (frozen in the architecture plan §4 / ZOOM_RECORDING_NOTES.md).
     public const string NativeHostName = "com.tableturnerr.crm_agent";
 
-    // Pinned Lead Scraper extension id (derived from the `key` in its
-    // manifest.json). Only this origin may launch the host. Not a secret.
+    // Pinned Lead Scraper extension ids (derived from the `key` in the extension
+    // manifest.json). Only these origins may launch the host. Not secrets.
+    //   ExtensionId    -> the published release (release.key)
+    //   DevExtensionId -> the in-repo dev build, which ships a distinct dev key so
+    //                     it gets a stable id and can run alongside the release.
+    // Both are whitelisted so saved sessions (the agent-backed shared pool) and the
+    // Zoom recording bridge work from either build.
     public const string ExtensionId = "jmedgkieldhfccjpjeafmgenaidchbmg";
+    public const string DevExtensionId = "lgacebajcimhkmcgihcjcdnndkbdggak";
 
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
@@ -134,7 +140,11 @@ public static class StartupRegistrar
                 description = "TableTurnerr CRM Agent native messaging host",
                 path = exePath,
                 type = "stdio",
-                allowed_origins = new[] { $"chrome-extension://{ExtensionId}/" },
+                allowed_origins = new[]
+                {
+                    $"chrome-extension://{ExtensionId}/",
+                    $"chrome-extension://{DevExtensionId}/",
+                },
             };
             var manifestJson = JsonSerializer.Serialize(
                 manifest, new JsonSerializerOptions { WriteIndented = true });

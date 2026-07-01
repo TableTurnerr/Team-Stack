@@ -96,6 +96,20 @@ public class RecordingUploadService : IDisposable
         Wake(); // process any pending uploads immediately
     }
 
+    /// <summary>
+    /// Update just the rep identity (repKey) without touching the worker URL or
+    /// token. Used when the Chrome extension pushes the rep's resolved GoHighLevel
+    /// user id, so call attribution needs no manual setup on the machine.
+    /// </summary>
+    public void SetRepUserId(string repUserId)
+    {
+        lock (_lock)
+        {
+            _repUserId = repUserId;
+        }
+        Debug.WriteLine($"[Upload] Rep identity set to {repUserId}");
+    }
+
     public void Start()
     {
         _cts = new CancellationTokenSource();

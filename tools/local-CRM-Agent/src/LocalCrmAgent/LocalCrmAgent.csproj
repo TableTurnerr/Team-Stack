@@ -24,7 +24,19 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- Build-time provisioning. The release CI passes the shared agent token via
+         /p:AgentDefaultToken=<secret> so it ships embedded and reps enter nothing.
+         Empty by default: the source tree carries no secret and dev builds stay
+         blank (the setup dialog then prompts, or CRM_AGENT_TOKEN overrides). -->
+    <AgentDefaultToken></AgentDefaultToken>
+    <AgentDefaultWorkerUrl></AgentDefaultWorkerUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="AgentDefaultToken" Value="$(AgentDefaultToken)" />
+    <AssemblyMetadata Include="AgentDefaultWorkerUrl" Value="$(AgentDefaultWorkerUrl)" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Update="zoom-api.json">

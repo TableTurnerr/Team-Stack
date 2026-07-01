@@ -1,0 +1,5 @@
+# Local build outputs (build-release.bat) and stale dev-build staging.
+dist/
+dist-dev/
+.dev-build-counter
+*.zip

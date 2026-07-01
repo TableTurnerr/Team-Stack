@@ -1,85 +1,53 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal
 cd /d "%~dp0"
 
 :: =============================================
-::  Lead Scraper Extension - Dev build + install
+::  Lead Scraper Extension - Dev load helper
 ::
-::  The extension SOURCE lives in this monorepo at
-::  tools\chrome-extension\extension. Override with
-::  GMAPS_SCRAPER_DIR only if you keep a checkout
-::  elsewhere.
+::  There is nothing to build. The committed source
+::  at tools\chrome-extension\extension is ALREADY the
+::  dev build: its name shows " (dev)" and it has no
+::  signing "key", so Chrome assigns it its own
+::  extension id and it coexists with the Tool
+::  Manager's release install. Just load the folder
+::  unpacked and edit in place.
+::
+::  The GitHub release workflow (build-chrome-extension.yml)
+::  and build-release.bat strip the " (dev)" marker and
+::  inject the signing key via apply-release-manifest.ps1,
+::  so the published release is clean and keyed.
 :: =============================================
 
-set "SRC=%GMAPS_SCRAPER_DIR%"
-if "%SRC%"=="" set "SRC=%~dp0extension"
-
-:: Normalize to a full path
+set "SRC=%~dp0extension"
 for %%I in ("%SRC%") do set "SRC=%%~fI"
 
 if not exist "%SRC%\manifest.json" (
-    echo [ERROR] Could not find the extension at:
-    echo         %SRC%
-    echo.
-    echo The extension source should be at tools\chrome-extension\extension.
-    echo Override with GMAPS_SCRAPER_DIR if it lives elsewhere, e.g.:
-    echo     set GMAPS_SCRAPER_DIR=C:\path\to\extension
-    echo     dev-build.bat
+    echo [ERROR] Extension not found at %SRC%.
     pause
     exit /b 1
 )
 
-echo Extension source: %SRC%
-
-:: Version from the extension's manifest.json
-for /f "delims=" %%v in ('powershell -NoProfile -Command "(Get-Content '%SRC%\manifest.json' -Raw | ConvertFrom-Json).version"') do set VERSION=%%v
-if "%VERSION%"=="" set VERSION=0.0.0
-
-:: Dev version: date + daily counter (e.g. 4.2-dev.20260619.3)
-for /f %%d in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set TODAY=%%d
-set COUNTER_FILE=%~dp0.dev-build-counter
-set BUILD_NUM=1
-if exist "%COUNTER_FILE%" (
-    for /f "tokens=1,2 delims=:" %%a in (%COUNTER_FILE%) do (
-        if "%%a"=="%TODAY%" set /a BUILD_NUM=%%b+1
-    )
-)
-echo %TODAY%:%BUILD_NUM%> "%COUNTER_FILE%"
-set DEV_VERSION=%VERSION%-dev.%TODAY%.%BUILD_NUM%
+:: Informational sanity check that the source really is the dev build (dev-marked
+:: name + the DEV key, not the release key -- sharing the release key would collide
+:: with the installed release id and Chrome would refuse to load both).
+powershell -NoProfile -Command "$m = Get-Content '%SRC%\manifest.json' -Raw | ConvertFrom-Json; if ($m.name -notmatch '\(dev\)') { Write-Host '[WARN] Source manifest name is not (dev)-marked:' $m.name }; $rk = (Get-Content '%~dp0release.key' -Raw).Trim(); if (-not $m.key) { Write-Host '[WARN] Source manifest has no key - the dev id will vary per machine and native messaging will not work.' } elseif ($m.key -eq $rk) { Write-Host '[WARN] Source manifest carries the RELEASE key - it will collide with the installed release; restore the dev key.' }"
 
 echo ============================================
-echo   Lead Scraper Extension v%DEV_VERSION% - Dev install
+echo   Lead Scraper Extension - load the DEV build
 echo ============================================
 echo.
-
-:: Install into the Tool Manager's managed tools folder (id = lead-scraper)
-set "INSTALL_DIR=%LocalAppData%\TableTurnerr\ToolManager\tools\lead-scraper"
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-
-echo Staging extension to %INSTALL_DIR% ...
-robocopy "%SRC%" "%INSTALL_DIR%" /MIR /XD ".git" ".github" "node_modules" "dist" "dist-dev" /XF ".gitignore" ".dev-build-counter" /NFL /NDL /NJH /NJS /NP >nul
-if %ERRORLEVEL% GEQ 8 (
-    echo [ERROR] Failed to copy extension files.
-    pause
-    exit /b 1
-)
-
-:: Drop the tool manifest in next to the extension files
-copy /Y "%~dp0tool.json" "%INSTALL_DIR%\tool.json" >nul
-
+echo   1. Open  chrome://extensions
+echo   2. Enable  Developer mode  (top-right)
+echo   3. Click  Load unpacked  and select this folder:
 echo.
-echo ============================================
-echo   Staged dev build to:
-echo   %INSTALL_DIR%
-echo ============================================
+echo        %SRC%
 echo.
-echo   Load it in Chrome:  chrome://extensions  ^>  Developer mode
-echo   ^>  Load unpacked  ^>  select the folder above.
-echo   (If already loaded, click the reload icon on the card.)
+echo   It loads as "TableTurner Lead Scraper (dev)" with its own extension id,
+echo   so it runs side by side with the Tool Manager's release install. Edit
+echo   files and click the card's reload icon to pick up changes.
 echo.
-echo   Note: this stages files for local testing only and does NOT touch the
-echo   Tool Manager registry. To have the Tool Manager track and auto-update
-echo   the extension, install it from the Tool Manager once a lead-scraper
-echo   release exists (see build-chrome-extension.yml).
+echo   Note: native messaging (Zoom web-phone recording) only trusts the
+echo   release id, so that one feature does not fire on the dev build.
 echo.
 pause

@@ -77,6 +77,62 @@ public class ZoomPhoneApiService : IDisposable
         Debug.WriteLine($"[ZoomAPI] Credentials set for user: {zoomUserId}");
     }
 
+    /// <summary>
+    /// Self-provision the shared Zoom S2S creds from the bridge worker
+    /// (GET {workerBaseUrl}/agent/bootstrap, Bearer agent token). The worker is
+    /// the single source of truth for the Zoom secret, so the agent never needs
+    /// it shipped in the installer or entered by the user — only the agent token.
+    /// No-op if already configured. Best-effort: returns false on any failure so
+    /// the caller can retry on the next launch.
+    /// </summary>
+    public async Task<bool> TryBootstrapFromWorkerAsync(string workerBaseUrl, string agentToken)
+    {
+        if (IsConfigured) return true;
+        if (string.IsNullOrWhiteSpace(workerBaseUrl) || string.IsNullOrWhiteSpace(agentToken))
+            return false;
+
+        var url = $"{workerBaseUrl.TrimEnd('/')}/agent/bootstrap";
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", agentToken);
+            using var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                FileLogger.Write($"[ZoomAPI] Bootstrap from worker failed: HTTP {(int)resp.StatusCode} — Zoom number resolution disabled");
+                return false;
+            }
+
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("zoom", out var z))
+            {
+                FileLogger.Write("[ZoomAPI] Bootstrap response missing 'zoom' object");
+                return false;
+            }
+
+            var accountId = z.TryGetProperty("accountId", out var a) ? a.GetString() : null;
+            var clientId = z.TryGetProperty("clientId", out var c) ? c.GetString() : null;
+            var clientSecret = z.TryGetProperty("clientSecret", out var s) ? s.GetString() : null;
+            var zoomUserId = z.TryGetProperty("zoomUserId", out var u) ? u.GetString() : null;
+            if (string.IsNullOrEmpty(accountId) || string.IsNullOrEmpty(clientId)
+                || string.IsNullOrEmpty(clientSecret) || string.IsNullOrEmpty(zoomUserId))
+            {
+                FileLogger.Write("[ZoomAPI] Bootstrap response had incomplete Zoom creds");
+                return false;
+            }
+
+            SetCredentials(accountId, clientId, clientSecret, zoomUserId);
+            FileLogger.Write("[ZoomAPI] Provisioned Zoom S2S creds from worker — call number resolution enabled");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Write($"[ZoomAPI] Bootstrap from worker error: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
     private void LoadConfig()
     {
         try

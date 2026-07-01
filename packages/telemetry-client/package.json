@@ -1,0 +1,18 @@
+{
+  "name": "@crm-tableturnerr/telemetry-client",
+  "version": "0.1.0",
+  "description": "Dependency-free telemetry client for pushing structured logs and heartbeats to the CRM-Tableturnerr ingest API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/**/*.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0"
+  }
+}

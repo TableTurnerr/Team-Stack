@@ -10,7 +10,7 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>LocalCrmAgent</RootNamespace>
     <AssemblyName>LocalCrmAgent</AssemblyName>
-    <Version>4.0.4</Version>
+    <Version>4.0.5</Version>
     <Company>TableTurnerr</Company>
     <Product>Local CRM Agent</Product>
     <Description>Local desktop agent that monitors Zoom Phone call state via WASAPI and serves reliable signals to the CRM dashboard over WebSocket.</Description>

@@ -404,6 +404,95 @@ function showTurboWarning(onConfirm, onCancel) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+    if (new URLSearchParams(window.location.search).get('tab') === '1') {
+        document.body.classList.add('tab-mode');
+    }
+
+    function isDevBuild() {
+        try {
+            var mf = chrome.runtime.getManifest();
+            return Boolean(mf && /\(dev\)/i.test(String(mf.name || '')));
+        } catch (e) {
+            return false;
+        }
+    }
+
+    var openPopupTabBtn = document.getElementById('openPopupTabBtn');
+    if (openPopupTabBtn) {
+        openPopupTabBtn.addEventListener('click', function () {
+            chrome.runtime.sendMessage({ type: 'OPEN_POPUP_TAB' });
+        });
+    }
+
+    function downloadText(filename, text) {
+        var blob = new Blob([text], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    }
+
+    function renderDebugPreview() {
+        var preview = document.getElementById('debugLogPreview');
+        if (!preview) return;
+        chrome.storage.local.get(['gmes_debug_logs'], function (d) {
+            var logs = Array.isArray(d.gmes_debug_logs) ? d.gmes_debug_logs : [];
+            if (!logs.length) {
+                preview.style.display = 'none';
+                preview.textContent = '';
+                return;
+            }
+            preview.style.display = 'block';
+            preview.textContent = logs.slice(-30).map(function (l) {
+                var time = l.ts ? new Date(l.ts).toLocaleTimeString() : '';
+                return time + ' ' + l.event + ' ' + JSON.stringify(l.details || {});
+            }).join('\n');
+        });
+    }
+
+    var devBuild = isDevBuild();
+    var debugSettingsRow = document.getElementById('debugSettingsRow');
+    if (!devBuild) {
+        if (debugSettingsRow) debugSettingsRow.remove();
+        chrome.storage.local.set({ gmes_debug_enabled: false, gmes_debug_logs: [] });
+    }
+
+    var debugModeToggle = document.getElementById('debugModeToggle');
+    if (devBuild && debugModeToggle) {
+        chrome.storage.local.get(['gmes_debug_enabled'], function (d) {
+            updatePillToggle(debugModeToggle, d.gmes_debug_enabled === true);
+        });
+        debugModeToggle.addEventListener('click', function () {
+            var on = !debugModeToggle.classList.contains('on');
+            updatePillToggle(debugModeToggle, on);
+            chrome.storage.local.set({ gmes_debug_enabled: on }, renderDebugPreview);
+        });
+    }
+    var debugViewBtn = document.getElementById('debugViewBtn');
+    if (devBuild && debugViewBtn) {
+        debugViewBtn.addEventListener('click', function () {
+            chrome.tabs.create({ url: chrome.runtime.getURL('debug_logs.html') });
+        });
+    }
+    var debugExportBtn = document.getElementById('debugExportBtn');
+    if (devBuild && debugExportBtn) {
+        debugExportBtn.addEventListener('click', function () {
+            chrome.storage.local.get(['gmes_debug_logs'], function (d) {
+                downloadText('tableturner-extension-debug-logs.json', JSON.stringify(d.gmes_debug_logs || [], null, 2));
+            });
+        });
+    }
+    var debugClearBtn = document.getElementById('debugClearBtn');
+    if (devBuild && debugClearBtn) {
+        debugClearBtn.addEventListener('click', function () {
+            chrome.storage.local.set({ gmes_debug_logs: [] }, renderDebugPreview);
+        });
+    }
+    if (devBuild) renderDebugPreview();
+
     // Show extension version in header (read from manifest so it always stays in sync)
     try {
         var verEl = document.getElementById('appVersionBadge');
@@ -1851,6 +1940,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var pausedControls = document.getElementById('pausedControls');
         var resumeButton = document.getElementById('resumeButton');
         var stopSaveButton = document.getElementById('stopSaveButton');
+        var resetPausedButton = document.getElementById('resetPausedButton');
         var savedSessionsPanel = document.getElementById('savedSessionsPanel');
         var savedSessionsList = document.getElementById('savedSessionsList');
         var stopSessionModal = document.getElementById('stopSessionModal');
@@ -2270,6 +2360,23 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         }
 
+        if (resetPausedButton) {
+            resetPausedButton.addEventListener('click', function () {
+                var confirmed = confirm('Reset this paused scraping session? This clears the saved resume progress. Leads already collected will stay in the list.');
+                if (!confirmed) return;
+                chrome.runtime.sendMessage({ type: 'STOP_AUTO_SCRAPE' }, function () {
+                    void chrome.runtime.lastError;
+                    scraping = false;
+                    resumeInfo = null;
+                    userEditedForm = true;
+                    applyActionButtonLabel();
+                    refreshScrapeStatus();
+                    setScrapeStatus('Paused progress reset. Existing leads were kept.', false);
+                    try { chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: 'scrape.reset_paused', details: {} }); } catch (e) {}
+                });
+            });
+        }
+
         function closeStopModal() { if (stopSessionModal) stopSessionModal.style.display = 'none'; }
 
         // Gather this session's lead/block stats for the stop dialog.
@@ -2404,6 +2511,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // then persist to GHL and stamp the returned record id back into the cache.
         // cb receives { ok, error?, noLocation? }.
         function saveOneSession(rec, cb) {
+            try { chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: 'session.save.start', details: { id: rec && rec.id, name: rec && rec.name, leadCount: rec && rec.leadCount } }); } catch (e) {}
             readSessionCache(function (cache) {
                 var idx = -1;
                 for (var i = 0; i < cache.length; i++) { if (cache[i] && cache[i].id === rec.id) { idx = i; break; } }
@@ -2413,6 +2521,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         if (!locId) { if (cb) cb({ ok: false, noLocation: true }); return; }
                         if (!window.GHL || !GHL.saveScrapingSession) { if (cb) cb({ ok: false }); return; }
                         GHL.saveScrapingSession(locId, rec, function (res) {
+                            try { chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: res && res.ok ? 'session.save.success' : 'session.save.failed', details: { id: rec && rec.id, recordId: res && res.session && res.session.recordId, error: res && res.error } }); } catch (e) {}
                             if (res.ok && res.session && res.session.recordId) {
                                 readSessionCache(function (c2) {
                                     for (var j = 0; j < c2.length; j++) { if (c2[j] && c2[j].id === rec.id) { c2[j].recordId = res.session.recordId; break; } }
@@ -2427,6 +2536,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Delete one session from GHL (by record id) then from the local cache.
         function removeOneSession(sess, cb) {
+            try { chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: 'session.delete.start', details: { id: sess && sess.id, recordId: sess && sess.recordId } }); } catch (e) {}
             function dropCache() {
                 readSessionCache(function (cache) {
                     var rest = cache.filter(function (s) { return !(s && s.id === sess.id); });
@@ -2435,7 +2545,10 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             sessionLocationId(function (locId) {
                 if (sess.recordId && locId && window.GHL && GHL.deleteScrapingSession) {
-                    GHL.deleteScrapingSession(locId, sess.recordId, function () { dropCache(); });
+                    GHL.deleteScrapingSession(locId, sess.recordId, function (res) {
+                        try { chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: res && res.ok ? 'session.delete.success' : 'session.delete.failed', details: { id: sess && sess.id, recordId: sess && sess.recordId, error: res && res.error } }); } catch (e) {}
+                        dropCache();
+                    });
                 } else { dropCache(); }
             });
         }

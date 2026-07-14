@@ -85,6 +85,11 @@
       margin: 0;
       transition: background 0.2s, color 0.2s;
     }
+    body.tab-mode {
+      min-width: 0;
+      max-width: 960px;
+      margin: 0 auto;
+    }
 
     /* ── App Header ─────────────────────────────────── */
     .app-header {
@@ -1037,6 +1042,9 @@
           <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           <svg id="themeIconMoon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
+        <button class="icon-btn" id="openPopupTabBtn" title="Open popup in a full tab">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6"/><path d="M9 15l6-6"/></svg>
+        </button>
         <!-- Settings (gear) / Back arrow when open -->
         <button class="icon-btn" id="settingsToggleBtn" title="Settings">
           <svg id="settingsIconGear" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1333,6 +1341,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           Stop &amp; Save
         </button>
+        <button id="resetPausedButton" class="button red-btn" title="Reset paused progress after confirmation">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          Reset
+        </button>
       </div>
       <div id="scrapeRunControls" class="run-controls" style="display:none;">
         <button id="pauseButton" class="button black-btn" title="Pause — keep progress so you can resume from where it stopped">
@@ -1554,6 +1566,26 @@
             <div class="pill-knob"></div>
             <span class="pill-text">OFF</span>
           </button>
+        </div>
+
+        <div class="settings-row" id="debugSettingsRow" style="flex-direction: column; align-items: stretch; gap: 8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div class="settings-row-label" style="flex:1;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8"/></svg>
+              Debug Mode
+              <span class="settings-row-desc">Log scrape behavior, accept/reject reasons, and sync events</span>
+            </div>
+            <button id="debugModeToggle" class="pill-toggle">
+              <div class="pill-knob"></div>
+              <span class="pill-text">OFF</span>
+            </button>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="button" id="debugViewBtn" style="font-size:12px; padding:7px 12px;">View Logs</button>
+            <button class="button black-btn" id="debugExportBtn" style="font-size:12px; padding:7px 12px;">Export Logs</button>
+            <button class="button red-btn" id="debugClearBtn" style="font-size:12px; padding:7px 12px;">Clear Logs</button>
+          </div>
+          <pre id="debugLogPreview" style="display:none; max-height:180px; overflow:auto; margin:0; padding:9px; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); color:var(--text-2); font-size:11px; white-space:pre-wrap;"></pre>
         </div>
 
         <!-- Exceptions -->

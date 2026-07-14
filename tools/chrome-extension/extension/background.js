@@ -77,6 +77,50 @@ function updateToolbarBadge() {
 // Initial sync on service-worker startup
 refreshExtensionEnabled(updateToolbarBadge);
 
+// ============================================================================
+// Debug Mode
+// ============================================================================
+
+var DEBUG_LOG_KEY = 'gmes_debug_logs';
+var DEBUG_LOG_MAX = 500;
+
+function isDevBuild() {
+    try {
+        var mf = chrome.runtime.getManifest();
+        return Boolean(mf && /\(dev\)/i.test(String(mf.name || '')));
+    } catch (e) {
+        return false;
+    }
+}
+
+function debugLog(event, details) {
+    try {
+        if (!isDevBuild()) return;
+        chrome.storage.local.get(['gmes_debug_enabled', DEBUG_LOG_KEY, 'gmes_active_session_id'], function (data) {
+            if (data.gmes_debug_enabled !== true) return;
+            var logs = Array.isArray(data[DEBUG_LOG_KEY]) ? data[DEBUG_LOG_KEY] : [];
+            var cleanDetails = Object.assign({}, details || {});
+            var eventName = String(event || 'event');
+            var activeSessionId = data.gmes_active_session_id || '';
+            if (!cleanDetails.sessionId && /^session\./.test(eventName) && cleanDetails.id) {
+                cleanDetails.sessionId = cleanDetails.id;
+            }
+            if (!cleanDetails.sessionId && !cleanDetails.session_id && activeSessionId) {
+                cleanDetails.sessionId = activeSessionId;
+            }
+            logs.push({
+                ts: Date.now(),
+                event: eventName,
+                details: cleanDetails
+            });
+            if (logs.length > DEBUG_LOG_MAX) logs = logs.slice(logs.length - DEBUG_LOG_MAX);
+            var set = {};
+            set[DEBUG_LOG_KEY] = logs;
+            chrome.storage.local.set(set);
+        });
+    } catch (e) { /* debug logging must never affect scraping */ }
+}
+
 // Reset to OFF on every browser launch. onStartup fires once per profile launch
 // (when Chrome opens) and NOT on service-worker wake, so closing Chrome reliably
 // turns the extension back off without disrupting an active session.
@@ -417,45 +461,7 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
                     if (!results || !results[0] || !results[0].result) return;
                     var newItems = results[0].result;
 
-                    // Respect ignore lists and merge into storage
-                    chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled'], function (data) {
-                        var existing = Array.isArray(data.gmes_results) ? data.gmes_results : [];
-                        var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
-                        var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
-                        var ignoreNamesSet = new Set(ignoreNamesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
-                        var ignoreIndustriesSet = new Set(ignoreIndustriesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
-                        // Food filter is enabled by default
-                        var foodFilterEnabled = data.gmes_food_filter_enabled !== false;
-
-                        var seen = new Set(existing.map(function (it) { return it.href || (it.title + '|' + it.address); }));
-                        var added = false;
-
-                        newItems.forEach(function (item) {
-                            if (!item) return;
-                            var key = item.href || (item.title + '|' + item.address);
-                            if (!key) return;
-                            if (seen.has(key)) return;
-
-                            // Apply food industry filter
-                            if (foodFilterEnabled && !isFoodRelatedIndustry(item.industry)) {
-                                return;
-                            }
-
-                            try {
-                                if (chainNameMatchesIgnoreList(item && item.title, ignoreNamesSet)) return;
-                                if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) return;
-                            } catch (e) {
-                                // fallback to adding
-                            }
-                            seen.add(key);
-                            existing.push(item);
-                            added = true;
-                        });
-
-                        if (added) {
-                            chrome.storage.local.set({ gmes_results: existing });
-                        }
-                    });
+                    mergeScrapedItems(newItems, 'alarm');
                 });
             });
         });
@@ -968,22 +974,56 @@ function resolveScrapeTab(cb) {
 
 // Tell the injected controller in every open Maps tab to stop, and remove its
 // on-page popdown. Shared by Pause and Stop. cb() once all tabs were signalled.
-function stopMapsContentScripts(cb) {
+function stopMapsContentScripts(cb, opts) {
+    opts = opts || {};
+    var gracefulPause = opts.gracefulPause === true;
     chrome.tabs.query({ url: ['*://www.google.com/maps/*'] }, function (tabs) {
         (tabs || []).forEach(function (tab) {
             chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                func: function () {
+                func: function (pauseOnly) {
                     try {
-                        if (window.__GMES_AUTO_SCRAPER__) window.__GMES_AUTO_SCRAPER__.stop = true;
-                        var el = document.getElementById('gmes-popdown');
-                        if (el && el.parentNode) el.parentNode.removeChild(el);
+                        if (window.__GMES_AUTO_SCRAPER__) {
+                            if (pauseOnly) window.__GMES_AUTO_SCRAPER__.pauseAfterCurrent = true;
+                            else window.__GMES_AUTO_SCRAPER__.stop = true;
+                        }
+                        if (!pauseOnly) {
+                            var el = document.getElementById('gmes-popdown');
+                            if (el && el.parentNode) el.parentNode.removeChild(el);
+                        }
                     } catch (e) {}
-                }
+                },
+                args: [gracefulPause]
             }, function () { void chrome.runtime.lastError; });
         });
         if (cb) cb();
     });
+}
+
+function pauseBackgroundQueues() {
+    WEB_ENRICH.paused = true;
+    DELIVERY_DETECT.paused = true;
+    debugLog('queues.pause_requested', {
+        websiteQueued: WEB_ENRICH.queue.length,
+        websiteActive: WEB_ENRICH.inFlight,
+        deliveryQueued: DELIVERY_DETECT.queue.length,
+        deliveryActive: DELIVERY_DETECT.inFlight
+    });
+}
+
+function resumeBackgroundQueues() {
+    WEB_ENRICH.paused = false;
+    DELIVERY_DETECT.paused = false;
+    pumpEnrich();
+    pumpDelivery();
+}
+
+function stopBackgroundQueues() {
+    WEB_ENRICH.paused = false;
+    DELIVERY_DETECT.paused = false;
+    WEB_ENRICH.queue = [];
+    DELIVERY_DETECT.queue = [];
+    updateEnrichStatus();
 }
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
@@ -991,6 +1031,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
     if (msg.type === 'START_AUTO_SCRAPE') {
         if (!EXTENSION_ENABLED) { sendResponse({ started: false, error: 'Extension is off.' }); return; }
+        resumeBackgroundQueues();
         var categories = parseCategoriesMsg(msg);
         var category = categories[0] || '';
         var location = (msg.location || '').trim();
@@ -1003,6 +1044,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
             speed: speedFactor(msg.speed)
         };
         if (!categories.length || !location) { sendResponse({ started: false, error: 'Category and location are required.' }); return; }
+        debugLog('scrape.start.requested', { categories: categories, location: location, radiusMiles: radiusMiles, turbo: turbo, filters: filters });
 
         // Restaurant Mode config (shared contract with popup.js). Persist the five
         // platform keys so mergeScrapedItems and the delivery detector — which read
@@ -1058,7 +1100,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
     if (msg.type === 'RESUME_AUTO_SCRAPE') {
         if (!EXTENSION_ENABLED) { sendResponse({ resumed: false, error: 'Extension is off.' }); return; }
-        resumeGridScan(function (ok) { sendResponse({ resumed: Boolean(ok) }); });
+        debugLog('scrape.resume.requested', {});
+        resumeBackgroundQueues();
+        resumeGridScan(function (ok) {
+            debugLog(ok ? 'scrape.resume.started' : 'scrape.resume.failed', {});
+            sendResponse({ resumed: Boolean(ok) });
+        });
         return true;
     }
 
@@ -1069,14 +1116,18 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (msg.type === 'PAUSE_AUTO_SCRAPE') {
         gridScan = null;
         clearGridWatchdog();
+        pauseBackgroundQueues();
+        debugLog('scrape.pause_requested', {});
         chrome.storage.local.set({ gmes_background_scraping: false, gmes_scrape_heartbeat: 0, gmes_grid_autoresume: false });
-        stopMapsContentScripts(function () { sendResponse({ paused: true }); });
+        stopMapsContentScripts(function () { sendResponse({ paused: true, graceful: true }); }, { gracefulPause: true });
         return true;
     }
 
     if (msg.type === 'STOP_AUTO_SCRAPE') {
         gridScan = null;
         clearGridWatchdog();
+        stopBackgroundQueues();
+        debugLog('scrape.stopped', {});
         chrome.storage.local.remove([GRID_STATE_KEY, 'gmes_cat_queue', 'gmes_cat_shared']);
         chrome.storage.local.set({ gmes_background_scraping: false, gmes_scrape_heartbeat: 0, gmes_grid_total: 0, gmes_grid_current: 0, gmes_grid_autoresume: false, gmes_active_session_id: '', gmes_active_session_started: 0, gmes_cat_total: 0, gmes_cat_index: 0 });
         stopMapsContentScripts(function () { sendResponse({ stopped: true }); });
@@ -1141,6 +1192,94 @@ function hasPhone(item) {
     return phoneDigits(item) !== '';
 }
 
+var US_STATE_CODES_FOR_VALIDATION = {
+    AL: true, AK: true, AZ: true, AR: true, CA: true, CO: true, CT: true, DE: true, FL: true, GA: true,
+    HI: true, ID: true, IL: true, IN: true, IA: true, KS: true, KY: true, LA: true, ME: true, MD: true,
+    MA: true, MI: true, MN: true, MS: true, MO: true, MT: true, NE: true, NV: true, NH: true, NJ: true,
+    NM: true, NY: true, NC: true, ND: true, OH: true, OK: true, OR: true, PA: true, RI: true, SC: true,
+    SD: true, TN: true, TX: true, UT: true, VT: true, VA: true, WA: true, WV: true, WI: true, WY: true,
+    DC: true
+};
+
+var US_STATE_NAMES_FOR_VALIDATION = {
+    alabama: true, alaska: true, arizona: true, arkansas: true, california: true, colorado: true,
+    connecticut: true, delaware: true, florida: true, georgia: true, hawaii: true, idaho: true,
+    illinois: true, indiana: true, iowa: true, kansas: true, kentucky: true, louisiana: true,
+    maine: true, maryland: true, massachusetts: true, michigan: true, minnesota: true, mississippi: true,
+    missouri: true, montana: true, nebraska: true, nevada: true, 'new hampshire': true,
+    'new jersey': true, 'new mexico': true, 'new york': true, 'north carolina': true,
+    'north dakota': true, ohio: true, oklahoma: true, oregon: true, pennsylvania: true,
+    'rhode island': true, 'south carolina': true, 'south dakota': true, tennessee: true, texas: true,
+    utah: true, vermont: true, virginia: true, washington: true, 'west virginia': true,
+    wisconsin: true, wyoming: true, 'district of columbia': true
+};
+
+function itemPhoneDigitsForValidation(item) {
+    var raw = [];
+    if (item && item.phone) raw.push(item.phone);
+    if (item && Array.isArray(item.phones)) {
+        item.phones.forEach(function (p) { if (p) raw.push(p.number || p); });
+    }
+    for (var i = 0; i < raw.length; i++) {
+        var s = String(raw[i] || '').trim();
+        var d = s.replace(/\D/g, '');
+        if (/^\s*\+1\b/.test(s) || (d.length === 11 && d.charAt(0) === '1')) return 'explicit-us';
+        if (d.length === 10) continue;
+        if (d.length > 0) return 'non-us';
+    }
+    return '';
+}
+
+function coordsInUnitedStates(lat, lng) {
+    var la = parseFloat(lat), lo = parseFloat(lng);
+    if (!isFinite(la) || !isFinite(lo)) return false;
+    var mainland = la >= 24 && la <= 50 && lo >= -125 && lo <= -66;
+    var alaska = la >= 51 && la <= 72 && lo >= -170 && lo <= -129;
+    var hawaii = la >= 18 && la <= 23 && lo >= -161 && lo <= -154;
+    return mainland || alaska || hawaii;
+}
+
+function validateUnitedStatesLead(item) {
+    var reasons = [];
+    var explicitRejects = [];
+    var text = [
+        item && item.address,
+        item && item.city,
+        item && item.state,
+        item && item.zip,
+        item && item.country
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    if (/\b(canada|mexico|united kingdom|uk|australia|india|pakistan|uae|dubai|qatar|saudi|germany|france|spain|italy)\b/.test(text)) {
+        explicitRejects.push('address/country is outside the United States');
+    }
+
+    var phone = itemPhoneDigitsForValidation(item);
+    if (phone === 'non-us') explicitRejects.push('phone number is not a US +1/10-digit number');
+    else if (phone === 'explicit-us') reasons.push('explicit +1 phone');
+
+    var state = String((item && item.state) || '').trim();
+    if (state) {
+        if (US_STATE_CODES_FOR_VALIDATION[state.toUpperCase()] || US_STATE_NAMES_FOR_VALIDATION[state.toLowerCase()]) {
+            reasons.push('US state ' + state.toUpperCase());
+        } else {
+            explicitRejects.push('state is not a US state');
+        }
+    }
+
+    var zip = String((item && (item.zip || item.postalCode)) || '').trim();
+    if (zip && /^\d{5}(?:-\d{4})?$/.test(zip)) reasons.push('US ZIP ' + zip);
+    if (/\b(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY|DC)\s+\d{5}(?:-\d{4})?\b/i.test(text)) {
+        reasons.push('US state/ZIP in address');
+    }
+    if (/\b(united states|usa|u\.s\.a\.|u\.s\.)\b/i.test(text)) reasons.push('United States in address');
+    if (coordsInUnitedStates(item && item.lat, item && item.lng)) reasons.push('coordinates inside United States');
+
+    if (explicitRejects.length) return { ok: false, reason: explicitRejects.join('; '), evidence: reasons };
+    if (reasons.length) return { ok: true, reason: reasons.join(', '), evidence: reasons };
+    return { ok: false, reason: 'missing confident United States evidence', evidence: [] };
+}
+
 // Derive a stable identity for a scraped place used for de-duplication. The phone
 // number is the strongest signal (a business has a unique number, while two
 // different places can share a name/address), so it's preferred. When no phone is
@@ -1164,6 +1303,32 @@ function placeIdentity(item) {
     if (pathMatch) { try { return 'path:' + decodeURIComponent(pathMatch[1]).toLowerCase(); } catch (e) { return 'path:' + pathMatch[1].toLowerCase(); } }
     if (title) return 'title:' + title;
     return href;
+}
+
+function cardIdentityFromLead(item) {
+    if (!item) return '';
+    var href = String(item.href || '');
+    var m = href.match(/!1s(0x[0-9a-fA-F]+:0x[0-9a-fA-F]+)/);
+    if (m) return 'cid:' + m[1].toLowerCase();
+    m = href.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    if (m) return 'geo:' + m[1] + ',' + m[2];
+    var pathMatch = href.match(/\/maps\/place\/([^/@?]+)/);
+    if (pathMatch) { try { return 'path:' + decodeURIComponent(pathMatch[1]).toLowerCase(); } catch (e) { return 'path:' + pathMatch[1].toLowerCase(); } }
+    var title = (item.title || '').toLowerCase().trim();
+    if (title) return 'title:' + title;
+    return '';
+}
+
+function rememberRejectedScrapeCard(item) {
+    var keys = [placeIdentity(item), cardIdentityFromLead(item)].filter(Boolean);
+    if (!keys.length) return;
+    chrome.storage.local.get(['gmes_rejected_scrape_cards'], function (d) {
+        var list = Array.isArray(d.gmes_rejected_scrape_cards) ? d.gmes_rejected_scrape_cards : [];
+        var seen = {};
+        list.concat(keys).forEach(function (k) { if (k) seen[k] = true; });
+        var next = Object.keys(seen).slice(-1000);
+        chrome.storage.local.set({ gmes_rejected_scrape_cards: next });
+    });
 }
 
 // Fill empty fields on `target` from a duplicate `src` (e.g. recover a phone that
@@ -1213,6 +1378,23 @@ function dedupeStoredResults() {
     });
 }
 
+function enforceStoredResultsUnitedStates() {
+    chrome.storage.local.get(['gmes_results'], function (data) {
+        var list = Array.isArray(data.gmes_results) ? data.gmes_results : [];
+        if (!list.length) return;
+        var kept = [];
+        list.forEach(function (item) {
+            var us = validateUnitedStatesLead(item);
+            if (us.ok) {
+                if (item && item.companyUrl && !isRealWebsite(item.companyUrl)) item.companyUrl = '';
+                kept.push(item);
+            }
+            else debugLog('lead.removed_from_cache', { title: item && item.title, reason: us.reason });
+        });
+        if (kept.length !== list.length) chrome.storage.local.set({ gmes_results: kept });
+    });
+}
+
 // Merge freshly scraped items into storage, applying the ignore lists and the
 // (source-aware) food filter. cb(addedCount) when done. The whole read-modify-write
 // runs under withResultsLock so it can't race the async website-enrichment writes.
@@ -1222,7 +1404,11 @@ function mergeScrapedItems(newItems, source, cb) {
         chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled', 'gmes_active_session_id', 'gmes_restaurant_mode', 'gmes_platform_any', 'gmes_platform_include', 'gmes_platform_exclude', 'gmes_platform_unmatched'], function (data) {
             var existingRaw = Array.isArray(data.gmes_results) ? data.gmes_results : [];
             // Collapse any duplicates left by older runs before merging in new items.
-            var existing = dedupeItemList(existingRaw);
+            var existing = dedupeItemList(existingRaw).filter(function (item) {
+                var us = validateUnitedStatesLead(item);
+                if (!us.ok) debugLog('lead.removed_from_cache', { title: item && item.title, reason: us.reason });
+                return us.ok;
+            });
             var changed = existing.length !== existingRaw.length;
             var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
             var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
@@ -1251,12 +1437,17 @@ function mergeScrapedItems(newItems, source, cb) {
             } : null;
 
             newItems.forEach(function (item) {
+                if (item && item.companyUrl && !isRealWebsite(item.companyUrl)) item.companyUrl = '';
                 var key = placeIdentity(item);
-                if (!key) return;
+                if (!key) {
+                    debugLog('lead.rejected', { source: source || 'unknown', title: item && item.title, reason: 'missing lead identity' });
+                    return;
+                }
                 if (byKey.has(key)) {
                     // Same place seen again (overlapping cell) — enrich the stored copy
                     // with any fields this capture filled, but don't add a new row.
                     if (fillMissingFields(byKey.get(key), item)) changed = true;
+                    debugLog('lead.duplicate', { source: source || 'unknown', title: item && item.title, identity: key });
                     return;
                 }
 
@@ -1264,18 +1455,35 @@ function mergeScrapedItems(newItems, source, cb) {
                 // injected scraper already gates on this, but enforce it here too so a
                 // phone-less item can never reach storage from any auto-scrape path.
                 if (source === 'auto' && !hasPhone(item)) {
+                    debugLog('lead.rejected', { source: source, title: item && item.title, identity: key, reason: 'auto-scrape lead has no phone number' });
+                    return;
+                }
+
+                var us = validateUnitedStatesLead(item);
+                if (!us.ok) {
+                    rememberRejectedScrapeCard(item);
+                    debugLog('lead.rejected', { source: source || 'unknown', title: item && item.title, identity: key, reason: us.reason, evidence: us.evidence });
                     return;
                 }
 
                 // Apply food industry filter
                 if (foodFilterEnabled && !isFoodRelatedIndustry(item.industry)) {
+                    debugLog('lead.rejected', { source: source || 'unknown', title: item && item.title, identity: key, reason: 'industry failed food filter', industry: item && item.industry });
                     return;
                 }
 
                 try {
-                    if (chainNameMatchesIgnoreList(item && item.title, ignoreNamesSet)) return;
-                    if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) return;
+                    if (chainNameMatchesIgnoreList(item && item.title, ignoreNamesSet)) {
+                        debugLog('lead.rejected', { source: source || 'unknown', title: item && item.title, identity: key, reason: 'name matched blocklist' });
+                        return;
+                    }
+                    if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) {
+                        debugLog('lead.rejected', { source: source || 'unknown', title: item && item.title, identity: key, reason: 'industry matched blocklist', industry: item && item.industry });
+                        return;
+                    }
                 } catch (e) { }
+
+                if (activeSessionId && !item.sessionId) item.sessionId = activeSessionId;
 
                 // Restaurant Mode fast path: resolve delivery platforms the moment a
                 // lead is merged. A maps-direct hit (the Maps "website" link is itself
@@ -1285,19 +1493,27 @@ function mergeScrapedItems(newItems, source, cb) {
                 if (restaurantMode) {
                     var directKeys = matchPlatformHosts(item.companyUrl);
                     if (directKeys.length) {
-                        if (!applyDeliveryToLead(item, directKeys, 'maps-direct', deliveryCfg)) return;
+                        if (!applyDeliveryToLead(item, directKeys, 'maps-direct', deliveryCfg)) {
+                            debugLog('lead.rejected', { source: source || 'unknown', title: item && item.title, identity: key, reason: 'restaurant mode delivery filter rejected maps-direct lead' });
+                            return;
+                        }
                     } else if (!isRealWebsite(item.companyUrl)) {
-                        if (!applyDeliveryToLead(item, [], '', deliveryCfg)) return;
+                        if (!applyDeliveryToLead(item, [], '', deliveryCfg)) {
+                            debugLog('lead.rejected', { source: source || 'unknown', title: item && item.title, identity: key, reason: 'restaurant mode rejected lead with no matched website platform' });
+                            return;
+                        }
                     } else {
                         deliveryDeferred.push(item);
+                        debugLog('lead.pending_delivery', { source: source || 'unknown', title: item && item.title, identity: key, website: item.companyUrl, rules: describeDeliveryRules(deliveryCfg) });
+                        return;
                     }
                 }
 
-                if (activeSessionId && !item.sessionId) item.sessionId = activeSessionId;
                 byKey.set(key, item);
                 existing.push(item);
                 addedItems.push(item);
                 addedCount++;
+                debugLog('lead.accepted', { source: source || 'unknown', title: item && item.title, identity: key, reason: us.reason });
             });
 
             function finish() {
@@ -1342,6 +1558,7 @@ setupUpdateAlarm();
 checkForUpdates();
 // Clean up any duplicate leads left by older runs (pre stable-identity dedup).
 dedupeStoredResults();
+enforceStoredResultsUnitedStates();
 
 // ============================================================================
 // End of Update Checker
@@ -1543,6 +1760,16 @@ function computeMatched(detectedKeys, cfg) {
         seen[k] = 1; matched.push(k);
     });
     return matched;
+}
+
+function describeDeliveryRules(cfg) {
+    cfg = cfg || {};
+    return {
+        mode: cfg.platformAny ? 'any' : 'include',
+        include: cfg.platformAny ? ALL_KNOWN_KEYS.concat(['other']) : (cfg.platformInclude || []),
+        exclude: cfg.platformExclude || [],
+        unmatched: cfg.platformUnmatched === 'skip' ? 'skip' : 'tag'
+    };
 }
 
 // Append a [Delivery: DoorDash, Grubhub] (or [Delivery: none]) token to a lead's
@@ -1794,10 +2021,25 @@ function isGoogleHostBg(url) {
         return false;
     } catch (e) { return true; }
 }
+function isBlockedWebsiteHostBg(url) {
+    try {
+        var host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+        if (isGoogleHostBg(url)) return true;
+        return host === 'facebook.com' || host.endsWith('.facebook.com') ||
+            host === 'instagram.com' || host.endsWith('.instagram.com') ||
+            host === 'tiktok.com' || host.endsWith('.tiktok.com') ||
+            host === 'twitter.com' || host.endsWith('.twitter.com') ||
+            host === 'x.com' || host.endsWith('.x.com') ||
+            host === 'linkedin.com' || host.endsWith('.linkedin.com') ||
+            host === 'youtube.com' || host.endsWith('.youtube.com') ||
+            host === 'youtu.be' ||
+            host === 'linktr.ee' || host.endsWith('.linktr.ee');
+    } catch (e) { return true; }
+}
 function isRealWebsite(url) {
     if (!url) return false;
     if (!/^https?:\/\//i.test(String(url))) return false;
-    return !isGoogleHostBg(url);
+    return !isBlockedWebsiteHostBg(url);
 }
 
 // --- Contact extraction (shared by the fetch path) --------------------------
@@ -2141,7 +2383,8 @@ var WEB_ENRICH = {
     inFlight: 0,
     MAX: 3,
     total: 0,
-    completed: 0
+    completed: 0,
+    paused: false
 };
 
 function updateEnrichStatus() {
@@ -2180,6 +2423,10 @@ function enrichOne(job, done) {
 }
 
 function pumpEnrich() {
+    if (WEB_ENRICH.paused) {
+        updateEnrichStatus();
+        return;
+    }
     while (WEB_ENRICH.inFlight < WEB_ENRICH.MAX && WEB_ENRICH.queue.length) {
         var job = WEB_ENRICH.queue.shift();
         WEB_ENRICH.inFlight++;
@@ -2507,7 +2754,8 @@ var DELIVERY_DETECT = {
     queue: [],
     seen: new Set(),   // identities queued this SW lifetime (pre-persist guard)
     inFlight: 0,
-    MAX: 2
+    MAX: 2,
+    paused: false
 };
 
 function enqueueItemsForDelivery(items, cfg) {
@@ -2520,18 +2768,19 @@ function enqueueItemsForDelivery(items, cfg) {
         var id = placeIdentity(it);
         if (!id || DELIVERY_DETECT.seen.has(id)) return;
         DELIVERY_DETECT.seen.add(id);
-        DELIVERY_DETECT.queue.push({ identity: id, url: it.companyUrl, cfg: cfg });
+        DELIVERY_DETECT.queue.push({ identity: id, url: it.companyUrl, cfg: cfg, item: it });
     });
     pumpDelivery();
 }
 
 function detectDeliveryOne(job, done) {
     detectOrderPlatforms(job.url, function (res) {
-        applyDeliveryResultToLead(job.identity, (res && res.platforms) || [], (res && res.source) || '', job.cfg, (res && res.credit) || '', done);
+        applyDeliveryResultToLead(job.identity, (res && res.platforms) || [], (res && res.source) || '', job.cfg, (res && res.credit) || '', job.item || null, done);
     });
 }
 
 function pumpDelivery() {
+    if (DELIVERY_DETECT.paused) return;
     while (DELIVERY_DETECT.inFlight < DELIVERY_DETECT.MAX && DELIVERY_DETECT.queue.length) {
         var job = DELIVERY_DETECT.queue.shift();
         DELIVERY_DETECT.inFlight++;
@@ -2545,21 +2794,49 @@ function pumpDelivery() {
 // Write a detection result back to the matching stored lead (by identity), then
 // keep or prune it per the qualification rule. Skip-mode pruning splices the lead
 // out of gmes_results under the shared write lock so it can't race a scrape merge.
-function applyDeliveryResultToLead(identity, platforms, source, cfg, credit, done) {
+function applyDeliveryResultToLead(identity, platforms, source, cfg, credit, pendingItem, done) {
     withResultsLock(function (release) {
         chrome.storage.local.get(['gmes_results'], function (data) {
             var list = Array.isArray(data.gmes_results) ? data.gmes_results : [];
             var changed = false;
+            var found = false;
+            var addedItem = null;
             for (var i = 0; i < list.length; i++) {
                 if (placeIdentity(list[i]) !== identity) continue;
+                found = true;
                 var keep = applyDeliveryToLead(list[i], platforms, source, cfg);
-                if (!keep) list.splice(i, 1);   // skip mode + not qualified -> filter out
-                else if (credit) appendSiteCreditNote(list[i], credit);   // footer "Powered by …"
+                if (!keep) {
+                    debugLog('lead.rejected', { source: 'delivery', title: list[i] && list[i].title, identity: identity, reason: 'restaurant mode delivery filter rejected stored lead', detectedPlatforms: platforms, deliverySource: source, rules: describeDeliveryRules(cfg) });
+                    list.splice(i, 1);
+                } else {
+                    if (credit) appendSiteCreditNote(list[i], credit);
+                    debugLog('lead.accepted.delivery', { source: 'delivery', title: list[i] && list[i].title, identity: identity, detectedPlatforms: platforms, deliverySource: source, rules: describeDeliveryRules(cfg) });
+                }
                 changed = true;
                 break;
             }
-            if (changed) chrome.storage.local.set({ gmes_results: list }, function () { release(); if (done) done(); });
-            else { release(); if (done) done(); }
+            if (!found && pendingItem) {
+                var keepPending = applyDeliveryToLead(pendingItem, platforms, source, cfg);
+                if (keepPending) {
+                    if (credit) appendSiteCreditNote(pendingItem, credit);
+                    list.push(pendingItem);
+                    addedItem = pendingItem;
+                    changed = true;
+                    debugLog('lead.accepted', { source: 'delivery', title: pendingItem && pendingItem.title, identity: identity, reason: 'restaurant mode delivery rules matched', detectedPlatforms: platforms, deliverySource: source, rules: describeDeliveryRules(cfg) });
+                } else {
+                    debugLog('lead.rejected', { source: 'delivery', title: pendingItem && pendingItem.title, identity: identity, reason: 'restaurant mode delivery rules did not match', detectedPlatforms: platforms, deliverySource: source, rules: describeDeliveryRules(cfg) });
+                }
+            }
+            if (changed) {
+                chrome.storage.local.set({ gmes_results: list }, function () {
+                    release();
+                    if (addedItem) enqueueItemsForEnrichment([addedItem]);
+                    if (done) done();
+                });
+            } else {
+                release();
+                if (done) done();
+            }
         });
     });
 }
@@ -2629,43 +2906,7 @@ chrome.commands.onCommand.addListener(function (command) {
                 if (!results || !results[0] || !results[0].result) return;
                 var newItems = results[0].result;
 
-                chrome.storage.local.get(['gmes_results', 'gmes_ignore_names', 'gmes_ignore_industries', 'gmes_food_filter_enabled'], function (data) {
-                    var existing = Array.isArray(data.gmes_results) ? data.gmes_results : [];
-                    var ignoreNamesArr = Array.isArray(data.gmes_ignore_names) ? data.gmes_ignore_names : [];
-                    var ignoreIndustriesArr = Array.isArray(data.gmes_ignore_industries) ? data.gmes_ignore_industries : [];
-                    var ignoreNamesSet = new Set(ignoreNamesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
-                    var ignoreIndustriesSet = new Set(ignoreIndustriesArr.map(function (s) { return String(s).toLowerCase().trim(); }));
-                    // Food filter is enabled by default
-                    var foodFilterEnabled = data.gmes_food_filter_enabled !== false;
-
-                    var seen = new Set(existing.map(function (it) { return it.href || (it.title + '|' + it.address); }));
-                    var added = false;
-
-                    newItems.forEach(function (item) {
-                        if (!item) return;
-                        var key = item.href || (item.title + '|' + item.address);
-                        if (!key) return;
-                        if (seen.has(key)) return;
-
-                        // Apply food industry filter
-                        if (foodFilterEnabled && !isFoodRelatedIndustry(item.industry)) {
-                            return;
-                        }
-
-                        try {
-                            if (chainNameMatchesIgnoreList(item && item.title, ignoreNamesSet)) return;
-                            if (industryMatchesIgnoreList(item && item.industry, ignoreIndustriesSet)) return;
-                        } catch (e) {}
-
-                        seen.add(key);
-                        existing.push(item);
-                        added = true;
-                    });
-
-                    if (added) {
-                        chrome.storage.local.set({ gmes_results: existing });
-                    }
-                });
+                mergeScrapedItems(newItems, 'shortcut');
             });
         });
     } else if (command === 'manual_add_to_list') {
@@ -2736,6 +2977,13 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (msg.type === 'OPEN_RESULTS') {
         chrome.tabs.create({ url: 'results_tab.html' });
     }
+    if (msg.type === 'OPEN_POPUP_TAB') {
+        chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?tab=1') });
+    }
+    if (msg.type === 'DEBUG_LOG') {
+        debugLog(msg.event, msg.details || {});
+        sendResponse({ ok: true });
+    }
     if (msg.type === 'START_CRM_LOGIN_POLL') {
         // Poll every 30 seconds (minimum allowed by Chrome is ~0.5 min = 30s)
         chrome.storage.local.set({ gmes_ghl_wait_started: Date.now() });
@@ -2792,7 +3040,23 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
             GHL.checkDuplicate(msg.locationId, msg.phones, msg.email, function (res) { sendResponse(res || { exists: false }); });
             return true;
         case 'GHL_SEND_LEAD':
-            GHL.sendLead(msg.locationId, msg.item, msg.opts || {}, function (res) { sendResponse(res || { success: false, error: 'No response' }); });
+            var us = validateUnitedStatesLead(msg.item || {});
+            if (!us.ok) {
+                debugLog('ghl.send.rejected', { title: msg.item && msg.item.title, reason: us.reason, evidence: us.evidence });
+                sendResponse({ success: false, error: 'Lead rejected: only United States leads can be sent. ' + us.reason });
+                return true;
+            }
+            debugLog('ghl.send.start', { title: msg.item && msg.item.title, locationId: msg.locationId, usEvidence: us.evidence });
+            GHL.sendLead(msg.locationId, msg.item, msg.opts || {}, function (res) {
+                debugLog(res && res.success ? 'ghl.send.success' : 'ghl.send.failed', {
+                    title: msg.item && msg.item.title,
+                    locationId: msg.locationId,
+                    status: res && res.status,
+                    duplicate: Boolean(res && res.duplicate),
+                    error: res && res.error
+                });
+                sendResponse(res || { success: false, error: 'No response' });
+            });
             return true;
         default:
             return;
@@ -2807,8 +3071,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         return;
     }
 
-    handleManualAddItem(msg.item).then(function () {
-        sendResponse({ success: true });
+    handleManualAddItem(msg.item).then(function (result) {
+        sendResponse(result || { success: true });
     }).catch(function (err) {
         console.error('Error adding manual item:', err);
         sendResponse({ success: false, error: err.message });
@@ -2875,7 +3139,15 @@ function handleManualAddItem(item) {
 
             if (seen.has(key)) {
                 console.log('Duplicate item, skipping:', item.title);
-                resolve();
+                debugLog('lead.duplicate', { source: 'manual', title: item && item.title, identity: key });
+                resolve({ success: true, duplicate: true });
+                return;
+            }
+
+            var us = validateUnitedStatesLead(item);
+            if (!us.ok) {
+                debugLog('lead.rejected', { source: 'manual', title: item && item.title, identity: key, reason: us.reason, evidence: us.evidence });
+                resolve({ success: false, error: 'Lead rejected: only United States leads can be saved. ' + us.reason });
                 return;
             }
 
@@ -2884,18 +3156,21 @@ function handleManualAddItem(item) {
 
             if (chainNameMatchesIgnoreList(item.title, ignoreNamesSet)) {
                 console.log('Item ignored by name filter:', item.title);
-                resolve();
+                debugLog('lead.rejected', { source: 'manual', title: item && item.title, identity: key, reason: 'name matched blocklist' });
+                resolve({ success: false, error: 'Lead rejected by name blocklist.' });
                 return;
             }
 
             if (industryMatchesIgnoreList(item.industry, ignoreIndustriesSet)) {
                 console.log('Item ignored by industry filter:', item.industry);
-                resolve();
+                debugLog('lead.rejected', { source: 'manual', title: item && item.title, identity: key, reason: 'industry matched blocklist', industry: item && item.industry });
+                resolve({ success: false, error: 'Lead rejected by industry blocklist.' });
                 return;
             }
 
             existingItems.push(item);
-            chrome.storage.local.set({ gmes_results: existingItems }, resolve);
+            debugLog('lead.accepted', { source: 'manual', title: item && item.title, identity: key, reason: us.reason });
+            chrome.storage.local.set({ gmes_results: existingItems }, function () { resolve({ success: true }); });
         });
     });
 }

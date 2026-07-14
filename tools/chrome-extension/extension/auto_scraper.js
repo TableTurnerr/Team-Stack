@@ -25,13 +25,21 @@
   window.__GMES_AUTO_SCRAPER__ = {
     running: true,
     stop: false,
+    pauseAfterCurrent: false,
     seen: new Set(),
     totalFound: 0,
     totalSeen: 0,
-    totalSkippedRadius: 0
+    totalSkippedRadius: 0,
+    totalSkippedNonUs: 0
   };
 
   var S = window.__GMES_AUTO_SCRAPER__;
+
+  function debugLog(event, details) {
+    try {
+      chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: event, details: details || {} }, function () { void chrome.runtime.lastError; });
+    } catch (e) {}
+  }
 
   // ---- User filters (exclude keywords + numeric conditions) ------------------
   // Populated from the config in run(). EXCLUDE drops any business whose name or
@@ -49,6 +57,7 @@
   // business profile we've already captured (saves clicks + avoids re-hammering
   // Google). Populated in run().
   var ALREADY_SCRAPED = new Set();
+  var ALREADY_REJECTED = new Set();
 
   function parseExcludeKeywords(text) {
     if (!text) return [];
@@ -147,6 +156,12 @@
     return Boolean(k) && ALREADY_SCRAPED.has(k);
   }
 
+  function alreadyRejected(href, title) {
+    if (!ALREADY_REJECTED.size) return false;
+    var k = cardIdentity(href, title);
+    return Boolean(k) && ALREADY_REJECTED.has(k);
+  }
+
   // ---- DOM selectors (centralized — Google changes these periodically) -------
   var FEED_SELECTORS = ['div[role="feed"]', '.m6QErb[aria-label]', '.m6QErb-qJTHM-haAclf'];
   var END_OF_LIST_TEXT = "you've reached the end of the list";
@@ -228,11 +243,27 @@
     } catch (e) { return true; }
   }
 
+  function isBlockedWebsiteHost(url) {
+    try {
+      var host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+      if (isGoogleHost(url)) return true;
+      return host === 'facebook.com' || host.endsWith('.facebook.com') ||
+        host === 'instagram.com' || host.endsWith('.instagram.com') ||
+        host === 'tiktok.com' || host.endsWith('.tiktok.com') ||
+        host === 'twitter.com' || host.endsWith('.twitter.com') ||
+        host === 'x.com' || host.endsWith('.x.com') ||
+        host === 'linkedin.com' || host.endsWith('.linkedin.com') ||
+        host === 'youtube.com' || host.endsWith('.youtube.com') ||
+        host === 'youtu.be' ||
+        host === 'linktr.ee' || host.endsWith('.linktr.ee');
+    } catch (e) { return true; }
+  }
+
   function extractWebsite(container) {
     if (!container) return '';
     try {
       var direct = container.querySelector('a[data-item-id="authority"], a[data-value="Website"]');
-      if (direct && direct.href && !isGoogleHost(direct.href)) return direct.href;
+      if (direct && direct.href && !isBlockedWebsiteHost(direct.href)) return direct.href;
     } catch (e) {}
     try {
       var labelled = Array.prototype.slice.call(container.querySelectorAll('a[href]')).find(function (a) {
@@ -240,11 +271,11 @@
         var tip = (a.getAttribute('data-tooltip') || '').toLowerCase();
         return aria.indexOf('website') !== -1 || tip.indexOf('website') !== -1;
       });
-      if (labelled && labelled.href && !isGoogleHost(labelled.href)) return labelled.href;
+      if (labelled && labelled.href && !isBlockedWebsiteHost(labelled.href)) return labelled.href;
     } catch (e) {}
     try {
       var ext = Array.prototype.slice.call(container.querySelectorAll('a[href^="http"]')).find(function (a) {
-        return a.href && !isGoogleHost(a.href);
+        return a.href && !isBlockedWebsiteHost(a.href);
       });
       if (ext) return ext.href;
     } catch (e) {}
@@ -279,6 +310,12 @@
       if (inIndex !== -1) return query.substring(inIndex + 4);
     }
     return '';
+  }
+
+  function looksOutsideUnitedStatesText(text) {
+    text = String(text || '').toLowerCase();
+    return /\b(mexico|canada|united kingdom|uk|australia|india|pakistan|uae|dubai|qatar|saudi|germany|france|spain|italy)\b/.test(text) ||
+      /\b(son\.?|sonora|b\.?c\.?|baja california|quintana roo|jalisco|nuevo leon|nuevo le[oó]n|cdmx|ciudad de mexico|ciudad de m[eé]xico)\b/.test(text);
   }
 
   // Pull City / State / ZIP out of a full formal address such as
@@ -549,6 +586,10 @@
     var titleEl = container ? container.querySelector('.fontHeadlineSmall') : null;
     var titleText = titleEl ? titleEl.textContent : '';
     var containerText = container ? (container.textContent || '') : '';
+    if (looksOutsideUnitedStatesText(containerText)) {
+      debugLog('profile.skipped.before_open', { title: titleText || (link.getAttribute('aria-label') || '').trim(), reason: 'feed card appears outside the United States' });
+      return null;
+    }
     if (/permanently closed/i.test(containerText)) return null;
 
     var rating = '', reviewCount = '', industry = '',
@@ -787,11 +828,11 @@
       S.running = false;
       stopFaviconAnimation();
       var cfg = window.__GMES_AUTO_CFG__ || {};
-      if (cfg.gridMode && !S.stop) {
+      if (cfg.gridMode && !S.stop && !S.pauseAfterCurrent) {
         removePopdown();
         try { chrome.runtime.sendMessage({ type: 'GRID_CELL_DONE' }); } catch (e) {}
       } else {
-        if (S.stop) removePopdown(); else markDone(S.totalFound);
+        if (S.stop || S.pauseAfterCurrent) removePopdown(); else markDone(S.totalFound);
         try { chrome.storage.local.set({ gmes_background_scraping: false, gmes_scrape_heartbeat: 0 }); } catch (e) {}
       }
     }
@@ -809,7 +850,7 @@
 
     // Phase 2: open each buffered item's detail pane to capture phone/website.
     function enrich() {
-      if (S.stop || enrichQueue.length === 0) { finish(); return; }
+      if (S.stop || S.pauseAfterCurrent || enrichQueue.length === 0) { finish(); return; }
       heartbeat();
 
       var item = enrichQueue.shift();
@@ -879,7 +920,7 @@
     }
 
     function tick() {
-      if (S.stop) { finish(); return; }
+      if (S.stop || S.pauseAfterCurrent) { finish(); return; }
       heartbeat();
 
       var city = getCityFromQuery();
@@ -951,11 +992,11 @@
       S.running = false;
       stopFaviconAnimation();
       var cfg = window.__GMES_AUTO_CFG__ || {};
-      if (cfg.gridMode && !S.stop) {
+      if (cfg.gridMode && !S.stop && !S.pauseAfterCurrent) {
         removePopdown();
         try { chrome.runtime.sendMessage({ type: 'GRID_CELL_DONE' }); } catch (e) {}
       } else {
-        if (S.stop) removePopdown(); else markDone(S.totalFound);
+        if (S.stop || S.pauseAfterCurrent) removePopdown(); else markDone(S.totalFound);
         try { chrome.storage.local.set({ gmes_background_scraping: false, gmes_scrape_heartbeat: 0 }); } catch (e) {}
       }
     }
@@ -985,7 +1026,7 @@
     }
 
     function loop() {
-      if (S.stop) { finish(); return; }
+      if (S.stop || S.pauseAfterCurrent) { finish(); return; }
       if (visited >= MAX_PLACES) { finish(); return; }
       heartbeat();
 
@@ -1013,6 +1054,22 @@
       // radius pre-filter) so a viewport full of already-seen places still advances
       // toward the end-of-list cutoff instead of looping forever.
       if (alreadyScraped(href)) {
+        setProgressStatus(S.totalFound, radiusLabel, 'Detail');
+        setTimeout(loop, paced(60));
+        return;
+      }
+      if (alreadyRejected(href, link.getAttribute('aria-label') || link.textContent || '')) {
+        debugLog('profile.skipped.before_open', { title: (link.getAttribute('aria-label') || link.textContent || '').trim(), href: href, reason: 'previously rejected lead identity' });
+        setProgressStatus(S.totalFound, radiusLabel, 'Detail');
+        setTimeout(loop, paced(60));
+        return;
+      }
+
+      var cardContainer = link.closest('[jsaction*="mouseover:pane"]');
+      var cardText = cardContainer ? (cardContainer.textContent || '') : '';
+      if (looksOutsideUnitedStatesText(cardText)) {
+        S.totalSkippedNonUs++;
+        debugLog('profile.skipped.before_open', { title: (link.getAttribute('aria-label') || link.textContent || '').trim(), href: href, reason: 'feed card appears outside the United States' });
         setProgressStatus(S.totalFound, radiusLabel, 'Detail');
         setTimeout(loop, paced(60));
         return;
@@ -1063,6 +1120,7 @@
       setProgressStatus(S.totalFound, radiusLabel, 'Detail');
 
       try { link.scrollIntoView({ block: 'center' }); } catch (e) {}
+      debugLog('profile.opening', { title: (link.getAttribute('aria-label') || link.textContent || '').trim(), href: href });
       try { link.click(); } catch (e) { setTimeout(loop, paced(200)); return; }
 
       // Wait for the detail pane to belong to this place and carry its data.
@@ -1079,9 +1137,12 @@
         try { item = scrapeDetailPane(href, city); } catch (e) {}
 
         if (item && item.title && withinRadius(item, center, radius) && passesFilters(item)) {
+          debugLog('profile.extracted', { title: item.title, phone: item.phone || '', address: item.address || '', state: item.state || '', zip: item.zip || '', website: item.companyUrl || '' });
           S.totalFound++;
           post([item]);
           setProgressStatus(S.totalFound, radiusLabel, 'Detail');
+        } else {
+          debugLog('profile.rejected.before_merge', { title: item && item.title, reason: !item ? 'scrape returned no item' : (!withinRadius(item, center, radius) ? 'outside radius' : 'failed page filters') });
         }
 
         goBackToList(function () { setTimeout(loop, paced(350)); });
@@ -1123,15 +1184,20 @@
     // Seed the already-scraped set from the stored leads (this run's earlier cells
     // plus any prior session) so we never re-expand a business we already have.
     try {
-      chrome.storage.local.get(['gmes_results'], function (d) {
+      chrome.storage.local.get(['gmes_results', 'gmes_rejected_scrape_cards'], function (d) {
         try {
           ALREADY_SCRAPED = new Set();
+          ALREADY_REJECTED = new Set();
           var list = Array.isArray(d.gmes_results) ? d.gmes_results : [];
           for (var i = 0; i < list.length; i++) {
             var it = list[i];
             if (!it) continue;
             var k = cardIdentity(it.href, it.title);
             if (k) ALREADY_SCRAPED.add(k);
+          }
+          var rejected = Array.isArray(d.gmes_rejected_scrape_cards) ? d.gmes_rejected_scrape_cards : [];
+          for (var j = 0; j < rejected.length; j++) {
+            if (rejected[j]) ALREADY_REJECTED.add(String(rejected[j]));
           }
         } catch (e) {}
         begin();

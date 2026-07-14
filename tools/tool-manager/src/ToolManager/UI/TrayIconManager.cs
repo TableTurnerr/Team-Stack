@@ -18,14 +18,19 @@ public class TrayIconManager : IDisposable
     private readonly UpdateScheduler _scheduler;
     private readonly SelfUpdateService _selfUpdater;
     private readonly GitHubReleaseService _github;
+    private readonly AgentProvisioningService _agentProvisioning;
     private readonly SynchronizationContext? _uiContext;
     private DateTime _lastLaunch = DateTime.MinValue;
+    private DateTime _lastSetupPrompt = DateTime.MinValue;
+    private bool _setupPromptOpen;
 
-    public TrayIconManager(UpdateScheduler scheduler, SelfUpdateService selfUpdater, GitHubReleaseService github)
+    public TrayIconManager(UpdateScheduler scheduler, SelfUpdateService selfUpdater, GitHubReleaseService github,
+        AgentProvisioningService agentProvisioning)
     {
         _scheduler = scheduler;
         _selfUpdater = selfUpdater;
         _github = github;
+        _agentProvisioning = agentProvisioning;
         // Captured here so background-thread events can marshal NotifyIcon updates
         // back to the UI thread that owns the tray icon's hidden window.
         _uiContext = SynchronizationContext.Current;
@@ -80,6 +85,52 @@ public class TrayIconManager : IDisposable
             ShowBalloon("Manager Update Available",
                 $"Tool Manager v{version.ToString(3)} is available.", ToolTipIcon.Info);
         };
+
+        // After every update check (including the one ~10s after startup, i.e.
+        // right after a Tool Manager self-update relaunches us), nudge reps whose
+        // CRM Agent was never provisioned to pick their Setup-CRM-Agent-*.bat.
+        _scheduler.UpdatesChecked += MaybePromptForAgentSetup;
+    }
+
+    /// <summary>
+    /// Show the agent setup popup if the CRM Agent is installed but unprovisioned.
+    /// Rate-limited to once per 24h so "Remind me later" is respected, and never
+    /// stacked (one open dialog at a time). Runs on the UI thread.
+    /// </summary>
+    private void MaybePromptForAgentSetup()
+    {
+        void Check()
+        {
+            if (_setupPromptOpen) return;
+            if ((DateTime.UtcNow - _lastSetupPrompt) < TimeSpan.FromHours(24)) return;
+
+            try
+            {
+                if (!_agentProvisioning.NeedsRepSetup()) return;
+            }
+            catch (Exception ex)
+            {
+                FileLogger.Write($"[Tray] Agent setup check failed: {ex.Message}");
+                return;
+            }
+
+            _lastSetupPrompt = DateTime.UtcNow;
+            _setupPromptOpen = true;
+            try
+            {
+                using var form = new AgentSetupPromptForm(_agentProvisioning);
+                form.ShowDialog();
+            }
+            finally
+            {
+                _setupPromptOpen = false;
+            }
+        }
+
+        if (_uiContext != null)
+            _uiContext.Post(_ => Check(), null);
+        else
+            Check();
     }
 
     private ContextMenuStrip BuildContextMenu()
@@ -108,6 +159,25 @@ public class TrayIconManager : IDisposable
             }
         };
         menu.Items.Add(checkItem);
+
+        // Manual entry point to the same setup flow the popup drives, for reps
+        // who clicked "Remind me later" and want to finish setup now.
+        var setupItem = new ToolStripMenuItem("Set Up CRM Agent…");
+        setupItem.Click += (_, _) =>
+        {
+            if (_setupPromptOpen) return;
+            _setupPromptOpen = true;
+            try
+            {
+                using var form = new AgentSetupPromptForm(_agentProvisioning);
+                form.ShowDialog();
+            }
+            finally
+            {
+                _setupPromptOpen = false;
+            }
+        };
+        menu.Items.Add(setupItem);
 
         menu.Items.Add(new ToolStripSeparator());
 

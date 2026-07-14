@@ -39,6 +39,10 @@ public class AgentConfig
     [JsonPropertyName("repUserId")] public string? RepUserId { get; set; }
     /// <summary>DPAPI-encrypted, base64-encoded worker AGENT_SHARED_TOKEN. Scope = current user.</summary>
     [JsonPropertyName("agentTokenProtected")] public string? AgentTokenProtected { get; set; }
+    /// <summary>Optional cloud-relay base URL tried when the primary worker is
+    /// unreachable or returns 5xx (same /recordings/ingest contract, same token).
+    /// Plain string — it's a public URL, not a secret, so no DPAPI.</summary>
+    [JsonPropertyName("fallbackWorkerBaseUrl")] public string? FallbackWorkerBaseUrl { get; set; }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

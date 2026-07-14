@@ -11,6 +11,12 @@ static class Program
     // value or CRM_AGENT_WORKER_URL still overrides it.
     internal const string DefaultWorkerBaseUrl = "https://zoomphone.tableturnerr.com";
 
+    // Cloud relay tried when the primary worker is unreachable or 5xx. Same
+    // ingest/bootstrap contract and same agent token; only the host differs.
+    // A persisted config value, CRM_AGENT_FALLBACK_URL, or a baked build value
+    // still overrides it.
+    internal const string DefaultFallbackWorkerBaseUrl = "https://zoomphone-relay.tableturnerr.com";
+
     [STAThread]
     static void Main(string[] args)
     {
@@ -107,6 +113,15 @@ static class Program
         // provisioned per machine is the shared agent token.
         if (string.IsNullOrEmpty(workerUrl)) workerUrl = DefaultWorkerBaseUrl;
 
+        // Fallback (cloud relay) URL: same precedence chain as the worker URL,
+        // ending in a hardcoded default so every install has a second path out.
+        var fallbackUrl = !string.IsNullOrEmpty(config.FallbackWorkerBaseUrl)
+            ? config.FallbackWorkerBaseUrl
+            : (Environment.GetEnvironmentVariable("CRM_AGENT_FALLBACK_URL")
+               ?? BuildConfig.EmbeddedFallbackUrl);
+        if (string.IsNullOrEmpty(fallbackUrl)) fallbackUrl = DefaultFallbackWorkerBaseUrl;
+        uploader.SetFallbackBaseUrl(fallbackUrl);
+
         // First-run provisioning: with no token configured (and none in env),
         // prompt once for it. This is the only thing the user has to enter; the
         // Zoom creds are pulled from the worker below. The prompt also appears
@@ -130,9 +145,11 @@ static class Program
             uploader.SetWorkerConfig(workerUrl, agentToken, repUserId);
             // Persist env-provisioned values so later launches don't depend on
             // the env being set, and so the token is stored DPAPI-encrypted.
-            if (string.IsNullOrEmpty(config.WorkerBaseUrl) || string.IsNullOrEmpty(config.AgentTokenProtected))
+            if (string.IsNullOrEmpty(config.WorkerBaseUrl) || string.IsNullOrEmpty(config.AgentTokenProtected)
+                || string.IsNullOrEmpty(config.FallbackWorkerBaseUrl))
             {
                 config.SetWorkerConfig(workerUrl, agentToken, repUserId);
+                config.FallbackWorkerBaseUrl = fallbackUrl;
                 config.Save();
             }
 
@@ -145,7 +162,8 @@ static class Program
             {
                 var wu = workerUrl;
                 var tok = agentToken;
-                _ = Task.Run(() => zoomApi.TryBootstrapFromWorkerAsync(wu, tok));
+                var fb = fallbackUrl;
+                _ = Task.Run(() => zoomApi.TryBootstrapFromWorkerAsync(wu, tok, fb));
             }
         }
         else

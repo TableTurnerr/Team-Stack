@@ -83,15 +83,40 @@ public class ZoomPhoneApiService : IDisposable
     /// the single source of truth for the Zoom secret, so the agent never needs
     /// it shipped in the installer or entered by the user — only the agent token.
     /// No-op if already configured. Best-effort: returns false on any failure so
-    /// the caller can retry on the next launch.
+    /// the caller can retry on the next launch. When the primary worker is
+    /// unreachable or answers 5xx, the optional <paramref name="fallbackBaseUrl"/>
+    /// (cloud relay, same contract + token) is tried once before giving up.
     /// </summary>
-    public async Task<bool> TryBootstrapFromWorkerAsync(string workerBaseUrl, string agentToken)
+    public async Task<bool> TryBootstrapFromWorkerAsync(string workerBaseUrl, string agentToken, string? fallbackBaseUrl = null)
     {
         if (IsConfigured) return true;
         if (string.IsNullOrWhiteSpace(workerBaseUrl) || string.IsNullOrWhiteSpace(agentToken))
             return false;
 
-        var url = $"{workerBaseUrl.TrimEnd('/')}/agent/bootstrap";
+        var (ok, transient) = await TryBootstrapFromUrlAsync(workerBaseUrl, agentToken);
+        if (ok) return true;
+
+        // Only chase the relay for network-class/5xx failures — a clean 4xx from
+        // a reachable primary (bad token, unknown route) would just repeat there.
+        if (transient
+            && !string.IsNullOrWhiteSpace(fallbackBaseUrl)
+            && !string.Equals(fallbackBaseUrl.TrimEnd('/'), workerBaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+        {
+            FileLogger.Write($"[ZoomAPI] Bootstrap: primary unreachable — retrying via cloud relay {fallbackBaseUrl}");
+            (ok, _) = await TryBootstrapFromUrlAsync(fallbackBaseUrl, agentToken);
+            return ok;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// One bootstrap GET against a single base URL. Returns (success, transient)
+    /// where transient = network error or 5xx (worth retrying elsewhere/later).
+    /// </summary>
+    private async Task<(bool ok, bool transient)> TryBootstrapFromUrlAsync(string baseUrl, string agentToken)
+    {
+        var url = $"{baseUrl.TrimEnd('/')}/agent/bootstrap";
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -99,8 +124,8 @@ public class ZoomPhoneApiService : IDisposable
             using var resp = await _http.SendAsync(req);
             if (!resp.IsSuccessStatusCode)
             {
-                FileLogger.Write($"[ZoomAPI] Bootstrap from worker failed: HTTP {(int)resp.StatusCode} — Zoom number resolution disabled");
-                return false;
+                FileLogger.Write($"[ZoomAPI] Bootstrap from worker failed: HTTP {(int)resp.StatusCode} ({url}) — Zoom number resolution disabled");
+                return (false, (int)resp.StatusCode >= 500);
             }
 
             var json = await resp.Content.ReadAsStringAsync();
@@ -108,7 +133,7 @@ public class ZoomPhoneApiService : IDisposable
             if (!doc.RootElement.TryGetProperty("zoom", out var z))
             {
                 FileLogger.Write("[ZoomAPI] Bootstrap response missing 'zoom' object");
-                return false;
+                return (false, false);
             }
 
             var accountId = z.TryGetProperty("accountId", out var a) ? a.GetString() : null;
@@ -119,17 +144,17 @@ public class ZoomPhoneApiService : IDisposable
                 || string.IsNullOrEmpty(clientSecret) || string.IsNullOrEmpty(zoomUserId))
             {
                 FileLogger.Write("[ZoomAPI] Bootstrap response had incomplete Zoom creds");
-                return false;
+                return (false, false);
             }
 
             SetCredentials(accountId, clientId, clientSecret, zoomUserId);
             FileLogger.Write("[ZoomAPI] Provisioned Zoom S2S creds from worker — call number resolution enabled");
-            return true;
+            return (true, false);
         }
         catch (Exception ex)
         {
-            FileLogger.Write($"[ZoomAPI] Bootstrap from worker error: {ex.GetType().Name}: {ex.Message}");
-            return false;
+            FileLogger.Write($"[ZoomAPI] Bootstrap from worker error ({url}): {ex.GetType().Name}: {ex.Message}");
+            return (false, true);
         }
     }
 

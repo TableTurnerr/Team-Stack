@@ -233,6 +233,22 @@ public class RecordingStorageManager
     }
 
     /// <summary>
+    /// Entries whose WAV→MP3 conversion never completed (LAME failure/timeout,
+    /// or a crash mid-conversion). These are invisible to GetPendingUploads —
+    /// without intervention the clip would be silently stranded forever. The
+    /// recorder's rescue pass retries the conversion or falls back to WAV.
+    /// </summary>
+    public List<RecordingEntry> GetStrandedConversions()
+    {
+        lock (_lock)
+        {
+            return _entries
+                .Where(e => !e.Uploaded && !e.ConversionComplete)
+                .ToList();
+        }
+    }
+
+    /// <summary>
     /// Get recordings that have finished converting but haven't been linked to
     /// a CRM call log yet. These are the ones the dashboard can preview
     /// locally after a page refresh (before the call has been submitted).

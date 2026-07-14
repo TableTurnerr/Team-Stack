@@ -36,6 +36,7 @@ public class RecordingUploadService : IDisposable
     private string? _workerBaseUrl;
     private string? _agentToken;
     private string? _repUserId;
+    private string? _fallbackBaseUrl;
     private ZoomPhoneApiService? _zoomApi;
 
     private CancellationTokenSource? _cts;
@@ -70,6 +71,20 @@ public class RecordingUploadService : IDisposable
 
     public string? CurrentUpload { get; private set; }
 
+    /// <summary>True when the most recent upload attempt failed with a
+    /// network-class error (primary AND fallback unreachable). Cleared on the
+    /// next successful upload. The tray uses this to show "server offline".</summary>
+    public bool LastFailureWasNetwork { get; private set; }
+
+    /// <summary>True when the last accepted upload went through the fallback
+    /// cloud relay instead of the primary worker. Cleared when the primary
+    /// accepts again. The tray uses this to show "uploading via cloud relay".</summary>
+    public bool LastUploadViaFallback { get; private set; }
+
+    /// <summary>Uploads are effectively paused: the last attempt died on the
+    /// network (both URLs) or the global circuit breaker is open.</summary>
+    public bool IsOffline => LastFailureWasNetwork || IsCircuitOpen();
+
     public RecordingUploadService(RecordingStorageManager storage)
     {
         _storage = storage;
@@ -94,6 +109,22 @@ public class RecordingUploadService : IDisposable
         }
         Debug.WriteLine($"[Upload] Worker upload configured for {workerBaseUrl}");
         Wake(); // process any pending uploads immediately
+    }
+
+    /// <summary>
+    /// Configure the cloud-relay base URL tried when the primary worker is
+    /// unreachable or answers 5xx. Same /recordings/ingest contract and the
+    /// same bearer token; null disables the fallback path.
+    /// </summary>
+    public void SetFallbackBaseUrl(string? fallbackBaseUrl)
+    {
+        lock (_lock)
+        {
+            _fallbackBaseUrl = string.IsNullOrWhiteSpace(fallbackBaseUrl)
+                ? null
+                : fallbackBaseUrl.TrimEnd('/');
+        }
+        Debug.WriteLine($"[Upload] Fallback relay configured: {fallbackBaseUrl ?? "(none)"}");
     }
 
     /// <summary>
@@ -210,12 +241,13 @@ public class RecordingUploadService : IDisposable
 
     private async Task UploadRecording(RecordingEntry entry, CancellationToken ct)
     {
-        string? workerBaseUrl, agentToken, repUserId;
+        string? workerBaseUrl, agentToken, repUserId, fallbackBaseUrl;
         lock (_lock)
         {
             workerBaseUrl = _workerBaseUrl;
             agentToken = _agentToken;
             repUserId = _repUserId;
+            fallbackBaseUrl = _fallbackBaseUrl;
         }
 
         if (workerBaseUrl == null || agentToken == null) return;
@@ -279,32 +311,70 @@ public class RecordingUploadService : IDisposable
         {
             CurrentUpload = entry.FileName;
 
-            using var form = new MultipartFormDataContent();
-            using var fileStream = File.OpenRead(filePath);
-            var totalBytes = fileStream.Length;
-            var fileNameForProgress = entry.FileName;
-            var fileContent = new ProgressableStreamContent(fileStream, (sent, total) =>
+            // ── Primary attempt ─────────────────────────────────────────
+            HttpResponseMessage? response = null;
+            string? primaryNetworkError = null;
+            try
             {
-                try { UploadProgress?.Invoke(fileNameForProgress, sent, total); } catch { }
-            });
-            fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-            fileContent.Headers.ContentLength = totalBytes;
-            form.Add(fileContent, "clip", entry.FileName);
+                response = await SendIngestAsync(workerBaseUrl, agentToken, entry, filePath, contentType,
+                    clientCallId, rep, channel, phoneE164, connectTsMs, endTsMs, ct);
+            }
+            catch (Exception ex) when (IsNetworkException(ex, ct))
+            {
+                primaryNetworkError = DescribeNetworkError(ex);
+            }
 
-            // Identifier-only payload: the worker owns direction + contact match.
-            form.Add(new StringContent(clientCallId), "clientCallId");
-            form.Add(new StringContent(rep), "repKey");
-            form.Add(new StringContent(channel), "channel");
-            if (!string.IsNullOrEmpty(entry.ZoomCallId)) form.Add(new StringContent(entry.ZoomCallId), "zoomCallId");
-            if (!string.IsNullOrEmpty(phoneE164)) form.Add(new StringContent(phoneE164), "phoneE164");
-            form.Add(new StringContent(connectTsMs.ToString()), "connectTsMs");
-            form.Add(new StringContent(endTsMs.ToString()), "endTsMs");
+            // Network-class failure or 5xx from the primary → one immediate
+            // retry against the cloud relay before counting the attempt failed.
+            var primaryServerError = response != null && (int)response.StatusCode >= 500;
+            if (response == null || primaryServerError)
+            {
+                var primaryProblem = primaryNetworkError ?? $"HTTP {(int)response!.StatusCode} from primary";
 
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{workerBaseUrl}/recordings/ingest");
-            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {agentToken}");
-            request.Content = form;
+                if (!string.IsNullOrEmpty(fallbackBaseUrl)
+                    && !string.Equals(fallbackBaseUrl, workerBaseUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    response?.Dispose();
+                    FileLogger.Write($"[Upload] Primary failed ({primaryProblem}) — retrying via cloud relay {fallbackBaseUrl}: {entry.FileName}");
 
-            var response = await _httpClient.SendAsync(request, ct);
+                    HttpResponseMessage? fbResponse = null;
+                    string? fbNetworkError = null;
+                    try
+                    {
+                        fbResponse = await SendIngestAsync(fallbackBaseUrl, agentToken, entry, filePath, contentType,
+                            clientCallId, rep, channel, phoneE164, connectTsMs, endTsMs, ct);
+                    }
+                    catch (Exception ex) when (IsNetworkException(ex, ct))
+                    {
+                        fbNetworkError = DescribeNetworkError(ex);
+                    }
+
+                    if (fbResponse != null &&
+                        (fbResponse.IsSuccessStatusCode || fbResponse.StatusCode == HttpStatusCode.Conflict))
+                    {
+                        CurrentUpload = null;
+                        await HandleAcceptedResponse(entry, fbResponse, viaFallback: true, ct);
+                        return;
+                    }
+
+                    // Both paths failed. Never permanent here: the primary was
+                    // unreachable, so a 4xx from the relay isn't a trustworthy
+                    // verdict on the clip — keep retrying on the backoff cadence.
+                    var fbProblem = fbNetworkError ?? $"HTTP {(int)fbResponse!.StatusCode} from fallback";
+                    fbResponse?.Dispose();
+                    CurrentUpload = null;
+                    FileLogger.Write($"[Upload] Both primary and relay failed for {entry.FileName} — primary: {primaryProblem}; relay: {fbProblem}");
+                    HandleNetworkFailure(entry, $"primary: {primaryProblem}; relay: {fbProblem}");
+                    return;
+                }
+
+                // No fallback configured — behave exactly as before (retry forever).
+                response?.Dispose();
+                CurrentUpload = null;
+                Debug.WriteLine($"[Upload] Network/server failure: {entry.FileName} — {primaryProblem}");
+                HandleNetworkFailure(entry, primaryProblem);
+                return;
+            }
 
             CurrentUpload = null;
 
@@ -315,16 +385,9 @@ public class RecordingUploadService : IDisposable
                 return;
             }
 
-            // 409 → the worker already ingested this callId (duplicate or a retry
-            // after a success we never recorded). The clip is attached; we're done.
-            if (response.StatusCode == HttpStatusCode.Conflict)
-            {
-                MarkUploaded(entry, null, "duplicate (already attached)");
-                return;
-            }
-
             // 4xx (other than 401/409) → permanent failure: retrying won't help.
-            if ((int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
+            if (response.StatusCode != HttpStatusCode.Conflict
+                && (int)response.StatusCode >= 400 && (int)response.StatusCode < 500)
             {
                 var body = await SafeReadBody(response, ct);
                 var errMsg = $"HTTP {(int)response.StatusCode}: {body}";
@@ -335,42 +398,8 @@ public class RecordingUploadService : IDisposable
                 return;
             }
 
-            response.EnsureSuccessStatusCode();
-
-            // 200 → { ghlMessageId }; 202 → { status: "review" } (no phone match,
-            // parked in GHL Medias for manual review). Both mean accepted.
-            string? ghlMessageId = null;
-            try
-            {
-                var responseJson = await response.Content.ReadAsStringAsync(ct);
-                using var doc = JsonDocument.Parse(responseJson);
-                if (doc.RootElement.TryGetProperty("ghlMessageId", out var idProp))
-                    ghlMessageId = idProp.GetString();
-            }
-            catch { }
-
-            MarkUploaded(entry, ghlMessageId,
-                response.StatusCode == HttpStatusCode.Accepted ? "parked for review (no phone)" : null);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            // Treat HttpClient timeout cancellations as network errors.
-            CurrentUpload = null;
-            Debug.WriteLine($"[Upload] Network timeout: {entry.FileName}");
-            HandleNetworkFailure(entry, "Network timeout");
-        }
-        catch (HttpRequestException ex)
-        {
-            CurrentUpload = null;
-            Debug.WriteLine($"[Upload] Network failure: {entry.FileName} — {ex.Message}");
-            HandleNetworkFailure(entry, ex.Message);
-        }
-        catch (IOException ex)
-        {
-            // Connection reset / stream interrupted mid-transfer — also network.
-            CurrentUpload = null;
-            Debug.WriteLine($"[Upload] IO failure: {entry.FileName} — {ex.Message}");
-            HandleNetworkFailure(entry, ex.Message);
+            // 200/202/409 from the primary.
+            await HandleAcceptedResponse(entry, response, viaFallback: false, ct);
         }
         catch (OperationCanceledException) { CurrentUpload = null; throw; }
         catch (Exception ex)
@@ -390,8 +419,99 @@ public class RecordingUploadService : IDisposable
         }
     }
 
+    /// <summary>
+    /// POST the recording multipart to <c>{baseUrl}/recordings/ingest</c>.
+    /// The form (and the underlying file stream) is rebuilt per attempt because
+    /// multipart content cannot be resent — the fallback retry calls this again.
+    /// Network-class failures surface as exceptions for the caller to classify.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendIngestAsync(
+        string baseUrl, string agentToken, RecordingEntry entry, string filePath, string contentType,
+        string clientCallId, string rep, string channel, string phoneE164,
+        long connectTsMs, long endTsMs, CancellationToken ct)
+    {
+        using var form = new MultipartFormDataContent();
+        using var fileStream = File.OpenRead(filePath);
+        var totalBytes = fileStream.Length;
+        var fileNameForProgress = entry.FileName;
+        var fileContent = new ProgressableStreamContent(fileStream, (sent, total) =>
+        {
+            try { UploadProgress?.Invoke(fileNameForProgress, sent, total); } catch { }
+        });
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        fileContent.Headers.ContentLength = totalBytes;
+        form.Add(fileContent, "clip", entry.FileName);
+
+        // Identifier-only payload: the worker owns direction + contact match.
+        form.Add(new StringContent(clientCallId), "clientCallId");
+        form.Add(new StringContent(rep), "repKey");
+        form.Add(new StringContent(channel), "channel");
+        if (!string.IsNullOrEmpty(entry.ZoomCallId)) form.Add(new StringContent(entry.ZoomCallId), "zoomCallId");
+        if (!string.IsNullOrEmpty(phoneE164)) form.Add(new StringContent(phoneE164), "phoneE164");
+        form.Add(new StringContent(connectTsMs.ToString()), "connectTsMs");
+        form.Add(new StringContent(endTsMs.ToString()), "endTsMs");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/recordings/ingest");
+        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {agentToken}");
+        request.Content = form;
+
+        // Default SendAsync buffers the full response before returning, so the
+        // response body stays readable after form/stream disposal here.
+        return await _httpClient.SendAsync(request, ct);
+    }
+
+    /// <summary>
+    /// Network-class exception filter for a single ingest attempt: DNS/socket
+    /// failures, connection resets mid-transfer, and HttpClient timeouts (an
+    /// OperationCanceledException NOT caused by our own cancellation token).
+    /// </summary>
+    private static bool IsNetworkException(Exception ex, CancellationToken ct) => ex switch
+    {
+        HttpRequestException => true,
+        IOException => true,
+        OperationCanceledException => !ct.IsCancellationRequested,
+        _ => false,
+    };
+
+    private static string DescribeNetworkError(Exception ex) =>
+        ex is OperationCanceledException ? "Network timeout" : ex.Message;
+
+    /// <summary>
+    /// Consume an accepted ingest response (200/202/409) from either the
+    /// primary worker or the fallback relay and mark the entry uploaded.
+    /// </summary>
+    private async Task HandleAcceptedResponse(RecordingEntry entry, HttpResponseMessage response, bool viaFallback, CancellationToken ct)
+    {
+        using (response)
+        {
+            // 409 → the worker already ingested this callId (duplicate or a retry
+            // after a success we never recorded). The clip is attached; we're done.
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                MarkUploaded(entry, null, "duplicate (already attached)", viaFallback);
+                return;
+            }
+
+            // 200 → { ghlMessageId }; 202 → { status: "review" } (no phone match,
+            // parked in GHL Medias for manual review). Both mean accepted.
+            string? ghlMessageId = null;
+            try
+            {
+                var responseJson = await response.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(responseJson);
+                if (doc.RootElement.TryGetProperty("ghlMessageId", out var idProp))
+                    ghlMessageId = idProp.GetString();
+            }
+            catch { }
+
+            MarkUploaded(entry, ghlMessageId,
+                response.StatusCode == HttpStatusCode.Accepted ? "parked for review (no phone)" : null,
+                viaFallback);
+        }
+    }
+
     /// <summary>Mark an entry as successfully attached to GHL and reset breakers.</summary>
-    private void MarkUploaded(RecordingEntry entry, string? ghlMessageId, string? note)
+    private void MarkUploaded(RecordingEntry entry, string? ghlMessageId, string? note, bool viaFallback = false)
     {
         _storage.UpdateEntry(entry.FileName, e =>
         {
@@ -405,13 +525,15 @@ public class RecordingUploadService : IDisposable
         // surface it loudly via FileLogger (Debug.WriteLine was a no-op in
         // Release, which is why ~unattached uploads looked like clean successes).
         if (!string.IsNullOrEmpty(ghlMessageId))
-            FileLogger.Write($"[Upload] Attached to GHL: {entry.FileName} → msg {ghlMessageId}");
+            FileLogger.Write($"[Upload] Attached to GHL{(viaFallback ? " via cloud relay" : "")}: {entry.FileName} → msg {ghlMessageId}");
         else
-            FileLogger.Write($"[Upload] Uploaded but NOT attached: {entry.FileName} [{note ?? "no GHL message id"}] "
+            FileLogger.Write($"[Upload] Uploaded{(viaFallback ? " via cloud relay" : "")} but NOT attached: {entry.FileName} [{note ?? "no GHL message id"}] "
                 + "— check Zoom S2S creds (zoom-api.json / setZoomApiConfig) so the call number resolves");
         lock (_lastAttemptTime) { _lastAttemptTime.Remove(entry.FileName); }
         // Reset breaker on any successful upload — partial outages clear.
         Interlocked.Exchange(ref _consecutiveFailures, 0);
+        LastFailureWasNetwork = false;
+        LastUploadViaFallback = viaFallback;
         UploadCompleted?.Invoke(entry.FileName, ghlMessageId, entry.CallLogId, true, null);
     }
 
@@ -422,6 +544,7 @@ public class RecordingUploadService : IDisposable
     /// </summary>
     private void HandleNetworkFailure(RecordingEntry entry, string message)
     {
+        LastFailureWasNetwork = true;
         _storage.UpdateEntry(entry.FileName, e =>
         {
             // Cap at the index that yields the longest backoff slot so retries

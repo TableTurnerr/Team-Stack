@@ -70,6 +70,14 @@ public class AudioRecorderService : IDisposable
     private DateTime _webDialHintAt = DateTime.MinValue;
     private static readonly TimeSpan WebDialHintTtl = TimeSpan.FromSeconds(120);
 
+    // Conversion-rescue pass: filenames whose WAV→MP3 conversion task is
+    // currently in flight (normal post-call path), so the rescue scan never
+    // races a live conversion. Guarded by its own lock — never nests with _lock.
+    private readonly object _conversionLock = new();
+    private readonly HashSet<string> _conversionsInFlight = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Threading.Timer _rescueTimer;
+    private int _rescueRunning;
+
     // Safety: max recording duration (2 hours) — absolute ceiling.
     private const int MaxRecordingSeconds = 7200;
 
@@ -161,6 +169,14 @@ public class AudioRecorderService : IDisposable
         _chromeMonitor.WebCallStarted += OnWebCallStarted;
         _chromeMonitor.WebCallEnded += OnWebCallEnded;
         _chromeMonitor.StartWatching();
+
+        // Un-strand failed conversions: entries left with ConversionComplete=false
+        // (LAME timeout/failure or a crash mid-conversion) never appear in
+        // GetPendingUploads, so their clips silently never upload. Sweep them
+        // shortly after startup and then hourly — retry the conversion, or fall
+        // back to uploading the raw WAV.
+        _rescueTimer = new System.Threading.Timer(_ => _ = RescueStrandedConversionsAsync(), null,
+            TimeSpan.FromSeconds(20), TimeSpan.FromHours(1));
     }
 
     /// <summary>True while a web-channel recording is in progress.</summary>
@@ -693,6 +709,7 @@ public class AudioRecorderService : IDisposable
 
         // Convert WAV to MP3 on a background thread, with a 30s timeout so a
         // hung LAME encoder can never wedge the recorder permanently.
+        lock (_conversionLock) { _conversionsInFlight.Add(fileName); }
         _ = Task.Run(async () =>
         {
             try
@@ -751,7 +768,182 @@ public class AudioRecorderService : IDisposable
                     e.ConversionComplete = false;
                 });
             }
+            finally
+            {
+                lock (_conversionLock) { _conversionsInFlight.Remove(fileName); }
+            }
         });
+    }
+
+    // ── Conversion rescue (un-strand failed conversions) ──────────────
+
+    /// <summary>
+    /// Sweep the manifest for entries stranded with ConversionComplete=false
+    /// whose temp WAV still exists: retry the WAV→MP3 conversion; if it fails
+    /// again, fall back to uploading the raw WAV (the upload path already sends
+    /// audio/wav) so no clip is ever silently lost. Runs at startup and hourly.
+    /// </summary>
+    internal async Task RescueStrandedConversionsAsync()
+    {
+        // Single-flight: the hourly tick must never overlap a long-running pass.
+        if (Interlocked.Exchange(ref _rescueRunning, 1) == 1) return;
+        try
+        {
+            var stranded = _storage.GetStrandedConversions();
+            foreach (var entry in stranded)
+            {
+                // Skip conversions still in flight from a live recording stop.
+                lock (_conversionLock)
+                {
+                    if (_conversionsInFlight.Contains(entry.FileName)) continue;
+                }
+
+                // Skip anything belonging to the recording currently in progress.
+                lock (_lock)
+                {
+                    if (_state != RecordingState.Idle && _targetMp3Path != null &&
+                        string.Equals(Path.GetFileName(_targetMp3Path), entry.FileName, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+
+                try { await RescueEntryAsync(entry); }
+                catch (Exception ex)
+                {
+                    FileLogger.Write($"[Recorder] Rescue error for {entry.FileName}: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Write($"[Recorder] Conversion rescue pass failed: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _rescueRunning, 0);
+        }
+    }
+
+    private async Task RescueEntryAsync(RecordingEntry entry)
+    {
+        var dir = _storage.RecordingsDirectory;
+        var mp3Path = Path.Combine(dir, entry.FileName);
+        var wavPath = FindTempWav(dir, entry);
+
+        if (wavPath == null)
+        {
+            if (File.Exists(mp3Path))
+            {
+                // Conversion actually finished but the manifest update was lost
+                // (e.g. process died between the MP3 write and UpdateEntry).
+                var fi = new FileInfo(mp3Path);
+                _storage.UpdateEntry(entry.FileName, e =>
+                {
+                    e.FileSizeBytes = fi.Length;
+                    e.ConversionComplete = true;
+                    e.Error = null;
+                    e.RetryCount = 0;
+                });
+                FileLogger.Write($"[Recorder] Rescued {entry.FileName}: MP3 already on disk — marked uploadable");
+            }
+            else if (entry.Error?.StartsWith("stranded") != true)
+            {
+                // Nothing left on disk to recover — mark it failed LOUDLY so it
+                // shows in the tray's failed count instead of vanishing quietly.
+                _storage.UpdateEntry(entry.FileName, e => e.Error = "stranded: source WAV and MP3 both missing");
+                FileLogger.Write($"[Recorder] Cannot rescue {entry.FileName}: neither WAV nor MP3 exists — marked failed");
+            }
+            return;
+        }
+
+        // Best-effort duration from the WAV header (the entry usually has none
+        // when conversion never completed).
+        int wavDuration = 0;
+        try { using var r = new WaveFileReader(wavPath); wavDuration = (int)r.TotalTime.TotalSeconds; } catch { }
+
+        // 1) Retry the LAME conversion. We're idle here (not post-call), so give
+        //    it a more generous timeout than the 30s fast path.
+        try
+        {
+            await Task.Run(() => ConvertToMp3(wavPath, mp3Path))
+                .WaitAsync(TimeSpan.FromSeconds(60));
+
+            try { File.Delete(wavPath); } catch { }
+
+            var fileInfo = new FileInfo(mp3Path);
+            _storage.UpdateEntry(entry.FileName, e =>
+            {
+                if (e.DurationSeconds <= 0 && wavDuration > 0) e.DurationSeconds = wavDuration;
+                e.FileSizeBytes = fileInfo.Length;
+                e.ConversionComplete = true;
+                e.Error = null;
+                e.RetryCount = 0;
+            });
+            FileLogger.Write($"[Recorder] Rescued stranded conversion: {entry.FileName} ({wavDuration}s, {fileInfo.Length} bytes) — queued for upload");
+            RecordingConverted?.Invoke(entry.RecordingId ?? "", entry.FileName, wavDuration, fileInfo.Length);
+            return;
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Write($"[Recorder] Conversion retry failed for {entry.FileName}: {ex.GetType().Name}: {ex.Message} — falling back to WAV upload");
+            // Drop any partial MP3 the failed retry left behind.
+            try { if (File.Exists(mp3Path)) File.Delete(mp3Path); } catch { }
+        }
+
+        // 2) Fall back to uploading the raw WAV: strip the ".tmp_" prefix so the
+        //    file no longer looks temporary, point the manifest entry at it and
+        //    mark it conversion-complete so GetPendingUploads picks it up (the
+        //    upload path already sends audio/wav for .wav files).
+        var wavFileName = Path.GetFileName(wavPath);
+        if (wavFileName.StartsWith(".tmp_", StringComparison.OrdinalIgnoreCase))
+        {
+            var cleanName = wavFileName[".tmp_".Length..];
+            var cleanPath = Path.Combine(dir, cleanName);
+            try
+            {
+                if (!File.Exists(cleanPath))
+                {
+                    File.Move(wavPath, cleanPath);
+                    wavFileName = cleanName;
+                    wavPath = cleanPath;
+                }
+            }
+            catch { /* keep the .tmp_ name — it still uploads fine */ }
+        }
+
+        var wavInfo = new FileInfo(wavPath);
+        _storage.UpdateEntry(entry.FileName, e =>
+        {
+            e.FileName = wavFileName; // upload the WAV instead of the missing MP3
+            if (e.DurationSeconds <= 0 && wavDuration > 0) e.DurationSeconds = wavDuration;
+            e.FileSizeBytes = wavInfo.Length;
+            e.ConversionComplete = true;
+            e.Error = null;
+            e.RetryCount = 0;
+        });
+        FileLogger.Write($"[Recorder] Rescued {entry.FileName} as WAV: {wavFileName} ({wavDuration}s, {wavInfo.Length} bytes) — queued for upload");
+        RecordingConverted?.Invoke(entry.RecordingId ?? "", wavFileName, wavDuration, wavInfo.Length);
+    }
+
+    /// <summary>
+    /// Locate the kept temp WAV for a stranded entry. The WAV and MP3 names are
+    /// generated back-to-back so they normally share the same timestamp, but can
+    /// differ by a millisecond — fall back to matching on the unique recording id.
+    /// </summary>
+    private static string? FindTempWav(string dir, RecordingEntry entry)
+    {
+        var exact = Path.Combine(dir, ".tmp_" + Path.GetFileNameWithoutExtension(entry.FileName) + ".wav");
+        if (File.Exists(exact)) return exact;
+
+        if (!string.IsNullOrEmpty(entry.RecordingId))
+        {
+            try
+            {
+                var byId = Directory.GetFiles(dir, $".tmp_*_{entry.RecordingId}.wav");
+                if (byId.Length > 0) return byId[0];
+            }
+            catch { }
+        }
+        return null;
     }
 
     /// <summary>
@@ -990,6 +1182,7 @@ public class AudioRecorderService : IDisposable
     public void Dispose()
     {
         _fusion.StateChanged -= OnCallStateChanged;
+        try { _rescueTimer.Dispose(); } catch { }
         try
         {
             _chromeMonitor.WebCallStarted -= OnWebCallStarted;

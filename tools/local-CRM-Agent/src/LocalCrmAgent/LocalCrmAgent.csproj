@@ -31,11 +31,13 @@
          blank (the setup dialog then prompts, or CRM_AGENT_TOKEN overrides). -->
     <AgentDefaultToken></AgentDefaultToken>
     <AgentDefaultWorkerUrl></AgentDefaultWorkerUrl>
+    <AgentDefaultFallbackUrl></AgentDefaultFallbackUrl>
   </PropertyGroup>
 
   <ItemGroup>
     <AssemblyMetadata Include="AgentDefaultToken" Value="$(AgentDefaultToken)" />
     <AssemblyMetadata Include="AgentDefaultWorkerUrl" Value="$(AgentDefaultWorkerUrl)" />
+    <AssemblyMetadata Include="AgentDefaultFallbackUrl" Value="$(AgentDefaultFallbackUrl)" />
   </ItemGroup>
 
   <ItemGroup>

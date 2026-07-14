@@ -152,6 +152,20 @@ environment.
 | 2 | Shared token | `CRM_AGENT_TOKEN` | `agentTokenProtected` (DPAPI) | the bridge `AGENT_SHARED_TOKEN`; same value for all reps |
 | 3 | repKey | `CRM_AGENT_REP_USER_ID` | `repUserId` | **the rep's GoHighLevel user ID** — unique per machine |
 | 4 | Zoom S2S creds | — | `zoom-api.json` next to the exe | account/client id + secret + shared Zoom login email |
+| 5 | Fallback URL | `CRM_AGENT_FALLBACK_URL` | `fallbackWorkerBaseUrl` | cloud relay used when the worker is unreachable/5xx; defaults to `https://zoomphone-relay.tableturnerr.com` (see `tools/cloud-relay/README.md`) — normally nothing to set |
+
+> **Easiest provisioning path:** run `make-rep-installer.ps1` (this folder) as admin.
+> It generates a one-click `Setup-CRM-Agent-<RepName>.bat` embedding the token +
+> rep key. The rep either double-clicks it, **or** — on machines where the CRM
+> Agent is already installed via Tool Manager but unprovisioned — Tool Manager
+> itself pops up a "CRM Agent Setup" dialog (after its startup/auto-update check)
+> asking the rep to select that .bat from a file picker; it then parses the
+> `setx CRM_AGENT_*` lines, applies them, and restarts the agent
+> (`tools/tool-manager/.../Services/AgentProvisioningService.cs`). "Unprovisioned"
+> = no `repUserId` in `agent-config.json` and no `CRM_AGENT_REP_KEY` /
+> `CRM_AGENT_REP_USER_ID` user env var. So for already-installed machines you can
+> ship just the .bat. See `TEAM-SETUP-GUIDE.md` at the repo root for the
+> rep-facing steps.
 
 `agent-config.json` lives at **`%APPDATA%\CrmAgent\agent-config.json`**
 (`AgentConfig.ConfigPath`).

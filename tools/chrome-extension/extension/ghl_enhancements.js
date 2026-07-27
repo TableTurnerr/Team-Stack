@@ -73,21 +73,21 @@
     // Cached settings object, populated on load and kept current via
     // chrome.storage.onChanged.
     var settings = {
-        zoomEnabled: true,      // default ON
-        clickToCall: true,      // default ON
-        hideLc: true,           // default ON
+        zoomEnabled: false,     // default OFF
+        clickToCall: false,     // default OFF
+        hideLc: false,          // default OFF
         callerId: '',           // default ''
         domains: [],            // default []
         prewarm: false          // default OFF (truthy only)
     };
 
     // Normalizes a raw chrome.storage payload into the cached settings object.
-    // Booleans default ON via "!== false", except prewarm which is truthy-only.
+    // Booleans are opt-in via "=== true"; prewarm is also truthy-only.
     function readSettings(raw) {
         raw = raw || {};
-        settings.zoomEnabled = raw.gmes_zoom_enabled !== false;
-        settings.clickToCall = raw.gmes_zoom_click_to_call !== false;
-        settings.hideLc = raw.gmes_zoom_hide_lc !== false;
+        settings.zoomEnabled = raw.gmes_zoom_enabled === true;
+        settings.clickToCall = raw.gmes_zoom_click_to_call === true;
+        settings.hideLc = raw.gmes_zoom_hide_lc === true;
         settings.callerId = typeof raw.gmes_zoom_caller_id === 'string' ? raw.gmes_zoom_caller_id : '';
         settings.domains = Array.isArray(raw.gmes_ghl_domains) ? raw.gmes_ghl_domains : [];
         settings.prewarm = raw.gmes_zoom_prewarm === true;

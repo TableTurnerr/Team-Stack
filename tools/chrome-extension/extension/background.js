@@ -3253,7 +3253,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
 
     chrome.storage.local.get(['gmes_zoom_enabled'], function (data) {
         // Inject only when the Zoom dialer feature could be active.
-        var zoomOn = data.gmes_zoom_enabled !== false; // default ON
+        var zoomOn = data.gmes_zoom_enabled === true; // default OFF
         if (!zoomOn) return;
 
         chrome.scripting.executeScript({

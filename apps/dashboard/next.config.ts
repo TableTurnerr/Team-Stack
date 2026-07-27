@@ -8,6 +8,17 @@ const __dirname = path.dirname(__filename);
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: path.join(__dirname, '../../'),
+  async rewrites() {
+    const locked = [
+      'cold-calls', 'session', 'recordings', 'session-logs', 'companies',
+      'leads', 'notes', 'follow-ups', 'email', 'recycle-bin', 'roles',
+      'actors', 'goals', 'settings', 'search',
+    ];
+    return locked.map((route) => ({
+      source: `/${route}/:path*`,
+      destination: `/locked?feature=${encodeURIComponent(route)}`,
+    }));
+  },
   images: {
     remotePatterns: [
       {

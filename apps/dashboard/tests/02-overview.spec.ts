@@ -1,78 +1,25 @@
-/**
- * 02-overview.spec.ts
- * Tests for the main Overview/Dashboard page (/).
- *
- * Removed tests:
- *   - 'recent activity section renders' — no meaningful assertion (only checked body text for "Error")
- *   - 'page has no console errors on load' — logged errors but never failed (non-blocking warn only)
- *   - 'theme / appearance is applied' — tautological; tested that html is visible and body has CSS
- *   - 'all dashboard pages load without crashing' — duplicate of individual smoke tests in each spec file; 180s timeout
- */
 import { test, expect } from '@playwright/test';
-import { waitForTableLoad } from './helpers/test-data';
 
-test.describe('Overview Dashboard @smoke', () => {
-  test.beforeEach(async ({ page }) => {
+test.describe('Migrated dashboard shell @smoke', () => {
+  test('root redirects and exactly four active navigation links remain', async ({ page }) => {
+    await page.route('**/api/ghl/dashboard/config', route => route.fulfill({
+      json: { configured: true, locationId: 'loc', pipelines: [{ id: 'pipe', name: 'Sales', stages: [{ id: 'new', name: 'New', position: 0 }] }], users: [], tags: [], customFields: [], currentUser: { matched: true, ghlUserId: 'u1', ghlUserName: 'Test User' }, defaults: { leadSource: 'Dashboard' } },
+    }));
     await page.goto('/');
-    await waitForTableLoad(page);
+    await expect(page).toHaveURL(/\/lead-submission$/);
+    const nav = page.getByRole('navigation', { name: 'Dashboard navigation' });
+    const links = nav.locator('a');
+    await expect(links).toHaveCount(4);
+    await expect(links).toHaveText(['Lead Submission', 'Pipeline', 'Financial Overview', 'Team Overview']);
   });
 
-  test('overview page loads with heading and stats', async ({ page }) => {
-    await expect(page).toHaveURL('/');
-    const heading = page.locator('h1').first();
-    await expect(heading).toBeVisible();
-
-    // Stats cards with numbers should be present
-    const cards = page.locator('[class*="card"], [class*="stat"]').filter({ hasText: /\d+/ });
-    await expect(cards.first()).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('sidebar navigation is visible with all links', async ({ page }) => {
-    const sidebar = page.locator('nav, aside').first();
-    await expect(sidebar).toBeVisible();
-
-    // Direct links always visible
-    const directLinks = [
-      '/companies',
-      '/notes',
-      '/follow-ups',
-      '/settings',
-    ];
-    for (const href of directLinks) {
-      const link = page.locator(`a[href="${href}"]`).first();
-      await expect(link).toBeVisible();
-    }
-
-    // Cold Calls is a collapsible group — expand it to reveal sub-links
-    const coldCallsGroup = page.locator('button').filter({ hasText: /cold calls/i }).first();
-    await expect(coldCallsGroup).toBeVisible();
-    await coldCallsGroup.click();
-    await page.waitForTimeout(300);
-
-    const subLinks = ['/cold-calls', '/session'];
-    for (const href of subLinks) {
-      const link = page.locator(`a[href="${href}"]`).first();
-      await expect(link).toBeVisible();
-    }
-  });
-
-  test('navigating via sidebar works', async ({ page }) => {
-    await page.locator('a[href="/companies"]').first().click();
-    await page.waitForURL('/companies', { timeout: 30_000 });
-    await expect(page).toHaveURL('/companies');
-
-    // Expand Cold Calls group before clicking sub-link
-    const coldCallsGroup = page.locator('button').filter({ hasText: /cold calls/i }).first();
-    if ((await coldCallsGroup.count()) > 0) {
-      await coldCallsGroup.click();
-      await page.waitForTimeout(300);
-    }
-    await page.locator('a[href="/cold-calls"]').first().click();
-    await page.waitForURL('/cold-calls', { timeout: 30_000 });
-    await expect(page).toHaveURL('/cold-calls');
-
-    await page.locator('a[href="/notes"]').first().click();
-    await page.waitForURL('/notes', { timeout: 30_000 });
-    await expect(page).toHaveURL('/notes');
+  test('legacy items are disabled and direct routes render Locked', async ({ page }) => {
+    await page.route('**/api/ghl/dashboard/config', route => route.fulfill({ status: 503, json: { error: 'Not configured' } }));
+    await page.goto('/lead-submission');
+    const locked = page.getByRole('navigation').locator('[aria-disabled="true"]');
+    await expect(locked).toHaveCount(15);
+    await expect(locked.first()).toContainText('Locked');
+    await page.goto('/companies');
+    await expect(page.getByRole('heading', { name: /companies is locked/i })).toBeVisible();
   });
 });

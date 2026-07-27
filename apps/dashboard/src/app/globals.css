@@ -1,6 +1,28 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Draw attention to the required phone field until a number is entered. */
+@keyframes phoneFieldBorderBlink {
+  0%, 100% {
+    border-color: var(--card-border);
+  }
+
+  50% {
+    border-color: var(--error);
+  }
+}
+
+.phone-field-empty {
+  animation: phoneFieldBorderBlink 1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-field-empty {
+    animation: none;
+    border-color: var(--error);
+  }
+}
+
 /* Suppress focus outlines on Recharts SVG elements */
 .recharts-wrapper,
 .recharts-wrapper svg,

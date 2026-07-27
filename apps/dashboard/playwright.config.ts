@@ -20,7 +20,9 @@ const LIVE_CALLS_ENABLED = process.env.TEST_LIVE_CALLS === 'true';
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/*.spec.ts',
+  // Legacy CRM specs remain as migration history, but their routes are now
+  // intentionally locked. The active suite covers auth and the four sections.
+  testMatch: ['**/01-auth.spec.ts', '**/02-overview.spec.ts', '**/19-ghl-dashboard.spec.ts', '**/20-financial-smoke.spec.ts', '**/helpers/global-setup.ts'],
 
   // Parallelism: each worker gets a unique TEST_PREFIX in test-data.ts.
   // We keep fullyParallel: false because tests within a single .spec.ts
@@ -90,7 +92,10 @@ export default defineConfig({
       // When live calls are enabled, exclude the live-call spec from the
       // headless run — it requires user interaction via on-screen banners and
       // runs in a separate headed project below.
-      testIgnore: LIVE_CALLS_ENABLED ? ['**/12-live-call-flow.spec.ts'] : [],
+      testIgnore: [
+        '**/helpers/global-setup.ts',
+        ...(LIVE_CALLS_ENABLED ? ['**/12-live-call-flow.spec.ts'] : []),
+      ],
       // When live calls are enabled, wait for Zoom auth to be set up first.
       dependencies: LIVE_CALLS_ENABLED ? ['setup', 'zoom-setup'] : ['setup'],
     },

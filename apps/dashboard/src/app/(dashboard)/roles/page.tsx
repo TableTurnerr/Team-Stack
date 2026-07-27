@@ -47,6 +47,8 @@ const PRESET_COLORS = [
 ];
 
 const DEFAULT_PAGE_ACCESS: Record<PageKey, boolean> = {
+  'lead-submission': true,
+  'pipeline': true,
   'overview': true,
   'cold-calls': true,
   'session': true,

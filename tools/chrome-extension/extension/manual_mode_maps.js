@@ -568,10 +568,30 @@ function showCrmConfirmation_maps(item, onConfirm) {
             item.address = addr;
         }
 
+        const isBlockedWebsiteHost = (href) => {
+            try {
+                const url = new URL(href);
+                const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+                if (hostname === 'google.com' || hostname.endsWith('.google.com')) return true;
+                if (hostname.endsWith('.gstatic.com') || hostname.endsWith('.ggpht.com')) return true;
+                return hostname === 'facebook.com' || hostname.endsWith('.facebook.com') ||
+                    hostname === 'instagram.com' || hostname.endsWith('.instagram.com') ||
+                    hostname === 'tiktok.com' || hostname.endsWith('.tiktok.com') ||
+                    hostname === 'twitter.com' || hostname.endsWith('.twitter.com') ||
+                    hostname === 'x.com' || hostname.endsWith('.x.com') ||
+                    hostname === 'linkedin.com' || hostname.endsWith('.linkedin.com') ||
+                    hostname === 'youtube.com' || hostname.endsWith('.youtube.com') ||
+                    hostname === 'youtu.be' ||
+                    hostname === 'linktr.ee' || hostname.endsWith('.linktr.ee');
+            } catch {
+                return true;
+            }
+        };
+
         // 6. Website Extraction (Robust)
         // Priority 1: The standard "authority" button
         const websiteLink = container.querySelector('a[data-item-id="authority"]');
-        if (websiteLink && websiteLink.href) {
+        if (websiteLink && websiteLink.href && !isBlockedWebsiteHost(websiteLink.href)) {
             item.companyUrl = websiteLink.href;
         } 
         
@@ -587,7 +607,7 @@ function showCrmConfirmation_maps(item, onConfirm) {
                        tooltip.includes("open website") ||
                        text.includes("website");
             });
-            if (websiteBtn) item.companyUrl = websiteBtn.href;
+            if (websiteBtn && !isBlockedWebsiteHost(websiteBtn.href)) item.companyUrl = websiteBtn.href;
         }
 
         // Priority 3: Scavenge for any external link in the main pane
@@ -599,7 +619,7 @@ function showCrmConfirmation_maps(item, onConfirm) {
                 try {
                     const url = new URL(a.href);
                     const hostname = url.hostname.toLowerCase();
-                    if (hostname === 'google.com' || hostname.endsWith('.google.com')) return false;
+                    if (isBlockedWebsiteHost(a.href)) return false;
                 } catch {
                     return false;
                 }
@@ -733,6 +753,9 @@ function showCrmConfirmation_maps(item, onConfirm) {
         if (existing) existing.remove();
 
         const item = scrapeCurrentPlace();
+        try {
+            chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: 'manual.maps.profile.extracted', details: { title: item && item.title, phone: item && item.phone, address: item && item.address, state: item && item.state, zip: item && item.zip } });
+        } catch (e) {}
 
         const overlay = document.createElement('div');
         overlay.id = 'gmes-manual-overlay';
@@ -1200,6 +1223,8 @@ function showCrmConfirmation_maps(item, onConfirm) {
                     addBtn.textContent = '✓ Already in List';
                     addBtn.disabled = true;
                     addBtn.classList.add('already-added');
+                } else if (response && response.error) {
+                    alert(response.error);
                 }
             });
         });

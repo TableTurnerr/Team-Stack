@@ -18,12 +18,13 @@ import {
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
 import { COLLECTIONS, type ColdCallingSession, type CallLog, type PhoneNumber, type Recording, type FollowUp, type UserPreferences, type Company } from '@/lib/types';
-import { computeCompanyStatuses } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { usePhone } from '@/contexts/phone-context';
 import { useCallOwnershipOptional } from '@/contexts/call-ownership-context';
-import { linkCallLogToClaim } from '@/lib/call-claim';
-import { autoClaimCompany } from '@/lib/auto-claim';
+import { enqueueOutboxOp, flushOutbox, setSaveCallHooks, startOutbox, generateOfflineUuid, OFFLINE_ID_PREFIX } from '@/lib/offline-outbox';
+import { isPbNetworkError, type CallSavePayload } from '@/lib/offline-ops';
+import { getPbOnline, checkPbHealth } from '@/lib/pb-health';
+import { OfflineSyncBanner } from '@/components/offline-sync-banner';
 import { useCallRecording } from '@/contexts/call-recording-context';
 import { SessionMetrics } from './session-metrics';
 import { PerformanceTracker } from './performance-tracker';
@@ -802,7 +803,11 @@ export default function SessionPage() {
                     } as any).then(updatedSession => {
                         console.log('[Session Page] Dial count updated:', updatedSession.total_dials);
                         setSession(updatedSession);
-                    }).catch(err => console.error('Failed to increment dial count:', err));
+                    }).catch(err => {
+                        console.error('Failed to increment dial count:', err);
+                        // Never lose the stat — queue an atomic increment for replay.
+                        enqueueOutboxOp({ type: 'increment_session', payload: { sessionId: session.id, field: 'total_dials', amount: 1 } });
+                    });
                 } else if (!session) {
                     console.log('[Session Page] No active session, dial count not incremented');
                 } else if (dialCountIncremented) {
@@ -830,7 +835,11 @@ export default function SessionPage() {
                     } as any).then(updatedSession => {
                         console.log('[Session Page] Dial count updated at connect:', updatedSession.total_dials);
                         setSession(updatedSession);
-                    }).catch(err => console.error('Failed to increment dial count at connect:', err));
+                    }).catch(err => {
+                        console.error('Failed to increment dial count at connect:', err);
+                        // Never lose the stat — queue an atomic increment for replay.
+                        enqueueOutboxOp({ type: 'increment_session', payload: { sessionId: session.id, field: 'total_dials', amount: 1 } });
+                    });
                 }
 
                 // Increment pickup count when call is connected (only for session mode)
@@ -841,7 +850,11 @@ export default function SessionPage() {
                         'total_pickups+': 1
                     } as any).then(updatedSession => {
                         setSession(updatedSession);
-                    }).catch(err => console.error('Failed to increment pickup count:', err));
+                    }).catch(err => {
+                        console.error('Failed to increment pickup count:', err);
+                        // Never lose the stat — queue an atomic increment for replay.
+                        enqueueOutboxOp({ type: 'increment_session', payload: { sessionId: session.id, field: 'total_pickups', amount: 1 } });
+                    });
                 }
             }
         } else if (callStatus === 'ended') {
@@ -1202,7 +1215,7 @@ export default function SessionPage() {
             //    device_id pins this session to the teammate's physical machine so
             //    per-device session metrics can be joined to per-device call_claims
             //    on the shared Zoom account.
-            const newSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).create<ColdCallingSession>({
+            const sessionCreateBody = {
                 user: user.id,
                 started_at: new Date().toISOString(),
                 total_dials: 0,
@@ -1212,12 +1225,36 @@ export default function SessionPage() {
                 owner_reached: 0,
                 pitch_completed: 0,
                 warm_lead: 0,
-                status: 'active',
+                status: 'active' as const,
                 paused_at: null,
                 total_paused_sec: 0,
                 is_test: pendingTestSession,
                 device_id: ownership?.deviceId ?? undefined,
-            });
+            };
+            let newSession: ColdCallingSession;
+            try {
+                newSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).create<ColdCallingSession>(sessionCreateBody);
+            } catch (createErr: any) {
+                // Server unreachable (home-server PB outage) — don't block the
+                // rep: start the session locally under a temp id and queue the
+                // create for the offline outbox. Once replayed, ops referencing
+                // the temp id are rewritten to the real id, and session-context
+                // picks up the real record via its realtime subscription.
+                if (!isPbNetworkError(createErr) && getPbOnline()) throw createErr;
+                void checkPbHealth();
+                const tempSessionId = `${OFFLINE_ID_PREFIX}${generateOfflineUuid()}`;
+                enqueueOutboxOp({ type: 'create_session', payload: { tempSessionId, body: sessionCreateBody } });
+                newSession = {
+                    ...sessionCreateBody,
+                    paused_at: undefined,
+                    id: tempSessionId,
+                    collectionId: '',
+                    collectionName: COLLECTIONS.COLD_CALLING_SESSIONS,
+                    created: sessionCreateBody.started_at,
+                    updated: sessionCreateBody.started_at,
+                } as ColdCallingSession;
+                addToast('warning', 'CRM server unreachable — session started locally and will sync automatically');
+            }
             setPendingTestSession(false);
             setSession(newSession);
             setAwaitingAudioConnect(false);
@@ -1230,7 +1267,7 @@ export default function SessionPage() {
         } finally {
             setStarting(false);
         }
-    }, [user, setSession, startAudioSession, pendingTestSession, ownership?.deviceId]);
+    }, [user, setSession, startAudioSession, pendingTestSession, ownership?.deviceId, addToast]);
 
     // ---------------------------------------------------------------------------
     // End session
@@ -1243,12 +1280,23 @@ export default function SessionPage() {
         try {
             setEnding(true);
             const finalDuration = Math.max(0, elapsedSec - offlineSubtractSec);
-            await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, {
+            const endBody = {
                 ended_at: new Date().toISOString(),
                 total_duration_sec: finalDuration,
                 status: 'completed',
                 on_call: false,
-            });
+            };
+            try {
+                await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, endBody);
+            } catch (updateErr) {
+                // Server unreachable (or the session itself is still a queued
+                // offline create) — queue the end for replay and finish the
+                // local teardown so the rep isn't stuck in a zombie session.
+                console.error('Failed to end session on server — queued for sync:', updateErr);
+                enqueueOutboxOp({ type: 'end_session', payload: { sessionId, body: endBody } });
+                void flushOutbox();
+                addToast('info', 'Session end saved locally — will sync when the server is back');
+            }
 
             // Check if agent has pending uploads — show cooldown if so
             const hasPending = agentConnected && agentUploadQueue && agentUploadQueue.pendingCount > 0;
@@ -1291,7 +1339,7 @@ export default function SessionPage() {
         } finally {
             setEnding(false);
         }
-    }, [session, elapsedSec, setSession, setContextPhoneNumber, endAudioSession, agentConnected, agentUploadQueue]);
+    }, [session, elapsedSec, setSession, setContextPhoneNumber, endAudioSession, agentConnected, agentUploadQueue, addToast]);
 
     // Keep endSessionRef in sync so the offline watchdog can always call the
     // latest version without a stale closure (declared here, after endSession).
@@ -1690,6 +1738,59 @@ export default function SessionPage() {
     }, [currentPhoneNumber, dialNumber]);
 
     // ---------------------------------------------------------------------------
+    // Offline outbox wiring — start the replay engine and register page-side
+    // hooks for call saves. The hooks cover the parts of a save that need this
+    // page's context (recording submission via the agent WebSocket, last-call
+    // preview, session refresh, follow-up context). They are best-effort: a
+    // replay after a reload runs without them, and recordings are NEVER
+    // replayed from the outbox — the desktop agent owns those.
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+        startOutbox();
+        setSaveCallHooks({
+            onCallLogCreated: (callLog, payload) => {
+                // Submit this call's recording.
+                // For calls with callback legs, merge ALL queued segments into one
+                // recording; for normal calls, pop only the oldest segment so other
+                // calls' recordings stay in the queue.
+                if (!payload.form.callOutcome.includes('No Answer')) {
+                    const submitFn = payload.hasCallbacks
+                        ? submitDeferredRecording    // merge all segments (callback legs)
+                        : submitOldestDeferredRecording; // pop one segment (normal call)
+                    // Pass the captured clientCallId so the agent can link by
+                    // stable id (avoids the global-latest-recording race).
+                    void submitFn(callLog.id, payload.clientCallId);
+                    // Optimistically mark the call log; the agent performs the
+                    // actual upload in the background.
+                    pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
+                        has_recording: true,
+                    }).then(() => {
+                        setLastCallLog(prev =>
+                            prev?.id === callLog.id
+                                ? { ...prev, has_recording: true }
+                                : prev
+                        );
+                    }).catch(err => console.error('Failed to mark has_recording:', err));
+                    setContextPhoneNumber('');
+                }
+                // Show last call preview
+                setLastCallLog(callLog);
+            },
+            onSessionRefreshed: (updated) => {
+                // A replayed call may belong to an older (already ended)
+                // session — only refresh if it's still the one on screen.
+                if (sessionRef.current?.id === updated.id) setSession(updated);
+            },
+            createFollowUp,
+            completeFollowUp,
+            onFollowUpsCompleted: (count, companyName) => {
+                addToast('success', `Completed ${count} follow-up${count > 1 ? 's' : ''} for ${companyName}`);
+            },
+        });
+        return () => setSaveCallHooks(null);
+    }, [submitDeferredRecording, submitOldestDeferredRecording, setContextPhoneNumber, setSession, createFollowUp, completeFollowUp, addToast]);
+
+    // ---------------------------------------------------------------------------
     // Save call
     // ---------------------------------------------------------------------------
     const handleSaveCall = useCallback((data: CallFormData) => {
@@ -1746,6 +1847,28 @@ export default function SessionPage() {
             setContextPhoneNumber('');
         }
 
+        // ── DURABLE CAPTURE ── build a fully serializable snapshot of this
+        // call BEFORE the UI reset. It goes into the localStorage outbox, so
+        // a PocketBase outage at save time queues the call instead of losing
+        // it (the old fire-and-forget background save silently dropped it).
+        const savePayload: CallSavePayload = {
+            form: data,
+            sessionId: session.id,
+            userId: user.id,
+            callTime: new Date().toISOString(),
+            ringStart: capturedRingStart,
+            connectTime: capturedConnectTime,
+            endTime: capturedEndTime,
+            pickupIncremented: capturedPickupIncremented,
+            clientCallId: capturedClientCallId,
+            hasCallbacks,
+            zoomCallId: ownership?.zoomCallId ?? null,
+            deviceId: ownership?.deviceId ?? null,
+            intentId: ownership?.intentId ?? null,
+            activePhone: activeCallNumber ?? null,
+            direction: callDirection === 'inbound' ? 'inbound' : 'outbound',
+        };
+
         // ── INSTANT UI RESET ── user can start the next call right away
         setLastCallCompanyName(data.companyName);
         // Use functional update to preserve the NEXT call's phone number.
@@ -1783,7 +1906,9 @@ export default function SessionPage() {
         setDialCountIncremented(false);
         setPickupCountIncremented(false);
         callEndTimeRef.current = null;
-        window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+        // NOTE: UNSAVED_CALL_STORAGE_KEY is intentionally NOT removed here —
+        // the draft is only dropped after the call has been durably enqueued
+        // in the offline outbox (below), so a crash in between can't lose it.
 
         // Advance power dialer immediately (before background API calls).
         // Always advance the index even when paused — the call is done regardless.
@@ -1813,287 +1938,20 @@ export default function SessionPage() {
             }
         }
 
-        // ── BACKGROUND SAVE ── fire-and-forget API work
-        void (async () => {
-            try {
-                // Build the phone-number filter once — reused both by the
-                // global pre-check (anti-duplicate-company guard) and by the
-                // company-scoped lookup further down.
-                const phoneDigits = data.phoneNumber.replace(/\D/g, '');
-                const phoneLast10 = phoneDigits.slice(-10);
-                const phoneFilterParts = [`phone_number = "${data.phoneNumber}"`];
-                if (phoneDigits !== data.phoneNumber) phoneFilterParts.push(`phone_number ~ "${phoneDigits}"`);
-                if (phoneLast10 !== phoneDigits && phoneLast10.length >= 7) phoneFilterParts.push(`phone_number ~ "${phoneLast10}"`);
-
-                // Boundary recheck — if the user is creating a NEW company but
-                // the phone number already lives on a different company, adopt
-                // that existing company instead of creating a duplicate. This
-                // catches stale form state, races between auto-lookup and save,
-                // and any code path that bypasses the form's own block.
-                let adoptedCompanyId: string | null = null;
-                if (!data.companyId && data.newCompanyName?.trim() && phoneLast10.length >= 7) {
-                    try {
-                        const existing = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                            filter: phoneFilterParts.join(' || '),
-                            expand: 'company',
-                        });
-                        const hit = existing.items[0];
-                        if (hit?.company) {
-                            adoptedCompanyId = hit.company;
-                            const hitCompany = hit.expand?.company as Company | undefined;
-                            console.warn('[call-save] Phone already linked to company', hit.company,
-                                hitCompany ? `(${hitCompany.company_name})` : '',
-                                '— adopting existing company instead of creating duplicate.');
-                        }
-                    } catch {
-                        // Non-fatal: fall through to the original create path.
-                    }
-                }
-
-                // Resolve companyId — when the user typed a brand-new company name
-                // (Unit 7 fast path), create the company in parallel with the phone
-                // lookup so neither blocks the call-log create. If the boundary
-                // recheck found an existing company on this phone, adopt it.
-                const companyCreatePromise: Promise<string | null> =
-                    adoptedCompanyId
-                        ? Promise.resolve(adoptedCompanyId)
-                        : !data.companyId && data.newCompanyName?.trim()
-                            ? pb.collection(COLLECTIONS.COMPANIES).create<{ id: string }>({
-                                company_name: data.newCompanyName.trim(),
-                                owner_name: data.ownerName || undefined,
-                                source: 'Cold Call',
-                                first_contacted: new Date().toISOString(),
-                                last_contacted: new Date().toISOString(),
-                                assigned_to: user.id,
-                            }).then(c => c.id).catch(err => {
-                                console.error('Failed to create company:', err);
-                                return null;
-                            })
-                            : Promise.resolve(data.companyId || null);
-
-                // Find or create phone number record (kicked off in parallel with
-                // company creation; resolved once we have a companyId).
-                const phoneLookupPromise: Promise<string> = (async () => {
-                    const cid = await companyCreatePromise;
-                    if (!cid) return '';
-                    try {
-                        const phoneRecords = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 1, {
-                            filter: `company = "${cid}" && (${phoneFilterParts.join(' || ')})`,
-                        });
-                        if (phoneRecords.items.length > 0) {
-                            return phoneRecords.items[0].id;
-                        }
-                        const newPhone = await pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
-                            company: cid,
-                            phone_number: data.phoneNumber,
-                            receptionist_name: data.receptionistName || undefined,
-                            last_called: new Date().toISOString(),
-                        });
-                        // Race-window dedupe: a parallel save (negative-delay
-                        // power dialer) can also pass the empty getList check
-                        // and create a second row for the same (company, phone).
-                        // Re-query immediately after create; if duplicates exist,
-                        // keep the oldest and delete ours.
-                        try {
-                            const dupes = await pb.collection(COLLECTIONS.PHONE_NUMBERS).getList<PhoneNumber>(1, 5, {
-                                filter: `company = "${cid}" && (${phoneFilterParts.join(' || ')})`,
-                                sort: 'created',
-                            });
-                            if (dupes.items.length > 1) {
-                                const winner = dupes.items[0];
-                                if (winner.id !== newPhone.id) {
-                                    await pb.collection(COLLECTIONS.PHONE_NUMBERS).delete(newPhone.id).catch(() => {});
-                                    return winner.id;
-                                }
-                            }
-                        } catch {
-                            // Non-fatal — duplicate dedupe is best-effort.
-                        }
-                        return newPhone.id;
-                    } catch {
-                        return '';
-                    }
-                })();
-
-                const resolvedCompanyId = await companyCreatePromise;
-                const phoneNumberRecordId = await phoneLookupPromise;
-                if (!resolvedCompanyId) {
-                    console.error('Failed to resolve company for call log — aborting');
-                    return;
-                }
-
-                // Calculate call durations from captured values.
-                // capturedEndTime is set when callStatus became 'ended', so it reflects
-                // the real call-end moment even if the user submits the form much later.
-                let ringDuration = 0, callDuration = 0, totalDuration = 0;
-                if (capturedRingStart) {
-                    if (capturedConnectTime) {
-                        ringDuration = Math.floor((capturedConnectTime - capturedRingStart) / 1000);
-                        callDuration = Math.floor((capturedEndTime - capturedConnectTime) / 1000);
-                        totalDuration = ringDuration + callDuration;
-                    } else {
-                        // Call rang but never connected (no answer)
-                        ringDuration = Math.floor((capturedEndTime - capturedRingStart) / 1000);
-                        totalDuration = ringDuration;
-                    }
-                }
-
-                // Create call log
-                const callLog = await pb.collection(COLLECTIONS.CALL_LOGS).create<CallLog>({
-                    company: resolvedCompanyId,
-                    phone_number_record: phoneNumberRecordId || undefined,
-                    caller: user.id,
-                    call_time: new Date().toISOString(),
-                    duration: totalDuration > 0 ? totalDuration : undefined,
-                    ring_duration: ringDuration > 0 ? ringDuration : undefined,
-                    call_duration: callDuration > 0 ? callDuration : undefined,
-                    call_outcome: data.callOutcome,
-                    post_call_notes: data.postCallNotes || undefined,
-                    receptionist_name: data.receptionistName || undefined,
-                    owner_name_found: data.ownerName || undefined,
-                    session: session.id,
-                    owner_reached: data.ownerReached,
-                    pitch_completed: data.pitchCompleted,
-                    warm_lead: data.warmLead,
-                    callback_events: data.callbackEvents?.length ? data.callbackEvents : undefined,
-                    is_callback: hasCallbacks ? true : undefined,
-                    zoom_call_id: ownership?.zoomCallId ?? undefined,
-                }, { expand: 'company,phone_number_record' });
-
-                // Auto-claim the company if it was unassigned.
-                void autoClaimCompany(resolvedCompanyId, user.id);
-
-                // Link log → claim (shared-Zoom-account ownership ledger).
-                void linkCallLogToClaim(callLog.id, {
-                    zoomCallId: ownership?.zoomCallId ?? null,
-                    phone: activeCallNumber,
-                    direction: callDirection === 'inbound' ? 'inbound' : 'outbound',
-                    userId: user.id,
-                    deviceId: ownership?.deviceId ?? null,
-                    intentId: ownership?.intentId ?? null,
-                });
-                // Submit this call's recording.
-                // For calls with callback legs, merge ALL queued segments into one recording
-                // (each callback re-dial creates a separate segment). For normal calls,
-                // pop only the oldest segment so other calls' recordings stay in the queue.
-                //
-                // Mark has_recording = true synchronously immediately after submitFn returns
-                // (fire-and-forget) so the call_log shows the recording icon as soon as the
-                // upload is queued — we don't wait for the actual upload to finish.
-                if (!data.callOutcome.includes('No Answer')) {
-                    const submitFn = hasCallbacks
-                        ? submitDeferredRecording    // merge all segments (callback legs)
-                        : submitOldestDeferredRecording; // pop one segment (normal call)
-                    // Pass the captured clientCallId so the agent can link by
-                    // stable id (avoids the global-latest-recording race when
-                    // MP3 conversion lags behind form submission).
-                    void submitFn(callLog.id, capturedClientCallId);
-                    // Optimistically mark the call log; the agent will perform the actual
-                    // upload in the background. If the recording ends up empty/failed the
-                    // flag is harmless — the recordings collection will just be empty.
-                    pb.collection(COLLECTIONS.CALL_LOGS).update(callLog.id, {
-                        has_recording: true,
-                    }).then(() => {
-                        setLastCallLog(prev =>
-                            prev?.id === callLog.id
-                                ? { ...prev, has_recording: true }
-                                : prev
-                        );
-                    }).catch(err => console.error('Failed to mark has_recording:', err));
-                    setContextPhoneNumber('');
-                }
-
-                // Save additional phone number found during call
-                if (data.additionalPhoneNumber) {
-                    pb.collection(COLLECTIONS.PHONE_NUMBERS).create<PhoneNumber>({
-                        company: resolvedCompanyId,
-                        phone_number: data.additionalPhoneNumber,
-                        receptionist_name: data.additionalPhoneNote || undefined,
-                        last_called: new Date().toISOString(),
-                    }).catch(err => console.error('Failed to save additional phone number:', err));
-                }
-
-                // Show last call preview
-                setLastCallLog(callLog);
-
-                // Background: session perf + company metadata + follow-up + session refresh
-                void Promise.allSettled([
-                    (async () => {
-                        // Use PocketBase atomic increment/decrement operators to prevent
-                        // race conditions when multiple calls update the session concurrently.
-                        const sessionUpdates: Record<string, number> = {};
-                        if (data.ownerReached) sessionUpdates['owner_reached+'] = 1;
-                        if (data.pitchCompleted) sessionUpdates['pitch_completed+'] = 1;
-                        if (data.warmLead) sessionUpdates['warm_lead+'] = 1;
-                        if (hasCallbacks) sessionUpdates['total_callbacks+'] = 1;
-                        if (callDuration > 0) sessionUpdates['total_call_time+'] = callDuration;
-                        if (data.callOutcome.includes('No Answer') && capturedPickupIncremented) {
-                            // Atomically decrement — PB's min:0 constraint prevents going negative
-                            sessionUpdates['total_pickups-'] = 1;
-                        } else if (!data.callOutcome.includes('No Answer') && !capturedPickupIncremented) {
-                            // Fallback: if the call was NOT marked "No Answer" but the
-                            // connected-state pickup detection missed it, count it now.
-                            // This ensures pickups = dials − no-answer calls.
-                            sessionUpdates['total_pickups+'] = 1;
-                        }
-                        if (Object.keys(sessionUpdates).length > 0) {
-                            await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).update(session.id, sessionUpdates);
-                        }
-                        const updatedSession = await pb.collection(COLLECTIONS.COLD_CALLING_SESSIONS).getOne<ColdCallingSession>(session.id);
-                        setSession(updatedSession);
-                    })(),
-                    (async () => {
-                        try {
-                            const companyUpdates: Record<string, unknown> = { last_contacted: new Date().toISOString() };
-                            const existingCompany = await pb.collection(COLLECTIONS.COMPANIES).getOne(resolvedCompanyId);
-                            if (!existingCompany.source) companyUpdates.source = 'Cold Call';
-                            if (!existingCompany.first_contacted) companyUpdates.first_contacted = new Date().toISOString();
-                            if (data.ownerReached && data.ownerName && !existingCompany.owner_name) {
-                                companyUpdates.owner_name = data.ownerName;
-                            }
-                            if (data.email && !existingCompany.email) {
-                                companyUpdates.email = data.email;
-                            }
-                            // Compute company status from last call per phone number
-                            try {
-                                const allLogs = await pb.collection(COLLECTIONS.CALL_LOGS).getFullList<CallLog>({
-                                    filter: `company = "${resolvedCompanyId}"`,
-                                    sort: '-call_time',
-                                    fields: 'phone_number_record,call_time,call_outcome',
-                                });
-                                const statuses = computeCompanyStatuses(allLogs);
-                                companyUpdates.status = statuses;
-                            } catch { /* non-critical */ }
-                            await pb.collection(COLLECTIONS.COMPANIES).update(resolvedCompanyId, companyUpdates);
-                        } catch { /* non-critical */ }
-                    })(),
-                    data.followUp ? (async () => {
-                        try {
-                            await createFollowUp({
-                                company: resolvedCompanyId,
-                                phone_number_record: phoneNumberRecordId || undefined,
-                                call_log: callLog.id,
-                                scheduled_time: data.followUp!.scheduledTime,
-                                client_timezone: data.followUp!.timezone,
-                                notes: data.followUp!.notes || undefined,
-                            });
-                        } catch (err) { console.error('Failed to create follow-up:', err); }
-                    })() : Promise.resolve(),
-                    // Complete follow-ups the user chose to resolve in the call form
-                    data.completeFollowUpIds?.length ? (async () => {
-                        try {
-                            for (const fuId of data.completeFollowUpIds!) {
-                                await completeFollowUp(fuId);
-                            }
-                            addToast('success', `Completed ${data.completeFollowUpIds!.length} follow-up${data.completeFollowUpIds!.length > 1 ? 's' : ''} for ${data.companyName}`);
-                        } catch { /* non-critical */ }
-                    })() : Promise.resolve(),
-                ]);
-            } catch (err) {
-                console.error('Failed to save call:', err);
-            }
-        })();
-    }, [session, user, discardOldestDeferredRecording, discardDeferredRecording, submitOldestDeferredRecording, submitDeferredRecording, setSession, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, createFollowUp, completeFollowUp, addToast]);
+        // ── DURABLE SAVE ── enqueue in the offline outbox, then flush.
+        // When PocketBase is reachable, flushOutbox() executes the save
+        // immediately (executeCallSave in lib/offline-ops — the extracted
+        // background-save logic), matching the old fire-and-forget behavior.
+        // When it isn't, the call stays queued in localStorage and replays
+        // automatically once the server is back. Either way the data survives.
+        enqueueOutboxOp({ type: 'save_call', payload: savePayload });
+        // The call is durably captured — only now is it safe to drop the draft.
+        window.localStorage.removeItem(UNSAVED_CALL_STORAGE_KEY);
+        if (!getPbOnline()) {
+            addToast('info', 'Saved locally — will sync when the server is back');
+        }
+        void flushOutbox();
+    }, [session, user, discardOldestDeferredRecording, discardDeferredRecording, setContextPhoneNumber, ringStartTime, connectTime, pickupCountIncremented, addToast, ownership, activeCallNumber, callDirection]);
 
     const handleCallEndedManually = useCallback(() => {
         // Read the live phone number via ref so this callback isn't re-created
@@ -3184,6 +3042,9 @@ export default function SessionPage() {
 
     return (
         <PageGuard pageKey="session">
+            {/* Offline outbox status — PB unreachable / syncing / all synced */}
+            <OfflineSyncBanner />
+
             {renderContent()}
 
             {/* Follow-up notification toasts */}

@@ -13,9 +13,15 @@ import { test, expect } from '@playwright/test';
 // Auth tests use a fresh context (no storageState) to test login themselves
 test.use({ storageState: { cookies: [], origins: [] } });
 
+async function openCredentials(page: import('@playwright/test').Page) {
+  const button = page.getByRole('button', { name: /use login & password/i });
+  await button.waitFor({ state: 'visible', timeout: 5_000 }).then(() => button.click()).catch(() => {});
+}
+
 test.describe('Authentication @smoke', () => {
   test('login page renders correctly', async ({ page }) => {
     await page.goto('/login');
+    await openCredentials(page);
 
     // Page title / logo visible
     await expect(page.locator('h1, h2').filter({ hasText: /sign in|log in|welcome|tableturnerr/i }).first()).toBeVisible();
@@ -36,6 +42,7 @@ test.describe('Authentication @smoke', () => {
 
   test('shows error on invalid credentials', async ({ page }) => {
     await page.goto('/login');
+    await openCredentials(page);
 
     await page.getByLabel(/email/i).fill('bad@example.com');
     await page.getByLabel(/password/i).fill('wrongpassword');
@@ -54,21 +61,21 @@ test.describe('Authentication @smoke', () => {
     const password = process.env.TEST_USER_PASSWORD!;
 
     await page.goto('/login');
+    await openCredentials(page);
 
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel(/password/i).fill(password);
     await page.getByRole('button', { name: /sign in/i }).click();
 
-    // Expect redirect to dashboard root
-    await page.waitForURL('/', { timeout: 20_000 });
-    await expect(page).toHaveURL('/');
+    await page.waitForURL(/\/lead-submission$/, { timeout: 20_000 });
+    await expect(page).toHaveURL(/\/lead-submission$/);
 
     // Dashboard content visible
     await expect(page.locator('nav, aside').first()).toBeVisible();
   });
 
   test('unauthenticated user is redirected to login', async ({ page }) => {
-    const protectedRoutes = ['/', '/companies'];
+    const protectedRoutes = ['/', '/lead-submission', '/pipeline'];
 
     for (const route of protectedRoutes) {
       await page.goto(route);
@@ -83,10 +90,11 @@ test.describe('Authentication @smoke', () => {
 
     // Log in first
     await page.goto('/login');
+    await openCredentials(page);
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel(/password/i).fill(password);
     await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL('/', { timeout: 20_000 });
+    await page.waitForURL(/\/lead-submission$/, { timeout: 20_000 });
 
     // Find and click logout — usually in a user menu or sidebar
     const userMenuBtn = page.locator('button').filter({ hasText: /sign out|log out|logout/i }).first();
@@ -107,7 +115,7 @@ test.describe('Authentication @smoke', () => {
       await expect(page).toHaveURL(/\/login/);
     } else {
       console.warn('Logout button not found in standard location — skipping logout click');
-      await expect(page).toHaveURL('/');
+      await expect(page).toHaveURL(/\/lead-submission$/);
     }
   });
 });

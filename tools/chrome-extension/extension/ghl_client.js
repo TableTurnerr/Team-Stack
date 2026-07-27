@@ -217,6 +217,73 @@
         return '+' + digits;
     }
 
+    var US_VALIDATION_STATE_CODES = {
+        AL: true, AK: true, AZ: true, AR: true, CA: true, CO: true, CT: true, DE: true, FL: true, GA: true,
+        HI: true, ID: true, IL: true, IN: true, IA: true, KS: true, KY: true, LA: true, ME: true, MD: true,
+        MA: true, MI: true, MN: true, MS: true, MO: true, MT: true, NE: true, NV: true, NH: true, NJ: true,
+        NM: true, NY: true, NC: true, ND: true, OH: true, OK: true, OR: true, PA: true, RI: true, SC: true,
+        SD: true, TN: true, TX: true, UT: true, VT: true, VA: true, WA: true, WV: true, WI: true, WY: true,
+        DC: true
+    };
+
+    function coordsInUnitedStates(lat, lng) {
+        var la = parseFloat(lat), lo = parseFloat(lng);
+        if (!isFinite(la) || !isFinite(lo)) return false;
+        return (la >= 24 && la <= 50 && lo >= -125 && lo <= -66)
+            || (la >= 51 && la <= 72 && lo >= -170 && lo <= -129)
+            || (la >= 18 && la <= 23 && lo >= -161 && lo <= -154);
+    }
+
+    function validateUnitedStatesLead(item) {
+        item = item || {};
+        var reasons = [];
+        var rejects = [];
+        var text = [item.address, item.city, item.state, item.zip, item.postalCode, item.country].filter(Boolean).join(' ').toLowerCase();
+        if (/\b(canada|mexico|united kingdom|uk|australia|india|pakistan|uae|dubai|qatar|saudi|germany|france|spain|italy)\b/.test(text)) {
+            rejects.push('address/country is outside the United States');
+        }
+        var phones = [];
+        if (item.phone) phones.push(item.phone);
+        if (Array.isArray(item.phones)) item.phones.forEach(function (p) { if (p) phones.push(p.number || p); });
+        for (var i = 0; i < phones.length; i++) {
+            var s = String(phones[i] || '').trim();
+            var d = s.replace(/\D/g, '');
+            if (/^\s*\+1\b/.test(s) || (d.length === 11 && d.charAt(0) === '1')) { reasons.push('explicit +1 phone'); break; }
+            if (d.length === 10) continue;
+            if (d.length) { rejects.push('phone number is not a US +1/10-digit number'); break; }
+        }
+        var st = String(item.state || '').trim().toUpperCase();
+        if (st && US_VALIDATION_STATE_CODES[st]) reasons.push('US state ' + st);
+        else if (st) rejects.push('state is not a US state');
+        var zip = String(item.zip || item.postalCode || '').trim();
+        if (/^\d{5}(?:-\d{4})?$/.test(zip)) reasons.push('US ZIP ' + zip);
+        if (/\b(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY|DC)\s+\d{5}(?:-\d{4})?\b/i.test(text)) reasons.push('US state/ZIP in address');
+        if (/\b(united states|usa|u\.s\.a\.|u\.s\.)\b/i.test(text)) reasons.push('United States in address');
+        if (coordsInUnitedStates(item.lat, item.lng)) reasons.push('coordinates inside United States');
+        if (rejects.length) return { ok: false, reason: rejects.join('; ') };
+        if (reasons.length) return { ok: true, reason: reasons.join(', ') };
+        return { ok: false, reason: 'missing confident United States evidence' };
+    }
+
+    function isBlockedLeadWebsite(url) {
+        try {
+            if (!url || !/^https?:\/\//i.test(String(url))) return true;
+            var host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+            if (host === 'google.com' || host.endsWith('.google.com') || host.endsWith('.gstatic.com') || host.endsWith('.ggpht.com')) return true;
+            return host === 'facebook.com' || host.endsWith('.facebook.com') ||
+                host === 'instagram.com' || host.endsWith('.instagram.com') ||
+                host === 'tiktok.com' || host.endsWith('.tiktok.com') ||
+                host === 'twitter.com' || host.endsWith('.twitter.com') ||
+                host === 'x.com' || host.endsWith('.x.com') ||
+                host === 'linkedin.com' || host.endsWith('.linkedin.com') ||
+                host === 'youtube.com' || host.endsWith('.youtube.com') ||
+                host === 'youtu.be' ||
+                host === 'linktr.ee' || host.endsWith('.linktr.ee');
+        } catch (e) {
+            return true;
+        }
+    }
+
     // ---- Dedup check ----------------------------------------------------------
     // phones: array of { number } (or strings). cb receives { exists, contactId }.
     function checkDuplicate(locationId, phones, email, cb) {
@@ -393,7 +460,7 @@
             if (e) { primary = e; break; }
         }
         var website = item.companyUrl || '';
-        if (website && website.indexOf('https://www.google.com/maps') === 0) website = '';
+        if (website && isBlockedLeadWebsite(website)) website = '';
         var extraPhones = phones.slice(1)
             .map(function (p) { var n = toE164(p.number); return n ? (n + (p.label ? ' (' + p.label + ')' : '')) : ''; })
             .filter(Boolean);
@@ -476,6 +543,8 @@
     // ---- Composite send (contact + note + opportunity) ------------------------
     function sendLead(locationId, item, opts, cb) {
         if (!locationId) { cb({ success: false, error: 'No sub-account selected.' }); return; }
+        var us = validateUnitedStatesLead(item);
+        if (!us.ok) { cb({ success: false, error: 'Lead rejected: only United States leads can be sent. ' + us.reason }); return; }
         var payload = buildLeadPayload(item, opts || {});
         request('POST', '/ghl/locations/' + locationId + '/leads', payload, function (res) {
             if (!res.ok) {

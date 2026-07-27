@@ -238,14 +238,22 @@ public class TrayIconManager : IDisposable
                     : "Recording: Idle";
             }
 
-            // Update upload status
+            // Update upload status. When uploads are stalled on the network
+            // (both worker and relay unreachable, or circuit breaker open),
+            // say so explicitly instead of showing a mute pending count; when
+            // the cloud relay carried the last upload, surface that too.
             if (_storage != null)
             {
                 var pending = _storage.PendingCount;
                 var failed = _storage.FailedCount;
-                _uploadItem.Text = pending > 0 || failed > 0
-                    ? $"Uploads: {pending} pending, {failed} failed"
-                    : "Uploads: None pending";
+                if (pending > 0 && _uploader is { IsOffline: true })
+                    _uploadItem.Text = $"Uploads paused — server offline, retrying automatically ({pending} queued)";
+                else if (pending > 0 && _uploader is { LastUploadViaFallback: true })
+                    _uploadItem.Text = $"Uploading via cloud relay ({pending} queued)";
+                else
+                    _uploadItem.Text = pending > 0 || failed > 0
+                        ? $"Uploads: {pending} pending, {failed} failed"
+                        : "Uploads: None pending";
             }
         }
         catch { }
@@ -272,7 +280,12 @@ public class TrayIconManager : IDisposable
             _config.Save();
             _uploader?.SetWorkerConfig(url, s.token, rep);
             if (_zoomApi is { IsConfigured: false })
-                _ = Task.Run(() => _zoomApi.TryBootstrapFromWorkerAsync(url, s.token));
+            {
+                var fb = !string.IsNullOrEmpty(_config.FallbackWorkerBaseUrl)
+                    ? _config.FallbackWorkerBaseUrl
+                    : Program.DefaultFallbackWorkerBaseUrl;
+                _ = Task.Run(() => _zoomApi.TryBootstrapFromWorkerAsync(url, s.token, fb));
+            }
 
             _notifyIcon.ShowBalloonTip(3000, "CRM Agent",
                 "Setup saved — recording uploads enabled.", ToolTipIcon.Info);

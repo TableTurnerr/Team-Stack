@@ -7,6 +7,8 @@ import { Role, COLLECTIONS, PageKey, RolePermissions, RoleDataAccess } from '@/l
 
 // All page keys for the system
 export const ALL_PAGE_KEYS: PageKey[] = [
+  'lead-submission',
+  'pipeline',
   'overview',
   'cold-calls',
   'session',
@@ -26,6 +28,8 @@ export const ALL_PAGE_KEYS: PageKey[] = [
 
 // Human-readable labels for pages
 export const PAGE_LABELS: Record<PageKey, string> = {
+  'lead-submission': 'Lead Submission',
+  'pipeline': 'Pipeline',
   'overview': 'Overview / Dashboard',
   'cold-calls': 'Cold Calls',
   'session': 'Call Session',
@@ -105,6 +109,7 @@ export function RolePermissionProvider({ children }: { children: ReactNode }) {
     ALL_PAGE_KEYS.forEach(k => { allPageAccess[k] = true; });
 
     const memberPageAccess: Record<string, boolean> = {
+      'lead-submission': true, pipeline: true,
       overview: true, 'cold-calls': true, session: true, recordings: true,
       'session-logs': true, companies: true, leads: true, notes: true,
       'follow-ups': true, email: false, financial: false, team: false,
@@ -244,11 +249,15 @@ export function RolePermissionProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Backwards-compatible inheritance for roles created before the GHL migration.
+    if (access.leads || access.companies) access['lead-submission'] = true;
+    if (access.companies) access.pipeline = true;
+
     // Fallback: if roles are still loading or user has no roles assigned,
     // grant sensible default access so the user isn't completely locked out
     if (userRoles.length === 0) {
       // Basic default access — same as "Member" role
-      const defaults: PageKey[] = ['overview', 'cold-calls', 'session', 'recordings', 'session-logs', 'companies', 'leads', 'notes', 'follow-ups'];
+      const defaults: PageKey[] = ['lead-submission', 'pipeline'];
       defaults.forEach(k => { access[k] = true; });
     }
 

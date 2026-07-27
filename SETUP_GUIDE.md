@@ -140,6 +140,88 @@ pnpm dev
 ```
 Access at http://localhost:3000.
 
+### 5.1 GoHighLevel Dashboard Setup
+
+The active dashboard has four sections: Lead Submission, Pipeline, Financial
+Overview, and Team Overview. Contacts, opportunities, pipelines, stages, and
+GHL assignees come directly from one GHL location. PocketBase continues to
+provide authentication/RBAC, financial data, extension OAuth connections, and
+PII-free submission attribution.
+
+Create a location-scoped GHL Private Integration with location, contact, user,
+custom-field, pipeline, and opportunity read access, plus contact and
+opportunity write access. Add these **server-only** variables to
+`apps/dashboard/.env.local` locally and to the Vercel environment:
+
+```dotenv
+GHL_PRIVATE_INTEGRATION_TOKEN=
+GHL_LOCATION_ID=
+GHL_DEFAULT_LEAD_SOURCE=Tableturnerr Dashboard
+GHL_LEAD_CUSTOM_FIELD_KEYS=
+GHL_STALE_DAYS=14
+GHL_REQUEST_TIMEOUT_MS=12000
+```
+
+`GHL_LEAD_CUSTOM_FIELD_KEYS` is optional. Custom-field keys are comma separated;
+fields not explicitly allowlisted are never rendered or accepted. Do not expose
+the private token through a `NEXT_PUBLIC_` variable.
+
+Pipeline, stage, submission tag, and assignee are not deployment variables:
+
+- The user selects a live GHL pipeline, stage, and optional tag. The dashboard
+  remembers the last selection per authenticated Tableturnerr user and restores
+  it on Lead Submission, Pipeline, and Team Overview.
+- The assignee is determined by an exact, case-insensitive match between the
+  authenticated Tableturnerr email and a user email in the configured GHL
+  sub-account. Users cannot override this assignment on lead submission.
+- If no GHL user matches, a persistent warning appears at the top of the
+  dashboard asking the user to have the same email added in GHL or contact the
+  Tableturnerr support team. The user may instead paste their GHL user ID. The
+  server verifies that the ID belongs to the configured sub-account, reads the
+  user's name from GHL, and asks “Is your name XYZ?” The mapping is saved to the
+  user's existing PocketBase preferences only after explicit confirmation.
+  Lead creation remains blocked server-side until an email match or confirmed
+  user-ID mapping exists. Saved mappings are revalidated against GHL before use.
+  While unresolved, the banner checks GHL again every 30 seconds and provides a
+  **Recheck GHL user** button for immediate refresh after an administrator adds
+  or updates the user. User discovery prefers GHL's location-scoped user list,
+  tolerates the supported nested response formats, and uses company-scoped
+  search only as a fallback.
+
+Before allowing writes, sign in and request
+`GET /api/ghl/dashboard/config`. This performs read-only discovery and validates
+the configured location and retrieves live pipelines, stages, tags, users, and
+allowed contact custom fields. Do not use test writes for discovery.
+
+`GHL_COMPANY_ID` is not required. The dashboard validates the sub-account with
+`GHL_LOCATION_ID` and the location-scoped Private Integration Token. When the
+modern GHL user-search endpoint needs an agency company ID, the dashboard
+derives it from the location response automatically; it falls back to GHL's
+location-scoped user-list endpoint if that field is not returned.
+
+The Chrome extension still uses the existing per-user Marketplace OAuth
+variables (`GHL_CLIENT_ID`, `GHL_CLIENT_SECRET`, and related settings). Do not
+remove or replace them with the dashboard private token.
+
+#### Lead attribution schema
+
+`lead_submissions` stores application-user attribution and GHL IDs only; it
+contains no contact name, email, phone number, company name, or notes. Its
+source of truth is `packages/pocketbase-client/pb_db_schema.json`.
+
+Apply the collection separately to staging, then production after approval:
+
+```powershell
+$env:POCKETBASE_URL='http://localhost:8090'
+$env:PB_ADMIN_EMAIL='admin@example.com'
+$env:PB_ADMIN_PASSWORD='your_password'
+python tools/database/migration/create_lead_submissions.py
+```
+
+The migration is idempotent. It creates unique indexes for the idempotency key
+and non-empty successful opportunity IDs. It does not alter or delete legacy
+CRM collections.
+
 ---
 
 ## 6. Transcriber Setup
@@ -457,8 +539,36 @@ Recommended architecture:
 ### 11.2 Vercel (Dashboard)
 1. Connect your GitHub repo to Vercel.
 2. Set Root Directory to `apps/dashboard`.
-3. Add Environment Variable: `NEXT_PUBLIC_POCKETBASE_URL=https://api.yourdomain.com`.
+3. Add `NEXT_PUBLIC_POCKETBASE_URL=https://api.yourdomain.com`, the PocketBase
+   admin variables, and the server-only GHL dashboard variables from Section 5.1.
 4. Deploy.
+
+### 11.3 GHL Dashboard Rollout
+
+Use this order so attribution, duplicate protection, and rollback remain safe:
+
+1. Preserve `outdated-development` and `outdated-release` at the old tips.
+2. Configure the private token and run the read-only `/api/ghl/dashboard/config`
+   discovery check.
+3. Lock the pipeline, stage, user, source, tag, and custom-field IDs.
+4. Apply `create_lead_submissions.py` to staging.
+5. Deploy `development` to staging.
+6. Use designated test contacts to verify contact upsert, duplicate-opportunity
+   handling, opportunity edits, attribution, pagination, and Team metrics.
+7. Regression-test authentication and Financial Overview.
+8. Apply the same idempotent collection migration to production.
+9. Create and test the local `release` branch from the validated development
+   commit.
+10. Reverify the preserved remote release tip. Repoint remote `release` only
+    after separate explicit confirmation, using `--force-with-lease`.
+11. Monitor structured GHL status, timeout, and rate-limit logs. Logs must not
+    contain tokens or contact PII.
+
+If GHL pagination times out or returns partial data, Team Overview deliberately
+shows metrics as unavailable instead of presenting partial totals as complete.
+Historical time-in-stage and conversion rates remain unavailable until GHL
+provides complete transition history; “average current stage age” is a separate
+metric.
 
 ---
 
@@ -489,4 +599,4 @@ Recommended architecture:
 - **Fix**: Ensure the Local CRM Agent is running. The agent uses WASAPI audio monitoring (OS-level, network-independent) to confirm calls are still active and suppress false disconnects.
 
 ---
-*Last updated: June 2026*
+*Last updated: July 2026*

@@ -1257,11 +1257,17 @@ function showCrmConfirmation_website(item, onConfirm) {
                 note: noteValue
             };
 
+            try {
+                chrome.runtime.sendMessage({ type: 'DEBUG_LOG', event: 'manual.website.profile.extracted', details: { title: item.title, phone: item.phone, address: item.address, url: item.companyUrl } });
+            } catch (e) {}
+
             chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: item }, (response) => {
                 if (response && response.success) {
                     addBtn.textContent = '✓ Already in List';
                     addBtn.disabled = true;
                     addBtn.classList.add('already-added');
+                } else if (response && response.error) {
+                    alert(response.error);
                 }
             });
         });
@@ -1369,7 +1375,9 @@ function showCrmConfirmation_website(item, onConfirm) {
                                     crmItem.crmSynced = true;
                                     crmItem.ghlContactId = result.contactId || '';
                                     crmItem.ghlOpportunityId = result.opportunityId || '';
-                                    chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: crmItem });
+                                    chrome.runtime.sendMessage({ type: 'MANUAL_ADD_ITEM', item: crmItem }, function (addResponse) {
+                                        if (addResponse && addResponse.error) console.warn('GMES local add rejected:', addResponse.error);
+                                    });
                                 } else {
                                     crmBtn.disabled = false;
                                     crmBtn.textContent = 'Retry GHL Send';

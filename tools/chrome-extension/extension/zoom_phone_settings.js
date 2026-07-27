@@ -47,14 +47,14 @@
 
   // ── Pill toggles ─────────────────────────────────────────────────────────────
 
-  // Replace GHL dialer with Zoom — default ON
-  initPillToggle('zoomEnabledToggle', 'gmes_zoom_enabled', true);
+  // Replace GHL dialer with Zoom — default OFF
+  initPillToggle('zoomEnabledToggle', 'gmes_zoom_enabled', false);
 
-  // Click phone numbers to call (Zoom) — default ON
-  initPillToggle('zoomClickToCallToggle', 'gmes_zoom_click_to_call', true);
+  // Click phone numbers to call (Zoom) — default OFF
+  initPillToggle('zoomClickToCallToggle', 'gmes_zoom_click_to_call', false);
 
-  // Hide LeadConnector dialer — default ON
-  initPillToggle('zoomHideLcToggle', 'gmes_zoom_hide_lc', true);
+  // Hide LeadConnector dialer — default OFF
+  initPillToggle('zoomHideLcToggle', 'gmes_zoom_hide_lc', false);
 
   // Pre-launch Zoom on GHL pages — default OFF
   initPillToggle('zoomPrewarmToggle', 'gmes_zoom_prewarm', false);

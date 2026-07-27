@@ -24,14 +24,17 @@ setup('authenticate', async ({ page }) => {
   await page.goto('/login');
   await expect(page).toHaveURL(/\/login/);
 
+  const credentialsButton = page.getByRole('button', { name: /use login & password/i });
+  await credentialsButton.waitFor({ state: 'visible', timeout: 5_000 }).then(() => credentialsButton.click()).catch(() => {});
+
   // Fill in credentials
   await page.getByLabel(/email/i).fill(email);
   await page.getByLabel(/password/i).fill(password);
   await page.getByRole('button', { name: /sign in/i }).click();
 
   // Wait for redirect to dashboard
-  await page.waitForURL('/', { timeout: 60_000 });
-  await expect(page).toHaveURL('/');
+  await page.waitForURL(/\/lead-submission$/, { timeout: 60_000 });
+  await expect(page).toHaveURL(/\/lead-submission$/);
 
   // Ensure the .auth directory exists
   fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true });

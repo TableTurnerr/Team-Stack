@@ -28,8 +28,8 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { pb } from '@/lib/pocketbase';
-import { COLLECTIONS, type Company, type ColdCall, type EventLog, type LeadCategory, type User as UserType } from '@/lib/types';
-import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting, formatCompanyName, extractWebsiteFromName } from '@/lib/utils';
+import { COLLECTIONS, type Company, type ColdCall, type EventLog, type LeadCategory, type PhoneNumber, type User as UserType } from '@/lib/types';
+import { cn, sanitizeFilterValue, buildPhoneSearchFilter, stripPhoneFormatting, formatCompanyName, formatPhoneNumber, extractWebsiteFromName } from '@/lib/utils';
 import { getOutcomeColors } from '@/lib/call-outcomes';
 import { useAuth } from '@/contexts/auth-context';
 import { AssigneePicker, AssigneeAvatar, useTeamMembers } from '@/components/assignee-picker';
@@ -77,7 +77,9 @@ const COMPANY_COLUMNS: ColumnDefinition[] = [
   { key: 'lead_category', label: 'Lead Category', defaultVisible: true },
   { key: 'assigned_to', label: 'Assigned To', defaultVisible: true },
   { key: 'status', label: 'Status', defaultVisible: true },
+  { key: 'phone_numbers', label: 'Contact Numbers', defaultVisible: true },
   { key: 'email', label: 'Email', defaultVisible: true },
+  { key: 'notes', label: 'Notes', defaultVisible: true },
   { key: 'company_location', label: 'Location', defaultVisible: false },
   { key: 'website', label: 'Website', defaultVisible: true },
   { key: 'source', label: 'Source', defaultVisible: true },
@@ -150,6 +152,7 @@ function CompanyRow({
   onAddCategory,
   isAdmin,
   teamMembers,
+  phoneNumbers,
 }: {
   company: Company;
   onEdit: (id: string, data: Partial<Company>) => void;
@@ -163,6 +166,7 @@ function CompanyRow({
   onAddCategory: (name: string) => Promise<LeadCategory | null>;
   isAdmin: boolean;
   teamMembers: UserType[];
+  phoneNumbers: PhoneNumber[];
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
@@ -297,6 +301,11 @@ function CompanyRow({
             </div>
           </td>
         )}
+        {isColumnVisible('phone_numbers') && (
+          <td className="py-3 px-4">
+            <ContactNumbers phoneNumbers={phoneNumbers} />
+          </td>
+        )}
         {isColumnVisible('email') && (
           <td className="py-3 px-4">
             <input
@@ -306,6 +315,11 @@ function CompanyRow({
               className="w-full px-2 py-1 rounded border border-[var(--card-border)] bg-transparent focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
               placeholder="Email"
             />
+          </td>
+        )}
+        {isColumnVisible('notes') && (
+          <td className="py-3 px-4 text-sm text-[var(--muted)]">
+            <ContactNotes notes={company.notes} />
           </td>
         )}
         {isColumnVisible('company_location') && (
@@ -452,6 +466,11 @@ function CompanyRow({
           ) : <span className="text-[var(--muted)]">-</span>}
         </td>
       )}
+      {isColumnVisible('phone_numbers') && (
+        <td className="py-3 px-4 overflow-hidden">
+          <ContactNumbers phoneNumbers={phoneNumbers} />
+        </td>
+      )}
       {isColumnVisible('email') && (
         <td className="py-3 px-4 overflow-hidden">
           <span className="text-sm">
@@ -462,6 +481,11 @@ function CompanyRow({
               </a>
             ) : <span className="text-[var(--muted)]">-</span>}
           </span>
+        </td>
+      )}
+      {isColumnVisible('notes') && (
+        <td className="py-3 px-4 overflow-hidden">
+          <ContactNotes notes={company.notes} />
         </td>
       )}
       {isColumnVisible('company_location') && (
@@ -538,6 +562,39 @@ function CompanyRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+function ContactNumbers({ phoneNumbers }: { phoneNumbers: PhoneNumber[] }) {
+  if (phoneNumbers.length === 0) {
+    return <span className="text-sm text-[var(--muted)]">-</span>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {phoneNumbers.map(phone => (
+        <a
+          key={phone.id}
+          href={`tel:${phone.phone_number}`}
+          className="flex items-center gap-1 text-sm text-[var(--primary)] hover:underline min-w-0"
+          title={phone.label || phone.location_name || phone.phone_number}
+        >
+          <Phone size={12} className="shrink-0" />
+          <span className="truncate">{formatPhoneNumber(phone.phone_number)}</span>
+          {(phone.label || phone.location_name) && (
+            <span className="truncate text-xs text-[var(--muted)]">({phone.label || phone.location_name})</span>
+          )}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function ContactNotes({ notes }: { notes?: string }) {
+  return notes ? (
+    <span className="block truncate text-sm" title={notes}>{notes}</span>
+  ) : (
+    <span className="text-sm text-[var(--muted)]">-</span>
   );
 }
 
@@ -808,6 +865,7 @@ export default function CompaniesPage() {
   const { customOutcomes } = useCustomCallOutcomes();
   const filterFields = useMemo(() => buildCompaniesFilterFields(customOutcomes), [customOutcomes]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [phoneNumbersByCompany, setPhoneNumbersByCompany] = useState<Record<string, PhoneNumber[]>>({});
   const [categories, setCategories] = useState<LeadCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -904,7 +962,9 @@ export default function CompaniesPage() {
     { key: 'lead_category', initialWidth: 130, minWidth: 80 },
     { key: 'assigned_to', initialWidth: 160, minWidth: 120 },
     { key: 'status', initialWidth: 150, minWidth: 80 },
+    { key: 'phone_numbers', initialWidth: 200, minWidth: 130 },
     { key: 'email', initialWidth: 180, minWidth: 100 },
+    { key: 'notes', initialWidth: 220, minWidth: 120 },
     { key: 'company_location', initialWidth: 150, minWidth: 80 },
     { key: 'website', initialWidth: 180, minWidth: 100 },
     { key: 'source', initialWidth: 100, minWidth: 70 },
@@ -975,6 +1035,42 @@ export default function CompaniesPage() {
       fetchCompanies();
     }
   }, [isAuthenticated, fetchCompanies]);
+
+  // Phone numbers live in their own collection, so fetch every number for the
+  // companies on the current page and group them before rendering the grid.
+  useEffect(() => {
+    const companyIds = companies.map(company => company.id);
+    if (!isAuthenticated || companyIds.length === 0) {
+      setPhoneNumbersByCompany({});
+      return;
+    }
+
+    let cancelled = false;
+    const filter = companyIds.map(id => `company = "${id}"`).join(' || ');
+
+    pb.collection(COLLECTIONS.PHONE_NUMBERS).getFullList<PhoneNumber>({
+      filter,
+      sort: 'created',
+      fields: 'id,company,phone_number,label,location_name,disassociated',
+      requestKey: null,
+    }).then(phoneNumbers => {
+      if (cancelled) return;
+      const grouped = phoneNumbers
+        .filter(phone => !phone.disassociated)
+        .reduce<Record<string, PhoneNumber[]>>((result, phone) => {
+          (result[phone.company] ??= []).push(phone);
+          return result;
+        }, {});
+      setPhoneNumbersByCompany(grouped);
+    }).catch(err => {
+      if (!cancelled) {
+        console.error('Failed to load company phone numbers:', err);
+        setPhoneNumbersByCompany({});
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [companies, isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -1342,8 +1438,14 @@ export default function CompaniesPage() {
                     {isColumnVisible('status') && (
                       <ResizableTh width={getWidth('status')} minWidth={80} onResize={(w) => resize('status', w)}>Status</ResizableTh>
                     )}
+                    {isColumnVisible('phone_numbers') && (
+                      <ResizableTh width={getWidth('phone_numbers')} minWidth={130} onResize={(w) => resize('phone_numbers', w)}>Contact Numbers</ResizableTh>
+                    )}
                     {isColumnVisible('email') && (
                       <ResizableTh width={getWidth('email')} minWidth={100} onResize={(w) => resize('email', w)}>Email</ResizableTh>
+                    )}
+                    {isColumnVisible('notes') && (
+                      <ResizableTh width={getWidth('notes')} minWidth={120} onResize={(w) => resize('notes', w)}>Notes</ResizableTh>
                     )}
                     {isColumnVisible('company_location') && (
                       <ResizableTh width={getWidth('company_location')} minWidth={80} onResize={(w) => resize('company_location', w)}>Location</ResizableTh>
@@ -1376,6 +1478,7 @@ export default function CompaniesPage() {
                       onAddCategory={handleAddCategory}
                       isAdmin={isAdmin}
                       teamMembers={teamMembers}
+                      phoneNumbers={phoneNumbersByCompany[company.id] ?? []}
                     />
                   ))}
                 </tbody>

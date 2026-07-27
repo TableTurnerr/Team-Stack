@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>TableTurner Debug Logs</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111c33;
+      --panel-2: #17233d;
+      --border: #2b3a57;
+      --text: #e5edf8;
+      --muted: #92a4bd;
+      --accent: #38bdf8;
+      --danger: #ef4444;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 34rem),
+        linear-gradient(135deg, #09111f 0%, var(--bg) 58%, #111827 100%);
+      color: var(--text);
+    }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 28px 22px 40px; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 24px; letter-spacing: -0.03em; }
+    .subtitle { color: var(--muted); margin-top: 5px; font-size: 13px; }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      background: rgba(17,28,51,0.82);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(10px);
+    }
+    input, select, button {
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 9px 11px;
+      font: inherit;
+      font-size: 13px;
+    }
+    input { flex: 1; min-width: 260px; }
+    select[multiple] {
+      min-width: 230px;
+      min-height: 82px;
+      padding: 7px;
+    }
+    button { cursor: pointer; font-weight: 700; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #062033; }
+    button.danger { background: var(--danger); border-color: var(--danger); color: white; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .stat {
+      background: rgba(17,28,51,0.86);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 13px 14px;
+    }
+    .stat-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .stat-value { font-size: 22px; font-weight: 800; margin-top: 3px; }
+    .log-list { display: flex; flex-direction: column; gap: 9px; }
+    .log {
+      background: rgba(17,28,51,0.92);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .log.reject, .log.failed { border-left-color: var(--danger); }
+    .log.accept, .log.success { border-left-color: var(--ok); }
+    .log.warn { border-left-color: var(--warn); }
+    .log-top { display: flex; justify-content: space-between; gap: 14px; align-items: center; }
+    .event { font-weight: 800; font-size: 14px; }
+    .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    pre {
+      margin: 9px 0 0;
+      color: #c8d8ee;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(8,13,24,0.62);
+      border-radius: 9px;
+      padding: 10px;
+    }
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 44px 16px;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      background: rgba(17,28,51,0.5);
+    }
+    .release-block {
+      display: none;
+      margin: 28px auto;
+      max-width: 680px;
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.45);
+      color: #fecaca;
+      border-radius: 16px;
+      padding: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div id="releaseBlock" class="release-block">
+    Debug logs are only available in the dev extension build.
+  </div>
+  <main id="app" class="shell">
+    <div class="header">
+      <div>
+        <h1>Extension Debug Logs</h1>
+        <div class="subtitle">Dev-only trace of scraping, lead validation, GHL sync, and saved-session behavior.</div>
+      </div>
+      <button id="refreshBtn" class="primary">Refresh</button>
+    </div>
+
+    <div class="toolbar">
+      <input id="searchInput" type="search" placeholder="Search event, title, reason, URL, location..." />
+      <select id="eventFilter">
+        <option value="">All events</option>
+      </select>
+      <select id="sessionFilter" multiple title="Choose one or more sessions. Leave empty to show all sessions."></select>
+      <button id="clearSessionFilterBtn">All Sessions</button>
+      <button id="exportBtn">Export JSON</button>
+      <button id="clearBtn" class="danger">Clear Logs</button>
+    </div>
+
+    <section class="stats">
+      <div class="stat"><div class="stat-label">Total</div><div id="totalStat" class="stat-value">0</div></div>
+      <div class="stat"><div class="stat-label">Accepted</div><div id="acceptedStat" class="stat-value">0</div></div>
+      <div class="stat"><div class="stat-label">Rejected/Failed</div><div id="rejectedStat" class="stat-value">0</div></div>
+      <div class="stat"><div class="stat-label">Newest</div><div id="newestStat" class="stat-value" style="font-size:15px;">-</div></div>
+    </section>
+
+    <section id="logList" class="log-list"></section>
+  </main>
+
+  <script src="debug_logs.js"></script>
+</body>
+</html>

@@ -125,7 +125,8 @@ static class Program
         if (SynchronizationContext.Current is not WindowsFormsSynchronizationContext)
             SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
 
-        using var tray = new TrayIconManager(scheduler, selfUpdater, github);
+        using var tray = new TrayIconManager(scheduler, selfUpdater, github,
+            new AgentProvisioningService(registry));
         Application.Run();
 
         // Cleanup

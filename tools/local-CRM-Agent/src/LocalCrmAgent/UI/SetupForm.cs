@@ -40,10 +40,10 @@ public sealed class SetupForm : Form
             Size = new Size(412, 40),
         };
 
-        var tokenLabel = new Label { Text = "Agent token (required)", Location = new Point(14, 58), AutoSize = true };
+        var tokenLabel = new Label { Text = "Team upload token (ask your admin)", Location = new Point(14, 58), AutoSize = true };
         _tokenBox = new TextBox { Location = new Point(14, 78), Size = new Size(412, 24), UseSystemPasswordChar = true };
 
-        var repLabel = new Label { Text = "Rep GHL user id (optional, for attribution)", Location = new Point(14, 108), AutoSize = true };
+        var repLabel = new Label { Text = "Rep key (GoHighLevel user ID) — optional, for call attribution", Location = new Point(14, 108), AutoSize = true };
         _repBox = new TextBox { Location = new Point(14, 128), Size = new Size(412, 24), Text = existingRepUserId ?? "" };
 
         var workerLabel = new Label { Text = "Worker URL", Location = new Point(14, 158), AutoSize = true };

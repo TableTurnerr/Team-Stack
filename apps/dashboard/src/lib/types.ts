@@ -397,6 +397,7 @@ export interface UserPreferences extends RecordModel {
     followup_window_hours_behind?: number; // Hours behind current time to show overdue follow-ups (default: 8)
     followup_pre_notification_minutes?: number; // Minutes before scheduled time to send "heads up" notification (default: 0 = disabled)
     followup_sound_enabled?: boolean; // Whether to play sound on follow-up notifications (default: true)
+    ghl_user_id?: string; // Explicitly confirmed GHL identity when email matching is unavailable
   };
   privacy_settings?: {
     show_online_status?: boolean;
@@ -574,6 +575,7 @@ export const COLLECTIONS = {
 
   // Roles
   ROLES: 'roles',
+  LEAD_SUBMISSIONS: 'lead_submissions',
 } as const;
 
 // ============================================================================
@@ -582,6 +584,8 @@ export const COLLECTIONS = {
 
 /** All page keys that can be controlled by roles */
 export type PageKey =
+  | 'lead-submission'
+  | 'pipeline'
   | 'overview'
   | 'cold-calls'
   | 'session'

@@ -18,6 +18,9 @@ internal static class BuildConfig
     /// <summary>Optional build-time worker base URL override, or null if not baked in.</summary>
     public static string? EmbeddedWorkerUrl => Get("AgentDefaultWorkerUrl");
 
+    /// <summary>Optional build-time fallback (cloud relay) base URL override, or null if not baked in.</summary>
+    public static string? EmbeddedFallbackUrl => Get("AgentDefaultFallbackUrl");
+
     private static string? Get(string key)
     {
         var value = Assembly.GetExecutingAssembly()

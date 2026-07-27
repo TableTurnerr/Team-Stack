@@ -1,0 +1,33 @@
+# CRM Cloud Relay — store-and-forward fallback for the home server.
+#
+# One-time setup (see README.md):
+#   wrangler r2 bucket create crm-relay-buffer
+#   wrangler kv namespace create RELAY_KV        -> paste the id below
+#   wrangler secret put ZOOM_SECRET_TOKEN         (same value as the bridge's .env)
+#   wrangler secret put AGENT_SHARED_TOKEN        (same value as the bridge's .env)
+#   wrangler deploy
+
+name = "crm-cloud-relay"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# Custom domain (recommended): relay reachable at https://zoomphone-relay.tableturnerr.com
+# Requires the tableturnerr.com zone to be on this Cloudflare account.
+routes = [
+  { pattern = "zoomphone-relay.tableturnerr.com", custom_domain = true }
+]
+
+# Drain the buffer every 2 minutes (no-op when the home server is down or the buffer is empty).
+[triggers]
+crons = ["*/2 * * * *"]
+
+[[r2_buckets]]
+binding = "BUFFER"
+bucket_name = "crm-relay-buffer"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "8a2cdfd314654fcbad3346104d9f4d57"
+
+[vars]
+HOME_BASE_URL = "https://zoomphone.tableturnerr.com"
